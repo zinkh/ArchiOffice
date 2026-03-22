@@ -1,0 +1,5 @@
+{
+  "name": "ArchiManager",
+  "description": "Comprehensive management platform for architectural offices, featuring project tracking, tender management, specification creation, and Gantt-based planning.",
+  "requestFramePermissions": []
+}
