@@ -180,6 +180,10 @@ export interface Plan {
   name: string;
   file_url: string;
   uploaded_at: string;
+  index: string;
+  version: number;
+  parent_id?: string;
+  category?: 'PRO' | 'AOR';
 }
 
 export interface TeamMember {
@@ -191,6 +195,10 @@ export interface TeamMember {
   system_role: 'admin' | 'pm' | 'user';
   senderOption?: 'agency' | 'personal';
   defaultEmailTemplate?: string;
+  phone?: string;
+  address?: string;
+  jobTitle?: string;
+  department?: string;
 }
 
 export interface Milestone {

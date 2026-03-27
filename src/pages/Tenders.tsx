@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import type { Tender, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
@@ -36,53 +37,34 @@ export default function Tenders() {
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
 
   useEffect(() => {
-    fetch('/api/tenders')
-      .then(async res => {
-        const contentType = res.headers.get('content-type');
-        if (!res.ok || !contentType || !contentType.includes('application/json')) {
-          const text = await res.text();
-          if (text.includes('Please wait while your application starts')) {
-            console.log('Server is still starting...');
-            return [];
-          }
-          throw new Error('Failed to fetch tenders');
-        }
-        return res.json();
-      })
-      .then(data => {
-        if (!data) return;
-        // Convert SQLite 0/1 to boolean for mandatory_visit
-        const formattedData = data.map((t: any) => ({
+    const loadData = async () => {
+      try {
+        const [tendersData, contactsData] = await Promise.all([
+          fetchJson<any[]>('/api/tenders'),
+          fetchJson<Contact[]>('/api/contacts')
+        ]);
+
+        const formattedTenders = tendersData.map((t: any) => ({
           ...t,
           mandatory_visit: !!t.mandatory_visit
         }));
-        setTenders(formattedData);
-      })
-      .catch(err => console.error(err));
+        setTenders(formattedTenders);
+        setContacts(contactsData);
+      } catch (err) {
+        console.error('Tenders data fetch failed:', err);
+      }
+    };
 
-    fetch('/api/contacts')
-      .then(async res => {
-        const contentType = res.headers.get('content-type');
-        if (res.ok && contentType && contentType.includes('application/json')) {
-          return res.json();
-        }
-        return [];
-      })
-      .then(setContacts)
-      .catch(err => console.error(err));
-      
+    loadData();
     fetchMilestones();
   }, []);
 
   const fetchMilestones = async () => {
     try {
-      const res = await fetch('/api/milestones');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        setMilestones(await res.json());
-      }
+      const data = await fetchJson<Milestone[]>('/api/milestones');
+      setMilestones(data);
     } catch (err) {
-      console.error(err);
+      console.error('Milestones fetch failed:', err);
     }
   };
 

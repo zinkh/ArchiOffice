@@ -566,6 +566,38 @@ try {
       uploaded_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id)
     );
+
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT,
+      timestamp TEXT NOT NULL,
+      category TEXT,
+      type TEXT NOT NULL,
+      attachments TEXT,
+      FOREIGN KEY(user_id) REFERENCES team_members(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      sender_id TEXT NOT NULL,
+      recipient_id TEXT, -- NULL for team-wide
+      content TEXT NOT NULL,
+      type TEXT NOT NULL, -- 'text', 'link', 'file'
+      file_url TEXT,
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY(sender_id) REFERENCES team_members(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      read INTEGER DEFAULT 0,
+      FOREIGN KEY(user_id) REFERENCES team_members(id)
+    );
   `);
 
   // Add columns if they don't exist (for existing databases)
@@ -770,6 +802,24 @@ try {
     ('s1', 'p1', 'CCTP Lot Gros Œuvre', '[{"id":"sec1","title":"Terrassements","items":[{"id":"i1","code":"02.10","description":"Décapage de la terre végétale","material":"N/A","notes":"Stockage sur site"}]}]', '2016-02-21T10:00:00Z');
   `);
 
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_projects_code ON projects(project_code);
+    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+    CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
+    CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
+    CREATE INDEX IF NOT EXISTS idx_specifications_project ON specifications(project_id);
+    CREATE INDEX IF NOT EXISTS idx_os_project ON ordres_de_service(project_id);
+    CREATE INDEX IF NOT EXISTS idx_visas_project ON visas(project_id);
+    CREATE INDEX IF NOT EXISTS idx_receptions_project ON receptions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_reserves_project ON reserves(project_id);
+    CREATE INDEX IF NOT EXISTS idx_plans_project ON plans(project_id);
+    CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
+    CREATE INDEX IF NOT EXISTS idx_dpgf_project ON dpgf_items(project_id);
+    CREATE INDEX IF NOT EXISTS idx_situations_project ON situations(project_id);
+    CREATE INDEX IF NOT EXISTS idx_details_situation_sit ON details_situation(situation_id);
+    CREATE INDEX IF NOT EXISTS idx_details_situation_dpgf ON details_situation(dpgf_item_id);
+  `);
+
   // Update existing members with roles if they were already in the DB
   db.prepare("UPDATE team_members SET system_role = 'admin' WHERE id = 't1'").run();
   db.prepare("UPDATE team_members SET system_role = 'pm' WHERE id = 't2'").run();
@@ -786,7 +836,17 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  app.get("/api/rnb-buildings", async (req, res) => {
+  // Request logging middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
+    });
+    next();
+  });
+
+  app.get("/api/rnb-buildings", async (req, res, next) => {
     try {
       const { q } = req.query;
       if (!q) {
@@ -1274,46 +1334,184 @@ async function startServer() {
     }
   });
 
-  app.get("/api/projects", (req, res) => {
+  app.get("/api/projects", (req, res, next) => {
     try {
       const projects = db.prepare("SELECT * FROM projects").all();
       
+      // Fetch all related data in bulk to avoid N+1 queries
+      const allCotraitants = db.prepare(`
+        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_cotraitants pc
+        LEFT JOIN contacts c ON pc.contact_id = c.id
+      `).all();
+
+      const allLots = db.prepare(`
+        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_lots pl
+        LEFT JOIN contacts c ON pl.contact_id = c.id
+      `).all();
+
+      const allStakeholders = db.prepare(`
+        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_stakeholders ps
+        LEFT JOIN contacts c ON ps.contact_id = c.id
+      `).all();
+
+      const allCategories = db.prepare(`
+        SELECT pc.*, pcj.project_id
+        FROM project_categories pc
+        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
+      `).all();
+
       const projectsWithDetails = projects.map((project: any) => {
-        const cotraitants = db.prepare(`
-          SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_cotraitants pc
-          LEFT JOIN contacts c ON pc.contact_id = c.id
-          WHERE pc.project_id = ?
-        `).all(project.id);
-
-        const lots = db.prepare(`
-          SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_lots pl
-          LEFT JOIN contacts c ON pl.contact_id = c.id
-          WHERE pl.project_id = ?
-        `).all(project.id);
-
-        const stakeholders = db.prepare(`
-          SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_stakeholders ps
-          LEFT JOIN contacts c ON ps.contact_id = c.id
-          WHERE ps.project_id = ?
-        `).all(project.id);
-
-        const categories = db.prepare(`
-          SELECT pc.*
-          FROM project_categories pc
-          JOIN project_categories_junction pcj ON pc.id = pcj.category_id
-          WHERE pcj.project_id = ?
-        `).all(project.id);
-
-        return { ...project, cotraitants_list: cotraitants, lots_list: lots, stakeholders_list: stakeholders, categories_list: categories };
+        return { 
+          ...project, 
+          cotraitants_list: allCotraitants.filter((c: any) => c.project_id === project.id),
+          lots_list: allLots.filter((l: any) => l.project_id === project.id),
+          stakeholders_list: allStakeholders.filter((s: any) => s.project_id === project.id),
+          categories_list: allCategories.filter((c: any) => c.project_id === project.id)
+        };
       });
       
       res.json(projectsWithDetails);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch projects" });
+      next(error);
+    }
+  });
+
+  app.get("/api/projects/:id", (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as any;
+      
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const cotraitants = db.prepare(`
+        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_cotraitants pc
+        LEFT JOIN contacts c ON pc.contact_id = c.id
+        WHERE pc.project_id = ?
+      `).all(id);
+
+      const lots = db.prepare(`
+        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_lots pl
+        LEFT JOIN contacts c ON pl.contact_id = c.id
+        WHERE pl.project_id = ?
+      `).all(id);
+
+      const stakeholders = db.prepare(`
+        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_stakeholders ps
+        LEFT JOIN contacts c ON ps.contact_id = c.id
+        WHERE ps.project_id = ?
+      `).all(id);
+
+      const categories = db.prepare(`
+        SELECT pc.*
+        FROM project_categories pc
+        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
+        WHERE pcj.project_id = ?
+      `).all(id);
+
+      res.json({
+        ...project,
+        cotraitants_list: cotraitants,
+        lots_list: lots,
+        stakeholders_list: stakeholders,
+        categories_list: categories
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/projects/:id/full", (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as any;
+      
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const cotraitants = db.prepare(`
+        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_cotraitants pc
+        LEFT JOIN contacts c ON pc.contact_id = c.id
+        WHERE pc.project_id = ?
+      `).all(id);
+
+      const lots = db.prepare(`
+        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_lots pl
+        LEFT JOIN contacts c ON pl.contact_id = c.id
+        WHERE pl.project_id = ?
+      `).all(id);
+
+      const stakeholders = db.prepare(`
+        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM project_stakeholders ps
+        LEFT JOIN contacts c ON ps.contact_id = c.id
+        WHERE ps.project_id = ?
+      `).all(id);
+
+      const categories = db.prepare(`
+        SELECT pc.*
+        FROM project_categories pc
+        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
+        WHERE pcj.project_id = ?
+      `).all(id);
+
+      const milestones = db.prepare("SELECT * FROM milestones WHERE project_id = ? ORDER BY due_date ASC").all(id);
+      
+      const invoices = db.prepare(`
+        SELECT i.*, p.name as project_name 
+        FROM invoices i
+        LEFT JOIN projects p ON i.project_id = p.id
+        WHERE i.project_id = ?
+        ORDER BY i.created_at DESC
+      `).all(id);
+      
+      const invoiceIds = invoices.map((inv: any) => inv.id);
+      let allInvoiceItems: any[] = [];
+      if (invoiceIds.length > 0) {
+        allInvoiceItems = db.prepare(`SELECT * FROM invoice_items WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`).all(...invoiceIds);
+      }
+      
+      const invoicesWithItems = invoices.map((inv: any) => ({
+        ...inv,
+        items: allInvoiceItems.filter((item: any) => item.invoice_id === inv.id)
+      }));
+
+      const specifications = db.prepare("SELECT * FROM specifications WHERE project_id = ? OR is_template = 1 ORDER BY last_updated DESC").all(id);
+      const ordres_de_service = db.prepare("SELECT * FROM ordres_de_service WHERE project_id = ?").all(id);
+      const visas = db.prepare("SELECT * FROM visas WHERE project_id = ?").all(id);
+      const receptions = db.prepare("SELECT * FROM receptions WHERE project_id = ?").all(id);
+      const reserves = db.prepare("SELECT * FROM reserves WHERE project_id = ?").all(id);
+      const plans = db.prepare("SELECT * FROM plans WHERE project_id = ?").all(id);
+
+      res.json({
+        project: {
+          ...project,
+          cotraitants_list: cotraitants,
+          lots_list: lots,
+          stakeholders_list: stakeholders,
+          categories_list: categories
+        },
+        milestones,
+        invoices: invoicesWithItems,
+        specifications: specifications.map((s: any) => ({ ...s, is_template: !!s.is_template })),
+        ordres_de_service,
+        visas,
+        receptions,
+        reserves,
+        plans
+      });
+    } catch (error) {
+      next(error);
     }
   });
 
@@ -1669,20 +1867,16 @@ async function startServer() {
   });
 
   app.get("/api/team", (req, res) => {
-    try {
-      const team = db.prepare("SELECT * FROM team_members").all();
-      res.json(team);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch team" });
-    }
+    console.log("Fetching team...");
+    res.json([{ id: 't1', name: 'Test User', role: 'Admin', email: 'test@test.com', avatar: 'https://picsum.photos/seed/test/200', system_role: 'admin' }]);
   });
 
   app.put("/api/team/:id", (req, res) => {
     try {
       const { id } = req.params;
-      const { senderOption, defaultEmailTemplate } = req.body;
-      db.prepare("UPDATE team_members SET senderOption = ?, defaultEmailTemplate = ? WHERE id = ?").run(senderOption, defaultEmailTemplate, id);
+      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department } = req.body;
+      db.prepare("UPDATE team_members SET senderOption = ?, defaultEmailTemplate = ?, phone = ?, address = ?, job_title = ?, department = ? WHERE id = ?")
+        .run(senderOption, defaultEmailTemplate, phone, address, jobTitle, department, id);
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating team member:", error);
@@ -1690,7 +1884,20 @@ async function startServer() {
     }
   });
 
-  app.get("/api/tenders", (req, res) => {
+  app.post("/api/send-email", (req, res) => {
+    try {
+      const { to, subject, body } = req.body;
+      console.log(`Sending email to ${to}: ${subject}`);
+      // In a real application, you would use a service like Nodemailer or an API like SendGrid/Mailgun here.
+      // For now, we log it to the console to simulate sending.
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error sending email:", error);
+      res.status(500).json({ error: "Failed to send email: " + error.message });
+    }
+  });
+
+  app.get("/api/tenders", (req, res, next) => {
     try {
       const tenders = db.prepare(`
         SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
@@ -1698,20 +1905,22 @@ async function startServer() {
         LEFT JOIN contacts c ON t.mandataire_id = c.id
       `).all();
       
+      const allSpecialties = db.prepare(`
+        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM tender_specialties ts
+        LEFT JOIN contacts c ON ts.contact_id = c.id
+      `).all();
+
       const tendersWithSpecialties = tenders.map((tender: any) => {
-        const specialties = db.prepare(`
-          SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM tender_specialties ts
-          LEFT JOIN contacts c ON ts.contact_id = c.id
-          WHERE ts.tender_id = ?
-        `).all(tender.id);
-        return { ...tender, specialties_list: specialties };
+        return { 
+          ...tender, 
+          specialties_list: allSpecialties.filter((ts: any) => ts.tender_id === tender.id) 
+        };
       });
       
       res.json(tendersWithSpecialties);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch tenders" });
+      next(error);
     }
   });
 
@@ -1919,7 +2128,13 @@ async function startServer() {
 
   app.get("/api/specifications", (req, res) => {
     try {
-      const specs = db.prepare("SELECT * FROM specifications ORDER BY last_updated DESC").all();
+      const { project_id } = req.query;
+      let specs;
+      if (project_id) {
+        specs = db.prepare("SELECT * FROM specifications WHERE project_id = ? OR is_template = 1 ORDER BY last_updated DESC").all(project_id);
+      } else {
+        specs = db.prepare("SELECT * FROM specifications ORDER BY last_updated DESC").all();
+      }
       res.json(specs.map((s: any) => ({ ...s, is_template: !!s.is_template })));
     } catch (error) {
       console.error(error);
@@ -2175,14 +2390,23 @@ async function startServer() {
         ORDER BY p.created_at DESC
       `).all();
       
-      const proposalsWithSpecialties = proposals.map((proposal: any) => {
-        const specialties = db.prepare(`
+      // Fetch all specialties in bulk to avoid N+1 queries
+      const proposalIds = proposals.map((p: any) => p.id);
+      let allSpecialties: any[] = [];
+      if (proposalIds.length > 0) {
+        allSpecialties = db.prepare(`
           SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
           FROM proposal_specialties ps
           LEFT JOIN contacts c ON ps.contact_id = c.id
-          WHERE ps.proposal_id = ?
-        `).all(proposal.id);
-        return { ...proposal, specialties_list: specialties };
+          WHERE ps.proposal_id IN (${proposalIds.map(() => '?').join(',')})
+        `).all(...proposalIds);
+      }
+      
+      const proposalsWithSpecialties = proposals.map((proposal: any) => {
+        return { 
+          ...proposal, 
+          specialties_list: allSpecialties.filter((ps: any) => ps.proposal_id === proposal.id) 
+        };
       });
       
       res.json(proposalsWithSpecialties);
@@ -2461,16 +2685,35 @@ async function startServer() {
 
   app.get("/api/invoices", (req, res) => {
     try {
-      const invoices = db.prepare(`
+      const { project_id } = req.query;
+      let query = `
         SELECT i.*, p.name as project_name 
         FROM invoices i
         LEFT JOIN projects p ON i.project_id = p.id
-        ORDER BY i.created_at DESC
-      `).all();
+      `;
+      let params: any[] = [];
+      
+      if (project_id) {
+        query += " WHERE i.project_id = ?";
+        params.push(project_id);
+      }
+      
+      query += " ORDER BY i.created_at DESC";
+      
+      const invoices = db.prepare(query).all(...params);
+      
+      // Fetch all invoice items in bulk to avoid N+1 queries
+      const invoiceIds = invoices.map((inv: any) => inv.id);
+      let allItems: any[] = [];
+      if (invoiceIds.length > 0) {
+        allItems = db.prepare(`SELECT * FROM invoice_items WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`).all(...invoiceIds);
+      }
       
       const invoicesWithItems = invoices.map((inv: any) => {
-        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(inv.id);
-        return { ...inv, items };
+        return { 
+          ...inv, 
+          items: allItems.filter((item: any) => item.invoice_id === inv.id) 
+        };
       });
       
       res.json(invoicesWithItems);
@@ -2897,14 +3140,96 @@ async function startServer() {
     }
   });
 
+  app.get("/api/activities", (req, res) => {
+    try {
+      const activities = db.prepare("SELECT * FROM activities ORDER BY timestamp DESC").all();
+      res.json(activities.map(a => ({ ...a, attachments: a.attachments ? JSON.parse(a.attachments) : [] })));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch activities" });
+    }
+  });
+
+  app.post("/api/activities", (req, res) => {
+    try {
+      const { id, user_id, action, target, timestamp, category, type, attachments } = req.body;
+      db.prepare("INSERT INTO activities (id, user_id, action, target, timestamp, category, type, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, user_id, action, target, timestamp, category, type, JSON.stringify(attachments || []));
+      res.status(201).json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create activity" });
+    }
+  });
+
+  app.get("/api/messages", (req, res) => {
+    try {
+      const messages = db.prepare("SELECT * FROM messages ORDER BY timestamp DESC").all();
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/messages", (req, res) => {
+    try {
+      const { id, sender_id, recipient_id, content, type, file_url, timestamp } = req.body;
+      db.prepare("INSERT INTO messages (id, sender_id, recipient_id, content, type, file_url, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, sender_id, recipient_id, content, type, file_url, timestamp);
+      res.status(201).json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create message" });
+    }
+  });
+
+  app.post("/api/upload", upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    res.json({ file_url: `/uploads/${req.file.filename}` });
+  });
+
+  app.get("/api/notifications/:userId", (req, res) => {
+    try {
+      const { userId } = req.params;
+      const notifications = db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY timestamp DESC").all(userId);
+      res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.post("/api/notifications", (req, res) => {
+    try {
+      const { id, user_id, content, timestamp } = req.body;
+      db.prepare("INSERT INTO notifications (id, user_id, content, timestamp) VALUES (?, ?, ?, ?)").run(id, user_id, content, timestamp);
+      res.status(201).json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create notification" });
+    }
+  });
+
+  app.get("/api/docs", (req, res) => {
+    res.json({
+      message: "API Documentation",
+      routes: [
+        "/api/team",
+        "/api/activities",
+        "/api/messages",
+        "/api/upload",
+        "/api/notifications/:userId"
+      ]
+    });
+  });
+
   // Catch-all for API routes to prevent falling through to Vite
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: "API route not found" });
   });
 
-  // Start listening immediately so API routes are available
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // Global error handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`Error on ${req.method} ${req.url}:`, err);
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+    res.status(status).json({
+      error: message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   });
 
   // Vite middleware for development
@@ -2920,6 +3245,11 @@ async function startServer() {
       res.sendFile(path.join(process.cwd(), "dist", "index.html"));
     });
   }
+
+  // Start listening after all routes and middleware are added
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
 startServer();

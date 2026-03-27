@@ -1,5 +1,6 @@
-export const fetchJson = async (url: string, options?: RequestInit) => {
-  const res = await fetch(url, options);
+export const baseFetchJson = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
+  const fetchFn = (window as any)._originalFetch || window.fetch;
+  const res = await fetchFn(url, options);
   
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
@@ -15,4 +16,8 @@ export const fetchJson = async (url: string, options?: RequestInit) => {
   }
 
   return res.json();
+};
+
+export const fetchJson = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
+  return baseFetchJson<T>(url, options);
 };

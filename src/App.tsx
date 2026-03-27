@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   IconSearch,
   IconBell,
@@ -7,6 +7,9 @@ import {
   IconCommand,
   IconSun,
   IconMoon,
+  IconCloudOff,
+  IconCloudUpload,
+  IconCheck,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { syncManager } from './lib/sync';
 import './i18n';
 
 // Pages
@@ -31,13 +35,60 @@ import ProjectTemplates from './pages/ProjectTemplates';
 import ProjectDetail from './pages/ProjectDetail';
 import Documents from './pages/Documents';
 import Situations from './pages/Situations';
+import Notifications from './pages/Notifications';
 import Settings from './pages/Settings';
+
+function SyncStatus() {
+  const [pendingCount, setPendingCount] = useState(syncManager.getPendingCount());
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const cleanup = syncManager.onPendingCountChange(setPendingCount);
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      cleanup();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  if (!isOnline) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded text-[10px] font-bold uppercase tracking-wider border border-amber-200 dark:border-amber-800/50">
+        <IconCloudOff size={14} />
+        Offline ({pendingCount} pending)
+      </div>
+    );
+  }
+
+  if (pendingCount > 0) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded text-[10px] font-bold uppercase tracking-wider border border-blue-200 dark:border-blue-800/50 animate-pulse">
+        <IconCloudUpload size={14} />
+        Syncing {pendingCount}...
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase tracking-wider border border-emerald-200 dark:border-emerald-800/50">
+      <IconCheck size={14} />
+      Online
+    </div>
+  );
+}
 
 function Header() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const { currentUser, setCurrentUser, allUsers, headerTitle, setHeaderTitle } = useUser();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -70,6 +121,9 @@ function Header() {
         </div>
 
         <div className="flex items-center gap-6">
+          <div className="hidden lg:flex">
+            <SyncStatus />
+          </div>
           <div className="hidden md:flex relative">
             <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
             <input 
@@ -79,20 +133,23 @@ function Header() {
             />
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-0 sm:gap-2">
             <button 
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="p-2 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
               title={theme === 'dark' ? t('theme_light') : t('theme_dark')}
             >
-              {theme === 'dark' ? <IconSun size={20} /> : <IconMoon size={20} />}
+              {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
             </button>
-            <button className="p-2 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 relative">
-              <IconBell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-zinc-900" />
+            <button 
+              onClick={() => navigate('/notifications')}
+              className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 relative"
+            >
+              <IconBell size={18} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-zinc-900" />
             </button>
             
-            <div className="relative ml-2">
+            <div className="relative ml-0 sm:ml-1">
               <button 
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 className="flex items-center gap-2 p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
@@ -141,7 +198,13 @@ function Header() {
                         </div>
                       </div>
                       <div className="p-2">
-                        <button className="w-full flex items-center gap-2 p-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors">
+                        <button 
+                          onClick={() => {
+                            navigate('/settings');
+                            setIsUserMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                        >
                           <IconSettings size={16} />
                           Account Settings
                         </button>
@@ -213,6 +276,7 @@ export default function App() {
                   <Route path="/tenders" element={<Tenders />} />
                   <Route path="/specifications" element={<Specifications />} />
                   <Route path="/specifications/:specId" element={<Specifications />} />
+                  <Route path="/notifications" element={<Notifications />} />
                   <Route path="/team" element={<Team />} />
                   <Route path="/gantt" element={<Gantt />} />
                   <Route path="/contacts" element={<Contacts />} />

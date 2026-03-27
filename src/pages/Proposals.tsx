@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo } from '../components/LocationMaps';
@@ -107,35 +108,47 @@ export default function Proposals() {
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
 
   useEffect(() => {
-    fetchProposals();
-    fetchContacts();
-    fetchMilestones();
+    const loadData = async () => {
+      try {
+        const [proposalsData, contactsData, milestonesData] = await Promise.all([
+          fetchJson<Proposal[]>('/api/proposals'),
+          fetchJson<Contact[]>('/api/contacts'),
+          fetchJson<Milestone[]>('/api/milestones')
+        ]);
+        setProposals(proposalsData);
+        setContacts(contactsData);
+        setMilestones(milestonesData);
+      } catch (err) {
+        console.error('Proposals data fetch failed:', err);
+      }
+    };
+    loadData();
   }, []);
 
   const fetchMilestones = async () => {
     try {
-      const res = await fetch('/api/milestones');
-      if (res.ok) setMilestones(await res.json());
+      const data = await fetchJson<Milestone[]>('/api/milestones');
+      setMilestones(data);
     } catch (err) {
-      console.error(err);
+      console.error('Milestones fetch failed:', err);
     }
   };
 
   const fetchProposals = async () => {
     try {
-      const res = await fetch('/api/proposals');
-      if (res.ok) setProposals(await res.json());
+      const data = await fetchJson<Proposal[]>('/api/proposals');
+      setProposals(data);
     } catch (err) {
-      console.error(err);
+      console.error('Proposals fetch failed:', err);
     }
   };
 
   const fetchContacts = async () => {
     try {
-      const res = await fetch('/api/contacts');
-      if (res.ok) setContacts(await res.json());
+      const data = await fetchJson<Contact[]>('/api/contacts');
+      setContacts(data);
     } catch (err) {
-      console.error(err);
+      console.error('Contacts fetch failed:', err);
     }
   };
 

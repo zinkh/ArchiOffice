@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, ChangeEvent, useRef } from 'react';
 import Select, { StylesConfig } from 'react-select';
 import CreatableSelect from 'react-select/creatable';
 import chroma from 'chroma-js';
@@ -26,7 +26,8 @@ import {
   IconBook,
   IconCheck,
   IconX,
-  IconMessageDots
+  IconMessageDots,
+  IconRefresh
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
@@ -149,6 +150,8 @@ export default function ProjectDetail() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
+  const [isAddingSpec, setIsAddingSpec] = useState(false);
+  const [newSpecTitle, setNewSpecTitle] = useState('');
   const [isAddingReserve, setIsAddingReserve] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [isAnnotating, setIsAnnotating] = useState(false);
@@ -168,31 +171,47 @@ export default function ProjectDetail() {
   });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
-  const [activeTab, setActiveTab] = useState('études');
+  const [activeTab, setActiveTab] = useState('INFOS');
+  const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
+  const planInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (project && !project.is_chantier && ['chantier', 'comptabilité chantier', 'visas', 'réception'].includes(activeTab)) {
-      setActiveTab('études');
+    if (project && !project.is_chantier && ['DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
+      setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
 
   useEffect(() => {
     if (id) {
-      fetchProject();
-      fetchMilestones();
-      fetchInvoices();
-      fetchSpecifications();
+      fetchFullProject();
       fetchCategories();
       fetchContacts();
-      fetchOrdresDeService();
       fetchTeam();
-      fetchVisas();
-      fetchReceptions();
-      fetchReserves();
-      fetchPlans();
       fetchProjectTenders();
     }
   }, [id]);
+
+  const fetchFullProject = async () => {
+    try {
+      const res = await fetch(`/api/projects/${id}/full`);
+      if (res.ok) {
+        const data = await res.json();
+        setProject({ ...data.project, is_complete_mission: !!data.project.is_complete_mission });
+        setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+        setInvoices(data.invoices);
+        setSpecifications(data.specifications);
+        setOrdresDeService(data.ordres_de_service);
+        setVisas(data.visas);
+        setReceptions(data.receptions);
+        setReserves(data.reserves);
+        setPlans(data.plans);
+      } else {
+        navigate('/projects');
+      }
+    } catch (err) {
+      console.error('Failed to fetch full project:', err);
+    }
+  };
 
   const fetchVisas = async () => {
     try {
@@ -290,28 +309,7 @@ export default function ProjectDetail() {
     }
   };
 
-  const fetchProject = async () => {
-    try {
-      const res = await fetch('/api/projects');
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const projects: Project[] = JSON.parse(text);
-          const found = projects.find(p => p.id === id);
-          if (found) {
-            setProject({ ...found, is_complete_mission: !!found.is_complete_mission });
-          }
-          else navigate('/projects');
-        } catch (e) {
-          console.error("Failed to parse projects JSON:", text);
-        }
-      } else {
-        console.error("Failed to fetch projects:", res.status, await res.text());
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const fetchProject = fetchFullProject;
 
   const fetchMilestones = async () => {
     try {
@@ -369,39 +367,24 @@ export default function ProjectDetail() {
 
   const fetchInvoices = async () => {
     try {
-      const res = await fetch('/api/invoices');
+      const res = await fetch(`/api/invoices?project_id=${id}`);
       if (res.ok) {
-        const text = await res.text();
-        try {
-          const allInvoices: Invoice[] = JSON.parse(text);
-          setInvoices(allInvoices.filter(inv => inv.project_id === id));
-        } catch (e) {
-          console.error("Failed to parse invoices JSON:", text);
-        }
-      } else {
-        console.error("Failed to fetch invoices:", res.status, await res.text());
+        setInvoices(await res.json());
       }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to fetch invoices:', err);
     }
   };
 
   const fetchSpecifications = async () => {
     try {
-      const res = await fetch('/api/specifications');
+      const res = await fetch(`/api/specifications?project_id=${id}`);
       if (res.ok) {
-        const text = await res.text();
-        try {
-          const allSpecs: Specification[] = JSON.parse(text);
-          setSpecifications(allSpecs.filter(s => s.project_id === id));
-        } catch (e) {
-          console.error("Failed to parse specifications JSON:", text);
-        }
-      } else {
-        console.error("Failed to fetch specifications:", res.status, await res.text());
+        const data = await res.json();
+        setSpecifications(data.map((s: any) => ({ ...s, is_template: !!s.is_template })));
       }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to fetch specifications:', err);
     }
   };
 
@@ -482,6 +465,37 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleCreateSpec = async () => {
+    if (!id || !newSpecTitle) return;
+    try {
+      const newSpecId = `spec-${Date.now()}`;
+      const res = await fetch('/api/specifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newSpecId,
+          project_id: id,
+          title: newSpecTitle,
+          content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
+          last_updated: new Date().toISOString()
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title: newSpecTitle, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated }]);
+        setNewSpecTitle('');
+        setIsAddingSpec(false);
+      } else {
+        const errorText = await res.text();
+        console.error('Failed to create specification:', res.status, errorText);
+        alert(`Erreur lors de la création du cahier des charges: ${errorText}`);
+      }
+    } catch (err) {
+      console.error('Error creating specification:', err);
+      alert('Une erreur est survenue lors de la création du cahier des charges.');
     }
   };
 
@@ -610,6 +624,85 @@ export default function ProjectDetail() {
     }
   };
 
+  const handlePlanUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !project) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      const name = file.name;
+      
+      if (updatingPlanId) {
+        // Create a new version of an existing plan
+        const parentPlan = plans.find(p => p.id === updatingPlanId);
+        if (!parentPlan) return;
+        
+        // Calculate new index (A -> B, B -> C...)
+        let newIndex = 'A';
+        if (parentPlan.index) {
+          newIndex = String.fromCharCode(parentPlan.index.charCodeAt(0) + 1);
+        }
+        
+        const newPlan: Plan = {
+          id: crypto.randomUUID(),
+          project_id: id!,
+          name: parentPlan.name,
+          file_url: base64,
+          uploaded_at: new Date().toISOString(),
+          index: newIndex,
+          version: (parentPlan.version || 1) + 1,
+          parent_id: parentPlan.id,
+          category: parentPlan.category || (activeTab === 'PRO' || activeTab === 'AOR' ? activeTab as 'PRO' | 'AOR' : 'AOR')
+        };
+        
+        try {
+          const res = await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newPlan)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setPlans(prev => [...prev, data]);
+            setUpdatingPlanId(null);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        // Create a new plan
+        const newPlan: Plan = {
+          id: crypto.randomUUID(),
+          project_id: id!,
+          name: name,
+          file_url: base64,
+          uploaded_at: new Date().toISOString(),
+          index: 'A',
+          version: 1,
+          category: activeTab === 'PRO' || activeTab === 'AOR' ? activeTab as 'PRO' | 'AOR' : 'AOR'
+        };
+        
+        try {
+          const res = await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newPlan)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setPlans(prev => [...prev, data]);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      // Reset input
+      if (planInputRef.current) planInputRef.current.value = '';
+    };
+    reader.readAsDataURL(file);
+  };
+
   if (!project) return <div className="p-8 text-center">Loading project...</div>;
 
   return (
@@ -648,14 +741,14 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Main Info */}
-        <div className="lg:col-span-2 space-y-8">
+      <div className="grid grid-cols-1 gap-8">
+        {/* Main Column */}
+        <div className="space-y-8">
           
           {/* Tab Navigation */}
           <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 mb-6 overflow-x-auto">
-            {['études', 'ACT', 'chantier', 'comptabilité chantier', 'visas', 'réception'].map(tab => {
-              if (['chantier', 'comptabilité chantier', 'visas', 'réception'].includes(tab) && !project.is_chantier) return null;
+            {['INFOS', 'PRO', 'ACT', 'DET', 'RDT', 'VISA', 'AOR'].map(tab => {
+              if (['DET', 'RDT', 'VISA', 'AOR'].includes(tab) && !project.is_chantier) return null;
               return (
                 <button 
                   key={tab}
@@ -671,169 +764,449 @@ export default function ProjectDetail() {
             })}
           </div>
           <div className="tab-content mt-8">
-            {activeTab === 'études' && (
+            {activeTab === 'INFOS' && (
               <div className="space-y-8">
-                {/* Hero Section - Editable */}
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
-                  <div className="aspect-[21/9] relative overflow-hidden bg-zinc-100 dark:bg-zinc-800 group">
-                    {project.image_url ? (
-                      <img src={project.image_url} alt={project.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-zinc-400">
-                        <IconUpload size={48} />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-xl font-bold border border-white/30 transition-all">
-                        <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
-                        Change Cover Image
-                      </label>
-                    </div>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-                    <div className="absolute inset-x-0 bottom-0 p-8 space-y-4">
-                      <input 
-                        type="text"
-                        className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
-                        value={project.name}
-                        onChange={e => setProject({...project, name: e.target.value})}
-                        placeholder="Project Name"
-                      />
-                      <div className="flex flex-wrap items-center gap-4">
-                        <input 
-                          type="text"
-                          className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
-                          value={project.client}
-                          onChange={e => setProject({...project, client: e.target.value})}
-                          placeholder="Client Name"
-                        />
-                        <span className="text-white/40">•</span>
-                        <input 
-                          type="text"
-                          className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
-                          value={project.category || ''}
-                          onChange={e => setProject({...project, category: e.target.value})}
-                          placeholder="Category"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="p-8 space-y-8">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                      <div className="md:col-span-2 space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Description</label>
-                        <textarea 
-                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white min-h-[120px] resize-none"
-                          value={project.description}
-                          onChange={e => setProject({...project, description: e.target.value})}
-                          placeholder="Project description..."
-                        />
-                      </div>
-                      <div className="space-y-6">
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Chef de projet</label>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2 space-y-8">
+                    {/* Hero Section - Editable */}
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+                      <div className="aspect-[21/9] relative overflow-hidden bg-zinc-100 dark:bg-zinc-800 group">
+                        {project.image_url ? (
+                          <img src={project.image_url} alt={project.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-zinc-400">
+                            <IconUpload size={48} />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-xl font-bold border border-white/30 transition-all">
+                            <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                            Change Cover Image
+                          </label>
+                        </div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+                        <div className="absolute inset-x-0 bottom-0 p-8 space-y-4">
                           <input 
                             type="text"
-                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                            value={project.project_manager || ''}
-                            onChange={e => setProject({...project, project_manager: e.target.value})}
-                            placeholder="Manager Name"
+                            className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
+                            value={project.name}
+                            onChange={e => setProject({...project, name: e.target.value})}
+                            placeholder="Project Name"
                           />
+                          <div className="flex flex-wrap items-center gap-4">
+                            <input 
+                              type="text"
+                              className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={project.client}
+                              onChange={e => setProject({...project, client: e.target.value})}
+                              placeholder="Client Name"
+                            />
+                            <span className="text-white/40">•</span>
+                            <input 
+                              type="text"
+                              className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={project.category || ''}
+                              onChange={e => setProject({...project, category: e.target.value})}
+                              placeholder="Category"
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
+                      
+                      <div className="p-8 space-y-8">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                          <div className="md:col-span-2 space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Description</label>
+                            <textarea 
+                              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white min-h-[120px] resize-none"
+                              value={project.description}
+                              onChange={e => setProject({...project, description: e.target.value})}
+                              placeholder="Project description..."
+                            />
+                          </div>
+                          <div className="space-y-6">
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Chef de projet</label>
+                              <input 
+                                type="text"
+                                className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                                value={project.project_manager || ''}
+                                onChange={e => setProject({...project, project_manager: e.target.value})}
+                                placeholder="Manager Name"
+                              />
+                            </div>
+                          </div>
+                        </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8 border-t border-zinc-100 dark:border-zinc-800">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8 border-t border-zinc-100 dark:border-zinc-800">
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Surface (m²)</label>
+                            <input 
+                              type="number"
+                              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                              value={project.surface || 0}
+                              onChange={e => setProject({...project, surface: Number(e.target.value)})}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Coût Travaux</label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
+                              <input 
+                                type="number"
+                                className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                                value={project.construction_cost || 0}
+                                onChange={e => setProject({...project, construction_cost: Number(e.target.value)})}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Rémunération</label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
+                              <input 
+                                type="number"
+                                className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                                value={project.remuneration || 0}
+                                onChange={e => setProject({...project, remuneration: Number(e.target.value)})}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Progression (%)</label>
+                            <input 
+                              type="number"
+                              min="0"
+                              max="100"
+                              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                              value={project.progression || 0}
+                              onChange={e => setProject({...project, progression: Number(e.target.value)})}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Code Projet</label>
+                            <input 
+                              type="text"
+                              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                              value={project.project_code || ''}
+                              onChange={e => setProject({...project, project_code: e.target.value})}
+                              placeholder="PRJ-001"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Location & Maps - Editable */}
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Localisation</h3>
+                        <div className="mt-4">
+                          <AddressAutocomplete 
+                            value={project.address || ''}
+                            onChange={addr => setProject({...project, address: addr})}
+                          />
+                        </div>
+                      </div>
+                      {project.address && (
+                        <div className="space-y-6 p-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <RNBInfo address={project.address} />
+                            <CadastreDownload address={project.address} />
+                          </div>
+                          <div className="bg-zinc-100 dark:bg-zinc-800 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
+                              <div className="bg-white dark:bg-zinc-900 relative">
+                                <GeoportailMap address={project.address} />
+                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">Cadastre</div>
+                              </div>
+                              <div className="bg-white dark:bg-zinc-900 relative">
+                                <GoogleMap address={project.address} />
+                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">Google Maps</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Milestones section moved into INFOS tab */}
+                      <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Milestones</h3>
+                          <button 
+                            onClick={() => setIsAddingMilestone(!isAddingMilestone)}
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                          >
+                            <IconPlus size={14} />
+                            Ajouter un milestone
+                          </button>
+                        </div>
+
+                        {isAddingMilestone && (
+                          <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-700 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre</label>
+                                <input 
+                                  type="text"
+                                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={newMilestoneTitle}
+                                  onChange={e => setNewMilestoneTitle(e.target.value)}
+                                  placeholder="ex: Permis de construire"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
+                                <input 
+                                  type="date"
+                                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={newMilestoneDate}
+                                  onChange={e => setNewMilestoneDate(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-3">
+                              <button 
+                                onClick={() => setIsAddingMilestone(false)}
+                                className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                              >
+                                Annuler
+                              </button>
+                              <button 
+                                onClick={handleAddMilestone}
+                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                              >
+                                Ajouter
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {project && milestones.length > 0 && (
+                          <div className="mb-6">
+                            <MilestoneGantt 
+                              milestones={milestones} 
+                              startDate={new Date(project.start_date)} 
+                              endDate={new Date(project.end_date)} 
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-3">
+                          {milestones.length > 0 ? milestones.map((m) => (
+                            <div key={m.id} className="flex items-center justify-between group">
+                              <div className="flex items-center gap-3">
+                                <button 
+                                  onClick={() => handleToggleMilestone(m)}
+                                  className={cn(
+                                    "transition-colors",
+                                    m.completed ? "text-green-500" : "text-zinc-300 hover:text-zinc-400"
+                                  )}
+                                >
+                                  {m.completed ? <IconCircleCheck size={20} /> : <IconCircle size={20} />}
+                                </button>
+                                <div>
+                                  <p className={cn("text-sm font-medium", m.completed ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-white")}>
+                                    {m.title}
+                                  </p>
+                                  <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+                                    <IconCalendar size={10} />
+                                    {new Date(m.due_date).toLocaleDateString()}
+                                  </div>
+                                </div>
+                              </div>
+                              <button 
+                                onClick={() => {
+                                  if(confirm('Delete milestone?')) {
+                                    fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
+                                      .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
+                                  }
+                                }}
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </div>
+                          )) : (
+                            <p className="text-xs text-zinc-500 italic text-center py-4">No milestones defined.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Status & Budget (Moved into INFOS Tab) */}
+                  <div className="space-y-8">
+                    <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Surface (m²)</label>
-                        <input 
-                          type="number"
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('status')} *</label>
+                        <select 
                           className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                          value={project.surface || 0}
-                          onChange={e => setProject({...project, surface: Number(e.target.value)})}
-                        />
+                          value={project.status}
+                          onChange={e => setProject({...project, status: e.target.value as any})}
+                        >
+                          <option value="Planning">Planning</option>
+                          <option value="In Progress">In Progress</option>
+                          <option value="Completed">Completed</option>
+                          <option value="On Hold">On Hold</option>
+                        </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Coût Travaux</label>
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('budget')} *</label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
                           <input 
                             type="number"
                             className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                            value={project.construction_cost || 0}
-                            onChange={e => setProject({...project, construction_cost: Number(e.target.value)})}
+                            value={project.budget || 0}
+                            onChange={e => setProject({...project, budget: Number(e.target.value)})}
                           />
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Rémunération</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Start</label>
                           <input 
-                            type="number"
-                            className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                            value={project.remuneration || 0}
-                            onChange={e => setProject({...project, remuneration: Number(e.target.value)})}
+                            type="date"
+                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                            value={project.start_date}
+                            onChange={e => setProject({...project, start_date: e.target.value})}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('deadline')}</label>
+                          <input 
+                            type="date"
+                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                            value={project.end_date}
+                            onChange={e => setProject({...project, end_date: e.target.value})}
                           />
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Progression (%)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          max="100"
-                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                          value={project.progression || 0}
-                          onChange={e => setProject({...project, progression: Number(e.target.value)})}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Code Projet</label>
-                        <input 
-                          type="text"
-                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                          value={project.project_code || ''}
-                          onChange={e => setProject({...project, project_code: e.target.value})}
-                          placeholder="PRJ-001"
-                        />
+                      <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox"
+                            id="is_complete_mission"
+                            className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+                            checked={!!project.is_complete_mission}
+                            onChange={e => setProject({...project, is_complete_mission: e.target.checked})}
+                          />
+                          <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                            Mission Complète
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox"
+                            id="is_chantier"
+                            className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+                            checked={!!project.is_chantier}
+                            onChange={e => setProject({...project, is_chantier: e.target.checked})}
+                          />
+                          <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                            Chantier
+                          </label>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-                
-                {/* Location & Maps - Editable */}
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Localisation</h3>
-                    <div className="mt-4">
-                      <AddressAutocomplete 
-                        value={project.address || ''}
-                        onChange={addr => setProject({...project, address: addr})}
-                      />
-                    </div>
-                  </div>
-                  {project.address && (
-                    <div className="space-y-6 p-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <RNBInfo address={project.address} />
-                        <CadastreDownload address={project.address} />
-                      </div>
-                      <div className="bg-zinc-100 dark:bg-zinc-800 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-700">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
-                          <div className="bg-white dark:bg-zinc-900 relative">
-                            <GeoportailMap address={project.address} />
-                            <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">Cadastre</div>
+              </div>
+            )}
+
+            {activeTab === 'PRO' && (
+              <div className="space-y-8">
+                {(() => {
+                  const proPlans = plans.filter(p => p.category === 'PRO');
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      <div className="lg:col-span-2 space-y-8">
+                        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                          <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Plans du projet (PRO)</h3>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => {
+                                  setUpdatingPlanId(null);
+                                  planInputRef.current?.click();
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                              >
+                                <IconUpload size={14} />
+                                Importer un plan
+                              </button>
+                            </div>
                           </div>
-                          <div className="bg-white dark:bg-zinc-900 relative">
-                            <GoogleMap address={project.address} />
-                            <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">Google Maps</div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                                <tr>
+                                  <th className="px-6 py-3 text-left">Nom</th>
+                                  <th className="px-6 py-3 text-left w-20">Indice</th>
+                                  <th className="px-6 py-3 text-left">Date</th>
+                                  <th className="px-6 py-3 text-right w-24">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                                {proPlans
+                                  .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
+                                  .map((plan) => (
+                                  <tr key={plan.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                                    <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{plan.name}</td>
+                                    <td className="px-6 py-4">
+                                      <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px] font-bold">
+                                        {plan.index || 'A'}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString()}</td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <button 
+                                          onClick={() => {
+                                            setUpdatingPlanId(plan.id);
+                                            planInputRef.current?.click();
+                                          }}
+                                          title="Nouvel indice"
+                                          className="p-2 text-zinc-400 hover:text-blue-600 transition-colors"
+                                        >
+                                          <IconRefresh size={16} />
+                                        </button>
+                                        <a href={plan.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-zinc-400 hover:text-blue-600 transition-colors">
+                                          <IconExternalLink size={16} />
+                                        </a>
+                                        <button 
+                                          onClick={async () => {
+                                            if (!confirm('Supprimer ce plan ?')) return;
+                                            try {
+                                              const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
+                                              if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
+                                            } catch (err) {
+                                              console.error(err);
+                                            }
+                                          }}
+                                          title="Supprimer"
+                                          className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
+                                        >
+                                          <IconTrash size={16} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {proPlans.length === 0 && (
+                                  <tr>
+                                    <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun plan PRO.</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -843,48 +1216,38 @@ export default function ProjectDetail() {
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
                     <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Cahier des charges</h3>
-                    <button 
-                      onClick={async () => {
-                        console.log('Button clicked, project ID:', id);
-                        if (!id) {
-                            console.error('Project ID is missing');
-                            alert('Erreur: ID du projet manquant');
-                            return;
-                        }
-                        const title = prompt('Titre du cahier des charges:');
-                        console.log('Title entered:', title);
-                        if (!title) return;
-                        try {
-                          const newSpecId = `spec-${Date.now()}`;
-                          const res = await fetch('/api/specifications', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              id: newSpecId,
-                              project_id: id,
-                              title,
-                              content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
-                              last_updated: new Date().toISOString()
-                            })
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated }]);
-                          } else {
-                            const errorText = await res.text();
-                            console.error('Failed to create specification:', res.status, errorText);
-                            alert(`Erreur lors de la création du cahier des charges: ${errorText}`);
-                          }
-                        } catch (err) {
-                          console.error('Error creating specification:', err);
-                          alert('Une erreur est survenue lors de la création du cahier des charges.');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                    >
-                      <IconPlus size={14} />
-                      Ajouter un cahier des charges
-                    </button>
+                    {isAddingSpec ? (
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="text" 
+                          value={newSpecTitle} 
+                          onChange={(e) => setNewSpecTitle(e.target.value)}
+                          className="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                          placeholder="Titre..."
+                          autoFocus
+                        />
+                        <button 
+                          onClick={handleCreateSpec}
+                          className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
+                        >
+                          OK
+                        </button>
+                        <button 
+                          onClick={() => setIsAddingSpec(false)}
+                          className="px-3 py-1 bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg text-xs font-bold hover:bg-zinc-300"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setIsAddingSpec(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                      >
+                        <IconPlus size={14} />
+                        Ajouter un cahier des charges
+                      </button>
+                    )}
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1074,7 +1437,7 @@ export default function ProjectDetail() {
                 </div>
               </div>
             )}
-            {activeTab === 'chantier' && (
+            {activeTab === 'DET' && (
               <div className="space-y-8">
                 {/* Ordres de Service List - Manageable */}
                 {project?.is_complete_mission && (
@@ -1202,7 +1565,7 @@ export default function ProjectDetail() {
                 )}
               </div>
             )}
-            {activeTab === 'comptabilité chantier' && (
+            {activeTab === 'RDT' && (
               <div className="space-y-8">
                 <Situations projectId={id!} />
                 {/* Financial Summary */}
@@ -1371,7 +1734,7 @@ export default function ProjectDetail() {
                 </div>
               </div>
             )}
-            {activeTab === 'visas' && (
+            {activeTab === 'VISA' && (
               <div className="space-y-8">
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
@@ -1461,7 +1824,8 @@ export default function ProjectDetail() {
                 </div>
               </div>
             )}
-            {activeTab === 'réception' && (
+
+            {activeTab === 'AOR' && (
               <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
@@ -1913,250 +2277,102 @@ export default function ProjectDetail() {
                 </div>
 
                 {/* Plans de l'opération */}
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden mt-8">
-                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Plans de l'opération</h3>
-                    <button 
-                      onClick={async () => {
-                        const name = prompt('Nom du plan:');
-                        const file_url = prompt('URL du fichier:');
-                        if (!name || !file_url) return;
-                        try {
-                          const res = await fetch('/api/plans', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              id: crypto.randomUUID(),
-                              project_id: id,
-                              name,
-                              file_url
-                            })
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setPlans(prev => [...prev, data]);
-                          }
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                    >
-                      <IconUpload size={14} />
-                      Importer un plan
-                    </button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3 text-left">Nom</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-right w-10"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {plans.map((plan) => (
-                          <tr key={plan.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{plan.name}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString()}</td>
-                            <td className="px-6 py-4 text-right">
-                              <a href={plan.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-zinc-400 hover:text-blue-600 transition-colors">
-                                <IconExternalLink size={16} />
-                              </a>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-              </div>
-              </div>
-            )}
-          </div>
-
-          {/* Milestones section outside tabs */}
-          <div className="mt-8 bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Milestones</h3>
-              <button 
-                onClick={() => setIsAddingMilestone(!isAddingMilestone)}
-                className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-              >
-                <IconPlus size={14} />
-                Ajouter un milestone
-              </button>
-            </div>
-
-            {isAddingMilestone && (
-              <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-700 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre</label>
-                    <input 
-                      type="text"
-                      className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newMilestoneTitle}
-                      onChange={e => setNewMilestoneTitle(e.target.value)}
-                      placeholder="ex: Permis de construire"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
-                    <input 
-                      type="date"
-                      className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newMilestoneDate}
-                      onChange={e => setNewMilestoneDate(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button 
-                    onClick={() => setIsAddingMilestone(false)}
-                    className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                  >
-                    Annuler
-                  </button>
-                  <button 
-                    onClick={handleAddMilestone}
-                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                  >
-                    Ajouter
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {project && milestones.length > 0 && (
-              <div className="mb-6">
-                <MilestoneGantt 
-                  milestones={milestones} 
-                  startDate={new Date(project.start_date)} 
-                  endDate={new Date(project.end_date)} 
-                />
-              </div>
-            )}
-
-            <div className="space-y-3">
-              {milestones.length > 0 ? milestones.map((m) => (
-                <div key={m.id} className="flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => handleToggleMilestone(m)}
-                      className={cn(
-                        "transition-colors",
-                        m.completed ? "text-green-500" : "text-zinc-300 hover:text-zinc-400"
-                      )}
-                    >
-                      {m.completed ? <IconCircleCheck size={20} /> : <IconCircle size={20} />}
-                    </button>
-                    <div>
-                      <p className={cn("text-sm font-medium", m.completed ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-white")}>
-                        {m.title}
-                      </p>
-                      <div className="flex items-center gap-1 text-[10px] text-zinc-400">
-                        <IconCalendar size={10} />
-                        {new Date(m.due_date).toLocaleDateString()}
+                {(() => {
+                  const aorPlans = plans.filter(p => p.category === 'AOR' || !p.category);
+                  return (
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden mt-8">
+                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Plans de l'opération</h3>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="file" 
+                            className="hidden" 
+                            ref={planInputRef}
+                            onChange={handlePlanUpload}
+                          />
+                          <button 
+                            onClick={() => {
+                              setUpdatingPlanId(null);
+                              planInputRef.current?.click();
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                          >
+                            <IconUpload size={14} />
+                            Importer un plan
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                            <tr>
+                              <th className="px-6 py-3 text-left">Nom</th>
+                              <th className="px-6 py-3 text-left w-20">Indice</th>
+                              <th className="px-6 py-3 text-left">Date</th>
+                              <th className="px-6 py-3 text-right w-24">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {aorPlans
+                              .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
+                              .map((plan) => (
+                              <tr key={plan.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                                <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{plan.name}</td>
+                                <td className="px-6 py-4">
+                                  <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px] font-bold">
+                                    {plan.index || 'A'}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString()}</td>
+                                <td className="px-6 py-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        setUpdatingPlanId(plan.id);
+                                        planInputRef.current?.click();
+                                      }}
+                                      title="Nouvel indice"
+                                      className="p-2 text-zinc-400 hover:text-blue-600 transition-colors"
+                                    >
+                                      <IconRefresh size={16} />
+                                    </button>
+                                    <a href={plan.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-zinc-400 hover:text-blue-600 transition-colors">
+                                      <IconExternalLink size={16} />
+                                    </a>
+                                    <button 
+                                      onClick={async () => {
+                                        if (!confirm('Supprimer ce plan ?')) return;
+                                        try {
+                                          const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
+                                          if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
+                                        } catch (err) {
+                                          console.error(err);
+                                        }
+                                      }}
+                                      title="Supprimer"
+                                      className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
+                                    >
+                                      <IconTrash size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {aorPlans.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun plan de l'opération.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      if(confirm('Delete milestone?')) {
-                        fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-                          .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
-                      }
-                    }}
-                    className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                  >
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 italic text-center py-4">No milestones defined.</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        
-        <div className="space-y-8">
-          {/* Status Card */}
-          <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('status')} *</label>
-              <select 
-                className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                value={project.status}
-                onChange={e => setProject({...project, status: e.target.value as any})}
-              >
-                <option value="Planning">Planning</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Completed">Completed</option>
-                <option value="On Hold">On Hold</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('budget')} *</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
-                <input 
-                  type="number"
-                  className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
-                  value={project.budget || 0}
-                  onChange={e => setProject({...project, budget: Number(e.target.value)})}
-                />
+                  );
+                })()}
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Start</label>
-                <input 
-                  type="date"
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                  value={project.start_date}
-                  onChange={e => setProject({...project, start_date: e.target.value})}
-                />
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('deadline')}</label>
-                <input 
-                  type="date"
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                  value={project.end_date}
-                  onChange={e => setProject({...project, end_date: e.target.value})}
-                />
               </div>
-            </div>
-            <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox"
-                  id="is_complete_mission"
-                  className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
-                  checked={!!project.is_complete_mission}
-                  onChange={e => setProject({...project, is_complete_mission: e.target.checked})}
-                />
-                <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                  Mission Complète
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox"
-                  id="is_chantier"
-                  className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
-                  checked={!!project.is_chantier}
-                  onChange={e => setProject({...project, is_chantier: e.target.checked})}
-                />
-                <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                  Chantier
-                </label>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

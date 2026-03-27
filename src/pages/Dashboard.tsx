@@ -11,6 +11,7 @@ import {
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
@@ -22,21 +23,19 @@ export default function Dashboard() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   useEffect(() => {
-    fetch('/api/projects')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch projects');
-        return res.json();
-      })
-      .then(setProjects)
-      .catch(err => console.error(err));
-
-    fetch('/api/milestones')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch milestones');
-        return res.json();
-      })
-      .then(setMilestones)
-      .catch(err => console.error(err));
+    const loadData = async () => {
+      try {
+        const [projectsData, milestonesData] = await Promise.all([
+          fetchJson<Project[]>('/api/projects'),
+          fetchJson<Milestone[]>('/api/milestones')
+        ]);
+        setProjects(projectsData);
+        setMilestones(milestonesData);
+      } catch (err) {
+        console.error('Dashboard data fetch failed:', err);
+      }
+    };
+    loadData();
   }, []);
 
   const stats = [

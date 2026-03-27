@@ -11,6 +11,7 @@ export default function Team() {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: '', role: '', email: '', system_role: 'user' as 'admin' | 'pm' | 'user' });
+  const [composeEmail, setComposeEmail] = useState<{ open: boolean; to: string; subject: string; body: string }>({ open: false, to: '', subject: '', body: '' });
 
   useEffect(() => {
     fetch('/api/team')
@@ -21,6 +22,21 @@ export default function Team() {
       .then(setTeam)
       .catch(err => console.error(err));
   }, []);
+
+  const handleSendEmail = async () => {
+    try {
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: composeEmail.to, subject: composeEmail.subject, body: composeEmail.body })
+      });
+      setComposeEmail({ open: false, to: '', subject: '', body: '' });
+      alert('Email sent successfully!');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to send email.');
+    }
+  };
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,13 +95,13 @@ export default function Team() {
             </div>
             
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700 mt-auto flex gap-2">
-              <a 
-                href={`mailto:${member.email}`}
+              <button 
+                onClick={() => setComposeEmail({ open: true, to: member.email || '', subject: '', body: '' })}
                 className="flex-1 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-700/50 text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 transition-colors text-sm font-medium flex items-center justify-center gap-2"
               >
                 <IconMail size={16} />
                 {t('mail')}
-              </a>
+              </button>
               <button className="flex-1 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-700/50 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-colors text-sm font-medium flex items-center justify-center gap-2">
                 <IconShield size={16} />
                 {t('auth')}
@@ -104,6 +120,23 @@ export default function Team() {
           <span className="font-medium text-zinc-600 dark:text-zinc-400 group-hover:text-blue-600 dark:group-hover:text-blue-400">{t('invite_member')}</span>
         </button>
       </div>
+
+      <AnimatePresence>
+        {composeEmail.open && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white dark:bg-zinc-800 rounded-xl p-6 w-full max-w-lg shadow-xl">
+              <h3 className="text-lg font-bold mb-4">Compose Email</h3>
+              <input type="email" value={composeEmail.to} readOnly className="w-full p-2 mb-4 border rounded" />
+              <input type="text" placeholder="Subject" value={composeEmail.subject} onChange={e => setComposeEmail({...composeEmail, subject: e.target.value})} className="w-full p-2 mb-4 border rounded" />
+              <textarea placeholder="Body" value={composeEmail.body} onChange={e => setComposeEmail({...composeEmail, body: e.target.value})} className="w-full p-2 mb-4 border rounded h-32" />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setComposeEmail({...composeEmail, open: false})} className="px-4 py-2 rounded bg-zinc-200">Cancel</button>
+                <button onClick={handleSendEmail} className="px-4 py-2 rounded bg-blue-600 text-white">Send</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isInviteModalOpen && (

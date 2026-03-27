@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
@@ -102,19 +103,8 @@ export default function Projects() {
 
   const fetchTeam = async () => {
     try {
-      const res = await fetch('/api/team');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setTeam(data);
-      } else {
-        const text = await res.text();
-        if (text.includes('Please wait while your application starts')) {
-          console.log('Server is still starting...');
-        } else {
-          console.error('Failed to fetch team: Invalid response format');
-        }
-      }
+      const data = await fetchJson('/api/team');
+      setTeam(data);
     } catch (err) {
       console.error('Failed to fetch team:', err);
     }
@@ -135,17 +125,7 @@ export default function Projects() {
     // 2. Fetch from API
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/contacts');
-        const contentType = res.headers.get('content-type');
-        if (!res.ok || !contentType || !contentType.includes('application/json')) {
-          const text = await res.text();
-          if (text.includes('Please wait while your application starts')) {
-            console.log('Server is still starting...');
-            return;
-          }
-          throw new Error('Failed to fetch contacts');
-        }
-        const data = await res.json();
+        const data = await fetchJson('/api/contacts');
         
         // 3. Update IndexedDB
         await db.contacts.clear();
@@ -227,17 +207,7 @@ export default function Projects() {
     // 2. Fetch from API
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/projects');
-        const contentType = res.headers.get('content-type');
-        if (!res.ok || !contentType || !contentType.includes('application/json')) {
-          const text = await res.text();
-          if (text.includes('Please wait while your application starts')) {
-            console.log('Server is still starting...');
-            return;
-          }
-          throw new Error('Failed to fetch projects');
-        }
-        const data = await res.json();
+        const data = await fetchJson('/api/projects');
         
         // 3. Update IndexedDB
         await db.projects.clear();

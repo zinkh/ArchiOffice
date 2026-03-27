@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconAlertTriangle, IconEdit, IconFileCode } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Invoice, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
@@ -24,66 +25,69 @@ export default function Invoices() {
   });
 
   useEffect(() => {
-    fetchInvoices();
-    fetchProjects();
+    const loadData = async () => {
+      try {
+        const [invoicesData, projectsData] = await Promise.all([
+          fetchJson<Invoice[]>('/api/invoices'),
+          fetchJson<Project[]>('/api/projects')
+        ]);
+        setInvoices(invoicesData);
+        setProjects(projectsData);
+      } catch (err) {
+        console.error('Invoices data fetch failed:', err);
+      }
+    };
+    loadData();
   }, []);
 
   const fetchInvoices = async () => {
     try {
-      const res = await fetch('/api/invoices');
-      if (res.ok) setInvoices(await res.json());
+      const data = await fetchJson<Invoice[]>('/api/invoices');
+      setInvoices(data);
     } catch (err) {
-      console.error(err);
+      console.error('Invoices fetch failed:', err);
     }
   };
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects');
-      if (res.ok) setProjects(await res.json());
+      const data = await fetchJson<Project[]>('/api/projects');
+      setProjects(data);
     } catch (err) {
-      console.error(err);
+      console.error('Projects fetch failed:', err);
     }
   };
 
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/invoices', {
+      const saved = await fetchJson<Invoice>('/api/invoices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newInvoice)
       });
-      if (res.ok) {
-        const saved = await res.json();
-        setInvoices([saved, ...invoices]);
-        setIsModalOpen(false);
-        setNewInvoice({ 
-          project_id: '', 
-          amount: 0, 
-          description: '', 
-          status: 'Draft', 
-          due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] 
-        });
-      }
+      setInvoices([saved, ...invoices]);
+      setIsModalOpen(false);
+      setNewInvoice({ 
+        project_id: '', 
+        amount: 0, 
+        description: '', 
+        status: 'Draft', 
+        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] 
+      });
     } catch (err) {
-      console.error(err);
+      console.error('Create invoice failed:', err);
     }
   };
 
   const handleUpdateStatus = async (invoice: Invoice, newStatus: Invoice['status']) => {
     try {
-      const res = await fetch(`/api/invoices/${invoice.id}`, {
+      const updated = await fetchJson<Invoice>(`/api/invoices/${invoice.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...invoice, status: newStatus })
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
-      }
+      setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
     } catch (err) {
-      console.error(err);
+      console.error('Update invoice status failed:', err);
     }
   };
 

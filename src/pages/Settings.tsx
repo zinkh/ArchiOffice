@@ -28,7 +28,11 @@ export default function Settings() {
 
   const [userSettings, setUserSettings] = useState({
     senderOption: 'agency' as 'agency' | 'personal',
-    defaultEmailTemplate: ''
+    defaultEmailTemplate: '',
+    phone: '',
+    address: '',
+    jobTitle: '',
+    department: ''
   });
 
   useEffect(() => {
@@ -38,7 +42,11 @@ export default function Settings() {
     if (currentUser) {
       setUserSettings({
         senderOption: currentUser.senderOption || 'agency',
-        defaultEmailTemplate: currentUser.defaultEmailTemplate || ''
+        defaultEmailTemplate: currentUser.defaultEmailTemplate || '',
+        phone: currentUser.phone || '',
+        address: currentUser.address || '',
+        jobTitle: currentUser.jobTitle || '',
+        department: currentUser.department || ''
       });
     }
   }, [currentUser]);
@@ -98,6 +106,14 @@ export default function Settings() {
         </div>
       </div>
       
+      <h2 className="text-xl font-bold mt-8">{t('user_information')}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input className="p-2 border rounded" placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
+        <input className="p-2 border rounded" placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
+        <input className="p-2 border rounded" placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
+        <input className="p-2 border rounded" placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
+      </div>
+
       <h2 className="text-xl font-bold mt-8">{t('email_settings')}</h2>
       <div className="space-y-4">
         <div className="flex items-center gap-4">
