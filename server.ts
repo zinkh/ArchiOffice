@@ -1575,7 +1575,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
+            stmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, cot.specialty, cot.contact_id || null);
           }
         }
 
@@ -1585,7 +1585,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
+            stmt.run(`pl${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
           }
         }
 
@@ -1595,7 +1595,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
+            stmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, s.name, s.role, s.contact_id || null);
           }
         }
 
@@ -1689,7 +1689,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
+            stmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, cot.specialty, cot.contact_id || null);
             if (cot.contact_id) updateContactAffaires(cot.contact_id, id);
           }
         }
@@ -1702,7 +1702,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
+            stmt.run(`pl${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
             if (lot.contact_id) updateContactAffaires(lot.contact_id, id);
           }
         }
@@ -1714,7 +1714,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
+            stmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, s.name, s.role, s.contact_id || null);
             if (s.contact_id) updateContactAffaires(s.contact_id, id);
           }
         }
@@ -1953,7 +1953,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
+            stmt.run(`ts${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -1963,7 +1963,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
+            stmt.run(`m${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
           }
         }
       });
@@ -2022,7 +2022,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
+            stmt.run(`ts${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -2034,7 +2034,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
+            stmt.run(`m${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
           }
         }
       });
@@ -2486,7 +2486,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
+            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
       });
@@ -2589,7 +2589,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
+            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -2620,7 +2620,7 @@ async function startServer() {
               VALUES (?, ?, ?, ?)
             `);
             for (const spec of p.specialties_list) {
-              cotStmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, projectId, spec.specialty_name, spec.contact_id || null);
+              cotStmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, projectId, spec.specialty_name, spec.contact_id || null);
             }
           }
         }
@@ -2755,7 +2755,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?)
           `);
           for (const item of items) {
-            stmt.run(`ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
+            stmt.run(`ii${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
           }
         }
       });
@@ -2809,7 +2809,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?)
           `);
           for (const item of items) {
-            stmt.run(item.id || `ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
+            stmt.run(item.id || `ii${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
           }
         }
       });
@@ -2996,7 +2996,7 @@ async function startServer() {
 
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
+        port: parseInt(process.env.SMTP_PORT || '587', 10),
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,

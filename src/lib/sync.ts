@@ -14,6 +14,7 @@ class SyncManager {
   private pendingChanges: PendingChange[] = [];
   private listeners: ((count: number) => void)[] = [];
   private originalFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : null;
+  private syncIntervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined' && this.originalFetch) {
@@ -21,7 +22,14 @@ class SyncManager {
       this.patchFetch();
       window.addEventListener('online', () => this.sync());
       // Periodically try to sync if online
-      setInterval(() => this.sync(), 30000);
+      this.syncIntervalId = setInterval(() => this.sync(), 30000);
+    }
+  }
+
+  destroy() {
+    if (this.syncIntervalId !== null) {
+      clearInterval(this.syncIntervalId);
+      this.syncIntervalId = null;
     }
   }
 

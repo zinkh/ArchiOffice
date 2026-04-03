@@ -221,7 +221,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
   const addItem = () => {
     const newItem: InvoiceItem = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).substring(2, 11),
       description: '',
       quantity: 1,
       unit_price: 0,
