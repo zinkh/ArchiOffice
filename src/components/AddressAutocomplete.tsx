@@ -4,9 +4,18 @@ import { IconSearch, IconMapPin } from '@tabler/icons-react';
 interface AddressAutocompleteProps {
   label?: string;
   value: string;
-  onChange: (value: string, details?: { city?: string; zipcode?: string; street?: string }) => void;
+  onChange: (value: string) => void;
+  onSelect?: (details: {
+    fullAddress: string;
+    city?: string;
+    zipcode?: string;
+    street?: string;
+    banId?: string;
+    cityCode?: string;
+  }) => void;
   placeholder?: string;
   required?: boolean;
+  id?: string;
 }
 
 interface AddressFeature {
@@ -32,7 +41,7 @@ interface AddressFeature {
   };
 }
 
-export function AddressAutocomplete({ label, value, onChange, placeholder, required }: AddressAutocompleteProps) {
+export function AddressAutocomplete({ label, value, onChange, onSelect, placeholder, required, id }: AddressAutocompleteProps) {
   const [query, setQuery] = useState(value);
   const [suggestions, setSuggestions] = useState<AddressFeature[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -124,12 +133,20 @@ export function AddressAutocomplete({ label, value, onChange, placeholder, requi
     setSuggestions([]);
     setShowSuggestions(false);
     
-    // Pass detailed info back to parent
-    onChange(fullAddress, {
-      city: feature.properties.city,
-      zipcode: feature.properties.postcode,
-      street: feature.properties.street || feature.properties.name
-    });
+    // Pass raw value back
+    onChange(fullAddress);
+    
+    // Pass detailed info back to parent via onSelect
+    if (onSelect) {
+      onSelect({
+        fullAddress,
+        city: feature.properties.city,
+        zipcode: feature.properties.postcode,
+        street: feature.properties.street || feature.properties.name,
+        banId: feature.properties.id,
+        cityCode: feature.properties.citycode
+      });
+    }
   };
 
   return (
@@ -141,9 +158,10 @@ export function AddressAutocomplete({ label, value, onChange, placeholder, requi
       )}
       <div className="relative">
         <input
+          id={id}
           type="text"
           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-9"
-          value={query}
+          value={query || ''}
           onChange={handleInputChange}
           onFocus={() => setShowSuggestions(true)}
           placeholder={placeholder || "Search address..."}

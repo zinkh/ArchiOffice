@@ -30,7 +30,16 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
     try {
       // 1. Geocode address to get coordinates
       const geoRes = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
-      if (!geoRes.ok) throw new Error('Geocoding failed');
+      if (!geoRes.ok) {
+        let details = '';
+        try {
+          const errorData = await geoRes.json();
+          details = errorData.details || errorData.error || '';
+        } catch (e) {
+          details = await geoRes.text().catch(() => '');
+        }
+        throw new Error(`Geocoding failed: ${geoRes.status}${details ? ` (${details.substring(0, 50)})` : ''}`);
+      }
       
       const geoData = await geoRes.json();
       if (!geoData.features?.length) {

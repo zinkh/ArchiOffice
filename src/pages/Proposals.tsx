@@ -6,20 +6,22 @@ import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
-import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ContactModal } from '../components/ContactModal';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
 import MilestoneGantt from '../components/MilestoneGantt';
 
-const FormField = ({ label, value, onChange, type = "text", required = false, options = [] }: any) => (
+const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
   <div>
     <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
       {label} {required && <span className="text-red-500">*</span>}
     </label>
     {type === "select" ? (
       <select 
+        id={id}
         required={required}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
         value={value}
@@ -32,6 +34,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
       </select>
     ) : type === "textarea" ? (
       <textarea 
+        id={id}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white resize-none h-20"
         value={value ?? ''}
         onChange={e => onChange(e.target.value)}
@@ -39,6 +42,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
     ) : type === "checkbox" ? (
       <div className="flex items-center h-9">
         <input 
+          id={id}
           type="checkbox"
           className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
           checked={value}
@@ -47,6 +51,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
       </div>
     ) : (
       <input 
+        id={id}
         type={type}
         required={required}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
@@ -63,6 +68,7 @@ export default function Proposals() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -86,6 +92,8 @@ export default function Proposals() {
     email_client: '',
     adresse_terrain: '',
     cp_ville_terrain: '',
+    site_postcode: '',
+    site_city: '',
     ref_cadastrale: '',
     zone_plu: '',
     surface_parcelle: '',
@@ -423,13 +431,12 @@ export default function Proposals() {
                     General Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal({...newProposal, reference: v})} />
+                    <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
                     <div className="md:col-span-2">
-                      <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal({...newProposal, title: v})} />
+                      <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
                     </div>
-                    <FormField label="Amount" type="number" required value={newProposal.amount} onChange={(v: any) => setNewProposal({...newProposal, amount: Number(v)})} />
-                    <FormField label="Status" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected']} value={newProposal.status} onChange={(v: any) => setNewProposal({...newProposal, status: v})} />
-                    <FormField label="Ind" value={newProposal.ind} onChange={(v: any) => setNewProposal({...newProposal, ind: v})} />
+                    <FormField label="Status" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected']} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
+                    <FormField label="Ind" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
                   </div>
                 </div>
 
@@ -441,50 +448,79 @@ export default function Proposals() {
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30">
-                      <FormField label="Client Database" type="select" required options={contacts.map(c => ({ id: c.id, name: `${c.first_name} ${c.last_name}` }))} value={newProposal.client_id} onChange={(v: any) => setNewProposal({...newProposal, client_id: v})} />
+                      <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                        Client Database <span className="text-red-500">*</span>
+                      </label>
+                      <ContactAutocomplete 
+                        contacts={contacts}
+                        value={newProposal.client_id || ''}
+                        onChange={(v: any) => {
+                          const contact = contacts.find(c => c.id === v);
+                          if (contact) {
+                            setNewProposal(prev => ({
+                              ...prev,
+                              client_id: v,
+                              adresse_client: contact.address || contact.address_work_street || '',
+                              cp_client: contact.zip || contact.address_work_zip || '',
+                              ville_client: contact.city || contact.address_work_city || '',
+                              telephone: contact.phone || contact.phone_work || '',
+                              portable: contact.phone_mobile || '',
+                              email_client: contact.email || contact.email_work || ''
+                            }));
+                          } else {
+                            setNewProposal(prev => ({...prev, client_id: v}));
+                          }
+                        }}
+                        onAddNew={() => setIsContactModalOpen(true)}
+                        addNewLabel="Add New Client"
+                      />
                     </div>
-                    <FormField label="Entreprise?" type="checkbox" value={newProposal.is_entreprise} onChange={(v: any) => setNewProposal({...newProposal, is_entreprise: v})} />
+                    <FormField label="Entreprise?" type="checkbox" value={newProposal.is_entreprise} onChange={(v: any) => setNewProposal(prev => ({...prev, is_entreprise: v}))} />
                     <CompanyAutocomplete 
                       label="Nom Société" 
                       value={newProposal.nom_societe || ''} 
                       onChange={(val, details) => {
                         if (details) {
-                          setNewProposal({
-                            ...newProposal,
+                          setNewProposal(prev => ({
+                            ...prev,
                             nom_societe: val,
                             rcs: details.siren || details.siret || '',
                             adresse_client: details.address || '',
                             cp_client: details.zipcode || '',
                             ville_client: details.city || '',
                             is_entreprise: true
-                          });
+                          }));
                         } else {
-                          setNewProposal({...newProposal, nom_societe: val});
+                          setNewProposal(prev => ({...prev, nom_societe: val}));
                         }
                       }} 
                     />
-                    <FormField label="RCS / SIRET" value={newProposal.rcs} onChange={(v: any) => setNewProposal({...newProposal, rcs: v})} />
-                    <FormField label="Représentant" value={newProposal.representant} onChange={(v: any) => setNewProposal({...newProposal, representant: v})} />
-                    <FormField label="Qualité" value={newProposal.qualite} onChange={(v: any) => setNewProposal({...newProposal, qualite: v})} />
+                    <FormField label="RCS / SIRET" value={newProposal.rcs} onChange={(v: any) => setNewProposal(prev => ({...prev, rcs: v}))} />
+                    <FormField label="Représentant" value={newProposal.representant} onChange={(v: any) => setNewProposal(prev => ({...prev, representant: v}))} />
+                    <FormField label="Qualité" value={newProposal.qualite} onChange={(v: any) => setNewProposal(prev => ({...prev, qualite: v}))} />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="md:col-span-3">
-                      <AddressAutocomplete 
-                        label="Adresse Complète Client" 
+                    <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <FormField 
+                        id="client-address"
+                        label="Adresse Client" 
                         value={newProposal.adresse_client || ''} 
-                        onChange={(val: string, details: any) => {
-                          setNewProposal({
-                            ...newProposal, 
-                            adresse_client: val,
-                            cp_client: details?.zipcode || '',
-                            ville_client: details?.city || ''
-                          });
-                        }} 
+                        onChange={(v: any) => setNewProposal(prev => ({...prev, adresse_client: v}))} 
+                      />
+                      <FormField 
+                        label="Code Postal Client" 
+                        value={newProposal.cp_client || ''} 
+                        onChange={(v: any) => setNewProposal(prev => ({...prev, cp_client: v}))} 
+                      />
+                      <FormField 
+                        label="Ville Client" 
+                        value={newProposal.ville_client || ''} 
+                        onChange={(v: any) => setNewProposal(prev => ({...prev, ville_client: v}))} 
                       />
                     </div>
-                    <FormField label="Téléphone" value={newProposal.telephone} onChange={(v: any) => setNewProposal({...newProposal, telephone: v})} />
-                    <FormField label="Portable" value={newProposal.portable} onChange={(v: any) => setNewProposal({...newProposal, portable: v})} />
-                    <FormField label="Adresse Mail" type="email" value={newProposal.email_client} onChange={(v: any) => setNewProposal({...newProposal, email_client: v})} />
+                    <FormField label="Téléphone" value={newProposal.telephone} onChange={(v: any) => setNewProposal(prev => ({...prev, telephone: v}))} />
+                    <FormField label="Portable" value={newProposal.portable} onChange={(v: any) => setNewProposal(prev => ({...prev, portable: v}))} />
+                    <FormField label="Adresse Mail" type="email" value={newProposal.email_client} onChange={(v: any) => setNewProposal(prev => ({...prev, email_client: v}))} />
                   </div>
                 </div>
 
@@ -495,8 +531,8 @@ export default function Proposals() {
                     Project Specifics
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField label="Détail du Projet" type="textarea" value={newProposal.projet_detail} onChange={(v: any) => setNewProposal({...newProposal, projet_detail: v})} />
-                    <FormField label="Description Générale" type="textarea" value={newProposal.description} onChange={(v: any) => setNewProposal({...newProposal, description: v})} />
+                    <FormField label="Détail du Projet" type="textarea" value={newProposal.projet_detail} onChange={(v: any) => setNewProposal(prev => ({...prev, projet_detail: v}))} />
+                    <FormField label="Description Générale" type="textarea" value={newProposal.description} onChange={(v: any) => setNewProposal(prev => ({...prev, description: v}))} />
                   </div>
                 </div>
 
@@ -507,28 +543,50 @@ export default function Proposals() {
                     Terrain & Technical Info
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="md:col-span-3">
+                    <div className="md:col-span-3 space-y-4">
                       <AddressAutocomplete 
+                        id="terrain-address"
                         label="Adresse Complète Terrain" 
                         value={newProposal.adresse_terrain || ''} 
-                        onChange={(val: string, details: any) => {
-                          setNewProposal({
-                            ...newProposal, 
-                            adresse_terrain: val,
-                            cp_ville_terrain: details ? `${details.zipcode || ''} ${details.city || ''}`.trim() : ''
+                        onChange={(val: string) => {
+                          setNewProposal(prev => {
+                            const updates: any = { adresse_terrain: val };
+                            if (!val) {
+                              updates.cp_ville_terrain = '';
+                              updates.site_postcode = '';
+                              updates.site_city = '';
+                              updates.ban_id_terrain = '';
+                              updates.city_code_terrain = '';
+                            }
+                            return { ...prev, ...updates };
                           });
+                        }}
+                        onSelect={(details) => {
+                          setNewProposal(prev => ({
+                            ...prev, 
+                            adresse_terrain: details.fullAddress,
+                            cp_ville_terrain: `${details.zipcode || ''} ${details.city || ''}`.trim(),
+                            site_postcode: details.zipcode || '',
+                            site_city: details.city || '',
+                            ban_id_terrain: details.banId || '',
+                            city_code_terrain: details.cityCode || ''
+                          }));
                         }} 
                       />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField label="Code Postal Terrain" value={newProposal.site_postcode} onChange={(v: any) => setNewProposal(prev => ({...prev, site_postcode: v}))} />
+                        <FormField label="Ville Terrain" value={newProposal.site_city} onChange={(v: any) => setNewProposal(prev => ({...prev, site_city: v}))} />
+                      </div>
                     </div>
-                    <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal({...newProposal, ref_cadastrale: v})} />
-                    <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal({...newProposal, zone_plu: v})} />
-                    <FormField label="Surface Parcelle" value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal({...newProposal, surface_parcelle: v})} />
-                    <FormField label="Nom Etablissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal({...newProposal, nom_etablissement: v})} />
-                    <FormField label="Avant Travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal({...newProposal, avant_trav: v})} />
-                    <FormField label="Après Travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal({...newProposal, apres_trav: v})} />
-                    <FormField label="Type Et Cat" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal({...newProposal, type_et_cat: v})} />
-                    <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal({...newProposal, type_projet: v})} />
-                    <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal({...newProposal, categorie_projet: v})} />
+                    <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
+                    <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
+                    <FormField label="Surface Parcelle" value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_parcelle: v}))} />
+                    <FormField label="Nom Etablissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
+                    <FormField label="Avant Travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
+                    <FormField label="Après Travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
+                    <FormField label="Type Et Cat" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                    <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
+                    <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
                   </div>
                 </div>
 
@@ -539,49 +597,70 @@ export default function Proposals() {
                     Surfaces & Capacity
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <FormField label="Surf. Plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal({...newProposal, surface_plancher: v})} />
-                    <FormField label="Surf. Extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal({...newProposal, surface_plancher_ext: v})} />
-                    <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal({...newProposal, surface_erp: v})} />
-                    <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal({...newProposal, surface_ert: v})} />
-                    <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal({...newProposal, effectif_public: v})} />
-                    <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal({...newProposal, effectif_personnel: v})} />
-                    <FormField label="Date Modif." value={newProposal.date_modification} onChange={(v: any) => setNewProposal({...newProposal, date_modification: v})} />
+                    <FormField label="Surf. Plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
+                    <FormField label="Surf. Extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher_ext: v}))} />
+                    <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
+                    <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
+                    <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
+                    <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
+                    <FormField label="Date Modif." value={newProposal.date_modification} onChange={(v: any) => setNewProposal(prev => ({...prev, date_modification: v}))} />
                   </div>
                 </div>
 
+                {/* Section 06: Risques */}
                 {newProposal.adresse_terrain && (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <RNBInfo address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
-                      <GeorisquesInfo address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
-                      <CadastreDownload address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
+                  <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
+                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
+                      Risques
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <RNBInfo address={newProposal.adresse_terrain || ''} />
+                      <BDNBInfo 
+                        address={newProposal.adresse_terrain || ''} 
+                        banId={newProposal.ban_id_terrain}
+                        cityCode={newProposal.city_code_terrain}
+                      />
+                      <GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                      <CadastreDownload address={newProposal.adresse_terrain || ''} />
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">Location & Risks</label>
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">Location & Risks Maps</label>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative">
-                          <GeoportailMap address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">Cadastre</div>
+                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                          <GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Cadastre</div>
                         </div>
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative">
-                          <GoogleMap address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">Google Maps</div>
+                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                          <GoogleMap address={newProposal.adresse_terrain || ''} />
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Google Maps</div>
                         </div>
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative">
-                          <GeorisquesMap address={[newProposal.adresse_terrain, newProposal.cp_ville_terrain].filter(Boolean).join(', ')} />
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">Géorisques</div>
+                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                          <GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
                         </div>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Section 6: Cotraitants / Spécialités */}
+                {/* Section 07: Honoraires */}
+                <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
+                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">07</span>
+                    Honoraires
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FormField label="Amount" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
+                  </div>
+                </div>
+
+                {/* Section 08: Cotraitants / Spécialités */}
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">08</span>
                       Cotraitants / Spécialités
                     </h3>
                     <button 
@@ -618,6 +697,7 @@ export default function Proposals() {
                                 contacts={contacts}
                                 value={spec.contact_id || ''}
                                 onChange={val => updateSpecialty(idx, 'contact_id', val)}
+                                onAddNew={() => setIsContactModalOpen(true)}
                               />
                             </td>
                             <td className="px-4 py-3 text-right">
@@ -642,11 +722,11 @@ export default function Proposals() {
                     </table>
                   </div>
                 </div>
-                {/* Section 7: Milestones */}
+                {/* Section 09: Milestones */}
                 {editingProposal && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">07</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">09</span>
                       Milestones
                     </h3>
                     <MilestoneGantt 
@@ -678,6 +758,16 @@ export default function Proposals() {
           </div>
         )}
       </AnimatePresence>
+
+      <ContactModal 
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        onSuccess={(newContact) => {
+          fetchContacts();
+          // If we are in the main proposal form, we might want to auto-select it
+          // but since we have multiple autocompletes, it's safer to just refresh the list
+        }}
+      />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
@@ -5,16 +6,13 @@ import {
   IconClock, 
   IconCircleCheck, 
   IconAlertCircle,
-  IconArrowUpRight,
-  IconCalendar,
-  IconActivity
+  IconActivity,
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
-import { formatCurrency, cn } from '../lib/utils';
-import { fetchJson } from '../lib/api';
+import { cn } from '../lib/utils';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
-import ActivityFeed from '../components/ActivityFeed';
+import { Card, Title, Text, DonutChart, BarChart, Legend } from '@tremor/react';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -23,19 +21,21 @@ export default function Dashboard() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [projectsData, milestonesData] = await Promise.all([
-          fetchJson<Project[]>('/api/projects'),
-          fetchJson<Milestone[]>('/api/milestones')
-        ]);
-        setProjects(projectsData);
-        setMilestones(milestonesData);
-      } catch (err) {
-        console.error('Dashboard data fetch failed:', err);
-      }
-    };
-    loadData();
+    fetch('/api/projects')
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch projects');
+        return res.json();
+      })
+      .then(setProjects)
+      .catch(err => console.error(err));
+
+    fetch('/api/milestones')
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch milestones');
+        return res.json();
+      })
+      .then(setMilestones)
+      .catch(err => console.error(err));
   }, []);
 
   const stats = [
@@ -45,11 +45,29 @@ export default function Dashboard() {
     { label: 'upcoming_deadlines', value: milestones.filter(m => !m.completed).length, icon: IconClock, trend: 'URGENT', color: 'text-red-500' },
   ];
 
+  const statusData = [
+    { name: 'Completed', value: projects.filter(p => p.status === 'Completed').length },
+    { name: 'In Progress', value: projects.filter(p => p.status === 'In Progress').length },
+    { name: 'Planning', value: projects.filter(p => p.status === 'Planning').length },
+    { name: 'On Hold', value: projects.filter(p => p.status === 'On Hold').length },
+  ].filter(d => d.value > 0);
+
+  const categoryData = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    projects.forEach(p => {
+      const cat = p.client || 'Other';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5);
+  }, [projects]);
+
   return (
     <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-6">
       <div className="md:col-span-4 p-4">
         <h1 className="text-zinc-900 dark:text-zinc-100 text-4xl font-bold leading-none tracking-tight">{t('dashboard')}</h1>
-        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-2 font-medium">Monday, October 24th</p>
+        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-2 font-medium">
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+        </p>
       </div>
 
       {stats.map((stat, i) => (
@@ -69,30 +87,68 @@ export default function Dashboard() {
         </motion.div>
       ))}
 
-      <div className="md:col-span-2 card">
+      <Card className="md:col-span-2">
+        <Title>Project Status</Title>
+        <DonutChart
+          className="mt-6 h-60"
+          data={statusData}
+          category="value"
+          index="name"
+          colors={['green', 'blue', 'yellow', 'slate']}
+        />
+        <Legend
+          className="mt-6"
+          categories={statusData.map(d => d.name)}
+          colors={['green', 'blue', 'yellow', 'slate']}
+        />
+      </Card>
+
+      <Card className="md:col-span-2">
+        <Title>Top Categories</Title>
+        <BarChart
+          className="mt-6 h-60"
+          data={categoryData}
+          index="name"
+          categories={['value']}
+          colors={['violet']}
+          layout="vertical"
+          yAxisWidth={100}
+        />
+      </Card>
+
+      <div className="md:col-span-4 card">
         <div className="flex justify-between items-end mb-6">
           <h2 className="text-zinc-900 dark:text-zinc-100 text-2xl font-bold leading-none tracking-tight">{t('recent_projects')}</h2>
           <Link to="/projects" className="text-blue-600 text-sm font-medium hover:underline">{t('view_all')}</Link>
         </div>
 
-        <div className="flex flex-col gap-4">
-          {projects?.slice(0, 2).map((project) => (
-            <div key={project.id} className="flex items-center gap-4 p-4 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-              <div className="size-16 shrink-0 bg-zinc-200 dark:bg-zinc-800 rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {projects?.slice(0, 4).map((project) => (
+            <div 
+              key={project.id} 
+              className="flex items-center gap-4 p-4 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+              onClick={() => navigate(`/projects/${project.id}`)}
+            >
+              <div className="size-12 shrink-0 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold">
+                {project.name.charAt(0)}
+              </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-zinc-900 dark:text-zinc-100 font-bold truncate">{project.name}</h3>
-                <p className="text-zinc-500 dark:text-zinc-400 text-xs font-medium truncate">{project.status}</p>
-                <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 mt-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: '65%' }}></div>
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
+                    project.status === 'Completed' ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" :
+                    project.status === 'In Progress' ? "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400" :
+                    "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400"
+                  )}>
+                    {project.status}
+                  </span>
+                  <p className="text-zinc-500 dark:text-zinc-400 text-[10px] font-medium truncate uppercase tracking-wider">{project.client}</p>
                 </div>
               </div>
             </div>
           ))}
         </div>
-      </div>
-      
-      <div className="md:col-span-2">
-        <ActivityFeed />
       </div>
     </div>
   );

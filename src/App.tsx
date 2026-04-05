@@ -18,7 +18,6 @@ import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
-import { syncManager } from './lib/sync';
 import './i18n';
 
 // Pages
@@ -34,16 +33,12 @@ import Contacts from './pages/Contacts';
 import ProjectTemplates from './pages/ProjectTemplates';
 import ProjectDetail from './pages/ProjectDetail';
 import Documents from './pages/Documents';
-import Situations from './pages/Situations';
-import Notifications from './pages/Notifications';
 import Settings from './pages/Settings';
 
 function SyncStatus() {
-  const [pendingCount, setPendingCount] = useState(syncManager.getPendingCount());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
-    const cleanup = syncManager.onPendingCountChange(setPendingCount);
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -51,7 +46,6 @@ function SyncStatus() {
     window.addEventListener('offline', handleOffline);
 
     return () => {
-      cleanup();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -61,16 +55,7 @@ function SyncStatus() {
     return (
       <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded text-[10px] font-bold uppercase tracking-wider border border-amber-200 dark:border-amber-800/50">
         <IconCloudOff size={14} />
-        Offline ({pendingCount} pending)
-      </div>
-    );
-  }
-
-  if (pendingCount > 0) {
-    return (
-      <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded text-[10px] font-bold uppercase tracking-wider border border-blue-200 dark:border-blue-800/50 animate-pulse">
-        <IconCloudUpload size={14} />
-        Syncing {pendingCount}...
+        Offline
       </div>
     );
   }
@@ -78,7 +63,7 @@ function SyncStatus() {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase tracking-wider border border-emerald-200 dark:border-emerald-800/50">
       <IconCheck size={14} />
-      Online
+      Online (Local)
     </div>
   );
 }
@@ -270,13 +255,11 @@ export default function App() {
                   <Route path="/projects" element={<Projects />} />
                   <Route path="/projects/:id" element={<ProjectDetail />} />
                   <Route path="/documents" element={<Documents />} />
-                  <Route path="/situations/:projectId" element={<Situations />} />
                   <Route path="/proposals" element={<Proposals />} />
                   <Route path="/invoices" element={<Invoices />} />
                   <Route path="/tenders" element={<Tenders />} />
                   <Route path="/specifications" element={<Specifications />} />
                   <Route path="/specifications/:specId" element={<Specifications />} />
-                  <Route path="/notifications" element={<Notifications />} />
                   <Route path="/team" element={<Team />} />
                   <Route path="/gantt" element={<Gantt />} />
                   <Route path="/contacts" element={<Contacts />} />

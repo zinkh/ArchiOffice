@@ -34,9 +34,8 @@ export function HistoricalMonuments({ lat, lon }: HistoricalMonumentsProps) {
       setLoading(true);
       setError('');
       try {
-        // Search for monuments within 1000m
-        // We use the dataset ID from the user's link: liste-des-immeubles-proteges-au-titre-des-monuments-historiques
-        const url = `https://data.culture.gouv.fr/api/records/1.0/search/?dataset=liste-des-immeubles-proteges-au-titre-des-monuments-historiques&q=&geofilter.distance=${lat},${lon},1000&rows=10&sort=dist`;
+        // Search for monuments within 1000m via our backend proxy
+        const url = `/api/historical-monuments?lat=${lat}&lon=${lon}&distance=1000`;
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch historical monuments');
         

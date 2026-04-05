@@ -38,8 +38,8 @@ export function UrbanPlanningInfo({ insee, coords }: UrbanPlanningInfoProps) {
       try {
         // 1. Search for documents using both grid and partition for better coverage
         // Grid search is broader, partition is more specific for PLU/POS
-        const gridUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&status=document.production`;
-        const partitionUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document?partition=DU_${insee}&status=document.production`;
+        const gridUrl = `/api/urban-planning/documents?grid=${insee}`;
+        const partitionUrl = `/api/urban-planning/documents?partition=DU_${insee}`;
         
         const [gridRes, partRes] = await Promise.all([
           fetch(gridUrl),
@@ -67,7 +67,7 @@ export function UrbanPlanningInfo({ insee, coords }: UrbanPlanningInfoProps) {
         const detailedDocs = await Promise.all(
           docs.slice(0, 5).map(async (doc) => {
             try {
-              const detailsRes = await fetch(`https://www.geoportail-urbanisme.gouv.fr/api/document/${doc.id}/details`);
+              const detailsRes = await fetch(`/api/urban-planning/details/${doc.id}`);
               if (!detailsRes.ok) return { ...doc };
               const details = await detailsRes.json();
               

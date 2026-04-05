@@ -13,14 +13,62 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
 
   useEffect(() => {
     if (projectId) {
-      fetch(`/api/dpgf/${projectId}`).then(res => res.json()).then(setDpgfItems);
-      fetch(`/api/situations/${projectId}`).then(res => res.json()).then(setSituations);
+      fetch(`/api/dpgf/${projectId}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch dpgf items');
+          return res.json();
+        })
+        .then(data => {
+          if (Array.isArray(data)) {
+            setDpgfItems(data);
+          } else {
+            console.error('Expected array for dpgf items, received:', data);
+            setDpgfItems([]);
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          setDpgfItems([]);
+        });
+      fetch(`/api/situations/${projectId}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch situations');
+          return res.json();
+        })
+        .then(data => {
+          if (Array.isArray(data)) {
+            setSituations(data);
+          } else {
+            console.error('Expected array for situations, received:', data);
+            setSituations([]);
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          setSituations([]);
+        });
     }
   }, [projectId]);
 
   useEffect(() => {
     if (selectedSituation) {
-      fetch(`/api/situations/${selectedSituation.id}/details`).then(res => res.json()).then(setDetails);
+      fetch(`/api/situations/${selectedSituation.id}/details`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch situation details');
+          return res.json();
+        })
+        .then(data => {
+          if (Array.isArray(data)) {
+            setDetails(data);
+          } else {
+            console.error('Expected array for details, received:', data);
+            setDetails([]);
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          setDetails([]);
+        });
     }
   }, [selectedSituation]);
 

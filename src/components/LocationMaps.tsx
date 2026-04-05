@@ -1,26 +1,37 @@
 import { useState, useEffect } from 'react';
 import { MapLibreCadastre } from './MapLibreCadastre';
+import { cn } from '../lib/utils';
 
-export const GeoportailMap = ({ address }: { address: string }) => {
+export const GeoportailMap = ({ address, banId }: { address: string; banId?: string }) => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!address || address.length < 5) return;
+    if ((!address || address.length < 5) && !banId) return;
     
     const fetchCoords = async () => {
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`);
+        const queryParams = new URLSearchParams();
+        if (banId) queryParams.append('banId', banId);
+        if (address) queryParams.append('q', address);
+        queryParams.append('limit', '1');
+
+        const res = await fetch(`/api/address-search?${queryParams.toString()}`);
         if (res.ok) {
-          const data = await res.json();
-          if (data.features && data.features.length > 0) {
-            const [lon, lat] = data.features[0].geometry.coordinates;
-            setCoords({ lat, lon });
+          const contentType = res.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.features && data.features.length > 0) {
+              const [lon, lat] = data.features[0].geometry.coordinates;
+              setCoords({ lat, lon });
+            } else {
+              setError('Address not found');
+            }
           } else {
-            setError('Address not found');
+            setError('Invalid response from geocoder');
           }
         } else {
           setError('Failed to geocode address');
@@ -33,9 +44,9 @@ export const GeoportailMap = ({ address }: { address: string }) => {
       }
     };
 
-    const timer = setTimeout(fetchCoords, 1500); // Debounce 1.5s
+    const timer = setTimeout(fetchCoords, 1000); // Reduced debounce to 1s
     return () => clearTimeout(timer);
-  }, [address]);
+  }, [address, banId]);
 
   if (loading) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading map...</div>;
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
@@ -72,7 +83,7 @@ export const GoogleMap = ({ address }: { address: string }) => {
   );
 };
 
-export const GeorisquesMap = ({ address }: { address: string }) => {
+export const GeorisquesMap = ({ address, banId }: { address: string; banId?: string }) => {
   const [addressDetails, setAddressDetails] = useState<{ 
     lat: number; 
     lon: number; 
@@ -85,28 +96,38 @@ export const GeorisquesMap = ({ address }: { address: string }) => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!address || address.length < 5) return;
+    if ((!address || address.length < 5) && !banId) return;
     
     const fetchCoords = async () => {
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`);
+        const queryParams = new URLSearchParams();
+        if (banId) queryParams.append('banId', banId);
+        if (address) queryParams.append('q', address);
+        queryParams.append('limit', '1');
+
+        const res = await fetch(`/api/address-search?${queryParams.toString()}`);
         if (res.ok) {
-          const data = await res.json();
-          if (data.features && data.features.length > 0) {
-            const feature = data.features[0];
-            const [lon, lat] = feature.geometry.coordinates;
-            setAddressDetails({ 
-              lat, 
-              lon,
-              city: feature.properties.city,
-              codeInsee: feature.properties.citycode,
-              adresse: feature.properties.label,
-              commune: feature.properties.city || feature.properties.name
-            });
+          const contentType = res.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.features && data.features.length > 0) {
+              const feature = data.features[0];
+              const [lon, lat] = feature.geometry.coordinates;
+              setAddressDetails({ 
+                lat, 
+                lon,
+                city: feature.properties.city,
+                codeInsee: feature.properties.citycode,
+                adresse: feature.properties.label,
+                commune: feature.properties.city || feature.properties.name
+              });
+            } else {
+              setError('Address not found');
+            }
           } else {
-            setError('Address not found');
+            setError('Invalid response from geocoder');
           }
         }
       } catch (err) {
@@ -117,9 +138,9 @@ export const GeorisquesMap = ({ address }: { address: string }) => {
       }
     };
 
-    const timer = setTimeout(fetchCoords, 1500);
+    const timer = setTimeout(fetchCoords, 1000);
     return () => clearTimeout(timer);
-  }, [address]);
+  }, [address, banId]);
 
   if (loading) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading risks...</div>;
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
@@ -155,21 +176,32 @@ export const GeorisquesMap = ({ address }: { address: string }) => {
   );
 };
 
-export const GeorisquesInfo = ({ address }: { address: string }) => {
+export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: string }) => {
   const [risks, setRisks] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!address || address.length < 10) return;
+    if ((!address || address.length < 10) && !banId) return;
 
     const fetchRisks = async () => {
       setLoading(true);
       setError('');
       try {
+        const queryParams = new URLSearchParams();
+        if (banId) queryParams.append('banId', banId);
+        if (address) queryParams.append('q', address);
+        queryParams.append('limit', '1');
+
         // First geocode to get lat/lon using our local proxy
-        const geoRes = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`);
+        const geoRes = await fetch(`/api/address-search?${queryParams.toString()}`);
         if (!geoRes.ok) throw new Error('Geocoding failed');
+        
+        const contentType = geoRes.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Invalid response from geocoder');
+        }
+        
         const geoData = await geoRes.json();
         if (!geoData.features?.length) throw new Error('Address not found');
         
@@ -178,23 +210,32 @@ export const GeorisquesInfo = ({ address }: { address: string }) => {
         // Then fetch risks from our local proxy API
         const res = await fetch(`/api/georisques?latitude=${lat}&longitude=${lon}&code_insee=${geoData.features[0].properties.citycode}`);
         if (res.ok) {
-          const data = await res.json();
-          setRisks(data);
+          const resContentType = res.headers.get('content-type');
+          if (resContentType && resContentType.includes('application/json')) {
+            const data = await res.json();
+            setRisks(data);
+          } else {
+            setError('Invalid response from Georisques API');
+          }
         } else {
-          const errorData = await res.json();
-          setError(errorData.error || `Georisques API Error (${res.status})`);
+          try {
+            const errorData = await res.json();
+            setError(errorData.error || `Georisques API Error (${res.status})`);
+          } catch (e) {
+            setError(`Georisques API Error (${res.status})`);
+          }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        setError('Error fetching risks');
+        setError(err.message || 'Error fetching risks');
       } finally {
         setLoading(false);
       }
     };
 
-    const timer = setTimeout(fetchRisks, 2000);
+    const timer = setTimeout(fetchRisks, 1500);
     return () => clearTimeout(timer);
-  }, [address]);
+  }, [address, banId]);
 
   if (!address || address.length < 10) return null;
   if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Fetching risk data...</div>;
@@ -231,6 +272,117 @@ export const GeorisquesInfo = ({ address }: { address: string }) => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?: string; cityCode?: string }) => {
+  const [buildings, setBuildings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!address || address.length < 10) return;
+
+    const fetchBDNB = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        let currentBanId = banId;
+        
+        // If we don't have a banId or if we want to be sure to use the BDNB-compatible one,
+        // we call the BDNB geocoder first via our unified address-search endpoint.
+        if (address && address.length >= 10) {
+          try {
+            const geoRes = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`);
+            if (geoRes.ok) {
+              const contentType = geoRes.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                const geoData = await geoRes.json();
+                // The unified geocoder returns GeoJSON features.
+                if (geoData.features && geoData.features.length > 0 && geoData.features[0].properties.id) {
+                  currentBanId = geoData.features[0].properties.id;
+                  console.log(`BDNB Geocoder found cle_interop_adr: ${currentBanId}`);
+                }
+              }
+            }
+          } catch (geoErr) {
+            console.error("Error with BDNB geocoder, falling back to provided banId or fuzzy search", geoErr);
+          }
+        }
+
+        const queryParams = new URLSearchParams();
+        if (currentBanId) queryParams.append('banId', currentBanId);
+        if (cityCode) queryParams.append('cityCode', cityCode);
+        queryParams.append('q', address);
+        
+        const res = await fetch(`/api/bdnb?${queryParams.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setBuildings(data || []);
+        } else {
+          setError(`BDNB API Error (${res.status})`);
+        }
+      } catch (err) {
+        console.error(err);
+        setError('Error connecting to BDNB API');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const timer = setTimeout(fetchBDNB, 2000);
+    return () => clearTimeout(timer);
+  }, [address]);
+
+  if (!address || address.length < 10) return null;
+  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Searching BDNB database...</div>;
+  if (error) return <div className="text-xs text-red-500">{error}</div>;
+  if (buildings.length === 0) return <div className="text-xs text-zinc-400 italic">No building found in BDNB for this address.</div>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-[10px] font-bold rounded uppercase tracking-wider">BDNB Buildings</span>
+      </div>
+      <div className="space-y-3">
+        {buildings.map((b: any) => (
+          <div key={b.batiment_groupe_id} className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex flex-col">
+                <span className="text-sm font-mono font-bold text-purple-600 dark:text-purple-400">
+                  {b.batiment_groupe_id}
+                </span>
+                <span className="text-[10px] text-zinc-400 uppercase font-bold mt-1">
+                  {b.usage_principal_bdnb_open || 'Usage inconnu'}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">Construction</span>
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{b.annee_construction || 'N/A'}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">DPE</span>
+                <span className={cn(
+                  "text-xs font-bold px-1.5 py-0.5 rounded w-fit",
+                  b.classe_bilan_dpe === 'A' ? "bg-green-100 text-green-700" :
+                  b.classe_bilan_dpe === 'B' ? "bg-green-50 text-green-600" :
+                  b.classe_bilan_dpe === 'C' ? "bg-lime-50 text-lime-600" :
+                  b.classe_bilan_dpe === 'D' ? "bg-yellow-50 text-yellow-600" :
+                  b.classe_bilan_dpe === 'E' ? "bg-orange-50 text-orange-600" :
+                  b.classe_bilan_dpe === 'F' ? "bg-red-50 text-red-600" :
+                  b.classe_bilan_dpe === 'G' ? "bg-red-100 text-red-700" :
+                  "bg-zinc-100 text-zinc-500"
+                )}>
+                  {b.classe_bilan_dpe || 'N/A'}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

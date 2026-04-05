@@ -30,6 +30,8 @@ import {
   IconRefresh
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
+import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
+import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn } from '../lib/utils';
 import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, Plan } from '../types';
 import { useUser } from '../UserContext';
@@ -39,10 +41,11 @@ import { PlanAnnotator } from '../components/PlanAnnotator';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
 import SiteReports from '../components/SiteReports';
 import MilestoneGantt from '../components/MilestoneGantt';
-import Situations from './Situations';
+import { ProTab } from '../components/pro/ProTab';
 
 import { useTranslation } from 'react-i18next';
 
@@ -142,6 +145,7 @@ export default function ProjectDetail() {
   });
   
   const [isAddingOs, setIsAddingOs] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isAddingInvoice, setIsAddingInvoice] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
     invoice_number: '',
@@ -747,8 +751,8 @@ export default function ProjectDetail() {
           
           {/* Tab Navigation */}
           <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 mb-6 overflow-x-auto">
-            {['INFOS', 'PRO', 'ACT', 'DET', 'RDT', 'VISA', 'AOR'].map(tab => {
-              if (['DET', 'RDT', 'VISA', 'AOR'].includes(tab) && !project.is_chantier) return null;
+            {['INFOS', 'PRO', 'VISA', 'AOR'].map(tab => {
+              if (['VISA', 'AOR'].includes(tab) && !project.is_chantier) return null;
               return (
                 <button 
                   key={tab}
@@ -764,6 +768,7 @@ export default function ProjectDetail() {
             })}
           </div>
           <div className="tab-content mt-8">
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} /></div>}
             {activeTab === 'INFOS' && (
               <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -794,12 +799,19 @@ export default function ProjectDetail() {
                             placeholder="Project Name"
                           />
                           <div className="flex flex-wrap items-center gap-4">
-                            <input 
-                              type="text"
-                              className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
-                              value={project.client}
-                              onChange={e => setProject({...project, client: e.target.value})}
+                            <ContactAutocomplete 
+                              contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                              value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
+                              onChange={id => {
+                                const contact = contacts.find(c => c.id === id);
+                                if (contact) {
+                                  setProject({...project, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                                }
+                              }}
+                              onAddNew={() => setIsContactModalOpen(true)}
                               placeholder="Client Name"
+                              inputClassName="bg-white/10 border border-white/20 text-white placeholder:text-white/60"
+                              addNewLabel="Add New Client"
                             />
                             <span className="text-white/40">•</span>
                             <input 
@@ -904,7 +916,7 @@ export default function ProjectDetail() {
                         <div className="mt-4">
                           <AddressAutocomplete 
                             value={project.address || ''}
-                            onChange={addr => setProject({...project, address: addr})}
+                            onChange={addr => setProject(prev => prev ? ({...prev, address: addr}) : null)}
                           />
                         </div>
                       </div>
@@ -1210,233 +1222,7 @@ export default function ProjectDetail() {
               </div>
             )}
 
-            {activeTab === 'ACT' && (
-              <div className="space-y-8">
-                {/* Specifications List - Manageable */}
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Cahier des charges</h3>
-                    {isAddingSpec ? (
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="text" 
-                          value={newSpecTitle} 
-                          onChange={(e) => setNewSpecTitle(e.target.value)}
-                          className="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white"
-                          placeholder="Titre..."
-                          autoFocus
-                        />
-                        <button 
-                          onClick={handleCreateSpec}
-                          className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
-                        >
-                          OK
-                        </button>
-                        <button 
-                          onClick={() => setIsAddingSpec(false)}
-                          className="px-3 py-1 bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg text-xs font-bold hover:bg-zinc-300"
-                        >
-                          Annuler
-                        </button>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setIsAddingSpec(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                      >
-                        <IconPlus size={14} />
-                        Ajouter un cahier des charges
-                      </button>
-                    )}
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3 text-left">Titre</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-right w-10"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {specifications.map((spec) => (
-                          <tr key={spec.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">
-                              <Link to={`/specifications/${spec.id}`} className="hover:text-blue-600 transition-colors">
-                                {spec.title}
-                              </Link>
-                            </td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(spec.last_updated).toLocaleDateString()}</td>
-                            <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={async () => {
-                                  if (!confirm('Supprimer ce document ?')) return;
-                                  try {
-                                    const res = await fetch(`/api/specifications/${spec.id}`, { method: 'DELETE' });
-                                    if (res.ok) {
-                                      setSpecifications(prev => prev.filter(s => s.id !== spec.id));
-                                    }
-                                  } catch (err) {
-                                    console.error(err);
-                                  }
-                                }}
-                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                              >
-                                <IconTrash size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {specifications.length === 0 && (
-                          <tr>
-                            <td colSpan={3} className="px-6 py-8 text-center text-zinc-500 italic">Aucun cahier des charges.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Lots & Entreprises - Editable */}
-                {project.is_complete_mission && (
-                  <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lots & Entreprises</h3>
-                      <button 
-                        onClick={() => {
-                          const newLot = { id: crypto.randomUUID(), project_id: project.id, lot_number: `${(project.lots_list?.length || 0) + 1}`, lot_title: '' };
-                          setProject({...project, lots_list: [...(project.lots_list || []), newLot]});
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                      >
-                        <IconPlus size={14} />
-                        Ajouter un lot
-                      </button>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                          <tr>
-                            <th className="px-6 py-3 text-left w-20">N°</th>
-                            <th className="px-6 py-3 text-left">Lot</th>
-                            <th className="px-6 py-3 text-left">Entreprise</th>
-                            <th className="px-6 py-3 text-right w-20"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                          {project.lots_list?.map((lot, idx) => (
-                            <tr key={lot.id || idx} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                              <td className="px-6 py-4">
-                                <input 
-                                  type="text"
-                                  className="w-full bg-transparent border-none p-0 text-sm font-bold text-zinc-900 dark:text-white focus:ring-0"
-                                  value={lot.lot_number}
-                                  onChange={e => {
-                                    const newList = [...(project.lots_list || [])];
-                                    newList[idx] = { ...lot, lot_number: e.target.value };
-                                    setProject({...project, lots_list: newList});
-                                  }}
-                                />
-                              </td>
-                              <td className="px-6 py-4">
-                                <input 
-                                  type="text"
-                                  className="w-full bg-transparent border-none p-0 text-sm text-zinc-600 dark:text-zinc-300 focus:ring-0"
-                                  value={lot.lot_title}
-                                  onChange={e => {
-                                    const newList = [...(project.lots_list || [])];
-                                    newList[idx] = { ...lot, lot_title: e.target.value };
-                                    setProject({...project, lots_list: newList});
-                                  }}
-                                  placeholder="Titre du lot"
-                                />
-                              </td>
-                              <td className="px-6 py-4">
-                                <ContactAutocomplete 
-                                  value={lot.contact_name || ''}
-                                  contacts={contacts}
-                                  onChange={(id) => {
-                                    const contact = contacts.find(c => c.id === id);
-                                    const newList = [...(project.lots_list || [])];
-                                    newList[idx] = { ...lot, contact_name: contact?.name || '', contact_id: id };
-                                    setProject({...project, lots_list: newList});
-                                  }}
-                                />
-                              </td>
-                              <td className="px-6 py-4 text-right">
-                                <button 
-                                  onClick={() => {
-                                    const newList = project.lots_list?.filter((_, i) => i !== idx);
-                                    setProject({...project, lots_list: newList});
-                                  }}
-                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                                >
-                                  <IconTrash size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {(!project.lots_list || project.lots_list.length === 0) && (
-                            <tr>
-                              <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun lot défini.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Appels d'offres</h3>
-                    <Link 
-                      to="/tenders"
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                    >
-                      <IconExternalLink size={14} />
-                      Gérer les appels d'offres
-                    </Link>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3 text-left">Titre</th>
-                          <th className="px-6 py-3 text-left">Date limite</th>
-                          <th className="px-6 py-3 text-left">Statut</th>
-                          <th className="px-6 py-3 text-right">Valeur</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {projectTenders.filter(t => t.title.toLowerCase().includes(project.name.toLowerCase()) || t.notes.toLowerCase().includes(project.name.toLowerCase())).map((tender) => (
-                          <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{tender.title}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(tender.submission_deadline).toLocaleDateString()}</td>
-                            <td className="px-6 py-4">
-                              <span className={cn(
-                                "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                tender.status === 'Won' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                                tender.status === 'Lost' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                                "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400"
-                              )}>
-                                {tender.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right font-bold text-zinc-900 dark:text-white">{formatCurrency(tender.value)}</td>
-                          </tr>
-                        ))}
-                        {projectTenders.length === 0 && (
-                          <tr>
-                            <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun appel d'offres trouvé pour ce projet.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Tab content for PRO, VISA, AOR ... */}
             {activeTab === 'DET' && (
               <div className="space-y-8">
                 {/* Ordres de Service List - Manageable */}
@@ -1567,7 +1353,6 @@ export default function ProjectDetail() {
             )}
             {activeTab === 'RDT' && (
               <div className="space-y-8">
-                <Situations projectId={id!} />
                 {/* Financial Summary */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
@@ -2376,6 +2161,13 @@ export default function ProjectDetail() {
           </div>
         </div>
       </div>
+      <ContactModal 
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        onSuccess={() => {
+          fetchContacts();
+        }}
+      />
     </div>
   );
 }

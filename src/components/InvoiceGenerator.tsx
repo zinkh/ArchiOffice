@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -19,15 +19,36 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     issue_date: new Date().toISOString().split('T')[0],
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     vat_rate: 20,
-    seller_siret: '801 417 122 00026',
-    seller_vat_number: 'FR 12 801417122',
-    seller_iban: 'FR76 3000 6000 0112 3456 7890 123',
-    seller_bic: 'BNPAFRPPXXX',
+    seller_name: '',
+    seller_address: '',
+    seller_siret: '',
+    seller_vat_number: '',
+    seller_iban: '',
+    seller_bic: '',
     items: [
       { id: '1', description: initialData?.description || 'Prestations architecturales', quantity: 1, unit_price: initialData?.amount || 0, vat_rate: 20 }
     ],
     ...initialData
   });
+
+  useEffect(() => {
+    // Fetch global settings for seller info
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(settings => {
+        if (settings) {
+          setData(prev => ({
+            ...prev,
+            seller_name: settings.agencyName || prev.seller_name,
+            seller_address: settings.address || prev.seller_address,
+            seller_siret: settings.siret || prev.seller_siret,
+            seller_vat_number: settings.vatNumber || prev.seller_vat_number,
+            seller_iban: settings.seller_iban || prev.seller_iban,
+            seller_bic: settings.seller_bic || prev.seller_bic
+          }));
+        }
+      });
+  }, []);
 
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -88,14 +109,12 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     </ram:IncludedSupplyChainTradeLineItem>`).join('')}
     <ram:ApplicableHeaderTradeAgreement>
       <ram:SellerTradeParty>
-        <ram:Name>KHALDOUN SEKTAOUI ARCHITECTE</ram:Name>
+        <ram:Name>${data.seller_name || 'KHALDOUN SEKTAOUI ARCHITECTE'}</ram:Name>
         <ram:SpecifiedLegalOrganization>
           <ram:ID schemeID="0002">${data.seller_siret?.replace(/\s/g, '')}</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
-          <ram:PostcodeCode>54500</ram:PostcodeCode>
-          <ram:LineOne>14 RUE COLONEL MOLL</ram:LineOne>
-          <ram:CityName>LAXOU</ram:CityName>
+          <ram:LineOne>${data.seller_address || ''}</ram:LineOne>
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:SpecifiedTaxRegistration>
@@ -221,7 +240,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
   const addItem = () => {
     const newItem: InvoiceItem = {
-      id: Math.random().toString(36).substring(2, 11),
+      id: Math.random().toString(36).substr(2, 9),
       description: '',
       quantity: 1,
       unit_price: 0,
@@ -308,11 +327,10 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 {/* Header */}
                 <div className="flex justify-between items-start mb-12">
                   <div>
-                    <h1 className="text-2xl font-bold tracking-tight">KHALDOUN SEKTAOUI</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">{data.seller_name || 'KHALDOUN SEKTAOUI'}</h1>
                     <p className="text-sm text-zinc-600">Architecture + Urbanisme</p>
                     <div className="mt-4 text-[8pt] text-zinc-500">
-                      <p>14 RUE COLONEL MOLL</p>
-                      <p>54500 LAXOU</p>
+                      <p>{data.seller_address}</p>
                       <p>SIRET : {data.seller_siret}</p>
                       <p>TVA : {data.seller_vat_number}</p>
                     </div>
@@ -329,10 +347,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                   <div>
                     <h3 className="text-[8pt] font-bold uppercase text-zinc-400 mb-2">Émetteur</h3>
                     <div className="text-[9pt]">
-                      <p className="font-bold">KHALDOUN SEKTAOUI ARCHITECTE</p>
-                      <p>14 RUE COLONEL MOLL</p>
-                      <p>54500 LAXOU</p>
-                      <p>contact@ksxa.fr</p>
+                      <p className="font-bold">{data.seller_name || 'KHALDOUN SEKTAOUI ARCHITECTE'}</p>
+                      <p>{data.seller_address}</p>
                     </div>
                   </div>
                   <div>
@@ -401,7 +417,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 {/* Legal Footer */}
                 <div className="mt-auto pt-8 border-t border-zinc-200 text-[7pt] text-center text-zinc-400">
                   <p>Facture conforme à la norme NF EN 16931 (Factur-X Ready)</p>
-                  <p>KHALDOUN SEKTAOUI ARCHITECTE - SIRET 801 417 122 00026 - Laxou, France</p>
+                  <p>{data.seller_name} - SIRET {data.seller_siret}</p>
                 </div>
               </div>
             </div>
@@ -505,6 +521,23 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Détails Émetteur</h3>
                     <div className="space-y-3">
                       <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nom / Agence</label>
+                        <input 
+                          type="text" 
+                          value={data.seller_name || ''}
+                          onChange={e => setData({...data, seller_name: e.target.value})}
+                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Adresse</label>
+                        <textarea 
+                          value={data.seller_address || ''}
+                          onChange={e => setData({...data, seller_address: e.target.value})}
+                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm h-20 resize-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
                         <label className="text-[10px] font-bold text-zinc-500 uppercase">SIRET</label>
                         <input 
                           type="text" 
@@ -528,6 +561,15 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                           type="text" 
                           value={data.seller_iban || ''}
                           onChange={e => setData({...data, seller_iban: e.target.value})}
+                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">BIC</label>
+                        <input 
+                          type="text" 
+                          value={data.seller_bic || ''}
+                          onChange={e => setData({...data, seller_bic: e.target.value})}
                           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-mono"
                         />
                       </div>

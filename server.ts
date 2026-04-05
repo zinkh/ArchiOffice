@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
-import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper";
+import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper.js";
 import multer from "multer";
 import fs from "fs";
 
@@ -98,34 +98,6 @@ try {
     CREATE TABLE IF NOT EXISTS project_categories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE
-    );
-
-    CREATE TABLE IF NOT EXISTS dpgf_items (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      designation TEXT NOT NULL,
-      unite TEXT,
-      quantite_prevue REAL,
-      prix_unitaire_ht REAL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS situations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      numero_situation INTEGER NOT NULL,
-      date_situation TEXT NOT NULL,
-      etat TEXT DEFAULT 'Brouillon',
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS details_situation (
-      id TEXT PRIMARY KEY,
-      situation_id TEXT,
-      dpgf_item_id TEXT,
-      pourcentage_avancement REAL,
-      FOREIGN KEY(situation_id) REFERENCES situations(id),
-      FOREIGN KEY(dpgf_item_id) REFERENCES dpgf_items(id)
     );
 
     CREATE TABLE IF NOT EXISTS project_categories_junction (
@@ -403,6 +375,8 @@ try {
       issue_date TEXT,
       description TEXT,
       created_at TEXT,
+      seller_name TEXT,
+      seller_address TEXT,
       seller_siret TEXT,
       seller_vat_number TEXT,
       seller_iban TEXT,
@@ -567,36 +541,65 @@ try {
       FOREIGN KEY(project_id) REFERENCES projects(id)
     );
 
-    CREATE TABLE IF NOT EXISTS activities (
+    CREATE TABLE IF NOT EXISTS dpgf_items (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      target TEXT,
-      timestamp TEXT NOT NULL,
-      category TEXT,
-      type TEXT NOT NULL,
-      attachments TEXT,
-      FOREIGN KEY(user_id) REFERENCES team_members(id)
+      project_id TEXT,
+      designation TEXT NOT NULL,
+      unite TEXT NOT NULL,
+      quantite_prevue REAL NOT NULL,
+      prix_unitaire_ht REAL NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id)
     );
 
-    CREATE TABLE IF NOT EXISTS messages (
+    CREATE TABLE IF NOT EXISTS situations (
       id TEXT PRIMARY KEY,
-      sender_id TEXT NOT NULL,
-      recipient_id TEXT, -- NULL for team-wide
-      content TEXT NOT NULL,
-      type TEXT NOT NULL, -- 'text', 'link', 'file'
-      file_url TEXT,
-      timestamp TEXT NOT NULL,
-      FOREIGN KEY(sender_id) REFERENCES team_members(id)
+      project_id TEXT,
+      numero_situation INTEGER NOT NULL,
+      date_situation TEXT NOT NULL,
+      etat TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id)
     );
 
-    CREATE TABLE IF NOT EXISTS notifications (
+    CREATE TABLE IF NOT EXISTS detail_situations (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      content TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      read INTEGER DEFAULT 0,
-      FOREIGN KEY(user_id) REFERENCES team_members(id)
+      situation_id TEXT,
+      dpgf_item_id TEXT,
+      pourcentage_avancement REAL NOT NULL,
+      FOREIGN KEY(situation_id) REFERENCES situations(id),
+      FOREIGN KEY(dpgf_item_id) REFERENCES dpgf_items(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cctps (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      data TEXT, -- JSON string of CCTP structure
+      FOREIGN KEY(project_id) REFERENCES projects(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS dpgfs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      cctp_id TEXT,
+      data TEXT, -- JSON string of DPGF structure
+      FOREIGN KEY(project_id) REFERENCES projects(id),
+      FOREIGN KEY(cctp_id) REFERENCES cctps(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      id TEXT PRIMARY KEY,
+      agencyName TEXT,
+      address TEXT,
+      phone TEXT,
+      email TEXT,
+      siret TEXT,
+      vatNumber TEXT,
+      currency TEXT,
+      language TEXT,
+      senderOption TEXT,
+      defaultEmailTemplate TEXT,
+      logoUrl TEXT,
+      seller_iban TEXT,
+      seller_bic TEXT
     );
   `);
 
@@ -614,7 +617,7 @@ try {
       'notes', 'birthday', 'category', 'company_name', 'siret', 'vat_number', 'website'
     ] },
     { table: 'team_members', columns: ['system_role', 'senderOption', 'defaultEmailTemplate'] },
-    { table: 'invoices', columns: ['invoice_number', 'tax_amount', 'total_amount', 'issue_date', 'seller_siret', 'seller_vat_number', 'seller_iban', 'seller_bic', 'vat_rate'] },
+    { table: 'invoices', columns: ['invoice_number', 'tax_amount', 'total_amount', 'issue_date', 'seller_name', 'seller_address', 'seller_siret', 'seller_vat_number', 'seller_iban', 'seller_bic', 'vat_rate'] },
     { table: 'tenders', columns: ['mandataire_id', 'type', 'surface', 'construction_cost', 'honoraires_percent', 'mandatory_visit', 'visit_date', 'withdrawal_deadline'] },
     { table: 'proposals', columns: [
       'reference', 'projet_detail', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite', 
@@ -646,7 +649,8 @@ try {
       'incidences_delais_details', 'incidences_couts_type', 'montant_devis_presente', 
       'montant_devis_accepte', 'date_signature'
     ] },
-    { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] }
+    { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
+    { table: 'settings', columns: ['seller_iban', 'seller_bic'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -717,19 +721,19 @@ try {
     INSERT OR IGNORE INTO projects (id, name, client, status, budget, start_date, end_date, description) VALUES 
     ('p1', 'Collège ARTEM', 'Enseignement', 'Completed', 18500000, '2016-01-01', '2018-11-07', 'Construction du Collège ARTEM'),
     ('p2', 'Lycée Heinrich-Nessel', 'Enseignement', 'Completed', 4200000, '2017-03-15', '2018-11-07', 'Ateliers du Lycée Heinrich-Nessel à Haguenau'),
-    ('p3', 'Collège Vallée de l''Orne', 'Enseignement', 'Completed', 12500000, '2013-06-01', '2018-11-07', 'Restructuration de l’externat. Création d’une demi-pension. Mise aux normes accessibilité PSH. Construction Neuve d’une galerie d’expositions.'),
-    ('p4', 'Lycée Cormontaigne', 'Enseignement', 'Completed', 6200000, '2016-01-01', '2018-11-07', 'Restructuration du bâtiment 3 - Ateliers, 6 200 m² SHON. Respect des 12 critères de préconisations HQE.'),
-    ('p5', 'Collège de Custines', 'Enseignement', 'Completed', 9500000, '2010-05-01', '2018-11-07', 'Collège de Custines'),
-    ('p6', 'ENSAD Nancy', 'Enseignement', 'Completed', 24000000, '2014-01-01', '2018-11-07', 'École nationale supérieure d’art et de design de Nancy'),
-    ('p7', 'Restauration Périscolaire Essey', 'Enseignement', 'Completed', 1200000, '2005-01-01', '2017-12-02', 'Creation de Locaux de Restauration Peri-Scolaire et Annexes dans les Anciennes Ecuries du Haut-Chateau a ESSEY-LES-NANCY'),
-    ('p8', 'Groupe Scolaire Ménil-la-Tour', 'Enseignement', 'Completed', 2100000, '2007-01-01', '2017-12-02', 'Solutions passives (sur isolation) ou semi passives (recuperation des apports). Capteurs solaires pour la production ECS.'),
-    ('p9', 'Groupe Scolaire Marcel Leroy', 'Enseignement', 'Completed', 1500000, '1997-01-01', '2017-12-02', 'La salle de jeux preexistante est completee a rez-de-chaussee par un bloc sanitaire, une Tisannerie, un degagement sur l''entree.'),
-    ('p10', 'Groupe Scolaire Laneuveville', 'Enseignement', 'Completed', 3000000, '2006-01-01', '2017-12-02', 'Construction d''un groupe scolaire de 9 classes: 5 classes elementaires 4 classes maternelles et d''un espace de restauration.'),
-    ('p11', 'Collège Liffol-le-Grand', 'Enseignement', 'Completed', 4000000, '1991-01-01', '2017-12-02', 'Creation de College sur site pente en frange industrielle du village sur l''entree de la Nationale de Haute-Marne dans les Vosges.'),
-    ('p12', 'Collège Emile Gallé', 'Enseignement', 'Completed', 5500000, '2003-01-01', '2017-12-02', 'College existant a reconstruire, en site occupe, en trois phases de demolition et de deux phases de construction.'),
-    ('p13', 'Cité Scolaire Chopin', 'Enseignement', 'Completed', 2800000, '1996-01-01', '2017-12-02', 'Batiment en extension sur cour en bordure du Parc Sainte Marie. Liaison a l''existant par passerelle sur 2 niveaux.'),
-    ('p14', 'Amphithéâtre 700', 'Enseignement', 'Completed', 1100000, '2011-01-01', '2017-12-02', 'Refection complete de l’etancheite avec integration d’une isolation ameliorant le bilan thermique du batiment.'),
-    ('p15', 'Collège Burnhaupt', 'Enseignement', 'Completed', 8000000, '2006-01-01', '2017-12-02', 'Construction d’un collège 600 et 4 logements de fonction.'),
+    ('p3', 'Collège Vallée de l''Orne', 'Enseignement', 'In Progress', 12500000, '2023-06-01', '2026-11-07', 'Restructuration de l’externat. Création d’une demi-pension. Mise aux normes accessibilité PSH. Construction Neuve d’une galerie d’expositions.'),
+    ('p4', 'Lycée Cormontaigne', 'Enseignement', 'In Progress', 6200000, '2024-01-01', '2026-11-07', 'Restructuration du bâtiment 3 - Ateliers, 6 200 m² SHON. Respect des 12 critères de préconisations HQE.'),
+    ('p5', 'Collège de Custines', 'Enseignement', 'Planning', 9500000, '2025-05-01', '2027-11-07', 'Collège de Custines'),
+    ('p6', 'ENSAD Nancy', 'Enseignement', 'In Progress', 24000000, '2024-01-01', '2027-11-07', 'École nationale supérieure d’art et de design de Nancy'),
+    ('p7', 'Restauration Périscolaire Essey', 'Enseignement', 'In Progress', 1200000, '2025-01-01', '2026-12-02', 'Creation de Locaux de Restauration Peri-Scolaire et Annexes dans les Anciennes Ecuries du Haut-Chateau a ESSEY-LES-NANCY'),
+    ('p8', 'Groupe Scolaire Ménil-la-Tour', 'Enseignement', 'Planning', 2100000, '2025-08-01', '2027-12-02', 'Solutions passives (sur isolation) ou semi passives (recuperation des apports). Capteurs solaires pour la production ECS.'),
+    ('p9', 'Groupe Scolaire Marcel Leroy', 'Enseignement', 'In Progress', 1500000, '2024-01-01', '2026-12-02', 'La salle de jeux preexistante est completee a rez-de-chaussee par un bloc sanitaire, une Tisannerie, un degagement sur l''entree.'),
+    ('p10', 'Groupe Scolaire Laneuveville', 'Enseignement', 'In Progress', 3000000, '2024-06-01', '2026-12-02', 'Construction d''un groupe scolaire de 9 classes: 5 classes elementaires 4 classes maternelles et d''un espace de restauration.'),
+    ('p11', 'Collège Liffol-le-Grand', 'Enseignement', 'In Progress', 4000000, '2024-01-01', '2026-12-02', 'Creation de College sur site pente en frange industrielle du village sur l''entree de la Nationale de Haute-Marne dans les Vosges.'),
+    ('p12', 'Collège Emile Gallé', 'Enseignement', 'In Progress', 5500000, '2024-01-01', '2026-12-02', 'College existant a reconstruire, en site occupe, en trois phases de demolition et de deux phases de construction.'),
+    ('p13', 'Cité Scolaire Chopin', 'Enseignement', 'In Progress', 2800000, '2024-01-01', '2026-12-02', 'Batiment en extension sur cour en bordure du Parc Sainte Marie. Liaison a l''existant par passerelle sur 2 niveaux.'),
+    ('p14', 'Amphithéâtre 700', 'Enseignement', 'In Progress', 1100000, '2024-01-01', '2026-12-02', 'Refection complete de l’etancheite avec integration d’une isolation ameliorant le bilan thermique du batiment.'),
+    ('p15', 'Collège Burnhaupt', 'Enseignement', 'In Progress', 8000000, '2024-01-01', '2026-12-02', 'Construction d’un collège 600 et 4 logements de fonction.'),
     ('p16', 'Lycée Emmanuel Héré', 'Enseignement', 'Completed', 7500000, '2005-01-01', '2017-12-02', 'Demolir et a reconstruire le batiment des ateliers en fonction d’un phasage permettant le fonctionnement de l’etablissement.'),
     ('p17', 'CERMAB ENSTIB', 'Enseignement', 'Completed', 3200000, '2000-01-01', '2017-12-02', 'Le mail central de distribution en double hauteur est scande par les poteaux biais en auto contreventement.'),
     ('p18', 'IUT MCQ - CML', 'Enseignement', 'Completed', 2500000, '1998-01-01', '2017-12-02', 'Le C.M.L. Centre de Mesure Lorrain est un laboratoire de metrologie.'),
@@ -792,7 +796,10 @@ try {
     INSERT OR IGNORE INTO milestones (id, project_id, title, due_date, completed) VALUES 
     ('m1', 'p1', 'Livraison', '2018-08-15', 1),
     ('m2', 'p2', 'Réception des travaux', '2018-11-20', 1),
-    ('m3', 'p4', 'Inauguration', '2016-09-15', 1);
+    ('m3', 'p4', 'Inauguration', '2026-09-15', 0),
+    ('m4', 'p3', 'Fin de gros oeuvre', '2026-04-15', 0),
+    ('m5', 'p6', 'Pose des menuiseries', '2026-05-10', 0),
+    ('m6', 'p10', 'Réception lot 1', '2026-04-20', 0);
 
     INSERT OR IGNORE INTO tenders (id, title, client, submission_deadline, status, value, notes) VALUES 
     ('ten1', 'Médiathèque de Thionville', 'Ville de Thionville', '2026-06-15', 'Draft', 4500000, 'Concours sur esquisse.'),
@@ -800,24 +807,6 @@ try {
 
     INSERT OR IGNORE INTO specifications (id, project_id, title, content, last_updated) VALUES 
     ('s1', 'p1', 'CCTP Lot Gros Œuvre', '[{"id":"sec1","title":"Terrassements","items":[{"id":"i1","code":"02.10","description":"Décapage de la terre végétale","material":"N/A","notes":"Stockage sur site"}]}]', '2016-02-21T10:00:00Z');
-  `);
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_projects_code ON projects(project_code);
-    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-    CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
-    CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
-    CREATE INDEX IF NOT EXISTS idx_specifications_project ON specifications(project_id);
-    CREATE INDEX IF NOT EXISTS idx_os_project ON ordres_de_service(project_id);
-    CREATE INDEX IF NOT EXISTS idx_visas_project ON visas(project_id);
-    CREATE INDEX IF NOT EXISTS idx_receptions_project ON receptions(project_id);
-    CREATE INDEX IF NOT EXISTS idx_reserves_project ON reserves(project_id);
-    CREATE INDEX IF NOT EXISTS idx_plans_project ON plans(project_id);
-    CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
-    CREATE INDEX IF NOT EXISTS idx_dpgf_project ON dpgf_items(project_id);
-    CREATE INDEX IF NOT EXISTS idx_situations_project ON situations(project_id);
-    CREATE INDEX IF NOT EXISTS idx_details_situation_sit ON details_situation(situation_id);
-    CREATE INDEX IF NOT EXISTS idx_details_situation_dpgf ON details_situation(dpgf_item_id);
   `);
 
   // Update existing members with roles if they were already in the DB
@@ -836,17 +825,7 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Request logging middleware
-  app.use((req, res, next) => {
-    const start = Date.now();
-    res.on('finish', () => {
-      const duration = Date.now() - start;
-      console.log(`${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
-    });
-    next();
-  });
-
-  app.get("/api/rnb-buildings", async (req, res, next) => {
+  app.get("/api/rnb-buildings", async (req, res) => {
     try {
       const { q } = req.query;
       if (!q) {
@@ -919,6 +898,168 @@ async function startServer() {
       } else {
         res.status(500).json({ error: "Internal server error", details: error.message });
       }
+    }
+  });
+
+  // Étape 0 : géocoder une adresse via le géocodeur interne BDNB pour obtenir la cle_interop_adr
+  app.get("/api/bdnb-geocode", async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+
+      const url = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=5`;
+      console.log(`Calling BDNB Geocodage API: ${url}`);
+
+      const response = await fetchWithTimeout(url, {
+        headers: { 'Accept': 'application/json' }
+      }, 10000); // 10 second timeout
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No response body');
+        console.error(`BDNB Geocodage error: ${response.status} ${errorText.substring(0, 200)}`);
+        return res.status(response.status).json({ error: `BDNB Geocodage error: ${response.status}`, details: errorText.substring(0, 200) });
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        res.json(data);
+      } else {
+        const text = await response.text().catch(() => 'Could not read body');
+        console.error(`BDNB Geocodage returned non-JSON: ${text.substring(0, 200)}`);
+        res.status(502).json({ error: "Invalid response from BDNB Geocodage", details: text.substring(0, 200) });
+      }
+    } catch (error: any) {
+      console.error("Error in /api/bdnb-geocode:", error);
+      if (error.name === 'AbortError') {
+        res.status(504).json({ error: "BDNB geocodage request timed out" });
+      } else {
+        res.status(500).json({ error: "Internal server error", details: error.message });
+      }
+    }
+  });
+
+  app.get("/api/bdnb", async (req, res) => {
+    try {
+      const { q, banId, cityCode } = req.query;
+      if (!q && !banId) {
+        return res.status(400).json({ error: "Query parameter 'q' or 'banId' is required" });
+      }
+      
+      let buildings: any[] = [];
+      
+      // Step 1: If we have a banId, try to find the building group ID first using the relationship table
+      // This table is indexed on cle_interop_adr and is much faster for direct lookups
+      if (banId) {
+        const relUrl = `https://api.bdnb.io/v1/bdnb/donnees/rel_batiment_groupe_adresse?cle_interop_adr=eq.${banId}&select=batiment_groupe_id`;
+        console.log(`Calling BDNB Rel API: ${relUrl}`);
+        
+        try {
+          const relResponse = await fetchWithTimeout(relUrl, {
+            headers: { 'Accept': 'application/json' }
+          }, 5000); // 5 second timeout
+          
+          if (relResponse.ok) {
+            const relData = await relResponse.json();
+            const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+            
+            if (ids.length > 0) {
+              // Step 2: Fetch full details for these specific building IDs
+              const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;
+              console.log(`Calling BDNB Detail API: ${detailUrl}`);
+              
+              const detailResponse = await fetchWithTimeout(detailUrl, {
+                headers: { 'Accept': 'application/json' }
+              }, 5000);
+              
+              if (detailResponse.ok) {
+                buildings = await detailResponse.json();
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error in BDNB direct lookup:", err);
+          // Continue to fallback if direct lookup fails
+        }
+      }
+      
+      // Step 3: Fallback to geocoder if no buildings found via banId or no banId provided
+      // Fuzzy search on batiment_groupe_complet is very slow. 
+      // We use the geocoder to get a cle_interop_adr first.
+      if (buildings.length === 0 && q) {
+        console.log(`[BDNB] Fallback: Geocoding query "${q}" to get cle_interop_adr`);
+        const geoUrl = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=1`;
+        
+        try {
+          const geoRes = await fetchWithTimeout(geoUrl, {
+            headers: { 'Accept': 'application/json' }
+          }, 5000);
+          
+          if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            const firstResult = geoData[0];
+            if (firstResult && firstResult.cle_interop_adr) {
+              const banIdFromGeo = firstResult.cle_interop_adr;
+              console.log(`[BDNB] Geocoder found cle_interop_adr: ${banIdFromGeo}`);
+              
+              // Now try direct lookup with this ID
+              const relUrl = `https://api.bdnb.io/v1/bdnb/donnees/rel_batiment_groupe_adresse?cle_interop_adr=eq.${banIdFromGeo}&select=batiment_groupe_id`;
+              const relResponse = await fetchWithTimeout(relUrl, {
+                headers: { 'Accept': 'application/json' }
+              }, 5000);
+              
+              if (relResponse.ok) {
+                const relData = await relResponse.json();
+                const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+                
+                if (ids.length > 0) {
+                  const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;
+                  const detailResponse = await fetchWithTimeout(detailUrl, {
+                    headers: { 'Accept': 'application/json' }
+                  }, 5000);
+                  
+                  if (detailResponse.ok) {
+                    buildings = await detailResponse.json();
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error in BDNB fallback geocoding:", err);
+        }
+      }
+      
+      // Step 4: Final fallback to fuzzy search ONLY if geocoder failed or returned nothing
+      // This is the last resort and might still timeout.
+      if (buildings.length === 0 && q) {
+        let url = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?limit=5`;
+        if (cityCode) {
+          url += `&code_commune_insee=eq.${cityCode}`;
+        }
+        url += `&libelle_adr_principale_ban=ilike.*${encodeURIComponent(q as string)}*`;
+        
+        console.log(`Calling BDNB Final Fallback API: ${url}`);
+        
+        try {
+          const response = await fetchWithTimeout(url, {
+            headers: { 'Accept': 'application/json' }
+          }, 15000); // Increased timeout for fuzzy search
+          
+          if (response.ok) {
+            buildings = await response.json();
+          }
+        } catch (err) {
+          console.error("Error in BDNB final fallback search:", err);
+        }
+      }
+      
+      res.json(buildings);
+    } catch (error: any) {
+      console.error("Error in /api/bdnb:", error);
+      res.status(500).json({ error: "Internal server error", details: error.message });
     }
   });
 
@@ -1164,162 +1305,37 @@ async function startServer() {
   app.get("/api/documents", (req, res) => {
     try {
       const { project_id } = req.query;
-      console.log("project_id:", project_id);
-      if (project_id && project_id !== 'undefined' && project_id !== '') {
-        const docs = db.prepare("SELECT * FROM documents WHERE project_id = ?").all(project_id);
-        res.json(docs);
-      } else {
-        const docs = db.prepare("SELECT * FROM documents").all();
-        res.json(docs);
-      }
+      const docs = db.prepare("SELECT * FROM documents WHERE project_id = ?").all(project_id);
+      res.json(docs);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch documents" });
     }
   });
 
-  // Situations de Travaux
-  app.get("/api/dpgf/:project_id", (req, res) => {
-    try {
-      const { project_id } = req.params;
-      const items = db.prepare("SELECT * FROM dpgf_items WHERE project_id = ?").all(project_id);
-      res.json(items);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch DPGF items" });
-    }
-  });
-
-  app.post("/api/dpgf", (req, res) => {
-    try {
-      const { id, project_id, designation, unite, quantite_prevue, prix_unitaire_ht } = req.body;
-      db.prepare("INSERT INTO dpgf_items (id, project_id, designation, unite, quantite_prevue, prix_unitaire_ht) VALUES (?, ?, ?, ?, ?, ?)").run(id, project_id, designation, unite, quantite_prevue, prix_unitaire_ht);
-      res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create DPGF item" });
-    }
-  });
-
-  app.get("/api/situations/:project_id", (req, res) => {
-    try {
-      const { project_id } = req.params;
-      const situations = db.prepare("SELECT * FROM situations WHERE project_id = ? ORDER BY numero_situation DESC").all(project_id);
-      res.json(situations);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch situations" });
-    }
-  });
-
-  app.post("/api/situations", (req, res) => {
-    try {
-      const { id, project_id, numero_situation, date_situation, etat } = req.body;
-      db.prepare("INSERT INTO situations (id, project_id, numero_situation, date_situation, etat) VALUES (?, ?, ?, ?, ?)").run(id, project_id, numero_situation, date_situation, etat);
-      res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create situation" });
-    }
-  });
-
-  app.get("/api/situations/:situation_id/details", (req, res) => {
-    try {
-      const { situation_id } = req.params;
-      const details = db.prepare("SELECT * FROM details_situation WHERE situation_id = ?").all(situation_id);
-      res.json(details);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch situation details" });
-    }
-  });
-
-  app.post("/api/situations/:situation_id/details", (req, res) => {
-    try {
-      const { id, dpgf_item_id, pourcentage_avancement } = req.body;
-      const { situation_id } = req.params;
-      db.prepare("INSERT INTO details_situation (id, situation_id, dpgf_item_id, pourcentage_avancement) VALUES (?, ?, ?, ?)").run(id, situation_id, dpgf_item_id, pourcentage_avancement);
-      res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create situation detail" });
-    }
-  });
-
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
   app.post("/api/documents", upload.single('file'), (req, res) => {
     try {
-      console.log('Received body:', req.body);
-      console.log('Received file:', req.file);
       const { project_id, name, category, description, uploaded_by } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
-      
-      console.log('Received project_id:', project_id);
 
       const id = `doc-${Date.now()}`;
       const file_url = `/uploads/${file.filename}`;
       
-      console.log('Inserting into documents:', { id, project_id, name, category, file_url, uploaded_by, description });
-
       db.prepare(`
         INSERT INTO documents (id, project_id, name, category, version, file_url, uploaded_by, uploaded_at, description)
         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-      `).run(id, project_id || null, name, category, file_url, uploaded_by, new Date().toISOString(), description);
-
-      console.log('Inserting into document_versions:', { id, file_url, uploaded_by, description });
+      `).run(id, project_id, name, category, 1, file_url, uploaded_by, new Date().toISOString(), description);
 
       db.prepare(`
         INSERT INTO document_versions (id, document_id, version, file_url, uploaded_by, uploaded_at, description)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(`ver-${Date.now()}`, id, 1, file_url, uploaded_by, new Date().toISOString(), description);
+        VALUES (?, ?, 1, ?, ?, ?, ?)
+      `).run(`ver-${Date.now()}`, id, file_url, uploaded_by, new Date().toISOString(), description);
 
       res.status(201).json({ id });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to upload document" });
-    }
-  });
-
-  app.delete("/api/documents/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log('DELETE /api/documents/:id called with id:', id);
-      const doc = db.prepare("SELECT file_url FROM documents WHERE id = ?").get(id);
-      if (!doc) {
-        console.log('Document not found:', id);
-        return res.status(404).json({ error: "Document not found" });
-      }
-
-      const filePath = path.join(process.cwd(), doc.file_url);
-      console.log('Deleting file:', filePath);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
-      db.prepare("DELETE FROM document_versions WHERE document_id = ?").run(id);
-      db.prepare("DELETE FROM documents WHERE id = ?").run(id);
-
-      console.log('Document deleted successfully:', id);
-      res.status(204).send();
-    } catch (error) {
-      console.error('Error in DELETE /api/documents/:id:', error);
-      res.status(500).json({ error: "Failed to delete document" });
-    }
-  });
-
-  app.put("/api/documents/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log('PUT /api/documents/:id called with id:', id, 'body:', req.body);
-      const { name, category, description } = req.body;
-      db.prepare("UPDATE documents SET name = ?, category = ?, description = ? WHERE id = ?")
-        .run(name, category, description, id);
-      console.log('Document updated successfully:', id);
-      res.status(200).json({ id });
-    } catch (error) {
-      console.error('Error in PUT /api/documents/:id:', error);
-      res.status(500).json({ error: "Failed to update document" });
     }
   });
 
@@ -1334,159 +1350,60 @@ async function startServer() {
     }
   });
 
-  app.get("/api/projects", (req, res, next) => {
+  app.get("/api/projects", (req, res) => {
     try {
       const projects = db.prepare("SELECT * FROM projects").all();
       
-      // Fetch all related data in bulk to avoid N+1 queries
-      const allCotraitants = db.prepare(`
-        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_cotraitants pc
-        LEFT JOIN contacts c ON pc.contact_id = c.id
-      `).all();
-
-      const allLots = db.prepare(`
-        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_lots pl
-        LEFT JOIN contacts c ON pl.contact_id = c.id
-      `).all();
-
-      const allStakeholders = db.prepare(`
-        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_stakeholders ps
-        LEFT JOIN contacts c ON ps.contact_id = c.id
-      `).all();
-
-      const allCategories = db.prepare(`
-        SELECT pc.*, pcj.project_id
-        FROM project_categories pc
-        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
-      `).all();
-
       const projectsWithDetails = projects.map((project: any) => {
-        return { 
-          ...project, 
-          cotraitants_list: allCotraitants.filter((c: any) => c.project_id === project.id),
-          lots_list: allLots.filter((l: any) => l.project_id === project.id),
-          stakeholders_list: allStakeholders.filter((s: any) => s.project_id === project.id),
-          categories_list: allCategories.filter((c: any) => c.project_id === project.id)
-        };
+        const cotraitants = db.prepare(`
+          SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
+          FROM project_cotraitants pc
+          LEFT JOIN contacts c ON pc.contact_id = c.id
+          WHERE pc.project_id = ?
+        `).all(project.id);
+
+        const lots = db.prepare(`
+          SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
+          FROM project_lots pl
+          LEFT JOIN contacts c ON pl.contact_id = c.id
+          WHERE pl.project_id = ?
+        `).all(project.id);
+
+        const stakeholders = db.prepare(`
+          SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
+          FROM project_stakeholders ps
+          LEFT JOIN contacts c ON ps.contact_id = c.id
+          WHERE ps.project_id = ?
+        `).all(project.id);
+
+        const categories = db.prepare(`
+          SELECT pc.*
+          FROM project_categories pc
+          JOIN project_categories_junction pcj ON pc.id = pcj.category_id
+          WHERE pcj.project_id = ?
+        `).all(project.id);
+
+        return { ...project, cotraitants_list: cotraitants, lots_list: lots, stakeholders_list: stakeholders, categories_list: categories };
       });
       
       res.json(projectsWithDetails);
     } catch (error) {
-      next(error);
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch projects" });
     }
   });
 
-  app.get("/api/projects/:id", (req, res, next) => {
+  app.get("/api/projects/:id/full", (req, res) => {
     try {
       const { id } = req.params;
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as any;
-      
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
       }
 
-      const cotraitants = db.prepare(`
-        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_cotraitants pc
-        LEFT JOIN contacts c ON pc.contact_id = c.id
-        WHERE pc.project_id = ?
-      `).all(id);
-
-      const lots = db.prepare(`
-        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_lots pl
-        LEFT JOIN contacts c ON pl.contact_id = c.id
-        WHERE pl.project_id = ?
-      `).all(id);
-
-      const stakeholders = db.prepare(`
-        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_stakeholders ps
-        LEFT JOIN contacts c ON ps.contact_id = c.id
-        WHERE ps.project_id = ?
-      `).all(id);
-
-      const categories = db.prepare(`
-        SELECT pc.*
-        FROM project_categories pc
-        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
-        WHERE pcj.project_id = ?
-      `).all(id);
-
-      res.json({
-        ...project,
-        cotraitants_list: cotraitants,
-        lots_list: lots,
-        stakeholders_list: stakeholders,
-        categories_list: categories
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.get("/api/projects/:id/full", (req, res, next) => {
-    try {
-      const { id } = req.params;
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as any;
-      
-      if (!project) {
-        return res.status(404).json({ error: "Project not found" });
-      }
-
-      const cotraitants = db.prepare(`
-        SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_cotraitants pc
-        LEFT JOIN contacts c ON pc.contact_id = c.id
-        WHERE pc.project_id = ?
-      `).all(id);
-
-      const lots = db.prepare(`
-        SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_lots pl
-        LEFT JOIN contacts c ON pl.contact_id = c.id
-        WHERE pl.project_id = ?
-      `).all(id);
-
-      const stakeholders = db.prepare(`
-        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM project_stakeholders ps
-        LEFT JOIN contacts c ON ps.contact_id = c.id
-        WHERE ps.project_id = ?
-      `).all(id);
-
-      const categories = db.prepare(`
-        SELECT pc.*
-        FROM project_categories pc
-        JOIN project_categories_junction pcj ON pc.id = pcj.category_id
-        WHERE pcj.project_id = ?
-      `).all(id);
-
-      const milestones = db.prepare("SELECT * FROM milestones WHERE project_id = ? ORDER BY due_date ASC").all(id);
-      
-      const invoices = db.prepare(`
-        SELECT i.*, p.name as project_name 
-        FROM invoices i
-        LEFT JOIN projects p ON i.project_id = p.id
-        WHERE i.project_id = ?
-        ORDER BY i.created_at DESC
-      `).all(id);
-      
-      const invoiceIds = invoices.map((inv: any) => inv.id);
-      let allInvoiceItems: any[] = [];
-      if (invoiceIds.length > 0) {
-        allInvoiceItems = db.prepare(`SELECT * FROM invoice_items WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`).all(...invoiceIds);
-      }
-      
-      const invoicesWithItems = invoices.map((inv: any) => ({
-        ...inv,
-        items: allInvoiceItems.filter((item: any) => item.invoice_id === inv.id)
-      }));
-
-      const specifications = db.prepare("SELECT * FROM specifications WHERE project_id = ? OR is_template = 1 ORDER BY last_updated DESC").all(id);
+      const milestones = db.prepare("SELECT * FROM milestones WHERE project_id = ?").all(id);
+      const invoices = db.prepare("SELECT * FROM invoices WHERE project_id = ?").all(id);
+      const specifications = db.prepare("SELECT * FROM specifications WHERE project_id = ?").all(id);
       const ordres_de_service = db.prepare("SELECT * FROM ordres_de_service WHERE project_id = ?").all(id);
       const visas = db.prepare("SELECT * FROM visas WHERE project_id = ?").all(id);
       const receptions = db.prepare("SELECT * FROM receptions WHERE project_id = ?").all(id);
@@ -1494,16 +1411,10 @@ async function startServer() {
       const plans = db.prepare("SELECT * FROM plans WHERE project_id = ?").all(id);
 
       res.json({
-        project: {
-          ...project,
-          cotraitants_list: cotraitants,
-          lots_list: lots,
-          stakeholders_list: stakeholders,
-          categories_list: categories
-        },
+        project,
         milestones,
-        invoices: invoicesWithItems,
-        specifications: specifications.map((s: any) => ({ ...s, is_template: !!s.is_template })),
+        invoices,
+        specifications,
         ordres_de_service,
         visas,
         receptions,
@@ -1511,7 +1422,44 @@ async function startServer() {
         plans
       });
     } catch (error) {
-      next(error);
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch project details" });
+    }
+  });
+
+  // API routes FIRST
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // Situations API
+  app.get("/api/dpgf/:projectId", (req, res) => {
+    try {
+      const items = db.prepare("SELECT * FROM dpgf_items WHERE project_id = ?").all(req.params.projectId);
+      res.json(items);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch dpgf items" });
+    }
+  });
+
+  app.get("/api/situations/:projectId", (req, res) => {
+    try {
+      const situations = db.prepare("SELECT * FROM situations WHERE project_id = ?").all(req.params.projectId);
+      res.json(situations);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch situations" });
+    }
+  });
+
+  app.get("/api/situations/:situationId/details", (req, res) => {
+    try {
+      const details = db.prepare("SELECT * FROM detail_situations WHERE situation_id = ?").all(req.params.situationId);
+      res.json(details);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch situation details" });
     }
   });
 
@@ -1575,7 +1523,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, cot.specialty, cot.contact_id || null);
+            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
           }
         }
 
@@ -1585,7 +1533,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
+            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
           }
         }
 
@@ -1595,7 +1543,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, s.name, s.role, s.contact_id || null);
+            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
           }
         }
 
@@ -1689,7 +1637,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, cot.specialty, cot.contact_id || null);
+            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
             if (cot.contact_id) updateContactAffaires(cot.contact_id, id);
           }
         }
@@ -1702,7 +1650,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
+            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
             if (lot.contact_id) updateContactAffaires(lot.contact_id, id);
           }
         }
@@ -1714,7 +1662,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, s.name, s.role, s.contact_id || null);
+            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
             if (s.contact_id) updateContactAffaires(s.contact_id, id);
           }
         }
@@ -1834,7 +1782,7 @@ async function startServer() {
     try {
       const { id, project_id, title, start_date, end_date, progress, dependencies } = req.body;
       db.prepare("INSERT INTO tasks (id, project_id, title, start_date, end_date, progress, dependencies) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(id, project_id, title, start_date, end_date, progress || 0, JSON.stringify(Array.isArray(dependencies) ? dependencies : []));
+        .run(id, project_id, title, start_date, end_date, progress || 0, JSON.stringify(dependencies || []));
       res.status(201).json({ id });
     } catch (error) {
       console.error(error);
@@ -1847,7 +1795,7 @@ async function startServer() {
       const { id } = req.params;
       const { title, start_date, end_date, progress, dependencies } = req.body;
       db.prepare("UPDATE tasks SET title = ?, start_date = ?, end_date = ?, progress = ?, dependencies = ? WHERE id = ?")
-        .run(title, start_date, end_date, progress, JSON.stringify(Array.isArray(dependencies) ? dependencies : []), id);
+        .run(title, start_date, end_date, progress, JSON.stringify(dependencies || []), id);
       res.json({ success: true });
     } catch (error) {
       console.error(error);
@@ -1867,16 +1815,20 @@ async function startServer() {
   });
 
   app.get("/api/team", (req, res) => {
-    console.log("Fetching team...");
-    res.json([{ id: 't1', name: 'Test User', role: 'Admin', email: 'test@test.com', avatar: 'https://picsum.photos/seed/test/200', system_role: 'admin' }]);
+    try {
+      const team = db.prepare("SELECT * FROM team_members").all();
+      res.json(team);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch team" });
+    }
   });
 
   app.put("/api/team/:id", (req, res) => {
     try {
       const { id } = req.params;
-      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department } = req.body;
-      db.prepare("UPDATE team_members SET senderOption = ?, defaultEmailTemplate = ?, phone = ?, address = ?, job_title = ?, department = ? WHERE id = ?")
-        .run(senderOption, defaultEmailTemplate, phone, address, jobTitle, department, id);
+      const { senderOption, defaultEmailTemplate } = req.body;
+      db.prepare("UPDATE team_members SET senderOption = ?, defaultEmailTemplate = ? WHERE id = ?").run(senderOption, defaultEmailTemplate, id);
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating team member:", error);
@@ -1884,20 +1836,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/send-email", (req, res) => {
-    try {
-      const { to, subject, body } = req.body;
-      console.log(`Sending email to ${to}: ${subject}`);
-      // In a real application, you would use a service like Nodemailer or an API like SendGrid/Mailgun here.
-      // For now, we log it to the console to simulate sending.
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ error: "Failed to send email: " + error.message });
-    }
-  });
-
-  app.get("/api/tenders", (req, res, next) => {
+  app.get("/api/tenders", (req, res) => {
     try {
       const tenders = db.prepare(`
         SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
@@ -1905,22 +1844,20 @@ async function startServer() {
         LEFT JOIN contacts c ON t.mandataire_id = c.id
       `).all();
       
-      const allSpecialties = db.prepare(`
-        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM tender_specialties ts
-        LEFT JOIN contacts c ON ts.contact_id = c.id
-      `).all();
-
       const tendersWithSpecialties = tenders.map((tender: any) => {
-        return { 
-          ...tender, 
-          specialties_list: allSpecialties.filter((ts: any) => ts.tender_id === tender.id) 
-        };
+        const specialties = db.prepare(`
+          SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
+          FROM tender_specialties ts
+          LEFT JOIN contacts c ON ts.contact_id = c.id
+          WHERE ts.tender_id = ?
+        `).all(tender.id);
+        return { ...tender, specialties_list: specialties };
       });
       
       res.json(tendersWithSpecialties);
     } catch (error) {
-      next(error);
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch tenders" });
     }
   });
 
@@ -1953,7 +1890,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
+            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -1963,7 +1900,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
+            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
           }
         }
       });
@@ -2022,7 +1959,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
+            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -2034,7 +1971,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?)
           `);
           for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
+            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
           }
         }
       });
@@ -2128,13 +2065,7 @@ async function startServer() {
 
   app.get("/api/specifications", (req, res) => {
     try {
-      const { project_id } = req.query;
-      let specs;
-      if (project_id) {
-        specs = db.prepare("SELECT * FROM specifications WHERE project_id = ? OR is_template = 1 ORDER BY last_updated DESC").all(project_id);
-      } else {
-        specs = db.prepare("SELECT * FROM specifications ORDER BY last_updated DESC").all();
-      }
+      const specs = db.prepare("SELECT * FROM specifications ORDER BY last_updated DESC").all();
       res.json(specs.map((s: any) => ({ ...s, is_template: !!s.is_template })));
     } catch (error) {
       console.error(error);
@@ -2212,7 +2143,7 @@ async function startServer() {
           candidatures, affaires, logo, ca_amount, electronic_signature, contact_references, 
           tags, category, notes, birthday, website, created_at, created_by, siret, vat_number
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       
@@ -2390,23 +2321,14 @@ async function startServer() {
         ORDER BY p.created_at DESC
       `).all();
       
-      // Fetch all specialties in bulk to avoid N+1 queries
-      const proposalIds = proposals.map((p: any) => p.id);
-      let allSpecialties: any[] = [];
-      if (proposalIds.length > 0) {
-        allSpecialties = db.prepare(`
+      const proposalsWithSpecialties = proposals.map((proposal: any) => {
+        const specialties = db.prepare(`
           SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
           FROM proposal_specialties ps
           LEFT JOIN contacts c ON ps.contact_id = c.id
-          WHERE ps.proposal_id IN (${proposalIds.map(() => '?').join(',')})
-        `).all(...proposalIds);
-      }
-      
-      const proposalsWithSpecialties = proposals.map((proposal: any) => {
-        return { 
-          ...proposal, 
-          specialties_list: allSpecialties.filter((ps: any) => ps.proposal_id === proposal.id) 
-        };
+          WHERE ps.proposal_id = ?
+        `).all(proposal.id);
+        return { ...proposal, specialties_list: specialties };
       });
       
       res.json(proposalsWithSpecialties);
@@ -2450,12 +2372,12 @@ async function startServer() {
             ed_report_header, custom_building, custom_architect, custom_client
           ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `);
 
         stmt.run(
-          id, p.title, p.client_id, p.amount || 0, p.status || 'Draft', p.description || '', created_at,
+          id, p.title, p.client_id || null, p.amount || 0, p.status || 'Draft', p.description || '', created_at,
           p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, p.representant, p.qualite,
           p.adresse_client, p.cp_client, p.ville_client, p.telephone, p.portable, p.email_client,
           p.adresse_terrain, p.cp_ville_terrain, p.ref_cadastrale, p.zone_plu, p.surface_parcelle,
@@ -2467,7 +2389,7 @@ async function startServer() {
           p.site_postbox, p.site_city, p.site_state, p.site_postcode, p.site_country, p.site_gross_perimeter, p.site_gross_area,
           p.building_name, p.building_description, p.building_id,
           p.contact_fullname, p.contact_prefixtitle, p.contact_givenname, p.contact_middlename, p.contact_familyname,
-          p.contact_suffixtitle, p.contact_nameorder, p.contact_id, p.contact_role, p.contact_department,
+          p.contact_suffixtitle, p.contact_nameorder, p.contact_id || null, p.contact_role, p.contact_department,
           p.contact_company, p.contact_companycode, p.contact_fulladdress, p.contact_address_1, p.contact_address_2,
           p.contact_address_3, p.contact_postbox, p.contact_city, p.contact_state, p.contact_postcode,
           p.contact_country, p.contact_email, p.contact_phone, p.contact_fax, p.contact_web,
@@ -2486,7 +2408,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
+            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
       });
@@ -2553,7 +2475,7 @@ async function startServer() {
         `);
 
         stmt.run(
-          p.title, p.client_id, p.amount, p.description, p.status,
+          p.title, p.client_id || null, p.amount, p.description, p.status,
           p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, 
           p.representant, p.qualite, p.adresse_client, p.cp_client, p.ville_client, 
           p.telephone, p.portable, p.email_client, p.adresse_terrain, p.cp_ville_terrain, 
@@ -2567,7 +2489,7 @@ async function startServer() {
           p.site_postbox, p.site_city, p.site_state, p.site_postcode, p.site_country, p.site_gross_perimeter, p.site_gross_area,
           p.building_name, p.building_description, p.building_id,
           p.contact_fullname, p.contact_prefixtitle, p.contact_givenname, p.contact_middlename, p.contact_familyname,
-          p.contact_suffixtitle, p.contact_nameorder, p.contact_id, p.contact_role, p.contact_department,
+          p.contact_suffixtitle, p.contact_nameorder, p.contact_id || null, p.contact_role, p.contact_department,
           p.contact_company, p.contact_companycode, p.contact_fulladdress, p.contact_address_1, p.contact_address_2,
           p.contact_address_3, p.contact_postbox, p.contact_city, p.contact_state, p.contact_postcode,
           p.contact_country, p.contact_email, p.contact_phone, p.contact_fax, p.contact_web,
@@ -2589,7 +2511,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?)
           `);
           for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, spec.specialty_name, spec.contact_id || null);
+            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
           }
         }
 
@@ -2620,7 +2542,7 @@ async function startServer() {
               VALUES (?, ?, ?, ?)
             `);
             for (const spec of p.specialties_list) {
-              cotStmt.run(`pc${Date.now()}${Math.random().toString(36).substring(2, 7)}`, projectId, spec.specialty_name, spec.contact_id || null);
+              cotStmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, projectId, spec.specialty_name, spec.contact_id || null);
             }
           }
         }
@@ -2685,35 +2607,16 @@ async function startServer() {
 
   app.get("/api/invoices", (req, res) => {
     try {
-      const { project_id } = req.query;
-      let query = `
+      const invoices = db.prepare(`
         SELECT i.*, p.name as project_name 
         FROM invoices i
         LEFT JOIN projects p ON i.project_id = p.id
-      `;
-      let params: any[] = [];
-      
-      if (project_id) {
-        query += " WHERE i.project_id = ?";
-        params.push(project_id);
-      }
-      
-      query += " ORDER BY i.created_at DESC";
-      
-      const invoices = db.prepare(query).all(...params);
-      
-      // Fetch all invoice items in bulk to avoid N+1 queries
-      const invoiceIds = invoices.map((inv: any) => inv.id);
-      let allItems: any[] = [];
-      if (invoiceIds.length > 0) {
-        allItems = db.prepare(`SELECT * FROM invoice_items WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`).all(...invoiceIds);
-      }
+        ORDER BY i.created_at DESC
+      `).all();
       
       const invoicesWithItems = invoices.map((inv: any) => {
-        return { 
-          ...inv, 
-          items: allItems.filter((item: any) => item.invoice_id === inv.id) 
-        };
+        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(inv.id);
+        return { ...inv, items };
       });
       
       res.json(invoicesWithItems);
@@ -2728,25 +2631,45 @@ async function startServer() {
       const { 
         project_id, amount, description, status, due_date, 
         invoice_number, tax_amount, total_amount, issue_date,
-        seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         items 
       } = req.body;
       
       const id = `inv${Date.now()}`;
       const created_at = new Date().toISOString();
       
+      // Fetch default seller info from settings if not provided
+      let finalSellerName = seller_name;
+      let finalSellerAddress = seller_address;
+      let finalSellerSiret = seller_siret;
+      let finalSellerVatNumber = seller_vat_number;
+      let finalSellerIban = seller_iban;
+      let finalSellerBic = seller_bic;
+
+      if (!finalSellerName || !finalSellerAddress || !finalSellerSiret) {
+        const settings = db.prepare("SELECT * FROM settings LIMIT 1").get() as any;
+        if (settings) {
+          finalSellerName = finalSellerName || settings.agencyName;
+          finalSellerAddress = finalSellerAddress || settings.address;
+          finalSellerSiret = finalSellerSiret || settings.siret;
+          finalSellerVatNumber = finalSellerVatNumber || settings.vatNumber;
+          finalSellerIban = finalSellerIban || settings.seller_iban;
+          finalSellerBic = finalSellerBic || settings.seller_bic;
+        }
+      }
+
       const insertInvoice = db.transaction(() => {
         db.prepare(`
           INSERT INTO invoices (
             id, invoice_number, project_id, amount, tax_amount, total_amount, 
             status, due_date, issue_date, description, created_at,
-            seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, invoice_number || null, project_id, amount || 0, tax_amount || 0, total_amount || 0,
           status || 'Draft', due_date, issue_date || created_at.split('T')[0], 
           description || '', created_at,
-          seller_siret || null, seller_vat_number || null, seller_iban || null, seller_bic || null, vat_rate || 20
+          finalSellerName || null, finalSellerAddress || null, finalSellerSiret || null, finalSellerVatNumber || null, finalSellerIban || null, finalSellerBic || null, vat_rate || 20
         );
 
         if (items && Array.isArray(items)) {
@@ -2755,7 +2678,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?)
           `);
           for (const item of items) {
-            stmt.run(`ii${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
+            stmt.run(`ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
           }
         }
       });
@@ -2783,7 +2706,7 @@ async function startServer() {
       const { 
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
-        seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         items
       } = req.body;
       
@@ -2792,12 +2715,12 @@ async function startServer() {
           UPDATE invoices 
           SET amount = ?, description = ?, status = ?, due_date = ?,
               invoice_number = ?, tax_amount = ?, total_amount = ?, issue_date = ?,
-              seller_siret = ?, seller_vat_number = ?, seller_iban = ?, seller_bic = ?, vat_rate = ?
+              seller_name = ?, seller_address = ?, seller_siret = ?, seller_vat_number = ?, seller_iban = ?, seller_bic = ?, vat_rate = ?
           WHERE id = ?
         `).run(
           amount, description, status, due_date,
           invoice_number, tax_amount, total_amount, issue_date,
-          seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+          seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
           id
         );
 
@@ -2809,7 +2732,7 @@ async function startServer() {
             VALUES (?, ?, ?, ?, ?, ?)
           `);
           for (const item of items) {
-            stmt.run(item.id || `ii${Date.now()}${Math.random().toString(36).substring(2, 7)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
+            stmt.run(item.id || `ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
           }
         }
       });
@@ -2855,43 +2778,197 @@ async function startServer() {
 
   app.get("/api/address-search", async (req, res) => {
     try {
-      const { q } = req.query;
-      if (!q) {
-        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      const { q, banId } = req.query;
+      
+      if (!q && !banId) {
+        return res.status(400).json({ error: "Query parameter 'q' or 'banId' is required" });
       }
-      const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q as string)}&limit=5`;
-      console.log(`Fetching addresses for query: ${q}, URL: ${url}`);
-      const response = await fetchWithTimeout(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Archimanager/1.0)'
+
+      let data: any;
+
+      // If we have a banId, try to get the specific address details first
+      if (banId) {
+        console.log(`Searching for address by banId: ${banId}`);
+        // Try BDNB first for consistency
+        const bdnbUrl = `https://api.bdnb.io/v1/bdnb/donnees/rel_batiment_groupe_adresse?cle_interop_adr=eq.${banId}&select=cle_interop_adr,libelle_adr,code_commune_insee,code_postal,nom_commune`;
+        try {
+          const bdnbRes = await fetchWithTimeout(bdnbUrl, { headers: { 'Accept': 'application/json' } }, 5000);
+          if (bdnbRes.ok) {
+            const bdnbData = await bdnbRes.json();
+            if (Array.isArray(bdnbData) && bdnbData.length > 0) {
+              data = bdnbData;
+            }
+          }
+        } catch (e) {
+          console.warn("BDNB lookup by banId failed, falling back to standard geocoder");
         }
-      }, 8000); // 8 second timeout
+      }
+
+      // If no data yet and we have a query string
+      if (!data && q) {
+        // Use the BDNB geocoder
+        let url = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=5`;
+        console.log(`Fetching addresses for query: ${q}, URL: ${url}`);
+        
+        let response = await fetchWithTimeout(url, {
+          headers: { 'Accept': 'application/json' }
+        }, 15000);
+        
+        if (response.ok) {
+          try {
+            const text = await response.text();
+            data = JSON.parse(text);
+          } catch (e) {
+            console.warn(`Failed to parse BDNB JSON.`);
+          }
+        }
+
+        // Fallback to api-adresse.data.gouv.fr if BDNB fails or returns no results
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          console.log(`BDNB returned no results, trying api-adresse.data.gouv.fr for query: ${q}`);
+          url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q as string)}&limit=5`;
+          response = await fetchWithTimeout(url, {
+            headers: { 'Accept': 'application/json' }
+          }, 15000);
+          
+          if (response.ok) {
+            const fallbackData = await response.json();
+            if (fallbackData.features) {
+              data = fallbackData.features.map((f: any) => ({
+                cle_interop_adr: f.properties.id,
+                libelle_adr: f.properties.label,
+                code_commune_insee: f.properties.citycode,
+                code_postal: f.properties.postcode,
+                nom_commune: f.properties.city,
+                score: f.properties.score,
+                lat: f.geometry.coordinates[1],
+                lon: f.geometry.coordinates[0]
+              }));
+            }
+          }
+        }
+      }
+      
+      const results = Array.isArray(data) ? data : [];
+      if (!Array.isArray(data)) {
+        console.warn(`Geocoder returned non-array data: ${JSON.stringify(data).substring(0, 200)}`);
+      }
+      
+      const features = results.map((item: any) => ({
+        properties: {
+          label: item.libelle_adr || item.nom_commune || "Unknown address",
+          score: item.score || 0,
+          id: item.cle_interop_adr || "",
+          name: item.libelle_adr || "",
+          postcode: item.code_postal || "",
+          citycode: item.code_commune_insee || "",
+          city: item.nom_commune || "",
+          context: `${item.code_postal || ""} ${item.nom_commune || ""}`,
+          importance: item.score || 0
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [item.lon || 0, item.lat || 0]
+        }
+      }));
+
+      res.json({ features });
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.error("BDNB Geocodage request timed out");
+        return res.status(504).json({ error: "BDNB Geocodage request timed out" });
+      }
+      console.error("Error in /api/address-search:", error);
+      res.status(500).json({ error: "Failed to fetch addresses" });
+    }
+  });
+
+  // Proxy for Urban Planning (GPU) API
+  app.get("/api/urban-planning/documents", async (req, res) => {
+    try {
+      const { insee, grid, partition } = req.query;
+      let url = "";
+      
+      if (grid) {
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${grid}&status=document.production`;
+      } else if (partition) {
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?partition=${partition}&status=document.production`;
+      } else if (insee) {
+        // Default to grid search if only insee is provided
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&status=document.production`;
+      } else {
+        return res.status(400).json({ error: "Missing search parameters (insee, grid, or partition)" });
+      }
+
+      console.log(`[GPU] Fetching documents: ${url}`);
+      const response = await fetchWithTimeout(url, {}, 10000);
       
       if (!response.ok) {
-        const errorText = await response.text().catch(() => 'No response body');
-        console.error(`Address API error: ${response.status} ${response.statusText} ${errorText}`);
-        return res.status(response.status).json({ 
-          error: `Address API error: ${response.status}`, 
-          details: errorText || 'No details provided' 
-        });
+        return res.status(response.status).json({ error: `GPU API error: ${response.status}` });
       }
-      
+
       const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        res.json(data);
+      } else {
         const text = await response.text();
-        console.error(`Address API returned non-JSON: ${text}`);
-        return res.status(502).json({ error: "Address API returned invalid response format" });
+        console.error(`[GPU] Non-JSON response: ${text.substring(0, 200)}`);
+        res.status(502).json({ error: "Invalid response from GPU API", details: text.substring(0, 200) });
+      }
+    } catch (error: any) {
+      console.error("[GPU] Proxy Error:", error);
+      res.status(500).json({ error: "Internal server error during GPU lookup" });
+    }
+  });
+
+  app.get("/api/urban-planning/details/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const url = `https://www.geoportail-urbanisme.gouv.fr/api/document/${id}/details`;
+      
+      console.log(`[GPU] Fetching details for ${id}`);
+      const response = await fetchWithTimeout(url, {}, 10000);
+      
+      if (!response.ok) {
+        return res.status(response.status).json({ error: `GPU Details error: ${response.status}` });
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        res.json(data);
+      } else {
+        res.status(502).json({ error: "Invalid response from GPU Details API" });
+      }
+    } catch (error: any) {
+      console.error("[GPU] Details Proxy Error:", error);
+      res.status(500).json({ error: "Internal server error during GPU details lookup" });
+    }
+  });
+
+  // Proxy for Historical Monuments (Culture API)
+  app.get("/api/historical-monuments", async (req, res) => {
+    try {
+      const { lat, lon, distance = 1000 } = req.query;
+      if (!lat || !lon) {
+        return res.status(400).json({ error: "Latitude and longitude are required" });
+      }
+
+      const url = `https://data.culture.gouv.fr/api/records/1.0/search/?dataset=liste-des-immeubles-proteges-au-titre-des-monuments-historiques&q=&geofilter.distance=${lat},${lon},${distance}&rows=10&sort=dist`;
+      
+      console.log(`[Culture] Fetching monuments: ${url}`);
+      const response = await fetchWithTimeout(url, {}, 10000);
+      
+      if (!response.ok) {
+        return res.status(response.status).json({ error: `Culture API error: ${response.status}` });
       }
 
       const data = await response.json();
       res.json(data);
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.error("Address API request timed out");
-        return res.status(504).json({ error: "Address API request timed out" });
-      }
-      console.error("Error in /api/address-search:", error);
-      res.status(500).json({ error: "Failed to fetch addresses" });
+      console.error("[Culture] Proxy Error:", error);
+      res.status(500).json({ error: "Internal server error during Culture API lookup" });
     }
   });
 
@@ -2996,7 +3073,7 @@ async function startServer() {
 
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
+        port: parseInt(process.env.SMTP_PORT || '587'),
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
@@ -3082,7 +3159,7 @@ async function startServer() {
       const { reportId } = req.params;
       const { category, note_number, responsible_company, issue_date, due_date } = req.body;
       const id = `sn${Date.now()}`;
-      db.prepare("INSERT INTO site_report_notes (id, report_id, category, note_number, responsible_company, issue_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, reportId, category, note_number, responsible_company, issue_date, due_date, 'open');
+      db.prepare("INSERT INTO site_report_notes (id, report_id, category, note_number, responsible_company, issue_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, reportId, category, note_number, responsible_company, issue_date, due_date);
       res.status(201).json({ id });
     } catch (error) {
       res.status(500).json({ error: "Failed to create note" });
@@ -3140,96 +3217,146 @@ async function startServer() {
     }
   });
 
-  app.get("/api/activities", (req, res) => {
+  app.get("/api/projects/:projectId/cctp", (req, res) => {
     try {
-      const activities = db.prepare("SELECT * FROM activities ORDER BY timestamp DESC").all();
-      res.json(activities.map(a => ({ ...a, attachments: a.attachments ? JSON.parse(a.attachments) : [] })));
+      const { projectId } = req.params;
+      const cctp = db.prepare("SELECT * FROM cctps WHERE project_id = ?").get(projectId) as any;
+      if (cctp) {
+        res.json(JSON.parse(cctp.data));
+      } else {
+        res.status(404).json({ error: "CCTP not found" });
+      }
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch activities" });
+      res.status(500).json({ error: "Failed to fetch CCTP" });
     }
   });
 
-  app.post("/api/activities", (req, res) => {
+  app.post("/api/projects/:projectId/cctp", (req, res) => {
     try {
-      const { id, user_id, action, target, timestamp, category, type, attachments } = req.body;
-      db.prepare("INSERT INTO activities (id, user_id, action, target, timestamp, category, type, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, user_id, action, target, timestamp, category, type, JSON.stringify(attachments || []));
-      res.status(201).json({ success: true });
+      const { projectId } = req.params;
+      const data = req.body;
+      const id = data.id === 'new' ? `cctp${Date.now()}` : data.id;
+      data.id = id;
+      
+      const existing = db.prepare("SELECT id FROM cctps WHERE project_id = ?").get(projectId);
+      if (existing) {
+        db.prepare("UPDATE cctps SET data = ? WHERE project_id = ?").run(JSON.stringify(data), projectId);
+      } else {
+        db.prepare("INSERT INTO cctps (id, project_id, data) VALUES (?, ?, ?)").run(id, projectId, JSON.stringify(data));
+      }
+      res.json(data);
     } catch (error) {
-      res.status(500).json({ error: "Failed to create activity" });
+      res.status(500).json({ error: "Failed to save CCTP" });
     }
   });
 
-  app.get("/api/messages", (req, res) => {
+  app.get("/api/projects/:projectId/dpgf", (req, res) => {
     try {
-      const messages = db.prepare("SELECT * FROM messages ORDER BY timestamp DESC").all();
-      res.json(messages);
+      const { projectId } = req.params;
+      const dpgf = db.prepare("SELECT * FROM dpgfs WHERE project_id = ?").get(projectId) as any;
+      if (dpgf) {
+        res.json(JSON.parse(dpgf.data));
+      } else {
+        res.status(404).json({ error: "DPGF not found" });
+      }
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch messages" });
+      res.status(500).json({ error: "Failed to fetch DPGF" });
     }
   });
 
-  app.post("/api/messages", (req, res) => {
+  app.post("/api/projects/:projectId/dpgf", (req, res) => {
     try {
-      const { id, sender_id, recipient_id, content, type, file_url, timestamp } = req.body;
-      db.prepare("INSERT INTO messages (id, sender_id, recipient_id, content, type, file_url, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, sender_id, recipient_id, content, type, file_url, timestamp);
-      res.status(201).json({ success: true });
+      const { projectId } = req.params;
+      const data = req.body;
+      const id = data.id === 'new' ? `dpgf${Date.now()}` : data.id;
+      data.id = id;
+      
+      const existing = db.prepare("SELECT id FROM dpgfs WHERE project_id = ?").get(projectId);
+      if (existing) {
+        db.prepare("UPDATE dpgfs SET data = ? WHERE project_id = ?").run(JSON.stringify(data), projectId);
+      } else {
+        db.prepare("INSERT INTO dpgfs (id, project_id, data) VALUES (?, ?, ?)").run(id, projectId, JSON.stringify(data));
+      }
+      res.json(data);
     } catch (error) {
-      res.status(500).json({ error: "Failed to create message" });
+      res.status(500).json({ error: "Failed to save DPGF" });
     }
   });
 
-  app.post("/api/upload", upload.single('file'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    res.json({ file_url: `/uploads/${req.file.filename}` });
-  });
-
-  app.get("/api/notifications/:userId", (req, res) => {
+  app.get("/api/settings", (req, res) => {
     try {
-      const { userId } = req.params;
-      const notifications = db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY timestamp DESC").all(userId);
-      res.json(notifications);
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+      if (settings) {
+        res.json(settings);
+      } else {
+        res.json({ id: 'general' });
+      }
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch notifications" });
+      res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
 
-  app.post("/api/notifications", (req, res) => {
+  app.put("/api/settings", (req, res) => {
     try {
-      const { id, user_id, content, timestamp } = req.body;
-      db.prepare("INSERT INTO notifications (id, user_id, content, timestamp) VALUES (?, ?, ?, ?)").run(id, user_id, content, timestamp);
-      res.status(201).json({ success: true });
+      const data = req.body;
+      const existing = db.prepare("SELECT id FROM settings WHERE id = 'general'").get();
+      if (existing) {
+        const columns = Object.keys(data).filter(k => k !== 'id');
+        const setClause = columns.map(c => `${c} = ?`).join(', ');
+        const values = columns.map(c => data[c]);
+        db.prepare(`UPDATE settings SET ${setClause} WHERE id = 'general'`).run(...values, 'general');
+      } else {
+        const columns = Object.keys(data);
+        if (!columns.includes('id')) {
+          columns.push('id');
+          data.id = 'general';
+        }
+        const placeholders = columns.map(() => '?').join(', ');
+        const values = columns.map(c => data[c]);
+        db.prepare(`INSERT INTO settings (${columns.join(', ')}) VALUES (${placeholders})`).run(...values);
+      }
+      res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: "Failed to create notification" });
+      console.error("Error updating settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
     }
   });
 
-  app.get("/api/docs", (req, res) => {
-    res.json({
-      message: "API Documentation",
-      routes: [
-        "/api/team",
-        "/api/activities",
-        "/api/messages",
-        "/api/upload",
-        "/api/notifications/:userId"
-      ]
-    });
+  app.get("/api/projects/:projectId/lots", (req, res) => {
+    try {
+      const { projectId } = req.params;
+      const lots = db.prepare("SELECT * FROM project_lots WHERE project_id = ?").all(projectId);
+      res.json(lots);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch lots" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/lots", (req, res) => {
+    try {
+      const { projectId } = req.params;
+      const { id, lot_number, lot_title } = req.body;
+      const lotId = id || `lot${Date.now()}`;
+      db.prepare("INSERT INTO project_lots (id, project_id, lot_number, lot_title) VALUES (?, ?, ?, ?)").run(lotId, projectId, lot_number, lot_title);
+      res.status(201).json({ id: lotId });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create lot" });
+    }
+  });
+
+  app.delete("/api/lots/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      db.prepare("DELETE FROM project_lots WHERE id = ?").run(id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete lot" });
+    }
   });
 
   // Catch-all for API routes to prevent falling through to Vite
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: "API route not found" });
-  });
-
-  // Global error handler
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(`Error on ${req.method} ${req.url}:`, err);
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({
-      error: message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
   });
 
   // Vite middleware for development
@@ -3246,7 +3373,7 @@ async function startServer() {
     });
   }
 
-  // Start listening after all routes and middleware are added
+  // Start listening after all middleware is set up
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

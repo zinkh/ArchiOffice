@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { IconSearch, IconUser } from '@tabler/icons-react';
+import { IconSearch, IconUser, IconPlus } from '@tabler/icons-react';
+import { Link } from 'react-router-dom';
 import { Contact } from '../types';
+import { cn } from '../lib/utils';
 
 interface ContactAutocompleteProps {
   contacts: Contact[];
   value: string; // contact_id
   onChange: (contactId: string) => void;
+  onAddNew?: () => void;
   placeholder?: string;
   className?: string;
+  inputClassName?: string;
+  addNewLabel?: string;
 }
 
-export function ContactAutocomplete({ contacts, value, onChange, placeholder, className }: ContactAutocompleteProps) {
+export function ContactAutocomplete({ contacts, value, onChange, onAddNew, placeholder, className, inputClassName, addNewLabel = "Add New Contact" }: ContactAutocompleteProps) {
   console.log('ContactAutocomplete contacts:', contacts);
   const [query, setQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -55,7 +60,7 @@ export function ContactAutocomplete({ contacts, value, onChange, placeholder, cl
       <div className="relative">
         <input
           type="text"
-          className="w-full px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-8"
+          className={cn("w-full px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-8 pr-8", inputClassName)}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -66,10 +71,39 @@ export function ContactAutocomplete({ contacts, value, onChange, placeholder, cl
           placeholder={placeholder || "Search contact..."}
         />
         <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" size={14} />
+        {onAddNew && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddNew();
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-colors"
+            title={addNewLabel}
+          >
+            <IconPlus size={14} />
+          </button>
+        )}
       </div>
 
-      {showSuggestions && query && filteredContacts.length > 0 && (
+      {showSuggestions && (
         <div className="absolute z-50 w-full mt-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          {onAddNew && (
+            <button
+              type="button"
+              onClick={() => {
+                onAddNew();
+                setShowSuggestions(false);
+              }}
+              className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 transition-colors border-b border-zinc-100 dark:border-zinc-700 text-blue-600 dark:text-blue-400 font-bold sticky top-0 bg-white dark:bg-zinc-800 z-10"
+            >
+              <div className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+                <IconPlus size={12} />
+              </div>
+              {addNewLabel}
+            </button>
+          )}
+
           {filteredContacts.map((contact) => (
             <button
               key={contact.id}
@@ -91,6 +125,22 @@ export function ContactAutocomplete({ contacts, value, onChange, placeholder, cl
               </div>
             </button>
           ))}
+          
+          {filteredContacts.length === 0 && !onAddNew && (
+            <div className="px-3 py-4 text-center text-zinc-500 text-xs italic">
+              No contacts found
+            </div>
+          )}
+
+          {!onAddNew && (
+            <Link
+              to="/contacts"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-center gap-2 transition-colors border-t border-zinc-100 dark:border-zinc-700 text-blue-600 dark:text-blue-400 font-medium sticky bottom-0 bg-white dark:bg-zinc-800"
+            >
+              <IconPlus size={14} />
+              {addNewLabel}
+            </Link>
+          )}
         </div>
       )}
     </div>

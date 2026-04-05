@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ContactModal } from '../components/ContactModal';
 import type { Tender, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
@@ -15,6 +16,7 @@ export default function Tenders() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingTender, setEditingTender] = useState<Tender | null>(null);
@@ -310,21 +312,18 @@ export default function Tenders() {
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Entité adjudicatrice</label>
                     </div>
-                    <select 
-                      required
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                      value={newTender.client || ''}
-                      onChange={e => setNewTender({...newTender, client: e.target.value})}
-                    >
-                      <option value="">Sélectionner un client</option>
-                      {contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage').map(c => (
-                        <option key={c.id} value={c.company_name || `${c.first_name} ${c.last_name}`}>{c.company_name || `${c.first_name} ${c.last_name}`}</option>
-                      ))}
-                      {/* Fallback if no clients found with category */}
-                      {contacts.filter(c => c.category !== 'Client' && c.category !== 'Maitre d\'ouvrage').length > 0 && contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage').length === 0 && contacts.map(c => (
-                        <option key={c.id} value={c.company_name || `${c.first_name} ${c.last_name}`}>{c.company_name || `${c.first_name} ${c.last_name}`}</option>
-                      ))}
-                    </select>
+                    <ContactAutocomplete 
+                      contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                      value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === newTender.client)?.id || ''}
+                      onChange={id => {
+                        const contact = contacts.find(c => c.id === id);
+                        if (contact) {
+                          setNewTender({...newTender, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                        }
+                      }}
+                      onAddNew={() => setIsContactModalOpen(true)}
+                      addNewLabel="Add New Client"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Representative (Mandataire)</label>
@@ -497,6 +496,7 @@ export default function Tenders() {
                             contacts={contacts}
                             value={spec.contact_id || ''}
                             onChange={val => updateSpecialty(idx, 'contact_id', val)}
+                            onAddNew={() => setIsContactModalOpen(true)}
                           />
                           <button 
                             type="button"
@@ -569,6 +569,23 @@ export default function Tenders() {
           </div>
         )}
       </AnimatePresence>
+
+      <ContactModal 
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        onSuccess={() => {
+          // Refetch contacts
+          const loadContacts = async () => {
+            try {
+              const data = await fetchJson<Contact[]>('/api/contacts');
+              setContacts(data);
+            } catch (err) {
+              console.error('Contacts fetch failed:', err);
+            }
+          };
+          loadContacts();
+        }}
+      />
     </div>
   );
 }

@@ -378,6 +378,8 @@ export interface Proposal {
   email_client?: string;
   adresse_terrain?: string;
   cp_ville_terrain?: string;
+  ban_id_terrain?: string;
+  city_code_terrain?: string;
   ref_cadastrale?: string;
   zone_plu?: string;
   surface_parcelle?: string;
@@ -497,6 +499,8 @@ export interface Invoice {
   description: string;
   created_at: string;
   // Factur-X / EN 16931 fields
+  seller_name?: string;
+  seller_address?: string;
   seller_siret?: string;
   seller_vat_number?: string;
   seller_iban?: string;

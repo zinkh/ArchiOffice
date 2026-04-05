@@ -13,7 +13,8 @@ import {
   IconFileSpreadsheet,
   IconFiles,
   IconSettings,
-  IconCommand
+  IconCommand,
+  IconCalculator
 } from '@tabler/icons-react';
 
 export const NAV_ITEMS = [
@@ -24,6 +25,7 @@ export const NAV_ITEMS = [
   { name: 'invoices', path: '/invoices', icon: IconFileInvoice },
   { name: 'tenders', path: '/tenders', icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconFileText },
+  { name: 'act', path: '/act', icon: IconCalculator },
   { name: 'gantt', path: '/gantt', icon: IconChartBar },
   { name: 'team', path: '/team', icon: IconUsers },
   { name: 'contacts', path: '/contacts', icon: IconAddressBook },

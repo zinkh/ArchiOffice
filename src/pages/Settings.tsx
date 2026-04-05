@@ -16,6 +16,8 @@ export default function Settings() {
     email: '',
     siret: '',
     vatNumber: '',
+    seller_iban: '',
+    seller_bic: '',
     currency: 'EUR',
     language: 'fr',
     senderOption: 'agency' as 'agency' | 'personal',
@@ -36,9 +38,13 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    db.settings.get('general').then(s => {
-      if (s) setSettings(prev => ({ ...prev, ...s }));
-    });
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(s => {
+        if (s) setSettings(prev => ({ ...prev, ...s }));
+        // Also sync to local Dexie for offline use if needed
+        db.settings.put(s);
+      });
     if (currentUser) {
       setUserSettings({
         senderOption: currentUser.senderOption || 'agency',
@@ -54,7 +60,16 @@ export default function Settings() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      // Save to server
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      
+      // Save to local Dexie
       await db.settings.put(settings);
+
       if (currentUser) {
         const updatedUser = { ...currentUser, ...userSettings } as any;
         await fetch(`/api/team/${currentUser.id}`, {
@@ -83,6 +98,8 @@ export default function Settings() {
         <input className="p-2 border rounded" placeholder={t('email')} value={settings.email} onChange={e => setSettings({...settings, email: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('siret')} value={settings.siret} onChange={e => setSettings({...settings, siret: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('vat_number')} value={settings.vatNumber} onChange={e => setSettings({...settings, vatNumber: e.target.value})} />
+        <input className="p-2 border rounded font-mono" placeholder="IBAN" value={settings.seller_iban} onChange={e => setSettings({...settings, seller_iban: e.target.value})} />
+        <input className="p-2 border rounded font-mono" placeholder="BIC" value={settings.seller_bic} onChange={e => setSettings({...settings, seller_bic: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('currency')} value={settings.currency} onChange={e => setSettings({...settings, currency: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('language')} value={settings.language} onChange={e => setSettings({...settings, language: e.target.value})} />
         <div className="flex flex-col gap-2">

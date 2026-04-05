@@ -10,6 +10,7 @@ import { db } from '../db';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { Link } from 'react-router-dom';
 
@@ -23,6 +24,7 @@ export default function Projects() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
@@ -822,11 +824,17 @@ export default function Projects() {
                       <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{selectedProject.name}</h2>
                     )}
                     {isEditing ? (
-                      <input 
-                        className="text-zinc-500 dark:text-zinc-400 bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-blue-500 outline-none w-full mt-1"
-                        value={editForm?.client ?? ''}
-                        placeholder="Client Name"
-                        onChange={e => setEditForm(prev => prev ? ({...prev, client: e.target.value}) : null)}
+                      <ContactAutocomplete 
+                        contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                        value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === editForm?.client)?.id || ''}
+                        onChange={id => {
+                          const contact = contacts.find(c => c.id === id);
+                          if (contact) {
+                            setEditForm(prev => prev ? ({...prev, client: contact.company_name || `${contact.first_name} ${contact.last_name}`}) : null);
+                          }
+                        }}
+                        onAddNew={() => setIsContactModalOpen(true)}
+                        addNewLabel="Add New Client"
                       />
                     ) : (
                       <p className="text-zinc-500 dark:text-zinc-400">{selectedProject.client}</p>
@@ -1119,6 +1127,7 @@ export default function Projects() {
                                       };
                                       setEditForm(prev => prev ? ({ ...prev, cotraitants_list: newList }) : null);
                                     }}
+                                    onAddNew={() => setIsContactModalOpen(true)}
                                   />
                                 ) : (
                                   cot.contact_name || '---'
@@ -1334,6 +1343,7 @@ export default function Projects() {
                                       };
                                       setEditForm(prev => prev ? ({ ...prev, lots_list: newList }) : null);
                                     }}
+                                    onAddNew={() => setIsContactModalOpen(true)}
                                   />
                                 ) : (
                                   lot.contact_name || '---'
@@ -1543,6 +1553,14 @@ export default function Projects() {
           </motion.div>
         </div>
       )}
+
+      <ContactModal 
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        onSuccess={(newContact) => {
+          fetchContacts();
+        }}
+      />
     </div>
   );
 }
