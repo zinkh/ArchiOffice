@@ -12,7 +12,22 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
-import { Card, Title, Text, DonutChart, BarChart, Legend } from '@tremor/react';
+import { 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  BarChart as RechartsBarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  Legend as RechartsLegend,
+  CartesianGrid
+} from 'recharts';
+
+const COLORS = ['#10b981', '#3b82f6', '#eab308', '#64748b']; // green, blue, yellow, slate
+const BAR_COLOR = '#8b5cf6'; // violet
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -76,45 +91,99 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: i * 0.1 }}
-          className="card flex flex-col gap-2"
+          className={cn(
+            "card flex flex-col gap-2 border-l-4 relative overflow-hidden",
+            stat.color === 'text-blue-500' ? "border-l-blue-500 bg-blue-50/30 dark:bg-blue-900/10" :
+            stat.color === 'text-yellow-500' ? "border-l-yellow-500 bg-yellow-50/30 dark:bg-yellow-900/10" :
+            stat.color === 'text-green-500' ? "border-l-green-500 bg-green-50/30 dark:bg-green-900/10" :
+            "border-l-red-500 bg-red-50/30 dark:bg-red-900/10"
+          )}
         >
-          <p className="text-zinc-500 dark:text-zinc-400 text-xs font-semibold uppercase tracking-wider">{t(stat.label)}</p>
+          <div className="flex justify-between items-start">
+            <p className="text-zinc-500 dark:text-zinc-400 text-xs font-semibold uppercase tracking-wider">{t(stat.label)}</p>
+            <stat.icon size={20} className={stat.color} />
+          </div>
           <p className="text-zinc-900 dark:text-zinc-100 text-4xl font-bold leading-none tracking-tight">{stat.value}</p>
           <div className="flex items-center gap-1 text-zinc-900 dark:text-zinc-100 text-sm font-medium">
-            <IconTrendingUp size={16} />
-            <span>{stat.trend}</span>
+            <IconTrendingUp size={16} className={stat.color} />
+            <span className={stat.color}>{stat.trend}</span>
           </div>
+          
+          {/* Subtle background icon decoration */}
+          <stat.icon 
+            size={80} 
+            className={cn(
+              "absolute -right-4 -bottom-4 opacity-5 dark:opacity-10",
+              stat.color
+            )} 
+          />
         </motion.div>
       ))}
 
-      <Card className="md:col-span-2">
-        <Title>Project Status</Title>
-        <DonutChart
-          className="mt-6 h-60"
-          data={statusData}
-          category="value"
-          index="name"
-          colors={['green', 'blue', 'yellow', 'slate']}
-        />
-        <Legend
-          className="mt-6"
-          categories={statusData.map(d => d.name)}
-          colors={['green', 'blue', 'yellow', 'slate']}
-        />
-      </Card>
+      <div className="md:col-span-2 card">
+        <h2 className="text-zinc-900 dark:text-zinc-100 text-lg font-bold mb-4">Project Status</h2>
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={statusData}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={5}
+                dataKey="value"
+              >
+                {statusData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.9)', 
+                  borderRadius: '8px', 
+                  border: 'none',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                }}
+              />
+              <RechartsLegend verticalAlign="bottom" height={36}/>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
-      <Card className="md:col-span-2">
-        <Title>Top Categories</Title>
-        <BarChart
-          className="mt-6 h-60"
-          data={categoryData}
-          index="name"
-          categories={['value']}
-          colors={['violet']}
-          layout="vertical"
-          yAxisWidth={100}
-        />
-      </Card>
+      <div className="md:col-span-2 card">
+        <h2 className="text-zinc-900 dark:text-zinc-100 text-lg font-bold mb-4">Top Categories</h2>
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <RechartsBarChart
+              data={categoryData}
+              layout="vertical"
+              margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e5e7eb" />
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                width={80} 
+                fontSize={12}
+                tick={{ fill: '#71717a' }}
+              />
+              <Tooltip 
+                cursor={{ fill: 'rgba(0, 0, 0, 0.05)' }}
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.9)', 
+                  borderRadius: '8px', 
+                  border: 'none',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                }}
+              />
+              <Bar dataKey="value" fill={BAR_COLOR} radius={[0, 4, 4, 0]} barSize={20} />
+            </RechartsBarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
       <div className="md:col-span-4 card">
         <div className="flex justify-between items-end mb-6">

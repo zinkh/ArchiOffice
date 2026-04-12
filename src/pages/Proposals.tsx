@@ -12,6 +12,8 @@ import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
+import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
+import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import MilestoneGantt from '../components/MilestoneGantt';
 
 const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
@@ -228,7 +230,7 @@ export default function Proposals() {
     setNewProposal({ ...newProposal, specialties_list: newList });
   };
 
-  const updateSpecialty = (index: number, field: string, value: string) => {
+  const updateSpecialty = (index: number, field: string, value: string | number) => {
     const newList = [...(newProposal.specialties_list || [])];
     newList[index] = { ...newList[index], [field]: value } as any;
     setNewProposal({ ...newProposal, specialties_list: newList });
@@ -423,7 +425,7 @@ export default function Proposals() {
                 </button>
               </div>
               
-              <form id="proposal-form" onSubmit={handleSubmitProposal} className="flex-1 overflow-y-auto p-6 space-y-8 no-scrollbar">
+              <form id="proposal-form" onSubmit={handleSubmitProposal} className="flex-1 overflow-y-auto p-6 pb-64 space-y-8 no-scrollbar">
                 {/* Section 1: General Info */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
@@ -612,17 +614,19 @@ export default function Proposals() {
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
-                      Risques
+                      Informations d'urbanisme et risques
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <RNBInfo address={newProposal.adresse_terrain || ''} />
                       <BDNBInfo 
                         address={newProposal.adresse_terrain || ''} 
                         banId={newProposal.ban_id_terrain}
                         cityCode={newProposal.city_code_terrain}
                       />
-                      <GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
                       <CadastreDownload address={newProposal.adresse_terrain || ''} />
+                      <UrbanPlanningInfo address={newProposal.adresse_terrain || ''} />
+                      <GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                      <HistoricalMonuments address={newProposal.adresse_terrain || ''} />
                     </div>
 
                     <div className="space-y-4">
@@ -672,17 +676,24 @@ export default function Proposals() {
                     </button>
                   </div>
                   
-                  <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden bg-white dark:bg-zinc-900/50">
+                  <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-visible bg-white dark:bg-zinc-900/50">
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                         <tr>
                           <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Spécialité</th>
                           <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Contact</th>
+                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Arch %</th>
+                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Arch €</th>
+                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Cotr %</th>
+                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Cotr €</th>
                           <th className="px-4 py-3 text-right font-bold text-zinc-500 uppercase tracking-wider w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
-                        {newProposal.specialties_list?.map((spec, idx) => (
+                        {newProposal.specialties_list?.map((spec, idx) => {
+                          const archAmount = (newProposal.amount || 0) * ((spec.architect_percentage || 0) / 100);
+                          const cotrAmount = (newProposal.amount || 0) * ((spec.cotraitant_percentage || 0) / 100);
+                          return (
                           <tr key={spec.id || idx}>
                             <td className="px-4 py-3">
                               <input 
@@ -700,6 +711,28 @@ export default function Proposals() {
                                 onAddNew={() => setIsContactModalOpen(true)}
                               />
                             </td>
+                            <td className="px-4 py-3">
+                              <input 
+                                type="number"
+                                className="w-16 bg-transparent outline-none focus:ring-2 focus:ring-blue-500/20 rounded-lg px-2 py-1 text-zinc-900 dark:text-white text-center"
+                                value={spec.architect_percentage || ''}
+                                onChange={e => updateSpecialty(idx, 'architect_percentage', Number(e.target.value))}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-center font-mono text-zinc-600 dark:text-zinc-300">
+                              {formatCurrency(archAmount)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <input 
+                                type="number"
+                                className="w-16 bg-transparent outline-none focus:ring-2 focus:ring-blue-500/20 rounded-lg px-2 py-1 text-zinc-900 dark:text-white text-center"
+                                value={spec.cotraitant_percentage || ''}
+                                onChange={e => updateSpecialty(idx, 'cotraitant_percentage', Number(e.target.value))}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-center font-mono text-zinc-600 dark:text-zinc-300">
+                              {formatCurrency(cotrAmount)}
+                            </td>
                             <td className="px-4 py-3 text-right">
                               <button 
                                 type="button"
@@ -710,10 +743,11 @@ export default function Proposals() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                         {(!newProposal.specialties_list || newProposal.specialties_list.length === 0) && (
                           <tr>
-                            <td colSpan={3} className="px-4 py-8 text-center text-zinc-400 italic">
+                            <td colSpan={7} className="px-4 py-8 text-center text-zinc-400 italic">
                               Aucun cotraitant ajouté.
                             </td>
                           </tr>

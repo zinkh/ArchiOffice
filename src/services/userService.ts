@@ -3,17 +3,34 @@ export interface UserProfile {
   name: string;
   email: string;
   system_role: 'admin' | 'pm' | 'user';
+  role?: string;
+  avatar?: string;
 }
 
 export const getAllUsers = async (): Promise<UserProfile[]> => {
-  console.log('Fetching all users');
-  return [
-    { id: '1', name: 'Admin User', email: 'admin@example.com', system_role: 'admin' },
-    { id: '2', name: 'PM User', email: 'pm@example.com', system_role: 'pm' },
-    { id: '3', name: 'Regular User', email: 'user@example.com', system_role: 'user' },
-  ];
+  const res = await fetch('/api/team');
+  if (!res.ok) throw new Error('Failed to fetch users');
+  return res.json();
 };
 
 export const updateUserRole = async (id: string, role: 'admin' | 'pm' | 'user'): Promise<void> => {
-  console.log(`Updating user ${id} to role ${role}`);
+  const res = await fetch(`/api/team/${id}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) throw new Error('Failed to update role');
+};
+
+export const createUser = async (user: Omit<UserProfile, 'id'>): Promise<UserProfile> => {
+  const res = await fetch('/api/team', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(user),
+  });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to create user');
+  }
+  return res.json();
 };

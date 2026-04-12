@@ -25,6 +25,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     seller_vat_number: '',
     seller_iban: '',
     seller_bic: '',
+    currency: 'EUR',
     items: [
       { id: '1', description: initialData?.description || 'Prestations architecturales', quantity: 1, unit_price: initialData?.amount || 0, vat_rate: 20 }
     ],
@@ -44,7 +45,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             seller_siret: settings.siret || prev.seller_siret,
             seller_vat_number: settings.vatNumber || prev.seller_vat_number,
             seller_iban: settings.seller_iban || prev.seller_iban,
-            seller_bic: settings.seller_bic || prev.seller_bic
+            seller_bic: settings.seller_bic || prev.seller_bic,
+            currency: settings.currency || prev.currency
           }));
         }
       });
@@ -130,7 +132,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       </ram:BuyerTradeParty>
     </ram:ApplicableHeaderTradeAgreement>
     <ram:ApplicableHeaderTradeSettlement>
-      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:InvoiceCurrencyCode>${data.currency || 'EUR'}</ram:InvoiceCurrencyCode>
       <ram:SpecifiedTradeSettlementPaymentMeans>
         <ram:TypeCode>30</ram:TypeCode>
         <ram:PayeePartyCredential>
@@ -151,7 +153,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         <ram:LineTotalAmount>${net.toFixed(2)}</ram:LineTotalAmount>
         <ram:TaxBasisTotalAmount>${net.toFixed(2)}</ram:TaxBasisTotalAmount>
-        <ram:TaxTotalAmount currencyID="EUR">${vat.toFixed(2)}</ram:TaxTotalAmount>
+        <ram:TaxTotalAmount currencyID="${data.currency || 'EUR'}">${vat.toFixed(2)}</ram:TaxTotalAmount>
         <ram:GrandTotalAmount>${gross.toFixed(2)}</ram:GrandTotalAmount>
         <ram:DuePayableAmount>${gross.toFixed(2)}</ram:DuePayableAmount>
       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
@@ -377,8 +379,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         <tr key={idx} className="border-b border-zinc-100">
                           <td className="py-3">{item.description}</td>
                           <td className="py-3 text-center">{item.quantity}</td>
-                          <td className="py-3 text-right">{formatCurrency(item.unit_price)}</td>
-                          <td className="py-3 text-right font-bold">{formatCurrency(item.quantity * item.unit_price)}</td>
+                          <td className="py-3 text-right">{formatCurrency(item.unit_price, data.currency)}</td>
+                          <td className="py-3 text-right font-bold">{formatCurrency(item.quantity * item.unit_price, data.currency)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -389,15 +391,15 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 <div className="ml-auto w-[250px] mt-8 space-y-2 text-[10pt]">
                   <div className="flex justify-between">
                     <span>Total HT</span>
-                    <span>{formatCurrency(net)}</span>
+                    <span>{formatCurrency(net, data.currency)}</span>
                   </div>
                   <div className="flex justify-between text-zinc-500">
                     <span>TVA ({data.vat_rate}%)</span>
-                    <span>{formatCurrency(vat)}</span>
+                    <span>{formatCurrency(vat, data.currency)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2">
                     <span>Total TTC</span>
-                    <span>{formatCurrency(gross)}</span>
+                    <span>{formatCurrency(gross, data.currency)}</span>
                   </div>
                 </div>
 
@@ -582,15 +584,15 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span>Total HT</span>
-                        <span>{formatCurrency(net)}</span>
+                        <span>{formatCurrency(net, data.currency)}</span>
                       </div>
                       <div className="flex justify-between text-sm opacity-80">
                         <span>TVA ({data.vat_rate}%)</span>
-                        <span>{formatCurrency(vat)}</span>
+                        <span>{formatCurrency(vat, data.currency)}</span>
                       </div>
                       <div className="flex justify-between text-xl font-bold border-t border-white/20 pt-2">
                         <span>Total TTC</span>
-                        <span>{formatCurrency(gross)}</span>
+                        <span>{formatCurrency(gross, data.currency)}</span>
                       </div>
                     </div>
                   </div>

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconAlertTriangle, IconEdit, IconFileCode } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconAlertTriangle, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -12,10 +12,14 @@ export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [currency, setCurrency] = useState('EUR');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isGroupedByProject, setIsGroupedByProject] = useState(true);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Invoice | 'project_name'; direction: 'asc' | 'desc' } | null>({ key: 'due_date', direction: 'desc' });
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
     project_id: '',
     amount: 0,
@@ -27,12 +31,18 @@ export default function Invoices() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [invoicesData, projectsData] = await Promise.all([
+        const [invoicesData, projectsData, settingsData] = await Promise.all([
           fetchJson<Invoice[]>('/api/invoices'),
-          fetchJson<Project[]>('/api/projects')
+          fetchJson<Project[]>('/api/projects'),
+          fetchJson<any>('/api/settings')
         ]);
-        setInvoices(invoicesData);
+        const enrichedInvoices = invoicesData.map(inv => ({
+          ...inv,
+          project_name: projectsData.find(p => p.id === inv.project_id)?.name || inv.project_name
+        }));
+        setInvoices(enrichedInvoices);
         setProjects(projectsData);
+        if (settingsData?.currency) setCurrency(settingsData.currency);
       } catch (err) {
         console.error('Invoices data fetch failed:', err);
       }
@@ -43,7 +53,11 @@ export default function Invoices() {
   const fetchInvoices = async () => {
     try {
       const data = await fetchJson<Invoice[]>('/api/invoices');
-      setInvoices(data);
+      const enriched = data.map(inv => ({
+        ...inv,
+        project_name: projects.find(p => p.id === inv.project_id)?.name || inv.project_name
+      }));
+      setInvoices(enriched);
     } catch (err) {
       console.error('Invoices fetch failed:', err);
     }
@@ -65,7 +79,11 @@ export default function Invoices() {
         method: 'POST',
         body: JSON.stringify(newInvoice)
       });
-      setInvoices([saved, ...invoices]);
+      const enrichedSaved = {
+        ...saved,
+        project_name: projects.find(p => p.id === saved.project_id)?.name || saved.project_name
+      };
+      setInvoices([enrichedSaved, ...invoices]);
       setIsModalOpen(false);
       setNewInvoice({ 
         project_id: '', 
@@ -85,7 +103,11 @@ export default function Invoices() {
         method: 'PUT',
         body: JSON.stringify({ ...invoice, status: newStatus })
       });
-      setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
+      const enrichedUpdated = {
+        ...updated,
+        project_name: projects.find(p => p.id === updated.project_id)?.name || updated.project_name
+      };
+      setInvoices(invoices.map(i => i.id === enrichedUpdated.id ? enrichedUpdated : i));
     } catch (err) {
       console.error('Update invoice status failed:', err);
     }
@@ -96,10 +118,61 @@ export default function Invoices() {
     setIsGeneratorOpen(true);
   };
 
+  const toggleProjectExpansion = (projectId: string) => {
+    const newExpanded = new Set(expandedProjects);
+    if (newExpanded.has(projectId)) {
+      newExpanded.delete(projectId);
+    } else {
+      newExpanded.add(projectId);
+    }
+    setExpandedProjects(newExpanded);
+  };
+
+  const handleSort = (key: keyof Invoice | 'project_name') => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortedInvoices = (list: Invoice[]) => {
+    if (!sortConfig) return list;
+
+    return [...list].sort((a, b) => {
+      const aValue = a[sortConfig.key as keyof Invoice] ?? '';
+      const bValue = b[sortConfig.key as keyof Invoice] ?? '';
+
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
   const filteredInvoices = invoices.filter(i => 
     i.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    i.project_name?.toLowerCase().includes(searchQuery.toLowerCase())
+    i.project_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    i.invoice_number.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const sortedInvoices = getSortedInvoices(filteredInvoices);
+
+  const groupedInvoices = sortedInvoices.reduce((acc, invoice) => {
+    const projectId = invoice.project_id || 'general';
+    if (!acc[projectId]) {
+      acc[projectId] = {
+        name: invoice.project_name || 'General / Internal',
+        invoices: []
+      };
+    }
+    acc[projectId].invoices.push(invoice);
+    return acc;
+  }, {} as Record<string, { name: string; invoices: Invoice[] }>);
+
+  const SortIcon = ({ column }: { column: keyof Invoice | 'project_name' }) => {
+    if (sortConfig?.key !== column) return <IconArrowsSort size={14} className="opacity-20 group-hover:opacity-50 transition-opacity" />;
+    return sortConfig.direction === 'asc' ? <IconSortAscending size={14} className="text-emerald-500" /> : <IconSortDescending size={14} className="text-emerald-500" />;
+  };
 
   return (
     <div className="space-y-6">
@@ -117,16 +190,38 @@ export default function Invoices() {
         </button>
       </div>
 
-      <div className="flex items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
-        <div className="relative flex-1">
+      <div className="flex flex-col md:flex-row items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+        <div className="relative flex-1 w-full">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input 
             type="text" 
-            placeholder="Search invoices..."
+            placeholder="Search invoices by number, project or description..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all text-zinc-900 dark:text-white"
           />
+        </div>
+        <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
+          <button 
+            onClick={() => setIsGroupedByProject(true)}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all",
+              isGroupedByProject ? "bg-white dark:bg-zinc-800 text-emerald-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            )}
+          >
+            <IconLayoutGrid size={16} />
+            Group by Project
+          </button>
+          <button 
+            onClick={() => setIsGroupedByProject(false)}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all",
+              !isGroupedByProject ? "bg-white dark:bg-zinc-800 text-emerald-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            )}
+          >
+            <IconList size={16} />
+            List View
+          </button>
         </div>
       </div>
 
@@ -135,70 +230,184 @@ export default function Invoices() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Invoice / Project</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Due Date</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Status</th>
+                <th 
+                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  onClick={() => handleSort('project_name')}
+                >
+                  <div className="flex items-center gap-2">
+                    Invoice / Project
+                    <SortIcon column="project_name" />
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  onClick={() => handleSort('amount')}
+                >
+                  <div className="flex items-center gap-2">
+                    Amount
+                    <SortIcon column="amount" />
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  onClick={() => handleSort('due_date')}
+                >
+                  <div className="flex items-center gap-2">
+                    Due Date
+                    <SortIcon column="due_date" />
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  onClick={() => handleSort('status')}
+                >
+                  <div className="flex items-center gap-2">
+                    Status
+                    <SortIcon column="status" />
+                  </div>
+                </th>
                 <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
-              {filteredInvoices.map((invoice) => (
-                <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
-                        <IconFileInvoice size={20} />
+              {isGroupedByProject ? (
+                Object.entries(groupedInvoices).map(([projectId, group]) => (
+                  <React.Fragment key={projectId}>
+                    <tr 
+                      className="bg-zinc-100/50 dark:bg-zinc-900/50 cursor-pointer hover:bg-zinc-200/50 dark:hover:bg-zinc-900/80 transition-colors group/header"
+                      onClick={() => toggleProjectExpansion(projectId)}
+                    >
+                      <td colSpan={5} className="px-6 py-3 border-y border-zinc-200/50 dark:border-zinc-700/50">
+                        <div className="flex items-center gap-3">
+                          <div className="p-1 bg-white dark:bg-zinc-800 rounded shadow-sm border border-zinc-200 dark:border-zinc-700">
+                            {expandedProjects.has(projectId) ? <IconChevronDown size={16} className="text-emerald-500" /> : <IconChevronRight size={16} className="text-zinc-400" />}
+                          </div>
+                          <span className="font-bold text-sm text-zinc-900 dark:text-white group-hover/header:text-emerald-600 transition-colors">{group.name}</span>
+                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full text-[10px] font-bold">
+                            {group.invoices.length} {group.invoices.length > 1 ? 'invoices' : 'invoice'}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    {expandedProjects.has(projectId) && group.invoices.map((invoice) => (
+                        <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-l-4 border-emerald-500/30">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3 pl-4">
+                              <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                                <IconFileInvoice size={20} />
+                              </div>
+                              <div>
+                                <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                                <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white text-sm">
+                            {formatCurrency(invoice.amount, currency)}
+                          </td>
+                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-sm">
+                            <div className="flex items-center gap-1.5">
+                              <IconClock size={14} className="text-zinc-400" />
+                              {new Date(invoice.due_date).toLocaleDateString()}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                              invoice.status === 'Paid' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
+                              invoice.status === 'Overdue' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800" :
+                              invoice.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
+                              "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
+                            )}>
+                              {invoice.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button 
+                                onClick={() => handleOpenGenerator(invoice)}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                title="Generate Factur-X"
+                              >
+                                <IconFileCode size={20} />
+                              </button>
+                              {invoice.status !== 'Paid' && (
+                                <button 
+                                  onClick={() => handleUpdateStatus(invoice, 'Paid')}
+                                  className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                  title="Mark as Paid"
+                                >
+                                  <IconCircleCheck size={20} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </React.Fragment>
+                ))
+              ) : (
+                sortedInvoices.map((invoice) => (
+                  <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                          <IconFileInvoice size={20} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                            <span className="text-[10px] text-zinc-400 font-mono">/</span>
+                            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{invoice.project_name || 'General'}</p>
+                          </div>
+                          <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-zinc-900 dark:text-white">{invoice.project_name || 'General'}</p>
-                        <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
+                    </td>
+                    <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white text-sm">
+                      {formatCurrency(invoice.amount, currency)}
+                    </td>
+                    <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-sm">
+                      <div className="flex items-center gap-1.5">
+                        <IconClock size={14} className="text-zinc-400" />
+                        {new Date(invoice.due_date).toLocaleDateString()}
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white">
-                    {formatCurrency(invoice.amount)}
-                  </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
-                    <div className="flex items-center gap-1.5">
-                      <IconClock size={14} className="text-zinc-400" />
-                      {new Date(invoice.due_date).toLocaleDateString()}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                      invoice.status === 'Paid' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                      invoice.status === 'Overdue' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800" :
-                      invoice.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                      "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
-                    )}>
-                      {invoice.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => handleOpenGenerator(invoice)}
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                        title="Generate Factur-X"
-                      >
-                        <IconFileCode size={20} />
-                      </button>
-                      {invoice.status !== 'Paid' && (
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                        invoice.status === 'Paid' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
+                        invoice.status === 'Overdue' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-green-800" :
+                        invoice.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
+                        "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
+                      )}>
+                        {invoice.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
                         <button 
-                          onClick={() => handleUpdateStatus(invoice, 'Paid')}
-                          className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
-                          title="Mark as Paid"
+                          onClick={() => handleOpenGenerator(invoice)}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                          title="Generate Factur-X"
                         >
-                          <IconCircleCheck size={20} />
+                          <IconFileCode size={20} />
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredInvoices.length === 0 && (
+                        {invoice.status !== 'Paid' && (
+                          <button 
+                            onClick={() => handleUpdateStatus(invoice, 'Paid')}
+                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                            title="Mark as Paid"
+                          >
+                            <IconCircleCheck size={20} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+              {sortedInvoices.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
                     No invoices found.

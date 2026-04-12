@@ -82,3 +82,92 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+/* Organizational Chart Styles */
+.org-tree-node {
+  padding-top: 20px !important;
+  position: relative;
+}
+
+.org-tree-node-label {
+  position: relative;
+  display: inline-block;
+}
+
+.org-tree-node-label::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 2px;
+  height: 20px;
+  background-color: #94a3b8 !important; /* slate-400 */
+  transform: translateX(-50%);
+}
+
+.org-tree-node-children {
+  padding-top: 20px !important;
+  position: relative;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.org-tree-node-children::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 20px;
+  background-color: #94a3b8 !important; /* slate-400 */
+  transform: translateX(-50%);
+}
+
+.org-tree-node::before,
+.org-tree-node::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 20px;
+  border-top: 2px solid #94a3b8 !important; /* slate-400 */
+}
+
+.org-tree-node::after {
+  left: 50%;
+  border-left: 2px solid #94a3b8 !important; /* slate-400 */
+}
+
+.org-tree-node:only-child::before,
+.org-tree-node:only-child::after {
+  display: none;
+}
+
+.org-tree-node:only-child {
+  padding-top: 0 !important;
+}
+
+.org-tree-node:first-child::before,
+.org-tree-node:last-child::after {
+  border: 0 none !important;
+}
+
+.org-tree-node:last-child::before {
+  border-right: 2px solid #94a3b8 !important; /* slate-400 */
+  border-radius: 0 10px 0 0 !important;
+}
+
+.org-tree-node:first-child::after {
+  border-radius: 10px 0 0 0 !important;
+}
+
+/* Dark Mode Overrides */
+.dark .org-tree-node-label::after,
+.dark .org-tree-node-children::before,
+.dark .org-tree-node::before,
+.dark .org-tree-node::after,
+.dark .org-tree-node:last-child::before {
+  background-color: #52525b !important; /* zinc-600 */
+  border-color: #52525b !important; /* zinc-600 */
+}

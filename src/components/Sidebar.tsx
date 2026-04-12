@@ -14,18 +14,19 @@ import {
   IconFiles,
   IconSettings,
   IconCommand,
-  IconCalculator
+  IconCalculator,
+  IconArchive
 } from '@tabler/icons-react';
 
 export const NAV_ITEMS = [
   { name: 'dashboard', path: '/', icon: IconLayoutDashboard },
   { name: 'projects', path: '/projects', icon: IconBriefcase },
+  { name: 'references', path: '/references', icon: IconArchive },
   { name: 'documents', path: '/documents', icon: IconFiles },
   { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
   { name: 'invoices', path: '/invoices', icon: IconFileInvoice },
   { name: 'tenders', path: '/tenders', icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconFileText },
-  { name: 'act', path: '/act', icon: IconCalculator },
   { name: 'gantt', path: '/gantt', icon: IconChartBar },
   { name: 'team', path: '/team', icon: IconUsers },
   { name: 'contacts', path: '/contacts', icon: IconAddressBook },

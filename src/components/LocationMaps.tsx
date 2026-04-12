@@ -243,35 +243,56 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
   if (!risks) return null;
 
   return (
-    <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between mb-1">
         <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[10px] font-bold rounded uppercase tracking-wider">Risks Summary (API)</span>
+        {risks.url && (
+          <a 
+            href={risks.url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-[10px] text-zinc-400 hover:text-red-500 flex items-center gap-1 transition-colors"
+          >
+            Full Report
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col">
-          <span className="text-[10px] text-zinc-400 uppercase font-bold">Natural Risks</span>
-          <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-            {risks.count || 0} identified
-          </span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[10px] text-zinc-400 uppercase font-bold">Last Update</span>
-          <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-            {new Date().toLocaleDateString('fr-FR')}
-          </span>
-        </div>
-      </div>
-      {risks.data && risks.data.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-          <div className="flex flex-wrap gap-1">
-            {risks.data?.slice(0, 5).map((r: any, i: number) => (
-              <span key={i} className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase tracking-tight">
-                {r.libelle_risque_naturel || r.type_risque}
-              </span>
-            ))}
+      <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col">
+            <span className="text-[10px] text-zinc-400 uppercase font-bold">Natural Risks</span>
+            <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+              {risks.risques_naturels?.length || 0} identified
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-zinc-400 uppercase font-bold">Tech Risks</span>
+            <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+              {risks.risques_technologiques?.length || 0} identified
+            </span>
           </div>
         </div>
-      )}
+        
+        {(risks.risques_naturels?.length > 0 || risks.risques_technologiques?.length > 0) && (
+          <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="flex flex-wrap gap-1">
+              {risks.risques_naturels?.map((r: string, i: number) => (
+                <span key={`nat-${i}`} className="px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[9px] rounded border border-red-100 dark:border-red-900/30 uppercase tracking-tight">
+                  {r}
+                </span>
+              ))}
+              {risks.risques_technologiques?.map((r: string, i: number) => (
+                <span key={`tech-${i}`} className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[9px] rounded border border-amber-100 dark:border-amber-900/30 uppercase tracking-tight">
+                  {r}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -350,15 +371,24 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
           <div key={b.batiment_groupe_id} className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
             <div className="flex items-start justify-between mb-2">
               <div className="flex flex-col">
-                <span className="text-sm font-mono font-bold text-purple-600 dark:text-purple-400">
+                <a 
+                  href={`https://gorenove.fr/adresse?id=${b.batiment_groupe_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-mono font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                  title="Voir sur GoRenove"
+                >
                   {b.batiment_groupe_id}
-                </span>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
                 <span className="text-[10px] text-zinc-400 uppercase font-bold mt-1">
                   {b.usage_principal_bdnb_open || 'Usage inconnu'}
                 </span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
               <div className="flex flex-col">
                 <span className="text-[9px] text-zinc-400 uppercase font-bold">Construction</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{b.annee_construction || 'N/A'}</span>
@@ -378,6 +408,76 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
                 )}>
                   {b.classe_bilan_dpe || 'N/A'}
                 </span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">Usage</span>
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate" title={b.categorie_usage_propriete}>
+                  {b.categorie_usage_propriete || 'N/A'}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">Logements / Niveaux</span>
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  {b.nb_log || 0} log. / {b.nb_niveau || 0} niv.
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">Hauteur / Altitude</span>
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  {b.hauteur_mean ? `${Math.round(b.hauteur_mean)}m` : 'N/A'} / {b.altitude_sol_mean ? `${Math.round(b.altitude_sol_mean)}m` : 'N/A'}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold">Immat. Copro</span>
+                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate">
+                  {b.numero_immat_principal || 'N/A'}
+                </span>
+              </div>
+
+              <div className="col-span-2 space-y-2 mt-1">
+                <div className="flex flex-col">
+                  <span className="text-[9px] text-zinc-400 uppercase font-bold">Systèmes</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {b.type_generateur_chauffage && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        Chauffage: {b.type_generateur_chauffage}
+                      </span>
+                    )}
+                    {b.type_generateur_ecs && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        ECS: {b.type_generateur_ecs} ({b.type_installation_ecs || 'N/A'})
+                      </span>
+                    )}
+                    {b.type_ventilation && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        VMC: {b.type_ventilation}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <span className="text-[9px] text-zinc-400 uppercase font-bold">Isolation</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {b.type_isolation_mur_exterieur && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        Murs: {b.type_isolation_mur_exterieur}
+                      </span>
+                    )}
+                    {b.type_isolation_plancher_haut && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        Toit: {b.type_isolation_plancher_haut} ({b.type_plancher_haut_deperditif || 'N/A'})
+                      </span>
+                    )}
+                    {b.type_plancher_bas_deperditif && (
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                        Sol: {b.type_plancher_bas_deperditif}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

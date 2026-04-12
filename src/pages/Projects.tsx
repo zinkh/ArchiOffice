@@ -535,7 +535,7 @@ export default function Projects() {
             className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 rounded-md font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >
             <IconSettings size={18} />
-            Categories
+            Domaines
           </button>
           <button 
             onClick={handleAddProject}
@@ -581,7 +581,7 @@ export default function Projects() {
             )}
           >
             <IconTag size={18} />
-            {filterCategory === 'All' ? 'Category' : filterCategory}
+            {filterCategory === 'All' ? 'Domaine' : filterCategory}
           </button>
           <button 
             onClick={cycleProjectManagerFilter}
@@ -951,20 +951,20 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Category</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Domaine</label>
                     {isEditing ? (
                       <select 
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                         value={editForm?.category || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, category: e.target.value}) : null)}
                       >
-                        <option value="">Select Category</option>
+                        <option value="">Sélectionner un domaine</option>
                         {categories.map(cat => (
                           <option key={cat.id} value={cat.name}>{cat.name}</option>
                         ))}
                       </select>
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.category || 'Uncategorized'}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.category || 'Non classé'}</p>
                     )}
                   </div>
                   <div className="space-y-1">
@@ -1516,7 +1516,7 @@ export default function Projects() {
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
           >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Manage Project Categories</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Gérer les Domaines de Projet</h3>
               <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
                 ✕
               </button>
@@ -1525,7 +1525,7 @@ export default function Projects() {
               <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
                 <input 
                   className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
-                  placeholder="New category name"
+                  placeholder="Nom du nouveau domaine"
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
                 />

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit } from '@tabler/icons-react';
+import { Link } from 'react-router-dom';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -37,6 +38,9 @@ export default function Tenders() {
     withdrawal_deadline: ''
   };
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterType, setFilterType] = useState<string>('All');
+  const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -154,6 +158,40 @@ export default function Tenders() {
     setIsModalOpen(true);
   };
 
+  const handleArchive = async (tender: Tender) => {
+    try {
+      const res = await fetch(`/api/tenders/${tender.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...tender,
+          archived: !tender.archived
+        })
+      });
+      if (!res.ok) throw new Error('Failed to archive tender');
+      const updatedTender = await res.json();
+      setTenders(tenders.map(t => t.id === updatedTender.id ? { ...updatedTender, mandatory_visit: !!updatedTender.mandatory_visit } : t));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const filteredTenders = tenders.filter(t => {
+    const statusMatch = filterStatus === 'All' || t.status === filterStatus;
+    const typeMatch = filterType === 'All' || t.type === filterType;
+    return statusMatch && typeMatch;
+  });
+
+  const sortedTenders = [...filteredTenders].sort((a, b) => {
+    if (!sortByDeadline) return 0;
+    const dateA = new Date(a.submission_deadline).getTime();
+    const dateB = new Date(b.submission_deadline).getTime();
+    return sortByDeadline === 'asc' ? dateA - dateB : dateB - dateA;
+  });
+
+  const activeTenders = sortedTenders.filter(t => !t.archived);
+  const archivedTenders = sortedTenders.filter(t => t.archived);
+
   const handleOpenCreateModal = () => {
     setEditingTender(null);
     setNewTender(initialTenderState);
@@ -189,6 +227,46 @@ export default function Tenders() {
         </motion.button>
       </div>
 
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+          <div className="flex items-center gap-2">
+            <IconFilter size={18} className="text-zinc-400" />
+            <select 
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Draft">Draft</option>
+              <option value="Submitted">Submitted</option>
+              <option value="Won">Won</option>
+              <option value="Lost">Lost</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <select 
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+            >
+              <option value="All">All Types</option>
+              <option value="Concours">Concours</option>
+              <option value="MAPA">MAPA</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <button 
+            onClick={() => setSortByDeadline(prev => prev === 'asc' ? 'desc' : 'asc')}
+            className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            {sortByDeadline === 'asc' ? <IconSortAscending size={18} /> : <IconSortDescending size={18} />}
+            Sort by Deadline
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -205,11 +283,13 @@ export default function Tenders() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
-              {tenders.map((tender) => (
+              {activeTenders.map((tender) => (
                 <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="font-medium text-zinc-900 dark:text-white">{tender.title}</span>
+                      <Link to={`/tenders/${tender.id}`} className="font-medium text-zinc-900 dark:text-white hover:text-blue-600 transition-colors">
+                        {tender.title}
+                      </Link>
                       <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || 'No representative'}</span>
                     </div>
                   </td>
@@ -250,12 +330,26 @@ export default function Tenders() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <Link 
+                        to={`/tenders/${tender.id}`}
+                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-blue-600 transition-colors"
+                        title="View Details"
+                      >
+                        <IconEye size={18} />
+                      </Link>
                       <button 
                         onClick={() => handleEditClick(tender)}
                         className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
                         title="Edit"
                       >
                         <IconEdit size={18} />
+                      </button>
+                      <button 
+                        onClick={() => handleArchive(tender)}
+                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                        title="Archive"
+                      >
+                        <IconArchive size={18} />
                       </button>
                       <button className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
                         <IconDownload size={18} />
@@ -264,9 +358,9 @@ export default function Tenders() {
                   </td>
                 </tr>
               ))}
-              {tenders.length === 0 && (
+              {activeTenders.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-zinc-400 dark:text-zinc-500">
+                  <td colSpan={8} className="px-6 py-12 text-center text-zinc-400 dark:text-zinc-500">
                     <div className="flex flex-col items-center gap-2">
                       <IconFileText size={32} className="opacity-20" />
                       <p>No active tenders found.</p>
@@ -278,6 +372,86 @@ export default function Tenders() {
           </table>
         </div>
       </div>
+
+      {archivedTenders.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+            <IconArchive size={20} />
+            <h3 className="text-lg font-bold">Archived Tenders</h3>
+          </div>
+          <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm opacity-75">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('description')}</th>
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('client')}</th>
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">Type</th>
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('deadline')}</th>
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('status')}</th>
+                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs text-right">{t('actions')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+                  {archivedTenders.map((tender) => (
+                    <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <Link to={`/tenders/${tender.id}`} className="font-medium text-zinc-900 dark:text-white hover:text-blue-600 transition-colors">
+                            {tender.title}
+                          </Link>
+                          <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || 'No representative'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{tender.client}</td>
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">
+                          {tender.type || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                        {new Date(tender.submission_deadline).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(tender.status)}
+                          <span className="font-medium text-zinc-700 dark:text-zinc-300">{tender.status}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => handleArchive(tender)}
+                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                            title="Unarchive"
+                          >
+                            <IconPlus size={18} className="rotate-45" />
+                          </button>
+                          <button 
+                            onClick={async () => {
+                              if (!confirm('Delete tender permanently?')) return;
+                              try {
+                                const res = await fetch(`/api/tenders/${tender.id}`, { method: 'DELETE' });
+                                if (res.ok) setTenders(tenders.filter(t => t.id !== tender.id));
+                              } catch (err) {
+                                console.error(err);
+                              }
+                            }}
+                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-red-500 transition-colors"
+                            title="Delete"
+                          >
+                            <IconTrash size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AnimatePresence>
         {isModalOpen && (
@@ -296,7 +470,7 @@ export default function Tenders() {
                   <IconX size={20} />
                 </button>
               </div>
-              <form onSubmit={handleCreateBid} className="p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+              <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Project Title</label>

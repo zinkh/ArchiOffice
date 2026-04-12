@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUpload } from '@tabler/icons-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Document, Project } from '../types';
 import { useUser } from '../UserContext';
 
@@ -10,52 +11,77 @@ export default function Documents() {
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('General');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentUser } = useUser();
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<Document | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCategory, setEditCategory] = useState('General');
+  const [editDescription, setEditDescription] = useState('');
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [docToDelete, setDocToDelete] = useState<string | null>(null);
 
-  const handleDelete = async (id: string) => {
-    console.log('Delete clicked for:', id);
-    if (!confirm('Are you sure you want to delete this document?')) return;
+  const refreshDocuments = () => {
+    fetch('/api/documents').then(res => res.json()).then(setDocuments);
+  };
+
+  const handleDelete = async () => {
+    if (!docToDelete) return;
     try {
-      console.log('About to fetch DELETE for:', id);
-      const response = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
-      console.log('Delete response status:', response.status);
+      const response = await fetch(`/api/documents/${docToDelete}`, { method: 'DELETE' });
       if (response.ok) {
-        fetch('/api/documents').then(res => res.json()).then(setDocuments);
+        refreshDocuments();
+        setDocToDelete(null);
       } else {
         const errorText = await response.text();
-        console.error('Delete failed:', response.status, errorText);
         alert(`Failed to delete document: ${response.status} ${errorText}`);
       }
     } catch (error) {
-      console.error('Error deleting document:', error);
       alert('Error deleting document: ' + error);
     }
   };
 
-  const handleUpdate = async (id: string) => {
-    console.log('Update clicked for:', id);
-    const name = prompt('Enter new name:');
-    if (!name) return;
+  const handleUpdate = async () => {
+    if (!editingDoc) return;
+    setIsUploading(true);
     try {
-      console.log('About to fetch PUT for:', id);
-      const response = await fetch(`/api/documents/${id}`, {
+      const formData = new FormData();
+      formData.append('name', editName);
+      formData.append('category', editCategory);
+      formData.append('description', editDescription);
+      formData.append('uploaded_by', currentUser?.name || 'Unknown');
+      if (editFile) {
+        formData.append('file', editFile);
+      }
+
+      const response = await fetch(`/api/documents/${editingDoc.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, category: 'General', description: '' }),
+        body: formData,
       });
-      console.log('Update response status:', response.status);
       if (response.ok) {
-        fetch('/api/documents').then(res => res.json()).then(setDocuments);
+        refreshDocuments();
+        setIsUpdateModalOpen(false);
+        setEditingDoc(null);
+        setEditFile(null);
       } else {
         const errorText = await response.text();
-        console.error('Update failed:', response.status, errorText);
         alert(`Failed to update document: ${response.status} ${errorText}`);
       }
     } catch (error) {
-      console.error('Error updating document:', error);
       alert('Error updating document: ' + error);
+    } finally {
+      setIsUploading(false);
     }
+  };
+
+  const openUpdateModal = (doc: Document) => {
+    setEditingDoc(doc);
+    setEditName(doc.name);
+    setEditCategory(doc.category);
+    setEditDescription(doc.description || '');
+    setIsUpdateModalOpen(true);
   };
 
   const handleFileUpload = async () => {
@@ -69,21 +95,25 @@ export default function Documents() {
     formData.append('description', '');
     formData.append('uploaded_by', currentUser?.name || 'Unknown');
 
+    setIsUploading(true);
     try {
       const response = await fetch('/api/documents', {
         method: 'POST',
         body: formData,
       });
       if (response.ok) {
-        fetch('/api/documents').then(res => res.json()).then(setDocuments);
+        refreshDocuments();
         setIsModalOpen(false);
         setSelectedFile(null);
       } else {
-        alert('Failed to upload document');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        alert(`Failed to upload document: ${errorData.error || response.statusText}`);
       }
     } catch (error) {
       console.error('Error uploading document:', error);
       alert('Error uploading document');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -107,40 +137,174 @@ export default function Documents() {
         </div>
       </div>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-md space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-bold">Upload Document</h2>
-              <button onClick={() => setIsModalOpen(false)}><IconX /></button>
-            </div>
-            <select className="w-full p-2 rounded-xl border" onChange={(e) => setSelectedProject(e.target.value)} value={selectedProject}>
-              <option value="">Select Project</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <select className="w-full p-2 rounded-xl border" onChange={(e) => setSelectedCategory(e.target.value)} value={selectedCategory}>
-              <option value="General">General</option>
-              <option value="Contract">Contract</option>
-              <option value="Plan">Plan</option>
-            </select>
-            <div 
-              className="border-2 border-dashed border-zinc-300 rounded-xl p-8 text-center cursor-pointer"
-              onDrop={(e) => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
-              onDragOver={(e) => e.preventDefault()}
-              onClick={() => fileInputRef.current?.click()}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-md space-y-4 shadow-2xl"
             >
-              {selectedFile ? selectedFile.name : 'Drop file here or click to select'}
-              <input 
-                type="file" 
-                className="hidden" 
-                ref={fileInputRef}
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} 
-              />
-            </div>
-            <button onClick={handleFileUpload} className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold">Upload</button>
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-bold">Upload Document</h2>
+                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
+                  <IconX size={20} />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Project</label>
+                <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setSelectedProject(e.target.value)} value={selectedProject}>
+                  <option value="">Select Project</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Category</label>
+                <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setSelectedCategory(e.target.value)} value={selectedCategory}>
+                  <option value="General">General</option>
+                  <option value="Contract">Contract</option>
+                  <option value="Plan">Plan</option>
+                </select>
+              </div>
+              <div 
+                className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all"
+                onDrop={(e) => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <IconUpload className="mx-auto mb-2 text-zinc-400" size={32} />
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  {selectedFile ? selectedFile.name : 'Drop file here or click to select'}
+                </p>
+                <input 
+                  type="file" 
+                  className="hidden" 
+                  ref={fileInputRef}
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} 
+                />
+              </div>
+              <button 
+                onClick={handleFileUpload} 
+                disabled={isUploading || !selectedFile}
+                className={`w-full py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-blue-500/20 ${
+                  isUploading || !selectedFile 
+                    ? 'bg-zinc-400 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98]'
+                }`}
+              >
+                {isUploading ? 'Uploading...' : 'Upload Document'}
+              </button>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+
+        {isUpdateModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-md space-y-4 shadow-2xl"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-bold">Edit Document</h2>
+                <button onClick={() => setIsUpdateModalOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
+                  <IconX size={20} />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Name</label>
+                <input 
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  placeholder="Document name"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Category</label>
+                <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setEditCategory(e.target.value)} value={editCategory}>
+                  <option value="General">General</option>
+                  <option value="Contract">Contract</option>
+                  <option value="Plan">Plan</option>
+                </select>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Description</label>
+                <textarea 
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[100px]"
+                  placeholder="Document description"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Replace File (Optional - Increments Version)</label>
+                <div 
+                  className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl p-4 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all"
+                  onClick={() => editFileInputRef.current?.click()}
+                >
+                  <p className="text-xs text-zinc-500">
+                    {editFile ? editFile.name : 'Click to select new version'}
+                  </p>
+                  <input 
+                    type="file" 
+                    className="hidden" 
+                    ref={editFileInputRef}
+                    onChange={(e) => setEditFile(e.target.files?.[0] || null)} 
+                  />
+                </div>
+              </div>
+              <button 
+                onClick={handleUpdate} 
+                disabled={isUploading}
+                className={`w-full py-3 rounded-xl font-bold text-white transition-all active:scale-[0.98] shadow-lg shadow-blue-500/20 ${
+                  isUploading ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {isUploading ? 'Updating...' : 'Save Changes'}
+              </button>
+            </motion.div>
+          </div>
+        )}
+
+        {docToDelete && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-sm space-y-6 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center mx-auto">
+                <IconTrash size={32} />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold">Delete Document?</h2>
+                <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+                  This action cannot be undone. All versions of this document will be permanently removed.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setDocToDelete(null)}
+                  className="flex-1 py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleDelete}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-red-500/20"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -176,9 +340,9 @@ export default function Documents() {
                   <td className="px-6 py-4 text-zinc-500">v{doc.version}</td>
                   <td className="px-6 py-4 text-zinc-500">{new Date(doc.uploaded_at).toLocaleDateString()}</td>
                   <td className="px-6 py-4 flex items-center gap-2">
-                    <button className="p-2 text-zinc-400 hover:text-blue-500" onClick={() => handleUpdate(doc.id)}><IconHistory size={16} /></button>
+                    <button className="p-2 text-zinc-400 hover:text-blue-500" onClick={() => openUpdateModal(doc)}><IconHistory size={16} /></button>
                     <button className="p-2 text-zinc-400 hover:text-blue-500" onClick={() => window.open(doc.file_url, '_blank')}><IconDownload size={16} /></button>
-                    <button className="p-2 text-zinc-400 hover:text-red-500" onClick={() => handleDelete(doc.id)}><IconTrash size={16} /></button>
+                    <button className="p-2 text-zinc-400 hover:text-red-500" onClick={() => setDocToDelete(doc.id)}><IconTrash size={16} /></button>
                   </td>
                 </tr>
               ))}

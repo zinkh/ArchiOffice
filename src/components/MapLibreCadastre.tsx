@@ -20,15 +20,49 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
     if (map.current) return; // initialize map only once
     if (!mapContainer.current) return;
 
-    // Official Cadastre style from cadastre.data.gouv.fr
-    const styleUrl = 'https://openmaptiles.geo.data.gouv.fr/styles/cadastre/style.json';
+    // We use a custom style with OSM background and Cadastre raster overlay for maximum reliability
+    // The previous vector style from data.geopf.fr was reported as not showing content.
+    const style: any = {
+      version: 8,
+      sources: {
+        'osm': {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '&copy; OpenStreetMap contributors',
+        },
+        'cadastre': {
+          type: 'raster',
+          tiles: [
+            'https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=CADASTRALPARCELS.PARCELS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}'
+          ],
+          tileSize: 256,
+          attribution: '&copy; IGN',
+        }
+      },
+      layers: [
+        {
+          id: 'osm-layer',
+          type: 'raster',
+          source: 'osm',
+        },
+        {
+          id: 'cadastre-layer',
+          type: 'raster',
+          source: 'cadastre',
+          paint: {
+            'raster-opacity': 0.7
+          }
+        }
+      ]
+    };
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: styleUrl,
+      style: style,
       center: [lon, lat],
-      zoom: 18,
-      maxZoom: 20,
+      zoom: 17,
+      maxZoom: 19,
       minZoom: 5
     });
 

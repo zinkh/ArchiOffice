@@ -37,13 +37,15 @@ import type { Project, Milestone, Invoice, ProjectCategory, Specification, Ordre
 import { useUser } from '../UserContext';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
+import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import { PlanAnnotator } from '../components/PlanAnnotator';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
-import SiteReports from '../components/SiteReports';
+import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
+import ConstructionReportModule from '../components/ConstructionReportModule';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
 
@@ -107,6 +109,50 @@ const colourStyles: StylesConfig<CategoryOption, true> = {
     },
   }),
 };
+
+const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id }: any) => (
+  <div className="space-y-1">
+    <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+      {label} {required && <span className="text-red-500">*</span>}
+    </label>
+    {type === 'select' ? (
+      <select 
+        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-medium"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Select {label}</option>
+        {options.map((opt: string) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    ) : type === 'textarea' ? (
+      <textarea 
+        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-medium min-h-[80px] resize-none"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    ) : type === 'checkbox' ? (
+      <div className="flex items-center gap-2 h-[42px]">
+        <input 
+          type="checkbox"
+          checked={!!value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+        />
+        <span className="text-sm text-zinc-600 dark:text-zinc-400">Oui</span>
+      </div>
+    ) : (
+      <input 
+        id={id}
+        type={type}
+        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-medium"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )}
+  </div>
+);
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -180,7 +226,7 @@ export default function ProjectDetail() {
   const planInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (project && !project.is_chantier && ['DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
+    if (project && !project.is_chantier && ['ACT', 'DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
       setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
@@ -751,8 +797,8 @@ export default function ProjectDetail() {
           
           {/* Tab Navigation */}
           <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 mb-6 overflow-x-auto">
-            {['INFOS', 'PRO', 'VISA', 'AOR'].map(tab => {
-              if (['VISA', 'AOR'].includes(tab) && !project.is_chantier) return null;
+            {['INFOS', 'PRO', 'ACT', 'VISA', 'DET', 'RDT', 'AOR'].map(tab => {
+              if (['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab) && !project.is_chantier) return null;
               return (
                 <button 
                   key={tab}
@@ -925,6 +971,7 @@ export default function ProjectDetail() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <RNBInfo address={project.address} />
                             <CadastreDownload address={project.address} />
+                            <HistoricalMonuments address={project.address} />
                           </div>
                           <div className="bg-zinc-100 dark:bg-zinc-800 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-700">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
@@ -1042,6 +1089,136 @@ export default function ProjectDetail() {
                           )) : (
                             <p className="text-xs text-zinc-500 italic text-center py-4">No milestones defined.</p>
                           )}
+                        </div>
+                      </div>
+
+                      {/* Additional Details from Proposal */}
+                      <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-8">
+                        <div className="space-y-4">
+                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">01</span>
+                            Détails Client
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <FormField label="Entreprise?" type="checkbox" value={project.is_entreprise} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_entreprise: v}) : null)} />
+                            <CompanyAutocomplete 
+                              label="Nom Société" 
+                              value={project.nom_societe || ''} 
+                              onChange={(val, details) => {
+                                if (details) {
+                                  setProject(prev => prev ? ({
+                                    ...prev,
+                                    nom_societe: val,
+                                    rcs: details.siren || details.siret || '',
+                                    adresse_client: details.address || '',
+                                    cp_client: details.zipcode || '',
+                                    ville_client: details.city || '',
+                                    is_entreprise: true
+                                  }) : null);
+                                } else {
+                                  setProject(prev => prev ? ({...prev, nom_societe: val}) : null);
+                                }
+                              }} 
+                            />
+                            <FormField label="RCS / SIRET" value={project.rcs} onChange={(v: any) => setProject(prev => prev ? ({...prev, rcs: v}) : null)} />
+                            <FormField label="Représentant" value={project.representant} onChange={(v: any) => setProject(prev => prev ? ({...prev, representant: v}) : null)} />
+                            <FormField label="Qualité" value={project.qualite} onChange={(v: any) => setProject(prev => prev ? ({...prev, qualite: v}) : null)} />
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
+                              <FormField 
+                                label="Adresse Client" 
+                                value={project.adresse_client || ''} 
+                                onChange={(v: any) => setProject(prev => prev ? ({...prev, adresse_client: v}) : null)} 
+                              />
+                              <FormField 
+                                label="Code Postal Client" 
+                                value={project.cp_client || ''} 
+                                onChange={(v: any) => setProject(prev => prev ? ({...prev, cp_client: v}) : null)} 
+                              />
+                              <FormField 
+                                label="Ville Client" 
+                                value={project.ville_client || ''} 
+                                onChange={(v: any) => setProject(prev => prev ? ({...prev, ville_client: v}) : null)} 
+                              />
+                            </div>
+                            <FormField label="Téléphone" value={project.telephone} onChange={(v: any) => setProject(prev => prev ? ({...prev, telephone: v}) : null)} />
+                            <FormField label="Portable" value={project.portable} onChange={(v: any) => setProject(prev => prev ? ({...prev, portable: v}) : null)} />
+                            <FormField label="Adresse Mail" type="email" value={project.email_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, email_client: v}) : null)} />
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-8 border-t border-zinc-100 dark:border-zinc-800">
+                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">02</span>
+                            Spécificités du Projet & Terrain
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <FormField label="Référence" value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
+                            <FormField label="Ind" value={project.ind} onChange={(v: any) => setProject(prev => prev ? ({...prev, ind: v}) : null)} />
+                            <FormField label="Détail du Projet" type="textarea" value={project.projet_detail} onChange={(v: any) => setProject(prev => prev ? ({...prev, projet_detail: v}) : null)} />
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-3 space-y-4">
+                              <AddressAutocomplete 
+                                label="Adresse Complète Terrain" 
+                                value={project.adresse_terrain || ''} 
+                                onChange={(val: string) => {
+                                  setProject(prev => {
+                                    if (!prev) return null;
+                                    const updates: any = { adresse_terrain: val };
+                                    if (!val) {
+                                      updates.cp_ville_terrain = '';
+                                      updates.site_postcode = '';
+                                      updates.site_city = '';
+                                      updates.ban_id_terrain = '';
+                                      updates.city_code_terrain = '';
+                                    }
+                                    return { ...prev, ...updates };
+                                  });
+                                }}
+                                onSelect={(details) => {
+                                  setProject(prev => prev ? ({
+                                    ...prev, 
+                                    adresse_terrain: details.fullAddress,
+                                    cp_ville_terrain: `${details.zipcode || ''} ${details.city || ''}`.trim(),
+                                    site_postcode: details.zipcode || '',
+                                    site_city: details.city || '',
+                                    ban_id_terrain: details.banId || '',
+                                    city_code_terrain: details.cityCode || ''
+                                  }) : null);
+                                }} 
+                              />
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <FormField label="Code Postal Terrain" value={project.site_postcode} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_postcode: v}) : null)} />
+                                <FormField label="Ville Terrain" value={project.site_city} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_city: v}) : null)} />
+                              </div>
+                            </div>
+                            <FormField label="Référence Cadastrale" value={project.ref_cadastrale} onChange={(v: any) => setProject(prev => prev ? ({...prev, ref_cadastrale: v}) : null)} />
+                            <FormField label="Zone PLU" value={project.zone_plu} onChange={(v: any) => setProject(prev => prev ? ({...prev, zone_plu: v}) : null)} />
+                            <FormField label="Surface Parcelle" value={project.surface_parcelle} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_parcelle: v}) : null)} />
+                            <FormField label="Nom Etablissement" value={project.nom_etablissement} onChange={(v: any) => setProject(prev => prev ? ({...prev, nom_etablissement: v}) : null)} />
+                            <FormField label="Avant Travaux" value={project.avant_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, avant_trav: v}) : null)} />
+                            <FormField label="Après Travaux" value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
+                            <FormField label="Type Et Cat" value={project.type_et_cat} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)} />
+                            <FormField label="Type" value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
+                            <FormField label="Catégorie" value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-8 border-t border-zinc-100 dark:border-zinc-800">
+                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">03</span>
+                            Surfaces & Capacités
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <FormField label="Surface Plancher" value={project.surface_plancher} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher: v}) : null)} />
+                            <FormField label="Surface Plancher Ext" value={project.surface_plancher_ext} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher_ext: v}) : null)} />
+                            <FormField label="Surface ERP" value={project.surface_erp} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_erp: v}) : null)} />
+                            <FormField label="Surface ERT" value={project.surface_ert} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_ert: v}) : null)} />
+                            <FormField label="Effectif Public" value={project.effectif_public} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_public: v}) : null)} />
+                            <FormField label="Effectif Personnel" value={project.effectif_personnel} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_personnel: v}) : null)} />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1225,9 +1402,14 @@ export default function ProjectDetail() {
             {/* Tab content for PRO, VISA, AOR ... */}
             {activeTab === 'DET' && (
               <div className="space-y-8">
+                {/* Construction Report Module */}
+                <ConstructionReportModule 
+                  project={project} 
+                  lots_list={project.lots_list || []} 
+                />
+
                 {/* Ordres de Service List - Manageable */}
-                {project?.is_complete_mission && (
-                  <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
                       <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Ordres de Service</h3>
                       <button 
@@ -1341,14 +1523,8 @@ export default function ProjectDetail() {
                       </table>
                     </div>
                   </div>
-                )}
 
-                {/* Site Reports */}
-                {project.is_complete_mission && (
-                  <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-4 sm:p-6">
-                    <SiteReports project={project} lots_list={project.lots_list || []} />
-                  </div>
-                )}
+                {/* Site Reports - Removed as it is replaced by ConstructionReportModule above */}
               </div>
             )}
             {activeTab === 'RDT' && (
@@ -1519,6 +1695,161 @@ export default function ProjectDetail() {
                 </div>
               </div>
             )}
+            {activeTab === 'ACT' && (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2 space-y-8">
+                    {/* Tenders Section */}
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Appels d'Offres</h3>
+                        <button 
+                          onClick={() => {
+                            const title = prompt('Titre de l\'appel d\'offres:');
+                            if (!title) return;
+                            fetch('/api/tenders', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ project_id: id, title, status: 'Draft', client: project.client, submission_deadline: new Date().toISOString() })
+                            }).then(res => res.json()).then(data => setProjectTenders(prev => [...prev, data]));
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          <IconPlus size={14} />
+                          Lancer un appel d'offres
+                        </button>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                            <tr>
+                              <th className="px-6 py-3 text-left">Titre</th>
+                              <th className="px-6 py-3 text-left">Date limite</th>
+                              <th className="px-6 py-3 text-left">Statut</th>
+                              <th className="px-6 py-3 text-right w-10"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {projectTenders.map((tender) => (
+                              <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                                <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{tender.title}</td>
+                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(tender.submission_deadline).toLocaleDateString()}</td>
+                                <td className="px-6 py-4">
+                                  <span className={cn(
+                                    "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                    tender.status === 'Won' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                                    tender.status === 'Lost' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                                    "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400"
+                                  )}>
+                                    {tender.status}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <button 
+                                    onClick={async () => {
+                                      if (!confirm('Supprimer cet appel d\'offres ?')) return;
+                                      try {
+                                        const res = await fetch(`/api/tenders/${tender.id}`, { method: 'DELETE' });
+                                        if (res.ok) setProjectTenders(prev => prev.filter(t => t.id !== tender.id));
+                                      } catch (err) {
+                                        console.error(err);
+                                      }
+                                    }}
+                                    className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
+                                  >
+                                    <IconTrash size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {projectTenders.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun appel d'offres en cours.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Lots & Entreprises Section */}
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lots & Entreprises</h3>
+                        <button 
+                          onClick={() => {
+                            const lot_title = prompt('Nom du lot:');
+                            if (!lot_title) return;
+                            const lot_number = prompt('Numéro du lot:');
+                            const newLot = { id: Math.random().toString(36).substr(2, 9), lot_number: lot_number || '', lot_title, project_id: id! };
+                            const updatedLots = [...(project.lots_list || []), newLot];
+                            setProject({...project, lots_list: updatedLots});
+                            // Update on server
+                            fetch(`/api/projects/${id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ...project, lots_list: updatedLots })
+                            });
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          <IconPlus size={14} />
+                          Ajouter un lot
+                        </button>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                            <tr>
+                              <th className="px-6 py-3 text-left w-20">N°</th>
+                              <th className="px-6 py-3 text-left">Désignation</th>
+                              <th className="px-6 py-3 text-left">Entreprise</th>
+                              <th className="px-6 py-3 text-right">Montant HT</th>
+                              <th className="px-6 py-3 text-right w-10"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {(project.lots_list || []).map((lot) => (
+                              <tr key={lot.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                                <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{lot.lot_number}</td>
+                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{lot.lot_title}</td>
+                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{lot.contact_name || '-'}</td>
+                                <td className="px-6 py-4 text-right font-bold text-zinc-900 dark:text-white">
+                                  {formatCurrency((lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0))}
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <button 
+                                    onClick={() => {
+                                      if (!confirm('Supprimer ce lot ?')) return;
+                                      const updatedLots = (project.lots_list || []).filter(l => l.id !== lot.id);
+                                      setProject({...project, lots_list: updatedLots});
+                                      fetch(`/api/projects/${id}`, {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ ...project, lots_list: updatedLots })
+                                      });
+                                    }}
+                                    className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
+                                  >
+                                    <IconTrash size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {(project.lots_list || []).length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 italic">Aucun lot défini.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'VISA' && (
               <div className="space-y-8">
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">

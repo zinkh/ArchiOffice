@@ -7,6 +7,128 @@ import dotenv from "dotenv";
 import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper.js";
 import multer from "multer";
 import fs from "fs";
+import axios from "axios";
+import https from "https";
+
+interface GeoJSONGeometry {
+  type: string;
+  coordinates: any;
+}
+
+interface ZoneUrbaProperties {
+  gid: number;
+  partition: string;
+  libelle: string;
+  libelong: string;
+  typezone: string;
+  destdomi: string | null;
+  nomfic: string;
+  urlfic: string | null;
+  insee: string;
+  datappro: string;
+  datvalid: string;
+  idurba: string;
+}
+
+interface DocumentProperties {
+  libelle: string;
+  typedoc: string;
+}
+
+interface ApicartoPluResponse<T> {
+  type: string;
+  features: Array<{
+    type: string;
+    geometry: GeoJSONGeometry;
+    properties: T;
+  }>;
+}
+
+interface PluResult {
+  libelle: string;
+  libelong: string;
+  typezone: string;
+  destdomi: string | null;
+  urlfic: string | null;
+  datappro: string | null;
+  insee: string;
+  partition: string;
+  document: {
+    nom: string | null;
+    typedoc: string | null;
+  } | null;
+}
+
+/**
+ * Fetch PLU data from APICARTO IGN GPU API
+ */
+async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
+  try {
+    const zoneUrbaUrl = "https://apicarto.ign.fr/api/gpu/zone-urba";
+    console.log(`[GPU] Calling zone-urba API with geometry: ${JSON.stringify(geometry)}`);
+    
+    const response = await axios.get<ApicartoPluResponse<ZoneUrbaProperties>>(zoneUrbaUrl, {
+      params: { geom: JSON.stringify(geometry) },
+      timeout: 10000
+    });
+
+    if (!response.data.features || response.data.features.length === 0) {
+      const error: any = new Error("Aucune zone PLU trouvée pour cette adresse");
+      error.status = 404;
+      throw error;
+    }
+
+    const props = response.data.features[0].properties;
+
+    // Convert AAAAMMJJ to ISO string
+    let datapproIso = null;
+    if (props.datappro && props.datappro.length === 8) {
+      const year = props.datappro.substring(0, 4);
+      const month = props.datappro.substring(4, 6);
+      const day = props.datappro.substring(6, 8);
+      datapproIso = new Date(`${year}-${month}-${day}T00:00:00Z`).toISOString();
+    }
+
+    const result: PluResult = {
+      libelle: props.libelle,
+      libelong: props.libelong,
+      typezone: props.typezone,
+      destdomi: props.destdomi,
+      urlfic: props.urlfic,
+      datappro: datapproIso,
+      insee: props.insee,
+      partition: props.partition,
+      document: null
+    };
+
+    // Optional second call for document info (non-blocking)
+    try {
+      const docUrl = "https://apicarto.ign.fr/api/gpu/document";
+      const docResponse = await axios.get<ApicartoPluResponse<DocumentProperties>>(docUrl, {
+        params: { geom: JSON.stringify(geometry) },
+        timeout: 5000
+      });
+
+      if (docResponse.data.features && docResponse.data.features.length > 0) {
+        const docProps = docResponse.data.features[0].properties;
+        result.document = {
+          nom: docProps.libelle,
+          typedoc: docProps.typedoc
+        };
+      }
+    } catch (docErr: any) {
+      console.warn("[GPU] Optional document lookup failed:", docErr.message);
+    }
+
+    return result;
+  } catch (error: any) {
+    if (error.status === 404) throw error;
+    console.error("[GPU] getPlu Error:", error.message);
+    const apiError: any = new Error("Service Urbanisme (GPU) temporairement indisponible");
+    apiError.status = 503;
+    throw apiError;
+  }
+}
 
 // Helper for fetching with timeout
 async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000) {
@@ -66,6 +188,40 @@ try {
       client_vat_number TEXT,
       client_email TEXT,
       is_public_client INTEGER DEFAULT 0,
+      reference TEXT,
+      projet_detail TEXT,
+      is_entreprise INTEGER DEFAULT 0,
+      nom_societe TEXT,
+      rcs TEXT,
+      representant TEXT,
+      qualite TEXT,
+      adresse_client TEXT,
+      cp_client TEXT,
+      ville_client TEXT,
+      telephone TEXT,
+      portable TEXT,
+      email_client TEXT,
+      adresse_terrain TEXT,
+      cp_ville_terrain TEXT,
+      ban_id_terrain TEXT,
+      city_code_terrain TEXT,
+      ref_cadastrale TEXT,
+      zone_plu TEXT,
+      surface_parcelle TEXT,
+      nom_etablissement TEXT,
+      avant_trav TEXT,
+      apres_trav TEXT,
+      type_et_cat TEXT,
+      type_projet TEXT,
+      categorie_projet TEXT,
+      surface_plancher TEXT,
+      surface_plancher_ext TEXT,
+      surface_erp TEXT,
+      surface_ert TEXT,
+      effectif_public TEXT,
+      effectif_personnel TEXT,
+      ind TEXT,
+      date_modification TEXT,
       FOREIGN KEY(client_id) REFERENCES contacts(id)
     );
 
@@ -112,9 +268,10 @@ try {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT NOT NULL,
-      email TEXT,
+      email TEXT UNIQUE,
       avatar TEXT,
-      system_role TEXT DEFAULT 'user'
+      system_role TEXT DEFAULT 'user',
+      password TEXT
     );
 
     CREATE TABLE IF NOT EXISTS project_team (
@@ -153,6 +310,7 @@ try {
       mandatory_visit INTEGER DEFAULT 0,
       visit_date TEXT,
       withdrawal_deadline TEXT,
+      archived INTEGER DEFAULT 0,
       FOREIGN KEY(mandataire_id) REFERENCES contacts(id)
     );
 
@@ -599,15 +757,29 @@ try {
       defaultEmailTemplate TEXT,
       logoUrl TEXT,
       seller_iban TEXT,
-      seller_bic TEXT
+      seller_bic TEXT,
+      smtpHost TEXT,
+      smtpPort TEXT,
+      smtpUser TEXT,
+      smtpPass TEXT
     );
   `);
 
   // Add columns if they don't exist (for existing databases)
   const tablesToUpdate = [
-    { table: 'projects', columns: ['category', 'image_url', 'project_code', 'address', 'client_id', 'client_siret', 'client_vat_number', 'client_email', 'is_public_client', 'is_complete_mission', 'is_chantier', 'etudes_notes', 'chantier_notes', 'surface', 'construction_cost', 'remuneration', 'progression', 'project_manager', 'cotraitants', 'external_intervenants', 'entreprises'] },
+    { table: 'settings', columns: ['smtpHost', 'smtpPort', 'smtpUser', 'smtpPass'] },
+    { table: 'projects', columns: [
+      'category', 'image_url', 'project_code', 'address', 'client_id', 'client_siret', 'client_vat_number', 'client_email', 'is_public_client', 'is_complete_mission', 'is_chantier', 'etudes_notes', 'chantier_notes', 'surface', 'construction_cost', 'remuneration', 'progression', 'project_manager', 'cotraitants', 'external_intervenants', 'entreprises',
+      'reference', 'projet_detail', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite', 
+      'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client', 
+      'adresse_terrain', 'cp_ville_terrain', 'ban_id_terrain', 'city_code_terrain', 'ref_cadastrale', 'zone_plu', 'surface_parcelle', 
+      'nom_etablissement', 'avant_trav', 'apres_trav', 'type_et_cat', 'type_projet', 
+      'categorie_projet', 'surface_plancher', 'surface_plancher_ext', 'surface_erp', 
+      'surface_ert', 'effectif_public', 'effectif_personnel', 'ind', 'date_modification'
+    ] },
     { table: 'milestones', columns: ['proposal_id', 'tender_id'] },
-    { table: 'site_reports', columns: ['pageFormat', 'stakeholders', 'companies', 'meetingNotes', 'nextMeeting'] },
+    { table: 'site_reports', columns: ['pageFormat', 'stakeholders', 'companies', 'meetingNotes', 'nextMeeting', 'meteo', 'temperature', 'effectif_total'] },
+    { table: 'site_report_notes', columns: ['text', 'lot_concerne', 'photo_url', 'position', 'description', 'statut'] },
     { table: 'contacts', columns: [
       'prefix', 'middle_name', 'suffix', 'nickname', 'job_title', 'department', 
       'email_work', 'email_home', 'email_other', 
@@ -616,9 +788,9 @@ try {
       'address_home_street', 'address_home_city', 'address_home_state', 'address_home_zip', 'address_home_country',
       'notes', 'birthday', 'category', 'company_name', 'siret', 'vat_number', 'website'
     ] },
-    { table: 'team_members', columns: ['system_role', 'senderOption', 'defaultEmailTemplate'] },
+    { table: 'team_members', columns: ['system_role', 'senderOption', 'defaultEmailTemplate', 'password'] },
     { table: 'invoices', columns: ['invoice_number', 'tax_amount', 'total_amount', 'issue_date', 'seller_name', 'seller_address', 'seller_siret', 'seller_vat_number', 'seller_iban', 'seller_bic', 'vat_rate'] },
-    { table: 'tenders', columns: ['mandataire_id', 'type', 'surface', 'construction_cost', 'honoraires_percent', 'mandatory_visit', 'visit_date', 'withdrawal_deadline'] },
+    { table: 'tenders', columns: ['mandataire_id', 'type', 'surface', 'construction_cost', 'honoraires_percent', 'mandatory_visit', 'visit_date', 'withdrawal_deadline', 'archived'] },
     { table: 'proposals', columns: [
       'reference', 'projet_detail', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite', 
       'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client', 
@@ -851,53 +1023,143 @@ async function startServer() {
     }
   });
 
+  // Georisques API Interfaces
+  interface RisqueEntry {
+    present: boolean;
+    libelle: string;
+  }
+
+  interface GeorisquesV1Response {
+    risquesNaturels: Record<string, RisqueEntry>;
+    risquesTechnologiques: Record<string, RisqueEntry>;
+    url: string;
+  }
+
+  interface GeorisquesV2Response {
+    data: Array<{
+      type_risque: string;
+      libelle_risque?: string;
+      [key: string]: any;
+    }>;
+    [key: string]: any;
+  }
+
+  interface GeorisquesResult {
+    url: string;
+    risques_naturels: string[];
+    risques_technologiques: string[];
+  }
+
+  async function getGeorisques(lon: number, lat: number, codeInsee: string): Promise<GeorisquesResult> {
+    const v1Url = `https://georisques.gouv.fr/api/v1/resultats_rapport_risque?latlon=${lon},${lat}`;
+    console.log(`Attempting Georisques API v1: ${v1Url}`);
+
+    try {
+      const v1Response = await axios.get<GeorisquesV1Response>(v1Url, {
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        timeout: 15000 // Increased timeout
+      });
+
+      if (v1Response.data) {
+        const data = v1Response.data;
+        const risques_naturels = Object.values(data.risquesNaturels || {})
+          .filter(r => r.present)
+          .map(r => r.libelle);
+        
+        const risques_technologiques = Object.values(data.risquesTechnologiques || {})
+          .filter(r => r.present)
+          .map(r => r.libelle);
+
+        return {
+          url: data.url || `https://www.georisques.gouv.fr/mes-risques/rapport?latlon=${lon},${lat}`,
+          risques_naturels,
+          risques_technologiques
+        };
+      }
+    } catch (v1Error: any) {
+      console.error("Georisques API v1 failed, attempting v2 fallback:", v1Error.message);
+    }
+
+    // Fallback to API v2
+    const v2Url = `https://www.georisques.gouv.fr/api/v2/indicateurs`; // Changed from /risques to /indicateurs which is more common for v2
+    const token = process.env.GEORISQUES_TOKEN;
+    const headers: Record<string, string> = { 'Accept': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    try {
+      console.log(`Attempting Georisques API v2: ${v2Url} for lat=${lat}, lon=${lon}`);
+      const v2Response = await axios.get<any>(v2Url, {
+        params: {
+          lat: lat,
+          lng: lon,
+        },
+        headers,
+        timeout: 8000
+      });
+
+      if (v2Response.data) {
+        // Map v2 response
+        const risks = v2Response.data.indicateurs || [];
+        const risksList = risks.map((r: any) => r.libelle || r.nom);
+        
+        return {
+          url: `https://www.georisques.gouv.fr/mes-risques/rapport?latlon=${lon},${lat}`,
+          risques_naturels: risksList,
+          risques_technologiques: []
+        };
+      }
+    } catch (v2Error: any) {
+      console.error("Georisques API v2 also failed:", v2Error.message);
+    }
+
+    throw new Error("Georisques API unavailable (v1 and v2 failed)");
+  }
+
   app.get("/api/georisques", async (req, res) => {
     try {
       const { latitude, longitude, code_insee } = req.query;
-      console.log(`Georisques API request: latitude=${latitude}, longitude=${longitude}, code_insee=${code_insee}`);
+      
       if (!latitude || !longitude || !code_insee) {
-        console.error("Missing required parameters for Georisques API");
         return res.status(400).json({ error: "latitude, longitude, and code_insee are required" });
       }
 
-      const token = process.env.GEORISQUES_API_TOKEN;
-      console.log(`Georisques API token present: ${!!token}`);
-      const headers: Record<string, string> = {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; MyApplication/1.0)'
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const lat = parseFloat(latitude as string);
+      const lon = parseFloat(longitude as string);
+      const insee = code_insee as string;
 
-      const url = `https://www.georisques.gouv.fr/api/v1/gaspar/risques?latitude=${latitude}&longitude=${longitude}&code_insee=${code_insee}&type=adresse`;
-      console.log(`Calling Georisques API: ${url}`);
-      
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-      const response = await fetch(url, {
-        headers,
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Georisques API error: ${response.status} ${errorText}`);
-        return res.status(response.status).json({ error: `Georisques API error: ${response.status}`, details: errorText });
-      }
-
-      const data = await response.json();
-      res.json(data);
+      const result = await getGeorisques(lon, lat, insee);
+      res.json(result);
     } catch (error: any) {
       console.error("Error in /api/georisques:", error);
-      if (error.name === 'AbortError') {
-        res.status(504).json({ error: "Georisques API request timed out" });
-      } else {
-        res.status(500).json({ error: "Internal server error", details: error.message });
+      res.status(503).json({ 
+        error: "Service Géorisques temporairement indisponible", 
+        details: error.message 
+      });
+    }
+  });
+
+  app.get("/api/urbanisme", async (req, res) => {
+    try {
+      const { geom } = req.query;
+      if (!geom) {
+        return res.status(400).json({ error: "Le paramètre 'geom' est requis (GeoJSON stringifié)" });
       }
+
+      let geometry: GeoJSONGeometry;
+      try {
+        geometry = JSON.parse(geom as string);
+      } catch (e) {
+        return res.status(400).json({ error: "Format GeoJSON invalide" });
+      }
+
+      const result = await getPlu(geometry);
+      res.json(result);
+    } catch (error: any) {
+      const status = error.status || 500;
+      console.error(`[GPU] Route Error (${status}):`, error.message);
+      res.status(status).json({ error: error.message });
     }
   });
 
@@ -1244,7 +1506,7 @@ async function startServer() {
       db.prepare(`
         INSERT INTO reserves (id, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, number)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, project_id, reception_id, title, batiment, local, status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, nextNumber);
+      `).run(id, project_id, reception_id, title, batiment, local, status || 'A faire', JSON.stringify(lots), JSON.stringify(entreprises), created_at, due_date, plan_id, x, y, nextNumber);
       
       res.json({ id, project_id, reception_id, title, batiment, local, status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber });
     } catch (error) {
@@ -1270,7 +1532,7 @@ async function startServer() {
         UPDATE reserves 
         SET title = ?, batiment = ?, local = ?, status = ?, lots = ?, entreprises = ?, created_at = ?, due_date = ?
         WHERE id = ?
-      `).run(title, batiment, local, status, lots, entreprises, created_at, due_date, req.params.id);
+      `).run(title, batiment, local, status, JSON.stringify(lots), JSON.stringify(entreprises), created_at, due_date, req.params.id);
       res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date });
     } catch (error) {
       console.error(error);
@@ -1305,7 +1567,12 @@ async function startServer() {
   app.get("/api/documents", (req, res) => {
     try {
       const { project_id } = req.query;
-      const docs = db.prepare("SELECT * FROM documents WHERE project_id = ?").all(project_id);
+      let docs;
+      if (project_id) {
+        docs = db.prepare("SELECT * FROM documents WHERE project_id = ?").all(project_id);
+      } else {
+        docs = db.prepare("SELECT * FROM documents").all();
+      }
       res.json(docs);
     } catch (error) {
       console.error(error);
@@ -1319,13 +1586,14 @@ async function startServer() {
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
 
+      const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
       const id = `doc-${Date.now()}`;
       const file_url = `/uploads/${file.filename}`;
       
       db.prepare(`
         INSERT INTO documents (id, project_id, name, category, version, file_url, uploaded_by, uploaded_at, description)
         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-      `).run(id, project_id, name, category, 1, file_url, uploaded_by, new Date().toISOString(), description);
+      `).run(id, projectIdVal, name, category, file_url, uploaded_by, new Date().toISOString(), description);
 
       db.prepare(`
         INSERT INTO document_versions (id, document_id, version, file_url, uploaded_by, uploaded_at, description)
@@ -1336,6 +1604,51 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to upload document" });
+    }
+  });
+
+  app.delete("/api/documents/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      db.prepare("DELETE FROM document_versions WHERE document_id = ?").run(id);
+      db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to delete document" });
+    }
+  });
+
+  app.put("/api/documents/:id", upload.single('file'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, category, description, uploaded_by } = req.body;
+      const file = req.file;
+
+      if (file) {
+        // Increment version and update file_url
+        const doc = db.prepare("SELECT version FROM documents WHERE id = ?").get(id) as { version: number } | undefined;
+        const newVersion = (doc?.version || 1) + 1;
+        const file_url = `/uploads/${file.filename}`;
+        
+        db.prepare("UPDATE documents SET name = ?, category = ?, description = ?, version = ?, file_url = ?, uploaded_at = ? WHERE id = ?")
+          .run(name, category, description, newVersion, file_url, new Date().toISOString(), id);
+          
+        // Add to versions table
+        db.prepare(`
+          INSERT INTO document_versions (id, document_id, version, file_url, uploaded_by, uploaded_at, description)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(`ver-${Date.now()}`, id, newVersion, file_url, uploaded_by || 'System', new Date().toISOString(), description);
+      } else {
+        // Just update metadata
+        db.prepare("UPDATE documents SET name = ?, category = ?, description = ? WHERE id = ?")
+          .run(name, category, description, id);
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to update document" });
     }
   });
 
@@ -1469,7 +1782,13 @@ async function startServer() {
         id, name, client, status, budget, category, start_date, end_date, description, image_url, address, 
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
-        cotraitants_list, lots_list, stakeholders_list, categories_list
+        cotraitants_list, lots_list, stakeholders_list, categories_list,
+        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
+        adresse_client, cp_client, ville_client, telephone, portable, email_client, 
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification
       } = req.body;
       
       if (!name || !client) {
@@ -1487,9 +1806,15 @@ async function startServer() {
           INSERT INTO projects (
             id, name, client, status, budget, category, start_date, end_date, description, image_url, project_code, address, 
             is_complete_mission, etudes_notes, chantier_notes, is_public_client,
-            surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises
+            surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
+            reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
+            adresse_client, cp_client, ville_client, telephone, portable, email_client, 
+            adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
+            nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
+            categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+            surface_ert, effectif_public, effectif_personnel, ind, date_modification
           ) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, 
           name, 
@@ -1514,7 +1839,41 @@ async function startServer() {
           project_manager || null,
           cotraitants || null,
           external_intervenants || null,
-          entreprises || null
+          entreprises || null,
+          reference || null,
+          projet_detail || null,
+          is_entreprise ? 1 : 0,
+          nom_societe || null,
+          rcs || null,
+          representant || null,
+          qualite || null,
+          adresse_client || null,
+          cp_client || null,
+          ville_client || null,
+          telephone || null,
+          portable || null,
+          email_client || null,
+          adresse_terrain || null,
+          cp_ville_terrain || null,
+          ban_id_terrain || null,
+          city_code_terrain || null,
+          ref_cadastrale || null,
+          zone_plu || null,
+          surface_parcelle || null,
+          nom_etablissement || null,
+          avant_trav || null,
+          apres_trav || null,
+          type_et_cat || null,
+          type_projet || null,
+          categorie_projet || null,
+          surface_plancher || null,
+          surface_plancher_ext || null,
+          surface_erp || null,
+          surface_ert || null,
+          effectif_public || null,
+          effectif_personnel || null,
+          ind || null,
+          date_modification || null
         );
 
         if (cotraitants_list && Array.isArray(cotraitants_list)) {
@@ -1574,7 +1933,13 @@ async function startServer() {
         name, client, status, budget, category, start_date, end_date, description, image_url, address, 
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
-        cotraitants_list, lots_list, stakeholders_list, categories_list
+        cotraitants_list, lots_list, stakeholders_list, categories_list,
+        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
+        adresse_client, cp_client, ville_client, telephone, portable, email_client, 
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification
       } = req.body;
       
       if (!name || !client) {
@@ -1597,7 +1962,13 @@ async function startServer() {
           UPDATE projects 
           SET name = ?, client = ?, status = ?, budget = ?, category = ?, start_date = ?, end_date = ?, description = ?, image_url = ?, address = ?, 
               is_complete_mission = ?, etudes_notes = ?, chantier_notes = ?, is_public_client = ?,
-              surface = ?, construction_cost = ?, remuneration = ?, progression = ?, project_manager = ?, cotraitants = ?, external_intervenants = ?, entreprises = ?
+              surface = ?, construction_cost = ?, remuneration = ?, progression = ?, project_manager = ?, cotraitants = ?, external_intervenants = ?, entreprises = ?,
+              reference = ?, projet_detail = ?, is_entreprise = ?, nom_societe = ?, rcs = ?, representant = ?, qualite = ?, 
+              adresse_client = ?, cp_client = ?, ville_client = ?, telephone = ?, portable = ?, email_client = ?, 
+              adresse_terrain = ?, cp_ville_terrain = ?, ban_id_terrain = ?, city_code_terrain = ?, ref_cadastrale = ?, zone_plu = ?, surface_parcelle = ?, 
+              nom_etablissement = ?, avant_trav = ?, apres_trav = ?, type_et_cat = ?, type_projet = ?, 
+              categorie_projet = ?, surface_plancher = ?, surface_plancher_ext = ?, surface_erp = ?, 
+              surface_ert = ?, effectif_public = ?, effectif_personnel = ?, ind = ?, date_modification = ?
           WHERE id = ?
         `).run(
           name, 
@@ -1622,6 +1993,40 @@ async function startServer() {
           cotraitants || null,
           external_intervenants || null,
           entreprises || null,
+          reference || null,
+          projet_detail || null,
+          is_entreprise ? 1 : 0,
+          nom_societe || null,
+          rcs || null,
+          representant || null,
+          qualite || null,
+          adresse_client || null,
+          cp_client || null,
+          ville_client || null,
+          telephone || null,
+          portable || null,
+          email_client || null,
+          adresse_terrain || null,
+          cp_ville_terrain || null,
+          ban_id_terrain || null,
+          city_code_terrain || null,
+          ref_cadastrale || null,
+          zone_plu || null,
+          surface_parcelle || null,
+          nom_etablissement || null,
+          avant_trav || null,
+          apres_trav || null,
+          type_et_cat || null,
+          type_projet || null,
+          categorie_projet || null,
+          surface_plancher || null,
+          surface_plancher_ext || null,
+          surface_erp || null,
+          surface_ert || null,
+          effectif_public || null,
+          effectif_personnel || null,
+          ind || null,
+          date_modification || null,
           id
         );
 
@@ -1816,7 +2221,7 @@ async function startServer() {
 
   app.get("/api/team", (req, res) => {
     try {
-      const team = db.prepare("SELECT * FROM team_members").all();
+      const team = db.prepare("SELECT id, name, email, role, system_role, avatar FROM team_members").all();
       res.json(team);
     } catch (error) {
       console.error(error);
@@ -1824,15 +2229,101 @@ async function startServer() {
     }
   });
 
-  app.put("/api/team/:id", (req, res) => {
+  app.post("/api/team", async (req, res) => {
+    try {
+      const { name, email, role, system_role } = req.body;
+      if (!name || !email) {
+        return res.status(400).json({ error: "Name and email are required" });
+      }
+
+      // Check if user already exists
+      const existing = db.prepare("SELECT * FROM team_members WHERE email = ?").get(email);
+      if (existing) {
+        return res.status(400).json({ error: "User with this email already exists" });
+      }
+
+      const id = `t${Date.now()}`;
+      const password = Math.random().toString(36).slice(-8); // Generate random 8-char password
+      
+      db.prepare("INSERT INTO team_members (id, name, email, role, system_role, password) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, name, email, role || 'Member', system_role || 'user', password);
+
+      // Send email
+      let emailSent = false;
+      let emailError = null;
+
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+      const smtpHost = settings?.smtpHost || process.env.SMTP_HOST;
+      const smtpPort = settings?.smtpPort || process.env.SMTP_PORT || '587';
+      const smtpUser = settings?.smtpUser || process.env.SMTP_USER;
+      const smtpPass = settings?.smtpPass || process.env.SMTP_PASS;
+
+      console.log(`[Team Creation] Attempting to send email to ${email} using host ${smtpHost}:${smtpPort}`);
+
+      if (smtpHost && smtpUser && smtpPass) {
+        try {
+          const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: parseInt(String(smtpPort)),
+            secure: String(smtpPort) === '465',
+            auth: {
+              user: smtpUser,
+              pass: smtpPass,
+            },
+          });
+
+          const appUrl = process.env.APP_URL || 'http://localhost:3000';
+          
+          await transporter.sendMail({
+            from: `"ArchiManager" <${smtpUser}>`,
+            to: email,
+            subject: "Your ArchiManager Credentials",
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+                <h2 style="color: #2563eb;">Welcome to ArchiManager</h2>
+                <p>Hello ${name},</p>
+                <p>An account has been created for you on ArchiManager. Here are your credentials to access the application:</p>
+                <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                  <p style="margin: 0;"><strong>Login URL:</strong> <a href="${appUrl}">${appUrl}</a></p>
+                  <p style="margin: 10px 0 0 0;"><strong>Email:</strong> ${email}</p>
+                  <p style="margin: 5px 0 0 0;"><strong>Temporary Password:</strong> ${password}</p>
+                </div>
+                <p>Please change your password after your first login.</p>
+                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiManager Team</p>
+              </div>
+            `
+          });
+          console.log(`Credentials email sent to ${email}`);
+          emailSent = true;
+        } catch (err: any) {
+          console.error("[Team Creation] Failed to send credentials email:", err);
+          emailError = err.message;
+        }
+      } else {
+        const missing = [];
+        if (!smtpHost) missing.push('smtpHost');
+        if (!smtpUser) missing.push('smtpUser');
+        if (!smtpPass) missing.push('smtpPass');
+        console.warn(`[Team Creation] SMTP settings missing (${missing.join(', ')}), skipping credentials email.`);
+        emailError = `Configuration SMTP manquante : ${missing.join(', ')}`;
+      }
+
+      res.status(201).json({ id, name, email, role, system_role, emailSent, emailError });
+    } catch (error: any) {
+      console.error("Error creating team member:", error);
+      res.status(500).json({ error: "Failed to create team member: " + error.message });
+    }
+  });
+
+  app.put("/api/team/:id/role", (req, res) => {
     try {
       const { id } = req.params;
-      const { senderOption, defaultEmailTemplate } = req.body;
-      db.prepare("UPDATE team_members SET senderOption = ?, defaultEmailTemplate = ? WHERE id = ?").run(senderOption, defaultEmailTemplate, id);
+      const { role } = req.body;
+      db.prepare("UPDATE team_members SET system_role = ? WHERE id = ?").run(role, id);
       res.json({ success: true });
     } catch (error: any) {
-      console.error("Error updating team member:", error);
-      res.status(500).json({ error: "Failed to update team member: " + error.message });
+      console.error("Error updating user role:", error);
+      res.status(500).json({ error: "Failed to update role" });
     }
   });
 
@@ -1861,12 +2352,40 @@ async function startServer() {
     }
   });
 
+  app.get("/api/tenders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const tender = db.prepare(`
+        SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
+        FROM tenders t
+        LEFT JOIN contacts c ON t.mandataire_id = c.id
+        WHERE t.id = ?
+      `).get(id);
+      
+      if (!tender) {
+        return res.status(404).json({ error: "Tender not found" });
+      }
+      
+      const specialties = db.prepare(`
+        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
+        FROM tender_specialties ts
+        LEFT JOIN contacts c ON ts.contact_id = c.id
+        WHERE ts.tender_id = ?
+      `).all(id);
+      
+      res.json({ ...tender, specialties_list: specialties });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch tender" });
+    }
+  });
+
   app.post("/api/tenders", (req, res) => {
     try {
       const { 
         title, client, submission_deadline, status, value, notes,
         mandataire_id, type, surface, construction_cost, honoraires_percent,
-        mandatory_visit, visit_date, withdrawal_deadline, specialties_list, milestones_list
+        mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list
       } = req.body;
       
       const id = `t${Date.now()}`;
@@ -1876,12 +2395,12 @@ async function startServer() {
           INSERT INTO tenders (
             id, title, client, submission_deadline, status, value, notes,
             mandataire_id, type, surface, construction_cost, honoraires_percent,
-            mandatory_visit, visit_date, withdrawal_deadline
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            mandatory_visit, visit_date, withdrawal_deadline, archived
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, title, client, submission_deadline, status || 'Draft', value || 0, notes || '',
           mandataire_id || null, type || null, surface || 0, construction_cost || 0, honoraires_percent || 0,
-          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null
+          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null, archived ? 1 : 0
         );
 
         if (specialties_list && Array.isArray(specialties_list)) {
@@ -1929,13 +2448,28 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/tenders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      db.transaction(() => {
+        db.prepare("DELETE FROM tender_specialties WHERE tender_id = ?").run(id);
+        db.prepare("DELETE FROM milestones WHERE tender_id = ?").run(id);
+        db.prepare("DELETE FROM tenders WHERE id = ?").run(id);
+      })();
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to delete tender" });
+    }
+  });
+
   app.put("/api/tenders/:id", (req, res) => {
     try {
       const { id } = req.params;
       const { 
         title, client, submission_deadline, status, value, notes,
         mandataire_id, type, surface, construction_cost, honoraires_percent,
-        mandatory_visit, visit_date, withdrawal_deadline, specialties_list, milestones_list
+        mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list
       } = req.body;
       
       const updateTender = db.transaction(() => {
@@ -1943,12 +2477,12 @@ async function startServer() {
           UPDATE tenders SET 
             title = ?, client = ?, submission_deadline = ?, status = ?, value = ?, notes = ?,
             mandataire_id = ?, type = ?, surface = ?, construction_cost = ?, honoraires_percent = ?,
-            mandatory_visit = ?, visit_date = ?, withdrawal_deadline = ?
+            mandatory_visit = ?, visit_date = ?, withdrawal_deadline = ?, archived = ?
           WHERE id = ?
         `).run(
           title, client, submission_deadline, status, value || 0, notes || '',
           mandataire_id || null, type || null, surface || 0, construction_cost || 0, honoraires_percent || 0,
-          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null, id
+          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null, archived ? 1 : 0, id
         );
 
         // Update specialties
@@ -2521,8 +3055,16 @@ async function startServer() {
           const client = db.prepare("SELECT first_name || ' ' || last_name as name FROM contacts WHERE id = ?").get(p.client_id);
           
           db.prepare(`
-            INSERT INTO projects (id, name, client, status, budget, description, start_date, end_date, address)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO projects (
+              id, name, client, status, budget, description, start_date, end_date, address,
+              reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
+              adresse_client, cp_client, ville_client, telephone, portable, email_client, 
+              adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
+              nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
+              categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+              surface_ert, effectif_public, effectif_personnel, ind, date_modification
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             projectId, 
             p.title, 
@@ -2532,7 +3074,14 @@ async function startServer() {
             p.description,
             new Date().toISOString().split('T')[0],
             new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Default 30 days
-            p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : ''
+            p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
+            p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, 
+            p.representant, p.qualite, p.adresse_client, p.cp_client, p.ville_client, 
+            p.telephone, p.portable, p.email_client, p.adresse_terrain, p.cp_ville_terrain, 
+            p.ban_id_terrain, p.city_code_terrain, p.ref_cadastrale, p.zone_plu, p.surface_parcelle, 
+            p.nom_etablissement, p.avant_trav, p.apres_trav, p.type_et_cat, p.type_projet, 
+            p.categorie_projet, p.surface_plancher, p.surface_plancher_ext, p.surface_erp, 
+            p.surface_ert, p.effectif_public, p.effectif_personnel, p.ind, p.date_modification
           );
 
           // Copy specialties to project cotraitants
@@ -2718,9 +3267,9 @@ async function startServer() {
               seller_name = ?, seller_address = ?, seller_siret = ?, seller_vat_number = ?, seller_iban = ?, seller_bic = ?, vat_rate = ?
           WHERE id = ?
         `).run(
-          amount, description, status, due_date,
-          invoice_number, tax_amount, total_amount, issue_date,
-          seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+          amount || 0, description || '', status || 'Draft', due_date || null,
+          invoice_number || null, tax_amount || 0, total_amount || 0, issue_date || null,
+          seller_name || null, seller_address || null, seller_siret || null, seller_vat_number || null, seller_iban || null, seller_bic || null, vat_rate || 20,
           id
         );
 
@@ -2806,35 +3355,19 @@ async function startServer() {
 
       // If no data yet and we have a query string
       if (!data && q) {
-        // Use the BDNB geocoder
-        let url = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=5`;
-        console.log(`Fetching addresses for query: ${q}, URL: ${url}`);
+        // Try Géoplateforme API FIRST (New official IGN API)
+        let url = `https://data.geopf.fr/geocodage/search/?q=${encodeURIComponent(q as string)}&limit=5`;
+        console.log(`Fetching addresses from Géoplateforme for query: ${q}`);
         
-        let response = await fetchWithTimeout(url, {
-          headers: { 'Accept': 'application/json' }
-        }, 15000);
-        
-        if (response.ok) {
-          try {
-            const text = await response.text();
-            data = JSON.parse(text);
-          } catch (e) {
-            console.warn(`Failed to parse BDNB JSON.`);
-          }
-        }
-
-        // Fallback to api-adresse.data.gouv.fr if BDNB fails or returns no results
-        if (!data || (Array.isArray(data) && data.length === 0)) {
-          console.log(`BDNB returned no results, trying api-adresse.data.gouv.fr for query: ${q}`);
-          url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q as string)}&limit=5`;
-          response = await fetchWithTimeout(url, {
+        try {
+          let response = await fetchWithTimeout(url, {
             headers: { 'Accept': 'application/json' }
-          }, 15000);
+          }, 5000);
           
           if (response.ok) {
-            const fallbackData = await response.json();
-            if (fallbackData.features) {
-              data = fallbackData.features.map((f: any) => ({
+            const geoData = await response.json();
+            if (geoData.features && geoData.features.length > 0) {
+              data = geoData.features.map((f: any) => ({
                 cle_interop_adr: f.properties.id,
                 libelle_adr: f.properties.label,
                 code_commune_insee: f.properties.citycode,
@@ -2845,6 +3378,57 @@ async function startServer() {
                 lon: f.geometry.coordinates[0]
               }));
             }
+          }
+        } catch (e) {
+          console.warn("Géoplateforme API failed, trying BAN fallback");
+        }
+
+        // Fallback to api-adresse.data.gouv.fr if Géoplateforme returned nothing
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q as string)}&limit=5`;
+          console.log(`Géoplateforme returned no results, trying BAN for query: ${q}`);
+          
+          try {
+            let response = await fetchWithTimeout(url, {
+              headers: { 'Accept': 'application/json' }
+            }, 5000);
+            
+            if (response.ok) {
+              const banData = await response.json();
+              if (banData.features && banData.features.length > 0) {
+                data = banData.features.map((f: any) => ({
+                  cle_interop_adr: f.properties.id,
+                  libelle_adr: f.properties.label,
+                  code_commune_insee: f.properties.citycode,
+                  code_postal: f.properties.postcode,
+                  nom_commune: f.properties.city,
+                  score: f.properties.score,
+                  lat: f.geometry.coordinates[1],
+                  lon: f.geometry.coordinates[0]
+                }));
+              }
+            }
+          } catch (e) {
+            console.warn("BAN API also failed, trying BDNB fallback");
+          }
+        }
+
+        // Final fallback to BDNB geocoder
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          url = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=5`;
+          console.log(`BAN returned no results, trying BDNB for query: ${q}`);
+          
+          try {
+            let response = await fetchWithTimeout(url, {
+              headers: { 'Accept': 'application/json' }
+            }, 15000);
+            
+            if (response.ok) {
+              const text = await response.text();
+              data = JSON.parse(text);
+            }
+          } catch (e) {
+            console.warn("BDNB geocoder also failed");
           }
         }
       }
@@ -2882,6 +3466,86 @@ async function startServer() {
       res.status(500).json({ error: "Failed to fetch addresses" });
     }
   });
+
+  app.get("/api/weather", async (req, res) => {
+    try {
+      const { q, date } = req.query;
+      if (!q || !date) {
+        return res.status(400).json({ error: "Address and date are required" });
+      }
+
+      // 1. Geocode address
+      const geocodeUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q as string)}&limit=1`;
+      const geoRes = await fetchWithTimeout(geocodeUrl, {}, 5000);
+      if (!geoRes.ok) {
+        throw new Error("Geocoding failed");
+      }
+      const geoData = await geoRes.json();
+      if (!geoData.features || geoData.features.length === 0) {
+        return res.status(404).json({ error: "Address not found" });
+      }
+
+      const [lon, lat] = geoData.features[0].geometry.coordinates;
+
+      // 2. Fetch weather from Open-Meteo
+      // We use the forecast API which also handles recent history (up to 92 days)
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto&start_date=${date}&end_date=${date}`;
+      
+      const weatherRes = await fetchWithTimeout(weatherUrl, {}, 5000);
+      if (!weatherRes.ok) {
+        // If forecast API fails (maybe date is too far in the past), try archive API
+        const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto&start_date=${date}&end_date=${date}`;
+        const archiveRes = await fetchWithTimeout(archiveUrl, {}, 5000);
+        if (!archiveRes.ok) {
+          throw new Error("Weather API failed");
+        }
+        const archiveData = await archiveRes.json();
+        return res.json(formatWeatherData(archiveData));
+      }
+
+      const weatherData = await weatherRes.json();
+      res.json(formatWeatherData(weatherData));
+    } catch (error: any) {
+      console.error("Error in /api/weather:", error);
+      res.status(500).json({ error: "Failed to fetch weather data" });
+    }
+  });
+
+  function formatWeatherData(data: any) {
+    if (!data.daily || !data.daily.weather_code || data.daily.weather_code.length === 0) {
+      return { meteo: "Inconnu", temperature: null };
+    }
+
+    const code = data.daily.weather_code[0];
+    const temp = data.daily.temperature_2m_max[0];
+
+    const weatherMap: Record<number, string> = {
+      0: "Ciel dégagé",
+      1: "Principalement dégagé",
+      2: "Partiellement nuageux",
+      3: "Couvert",
+      45: "Brouillard",
+      48: "Brouillard givrant",
+      51: "Bruine légère",
+      53: "Bruine modérée",
+      55: "Bruine dense",
+      61: "Pluie faible",
+      63: "Pluie modérée",
+      65: "Pluie forte",
+      71: "Neige faible",
+      73: "Neige modérée",
+      75: "Neige forte",
+      80: "Averses de pluie faibles",
+      81: "Averses de pluie modérées",
+      82: "Averses de pluie violentes",
+      95: "Orage",
+    };
+
+    return {
+      meteo: weatherMap[code] || "Variable",
+      temperature: temp
+    };
+  }
 
   // Proxy for Urban Planning (GPU) API
   app.get("/api/urban-planning/documents", async (req, res) => {
@@ -2950,25 +3614,112 @@ async function startServer() {
   // Proxy for Historical Monuments (Culture API)
   app.get("/api/historical-monuments", async (req, res) => {
     try {
-      const { lat, lon, distance = 1000 } = req.query;
-      if (!lat || !lon) {
+      const { lat: latQuery, lon: lonQuery, distance = 1000 } = req.query;
+      if (!latQuery || !lonQuery) {
         return res.status(400).json({ error: "Latitude and longitude are required" });
       }
 
-      const url = `https://data.culture.gouv.fr/api/records/1.0/search/?dataset=liste-des-immeubles-proteges-au-titre-des-monuments-historiques&q=&geofilter.distance=${lat},${lon},${distance}&rows=10&sort=dist`;
-      
-      console.log(`[Culture] Fetching monuments: ${url}`);
-      const response = await fetchWithTimeout(url, {}, 10000);
-      
-      if (!response.ok) {
-        return res.status(response.status).json({ error: `Culture API error: ${response.status}` });
+      const lat = parseFloat(latQuery as string);
+      const lon = parseFloat(lonQuery as string);
+
+      if (isNaN(lat) || isNaN(lon)) {
+        return res.status(400).json({ error: "Invalid latitude or longitude" });
       }
 
-      const data = await response.json();
-      res.json(data);
+      const dataset = "liste-des-immeubles-proteges-au-titre-des-monuments-historiques";
+      const url = `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/${dataset}/records`;
+
+      // ÉTAPE 1 : appel sans select ni where géo — juste 1 record pour voir les vrais noms
+      console.log(`[Culture] Découverte des champs sur dataset...`);
+      const discoveryResponse = await axios.get(url, {
+        params: {
+          limit: 1,
+        },
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        timeout: 10000
+      });
+
+      if (discoveryResponse.data?.results?.length > 0) {
+        const sample = discoveryResponse.data.results[0];
+        console.log("[Culture] === VRAIS NOMS DE CHAMPS ===");
+        Object.entries(sample).forEach(([k, v]) => {
+          console.log(`  "${k}": ${JSON.stringify(v)?.substring(0, 60)}`);
+        });
+        console.log("[Culture] === FIN CHAMPS ===");
+      }
+
+      // ÉTAPE 2 : appel géographique AVEC where explicite
+      console.log(`[Culture] Requête géo: lat=${lat}, lon=${lon}, distance=${distance}m`);
+
+      const response = await axios.get(url, {
+        params: {
+          limit: 10,
+          select: `*, distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})') as dist`,
+          where: `within_distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})', ${distance}m)`,
+          order_by: `distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})')`
+        },
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        timeout: 15000
+      });
+
+      const v2Data = response.data;
+
+      if (!v2Data?.results) {
+        return res.json({ records: [] });
+      }
+
+      console.log(`[Culture] ${v2Data.results.length} monument(s) trouvé(s)`);
+      if (v2Data.results.length > 0) {
+        console.log("[Culture] Champs du 1er résultat:", Object.keys(v2Data.results[0]));
+      }
+
+      // Mapping défensif : on prend ce qui existe, peu importe le nom exact
+      const mappedData = {
+        records: v2Data.results.map((r: any) => {
+          // Cherche le champ geo — peut s'appeler coordonnees_au_format_wgs84, coordonnees_ban, geolocalisation, etc.
+          const geoField = r.coordonnees_au_format_wgs84 ?? r.coordonnees_ban ?? r.geolocalisation ?? r.coordonnees_gps ?? null;
+          
+          // Cherche la référence Mérimée
+          const refField = r.ref ?? r.reference ?? r.ref_merimee ?? null;
+          
+          return {
+            recordid: refField || `mh-${Math.random().toString(36).substr(2, 9)}`,
+            fields: {
+              ref_merimee: refField,
+              tico: r.tico ?? r.titre_courant ?? r.denomination_de_l_edifice ?? null,
+              comm: r.com ?? r.commune ?? r.commune_forme_index ?? null,
+              dpt: r.dpt_lettre ?? r.departement ?? r.dep ?? null,
+              stat: r.stat ?? r.statut_juridique_de_l_edifice ?? null,
+              prec_lib: r.ppro ?? r.precision_sur_la_protection ?? null,
+              dpro: r.dpro ?? r.date_et_typologie_de_la_protection ?? null,
+              autr: r.autr ?? r.auteur_de_l_edifice ?? null,
+              adrs: r.adrs ?? r.adresse_forme_index ?? null,
+              coordonnees_ban: geoField,
+              dist: r.dist ?? null,
+            }
+          };
+        })
+      };
+
+      res.json(mappedData);
+
     } catch (error: any) {
-      console.error("[Culture] Proxy Error:", error);
-      res.status(500).json({ error: "Internal server error during Culture API lookup" });
+      if (error.response) {
+        console.error(
+          "[Culture] API Error:",
+          error.response.status,
+          JSON.stringify(error.response.data).substring(0, 400)
+        );
+        return res.status(error.response.status).json({
+          error: `Culture API error: ${error.response.status}`,
+          details: error.response.data?.message || error.response.data
+        });
+      }
+      console.error("[Culture] Proxy Error:", error.message);
+      res.status(error.code === 'ECONNABORTED' ? 504 : 500).json({
+        error: error.code === 'ECONNABORTED' ? "Culture API request timed out" : "Internal server error",
+        details: error.message
+      });
     }
   });
 
@@ -3071,12 +3822,22 @@ async function startServer() {
         return res.status(500).json({ error: "Settings not found" });
       }
 
+      const smtpHost = settings.smtpHost || process.env.SMTP_HOST;
+      const smtpPort = settings.smtpPort || process.env.SMTP_PORT || '587';
+      const smtpUser = settings.smtpUser || process.env.SMTP_USER;
+      const smtpPass = settings.smtpPass || process.env.SMTP_PASS;
+
+      if (!smtpHost || !smtpUser || !smtpPass) {
+        return res.status(500).json({ error: "Configuration SMTP manquante" });
+      }
+
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
+        host: smtpHost,
+        port: parseInt(String(smtpPort)),
+        secure: String(smtpPort) === '465',
         auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
+          user: smtpUser,
+          pass: smtpPass,
         },
       });
 
@@ -3299,26 +4060,71 @@ async function startServer() {
   app.put("/api/settings", (req, res) => {
     try {
       const data = req.body;
+      const validColumns = ['agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber', 'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl', 'seller_iban', 'seller_bic', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass'];
+      const filteredData = Object.keys(data)
+        .filter(k => validColumns.includes(k))
+        .reduce((obj, key) => {
+          obj[key] = data[key];
+          return obj;
+        }, {} as any);
+
       const existing = db.prepare("SELECT id FROM settings WHERE id = 'general'").get();
       if (existing) {
-        const columns = Object.keys(data).filter(k => k !== 'id');
+        const columns = Object.keys(filteredData);
+        if (columns.length === 0) {
+          res.json({ success: true });
+          return;
+        }
         const setClause = columns.map(c => `${c} = ?`).join(', ');
-        const values = columns.map(c => data[c]);
-        db.prepare(`UPDATE settings SET ${setClause} WHERE id = 'general'`).run(...values, 'general');
+        const values = columns.map(c => filteredData[c]);
+        db.prepare(`UPDATE settings SET ${setClause} WHERE id = 'general'`).run(...values);
       } else {
-        const columns = Object.keys(data);
+        const columns = Object.keys(filteredData);
         if (!columns.includes('id')) {
           columns.push('id');
-          data.id = 'general';
+          filteredData.id = 'general';
         }
         const placeholders = columns.map(() => '?').join(', ');
-        const values = columns.map(c => data[c]);
+        const values = columns.map(c => filteredData[c]);
         db.prepare(`INSERT INTO settings (${columns.join(', ')}) VALUES (${placeholders})`).run(...values);
       }
       res.json({ success: true });
     } catch (error) {
       console.error("Error updating settings:", error);
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  app.post("/api/test-smtp", async (req, res) => {
+    try {
+      const { smtpHost, smtpPort, smtpUser, smtpPass } = req.body;
+      
+      if (!smtpHost || !smtpUser || !smtpPass) {
+        return res.status(400).json({ error: "Missing SMTP configuration" });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(String(smtpPort) || '587'),
+        secure: String(smtpPort) === '465',
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"ArchiManager Test" <${smtpUser}>`,
+        to: smtpUser,
+        subject: "ArchiManager SMTP Test",
+        text: "This is a test email from ArchiManager to verify your SMTP configuration.",
+        html: "<b>This is a test email from ArchiManager to verify your SMTP configuration.</b>"
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("SMTP Test Error:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 

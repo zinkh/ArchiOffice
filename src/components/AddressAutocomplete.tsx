@@ -43,21 +43,27 @@ interface AddressFeature {
 
 export function AddressAutocomplete({ label, value, onChange, onSelect, placeholder, required, id }: AddressAutocompleteProps) {
   const [query, setQuery] = useState(value);
+  const [isUserTyping, setIsUserTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<AddressFeature[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const lastRequestRef = useRef<number>(0);
 
-  // Update internal query when prop value changes
+  // Update internal query when prop value changes (but not while typing)
   useEffect(() => {
-    setQuery(value);
-  }, [value]);
+    if (!isUserTyping) {
+      setQuery(value);
+    }
+  }, [value, isUserTyping]);
 
   // Handle outside click to close suggestions
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         setShowSuggestions(false);
+        setIsUserTyping(false);
+        setSuggestions([]);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -84,9 +90,14 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
   }, [query, showSuggestions]);
 
   const fetchAddresses = async (searchQuery: string) => {
+    const requestId = ++lastRequestRef.current;
     setIsLoading(true);
     try {
       const response = await fetch(`/api/address-search?q=${encodeURIComponent(searchQuery)}`);
+      
+      // Ignore stale responses
+      if (requestId !== lastRequestRef.current) return;
+
       if (response.ok) {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
@@ -122,6 +133,7 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
+    setIsUserTyping(true);
     setQuery(newValue);
     onChange(newValue); // Update parent immediately with raw input
     setShowSuggestions(true);
@@ -129,6 +141,7 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
 
   const handleSelectAddress = (feature: AddressFeature) => {
     const fullAddress = feature.properties.label;
+    setIsUserTyping(false); // Allow sync again
     setQuery(fullAddress);
     setSuggestions([]);
     setShowSuggestions(false);
@@ -164,6 +177,14 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
           value={query || ''}
           onChange={handleInputChange}
           onFocus={() => setShowSuggestions(true)}
+          onBlur={() => {
+            // Small delay to allow handleSelectAddress to fire first if a suggestion was clicked
+            setTimeout(() => {
+              setShowSuggestions(false);
+              setIsUserTyping(false);
+              setSuggestions([]);
+            }, 200);
+          }}
           placeholder={placeholder || "Search address..."}
           required={required}
         />

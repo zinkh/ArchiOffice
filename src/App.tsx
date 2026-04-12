@@ -32,8 +32,10 @@ import Gantt from './pages/Gantt';
 import Contacts from './pages/Contacts';
 import ProjectTemplates from './pages/ProjectTemplates';
 import ProjectDetail from './pages/ProjectDetail';
+import References from './pages/References';
 import Documents from './pages/Documents';
 import Settings from './pages/Settings';
+import TenderDetail from './pages/TenderDetail';
 
 function SyncStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -254,10 +256,12 @@ export default function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/projects" element={<Projects />} />
                   <Route path="/projects/:id" element={<ProjectDetail />} />
+                  <Route path="/references" element={<References />} />
                   <Route path="/documents" element={<Documents />} />
                   <Route path="/proposals" element={<Proposals />} />
                   <Route path="/invoices" element={<Invoices />} />
                   <Route path="/tenders" element={<Tenders />} />
+                  <Route path="/tenders/:id" element={<TenderDetail />} />
                   <Route path="/specifications" element={<Specifications />} />
                   <Route path="/specifications/:specId" element={<Specifications />} />
                   <Route path="/team" element={<Team />} />

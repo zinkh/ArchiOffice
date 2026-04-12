@@ -107,6 +107,44 @@ export interface Project {
   categories_list?: ProjectCategory[];
   external_intervenants?: string;
   entreprises?: string;
+
+  // Fields from Proposal
+  reference?: string;
+  projet_detail?: string;
+  is_entreprise?: boolean;
+  nom_societe?: string;
+  rcs?: string;
+  representant?: string;
+  qualite?: string;
+  adresse_client?: string;
+  cp_client?: string;
+  ville_client?: string;
+  telephone?: string;
+  portable?: string;
+  email_client?: string;
+  adresse_terrain?: string;
+  cp_ville_terrain?: string;
+  ban_id_terrain?: string;
+  city_code_terrain?: string;
+  ref_cadastrale?: string;
+  zone_plu?: string;
+  surface_parcelle?: string;
+  nom_etablissement?: string;
+  avant_trav?: string;
+  apres_trav?: string;
+  type_et_cat?: string;
+  type_projet?: string;
+  categorie_projet?: string;
+  surface_plancher?: string;
+  surface_plancher_ext?: string;
+  surface_erp?: string;
+  surface_ert?: string;
+  effectif_public?: string;
+  effectif_personnel?: string;
+  ind?: string;
+  date_modification?: string;
+  site_postcode?: string;
+  site_city?: string;
 }
 
 export interface OrdreDeService {
@@ -238,6 +276,7 @@ export interface Tender {
   withdrawal_deadline?: string;
   specialties_list?: TenderSpecialty[];
   milestones_list?: Milestone[];
+  archived?: boolean;
 }
 
 export interface Specification {
@@ -350,6 +389,8 @@ export interface ProposalSpecialty {
   specialty_name: string;
   contact_id?: string;
   contact_name?: string;
+  architect_percentage?: number;
+  cotraitant_percentage?: number;
 }
 
 export interface Proposal {
@@ -505,6 +546,7 @@ export interface Invoice {
   seller_vat_number?: string;
   seller_iban?: string;
   seller_bic?: string;
+  currency?: string;
   vat_rate?: number;
   items?: InvoiceItem[];
 }
@@ -527,6 +569,9 @@ export interface SiteReport {
   companies?: { name: string; trade: string }[];
   meetingNotes?: string;
   nextMeeting?: string;
+  meteo?: string;
+  temperature?: number;
+  effectif_total?: number;
 }
 
 export interface SiteReportNote {
@@ -538,8 +583,13 @@ export interface SiteReportNote {
   issue_date: string;
   due_date?: string;
   realization_date?: string;
-  status: 'open' | 'done';
+  status: 'open' | 'done' | 'A FAIRE' | 'EN COURS' | 'LEVÉE' | 'URGENT';
   text: string;
+  lot_concerne?: string;
+  photo_url?: string;
+  position?: { x: number; y: number };
+  description?: string;
+  statut?: 'A FAIRE' | 'EN COURS' | 'LEVÉE' | 'URGENT';
 }
 
 export interface DPGFItem {

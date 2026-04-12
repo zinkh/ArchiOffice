@@ -16,7 +16,6 @@ interface ContactAutocompleteProps {
 }
 
 export function ContactAutocomplete({ contacts, value, onChange, onAddNew, placeholder, className, inputClassName, addNewLabel = "Add New Contact" }: ContactAutocompleteProps) {
-  console.log('ContactAutocomplete contacts:', contacts);
   const [query, setQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -49,11 +48,14 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
   }, [wrapperRef, selectedContact]);
 
   const filteredContacts = contacts.filter(c => {
-    const fullName = `${c.first_name} ${c.last_name}`.toLowerCase();
+    const firstName = (c.first_name || '').toLowerCase();
+    const lastName = (c.last_name || '').toLowerCase();
+    const fullName = `${firstName} ${lastName}`.toLowerCase();
     const company = (c.company_name || '').toLowerCase();
+    const category = (c.category || '').toLowerCase();
     const search = query.toLowerCase();
-    return fullName.includes(search) || company.includes(search);
-  })?.slice(0, 10);
+    return fullName.includes(search) || company.includes(search) || category.includes(search) || firstName.includes(search) || lastName.includes(search);
+  }).slice(0, 10);
 
   return (
     <div className={`relative ${className}`} ref={wrapperRef}>

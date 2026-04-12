@@ -20,14 +20,50 @@ interface GPUDocumentDetails extends GPUDocument {
 }
 
 interface UrbanPlanningInfoProps {
-  insee: string;
+  insee?: string;
   coords?: { lat: number; lon: number } | null;
+  address?: string;
 }
 
-export function UrbanPlanningInfo({ insee, coords }: UrbanPlanningInfoProps) {
+export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, address }: UrbanPlanningInfoProps) {
   const [documents, setDocuments] = useState<GPUDocumentDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [insee, setInsee] = useState(initialInsee || '');
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(initialCoords || null);
+
+  useEffect(() => {
+    if (initialInsee) setInsee(initialInsee);
+    if (initialCoords) setCoords(initialCoords);
+  }, [initialInsee, initialCoords]);
+
+  useEffect(() => {
+    if (!address || insee) return;
+
+    const geocode = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.features?.length > 0) {
+            const feature = data.features[0];
+            setInsee(feature.properties.citycode);
+            setCoords({
+              lat: feature.geometry.coordinates[1],
+              lon: feature.geometry.coordinates[0]
+            });
+          }
+        }
+      } catch (e) {
+        console.error("Geocoding failed for UrbanPlanningInfo", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    geocode();
+  }, [address, insee]);
 
   useEffect(() => {
     if (!insee) return;
@@ -98,15 +134,16 @@ export function UrbanPlanningInfo({ insee, coords }: UrbanPlanningInfoProps) {
   if (!insee) return null;
 
   return (
-    <div className="mt-4 p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700">
-      <div className="flex items-center justify-between mb-3">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded uppercase tracking-wider">Urbanisme (GPU)</span>
         </div>
         {loading && <IconLoader2 size={14} className="animate-spin text-blue-500" />}
       </div>
 
-      {error ? (
+      <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
+        {error ? (
         <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
           <IconAlertCircle size={14} />
           <span>{error}</span>
@@ -188,6 +225,7 @@ export function UrbanPlanningInfo({ insee, coords }: UrbanPlanningInfoProps) {
           </a>
         </div>
       )}
+      </div>
     </div>
   );
 }
