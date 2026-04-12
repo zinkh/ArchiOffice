@@ -852,7 +852,7 @@ export default function Contacts() {
                       <input 
                         type="number"
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                        value={newContact.ca_amount || ''}
+                        value={newContact.ca_amount ?? ''}
                         onChange={e => setNewContact({...newContact, ca_amount: Number(e.target.value)})}
                       />
                     </div>

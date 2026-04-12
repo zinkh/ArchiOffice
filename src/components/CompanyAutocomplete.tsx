@@ -10,14 +10,14 @@ interface CompanyAutocompleteProps {
 }
 
 export function CompanyAutocomplete({ label, value, onChange, placeholder, required }: CompanyAutocompleteProps) {
-  const [query, setQuery] = useState(value);
+  const [query, setQuery] = useState(value || '');
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setQuery(value);
+    setQuery(value || '');
   }, [value]);
 
   useEffect(() => {
@@ -95,7 +95,7 @@ export function CompanyAutocomplete({ label, value, onChange, placeholder, requi
         <input
           type="text"
           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-9"
-          value={query}
+          value={query || ''}
           onChange={handleInputChange}
           onFocus={() => setShowSuggestions(true)}
           placeholder={placeholder || "Search company..."}

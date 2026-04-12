@@ -122,8 +122,8 @@ export default function Dashboard() {
 
       <div className="md:col-span-2 card">
         <h2 className="text-zinc-900 dark:text-zinc-100 text-lg font-bold mb-4">Project Status</h2>
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-64 w-full min-h-[256px]">
+          <ResponsiveContainer width="100%" height="100%" minHeight={256}>
             <PieChart>
               <Pie
                 data={statusData}
@@ -154,8 +154,8 @@ export default function Dashboard() {
 
       <div className="md:col-span-2 card">
         <h2 className="text-zinc-900 dark:text-zinc-100 text-lg font-bold mb-4">Top Categories</h2>
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-64 w-full min-h-[256px]">
+          <ResponsiveContainer width="100%" height="100%" minHeight={256}>
             <RechartsBarChart
               data={categoryData}
               layout="vertical"

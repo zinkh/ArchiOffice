@@ -105,7 +105,8 @@ const resources = {
       "send_from_personal": "Send from Personal",
       "default_email_template": "Default Email Template",
       "my_email_settings": "My Email Settings",
-      "siret": "SIRET"
+      "siret": "SIRET",
+      "pdf_generator": "PDF Generator"
     }
   },
   fr: {
@@ -210,7 +211,8 @@ const resources = {
       "send_from_personal": "Envoyer depuis mon compte",
       "default_email_template": "Modèle d'e-mail par défaut",
       "my_email_settings": "Mes paramètres de messagerie",
-      "siret": "SIRET"
+      "siret": "SIRET",
+      "pdf_generator": "Générateur PDF"
     }
   }
 };

@@ -1,5 +1,5 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
-import { Proposal } from '../types';
+import type { Proposal } from '../types';
 
 // Map Proposal fields to XML DBKey and UIKey
 const fieldMapping: { [key in keyof Proposal]?: { dbKey: string; uiKey: string } } = {

@@ -9,12 +9,28 @@ import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ReactGrid, Column, Row, Cell, CellChange, TextCell, NumberCell, HeaderCell } from "@silevis/reactgrid";
 import { ContactModal } from '../components/ContactModal';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import MilestoneGantt from '../components/MilestoneGantt';
+
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
+
+const DEFAULT_MISSIONS = [
+  { id: 'esquisse', name: 'Esquisse', category: 'Mission base', default_pct: 10 },
+  { id: 'aps', name: 'A.P.S.', category: 'Mission base', default_pct: 12 },
+  { id: 'apd', name: 'A.P.D.', category: 'Mission base', default_pct: 14 },
+  { id: 'projet', name: 'Projet', category: 'Mission base', default_pct: 18 },
+  { id: 'act', name: 'A.C.T.', category: 'Mission base', default_pct: 7 },
+  { id: 'visa', name: 'VISA', category: 'Mission base', default_pct: 7 },
+  { id: 'det', name: 'D.E.T.', category: 'Mission base', default_pct: 25 },
+  { id: 'aor', name: 'A.O.R.', category: 'Mission base', default_pct: 7 },
+  { id: 'opc', name: 'OPC', category: 'Mission Exécution' },
+];
 
 const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
   <div>
@@ -26,7 +42,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
         id={id}
         required={required}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
-        value={value}
+        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       >
         <option value="">Select...</option>
@@ -38,7 +54,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
       <textarea 
         id={id}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white resize-none h-20"
-        value={value ?? ''}
+        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       />
     ) : type === "checkbox" ? (
@@ -47,7 +63,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
           id={id}
           type="checkbox"
           className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
-          checked={value}
+          checked={!!value}
           onChange={e => onChange(e.target.checked)}
         />
       </div>
@@ -57,7 +73,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
         type={type}
         required={required}
         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
-        value={value ?? ''}
+        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       />
     )}
@@ -113,7 +129,19 @@ export default function Proposals() {
     effectif_personnel: '',
     ind: 'A',
     date_modification: new Date().toLocaleDateString('fr-FR'),
-    specialties_list: []
+    specialties_list: [],
+    fee_distribution: JSON.stringify({ 
+      missions: DEFAULT_MISSIONS.map(m => ({ 
+        ...m, 
+        amount: m.default_pct ? (0 * (m.default_pct / 100)) : 0,
+        percentages: {} 
+      })) 
+    }),
+    construction_cost: 0,
+    complexity_rate: 1,
+    base_fee_percent: 0,
+    vat_rate: 20,
+    decimal_precision: 2
   };
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
 
@@ -269,6 +297,87 @@ export default function Proposals() {
     p.client_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.reference?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const calculateFeeRatios = (feeDistribution: string | undefined) => {
+    if (!feeDistribution) return { exeRatio: 1, totalRatio: 1 };
+    try {
+      const data = JSON.parse(feeDistribution);
+      const missions = data.missions || [];
+      const baseAmt = missions
+        .filter((m: any) => m.category === 'Mission base')
+        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+      
+      if (baseAmt === 0) return { exeRatio: 1, totalRatio: 1 };
+
+      const exeAmt = missions
+        .filter((m: any) => m.category === 'Mission base' || m.category === 'Mission Exécution')
+        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+      
+      const totalAmt = missions
+        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+
+      return {
+        exeRatio: exeAmt / baseAmt,
+        totalRatio: totalAmt / baseAmt
+      };
+    } catch (e) {
+      return { exeRatio: 1, totalRatio: 1 };
+    }
+  };
+
+  const feeRatios = React.useMemo(() => calculateFeeRatios(newProposal.fee_distribution), [newProposal.fee_distribution]);
+  const calculatedExePercent = (newProposal.base_fee_percent || 0) * feeRatios.exeRatio;
+  const calculatedTotalPercent = (newProposal.base_fee_percent || 0) * feeRatios.totalRatio;
+
+  const vatAmount = (newProposal.amount || 0) * ((newProposal.vat_rate || 0) / 100);
+  const totalTTC = (newProposal.amount || 0) + vatAmount;
+
+  // Auto-calculate amount if factors change
+  useEffect(() => {
+    if (newProposal.construction_cost && newProposal.complexity_rate && newProposal.base_fee_percent) {
+      const calculatedAmount = newProposal.construction_cost * (newProposal.base_fee_percent / 100) * newProposal.complexity_rate;
+      if (Math.abs(calculatedAmount - (newProposal.amount || 0)) > 0.01) {
+        setNewProposal(prev => ({ ...prev, amount: Number(calculatedAmount.toFixed(2)) }));
+      }
+    }
+  }, [newProposal.construction_cost, newProposal.complexity_rate, newProposal.base_fee_percent]);
+
+  // Sync base missions with global amount
+  useEffect(() => {
+    if (!newProposal.fee_distribution) return;
+    try {
+      const data = JSON.parse(newProposal.fee_distribution);
+      const missions = data.missions || [];
+      const baseMissions = missions.filter((m: any) => m.category === 'Mission base');
+      
+      if (baseMissions.length === 0) return;
+
+      const currentBaseTotal = baseMissions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+      const targetBaseTotal = newProposal.amount || 0;
+
+      if (Math.abs(currentBaseTotal - targetBaseTotal) > 0.01) {
+        const updatedMissions = missions.map((m: any) => {
+          if (m.category === 'Mission base') {
+            // If there's only one mission, it gets the full amount
+            if (baseMissions.length === 1) {
+              return { ...m, amount: targetBaseTotal };
+            }
+            // If current total is 0, use default percentages
+            if (currentBaseTotal === 0) {
+              const defaultPct = DEFAULT_MISSIONS.find(dm => dm.id === m.id)?.default_pct || (100 / baseMissions.length);
+              return { ...m, amount: Number((targetBaseTotal * (defaultPct / 100)).toFixed(newProposal.decimal_precision || 2)) };
+            }
+            // Otherwise distribute based on relative percentage
+            const relPct = (m.amount || 0) / currentBaseTotal;
+            return { ...m, amount: Number((targetBaseTotal * relPct).toFixed(newProposal.decimal_precision || 2)) };
+          }
+          return m;
+        });
+        setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify({ ...data, missions: updatedMissions }) }));
+      }
+    } catch (e) {}
+  }, [newProposal.amount, newProposal.decimal_precision]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -656,7 +765,39 @@ export default function Proposals() {
                     Honoraires
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <FormField label="Amount" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
+                    <FormField label="Montant des travaux (€)" type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
+                    <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
+                    <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">% avec Exé</label>
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                        {calculatedExePercent.toFixed(2)} %
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">% avec Missions Comp.</label>
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                        {calculatedTotalPercent.toFixed(2)} %
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                        {formatCurrency(vatAmount)}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
+                      <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl text-sm font-bold text-blue-700 dark:text-blue-400">
+                        {formatCurrency(totalTTC)}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -682,17 +823,11 @@ export default function Proposals() {
                         <tr>
                           <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Spécialité</th>
                           <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Contact</th>
-                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Arch %</th>
-                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Arch €</th>
-                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Cotr %</th>
-                          <th className="px-4 py-3 text-center font-bold text-zinc-500 uppercase tracking-wider">Cotr €</th>
                           <th className="px-4 py-3 text-right font-bold text-zinc-500 uppercase tracking-wider w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
                         {newProposal.specialties_list?.map((spec, idx) => {
-                          const archAmount = (newProposal.amount || 0) * ((spec.architect_percentage || 0) / 100);
-                          const cotrAmount = (newProposal.amount || 0) * ((spec.cotraitant_percentage || 0) / 100);
                           return (
                           <tr key={spec.id || idx}>
                             <td className="px-4 py-3">
@@ -711,28 +846,6 @@ export default function Proposals() {
                                 onAddNew={() => setIsContactModalOpen(true)}
                               />
                             </td>
-                            <td className="px-4 py-3">
-                              <input 
-                                type="number"
-                                className="w-16 bg-transparent outline-none focus:ring-2 focus:ring-blue-500/20 rounded-lg px-2 py-1 text-zinc-900 dark:text-white text-center"
-                                value={spec.architect_percentage || ''}
-                                onChange={e => updateSpecialty(idx, 'architect_percentage', Number(e.target.value))}
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-center font-mono text-zinc-600 dark:text-zinc-300">
-                              {formatCurrency(archAmount)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <input 
-                                type="number"
-                                className="w-16 bg-transparent outline-none focus:ring-2 focus:ring-blue-500/20 rounded-lg px-2 py-1 text-zinc-900 dark:text-white text-center"
-                                value={spec.cotraitant_percentage || ''}
-                                onChange={e => updateSpecialty(idx, 'cotraitant_percentage', Number(e.target.value))}
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-center font-mono text-zinc-600 dark:text-zinc-300">
-                              {formatCurrency(cotrAmount)}
-                            </td>
                             <td className="px-4 py-3 text-right">
                               <button 
                                 type="button"
@@ -747,7 +860,7 @@ export default function Proposals() {
                         })}
                         {(!newProposal.specialties_list || newProposal.specialties_list.length === 0) && (
                           <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-zinc-400 italic">
+                            <td colSpan={3} className="px-4 py-8 text-center text-zinc-400 italic">
                               Aucun cotraitant ajouté.
                             </td>
                           </tr>
@@ -756,17 +869,108 @@ export default function Proposals() {
                     </table>
                   </div>
                 </div>
+
+                {/* Section 10: Répartition des Honoraires */}
+                <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">10</span>
+                      Répartition des Honoraires
+                    </h3>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
+                        <input 
+                          type="number" 
+                          min="0" 
+                          max="4" 
+                          value={(typeof newProposal.decimal_precision === 'number' && isNaN(newProposal.decimal_precision)) ? '' : (newProposal.decimal_precision ?? '')} 
+                          onChange={(e) => setNewProposal(prev => ({ ...prev, decimal_precision: Number(e.target.value) }))}
+                          className="w-10 bg-transparent text-xs font-bold text-zinc-900 dark:text-white outline-none"
+                        />
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => exportToXlsx(newProposal, contacts)}
+                        className="text-[10px] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
+                      >
+                        <IconFileSpreadsheet size={12} /> Exporter XLSX
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const currentData = JSON.parse(newProposal.fee_distribution || '{}');
+                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Base', category: 'Mission base', percentages: { architect: 100 } };
+                          const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
+                          setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
+                        }}
+                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      >
+                        <IconPlus size={12} /> Base
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const currentData = JSON.parse(newProposal.fee_distribution || '{}');
+                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Exé', category: 'Mission Exécution', percentages: { architect: 100 } };
+                          const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
+                          setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
+                        }}
+                        className="text-[10px] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
+                      >
+                        <IconPlus size={12} /> Exécution
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const currentData = JSON.parse(newProposal.fee_distribution || '{}');
+                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Comp', category: 'Missions complémentaires', percentages: { architect: 100 } };
+                          const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
+                          setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
+                        }}
+                        className="text-[10px] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
+                      >
+                        <IconPlus size={12} /> Complémentaire
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
+                    <FeeDistributionGrid 
+                      proposal={newProposal} 
+                      contacts={contacts} 
+                      milestones={milestones}
+                      onMilestonesChange={(updated) => {
+                        if (editingProposal) {
+                          setMilestones(prev => {
+                            const other = prev.filter(m => m.proposal_id !== editingProposal.id);
+                            return [...other, ...updated];
+                          });
+                        }
+                      }}
+                      onChange={(data) => setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(data) }))} 
+                    />
+                  </div>
+                </div>
+
                 {/* Section 09: Milestones */}
                 {editingProposal && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">09</span>
-                      Milestones
+                      Calendrier prévisionnel
                     </h3>
                     <MilestoneGantt 
                       milestones={milestones.filter(m => m.proposal_id === editingProposal.id)} 
                       startDate={new Date(editingProposal.created_at)} 
-                      endDate={new Date()} 
+                      endDate={new Date(new Date(editingProposal.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)} 
+                      onUpdate={(updatedMilestones) => {
+                        // In a real app, we would call an API to update milestones
+                        // For now, we update the local state
+                        setMilestones(prev => {
+                          const other = prev.filter(m => m.proposal_id !== editingProposal.id);
+                          return [...other, ...updatedMilestones];
+                        });
+                      }}
                     />
                   </div>
                 )}
@@ -805,3 +1009,478 @@ export default function Proposals() {
     </div>
   );
 }
+
+const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMilestonesChange }: { 
+  proposal: Partial<Proposal>, 
+  contacts: Contact[], 
+  onChange: (data: any) => void,
+  milestones: Milestone[],
+  onMilestonesChange: (milestones: Milestone[]) => void
+}) => {
+  const data = React.useMemo(() => {
+    if (proposal.fee_distribution) {
+      try {
+        return JSON.parse(proposal.fee_distribution);
+      } catch (e) {}
+    }
+    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+  }, [proposal.fee_distribution]);
+
+  // Sync milestones with missions
+  React.useEffect(() => {
+    if (!proposal.id) return;
+    
+    const currentMissions = data.missions;
+    const currentMilestones = milestones.filter(m => m.proposal_id === proposal.id);
+    
+    let hasChanges = false;
+    const updatedMilestones = [...currentMilestones];
+
+    // Add missing milestones
+    currentMissions.forEach((mission: any) => {
+      if (!currentMilestones.find(m => m.title === mission.name)) {
+        updatedMilestones.push({
+          id: `ms-${Date.now()}-${Math.random()}`,
+          proposal_id: proposal.id,
+          title: mission.name,
+          due_date: new Date().toISOString(),
+          completed: false,
+          duration_days: 30
+        });
+        hasChanges = true;
+      }
+    });
+
+    // Remove extra milestones (those not in missions)
+    const finalMilestones = updatedMilestones.filter(m => 
+      currentMissions.find((mission: any) => mission.name === m.title)
+    );
+
+    if (finalMilestones.length !== currentMilestones.length || hasChanges) {
+      onMilestonesChange(finalMilestones);
+    }
+  }, [data.missions, proposal.id]);
+
+  const selectedContacts = React.useMemo(() => {
+    const list = proposal.specialties_list || [];
+    return list.map(s => {
+      const contact = contacts.find(c => c.id === s.contact_id);
+      return {
+        id: s.contact_id || s.id,
+        name: contact ? `${contact.first_name} ${contact.last_name}` : s.specialty_name,
+        role: s.specialty_name
+      };
+    }).filter(c => c.id);
+  }, [proposal.specialties_list, contacts]);
+
+  const columns: Column[] = [
+    { columnId: "mission", width: 150 },
+    { columnId: "amount", width: 100 },
+    { columnId: "rel_pct", width: 70 },
+    { columnId: "solde", width: 100 },
+    { columnId: "architect_pct", width: 70 },
+    { columnId: "architect_amt", width: 100 },
+    ...selectedContacts.flatMap(c => [
+      { columnId: `${c.id}_pct`, width: 70 },
+      { columnId: `${c.id}_amt`, width: 100 }
+    ]),
+    { columnId: "actions", width: 40 }
+  ];
+
+  const headerRow1: Row = {
+    rowId: "header1",
+    cells: [
+      { type: "header", text: "Désignation" },
+      { type: "header", text: "Montant HT" },
+      { type: "header", text: "Rel %" },
+      { type: "header", text: "Solde" },
+      { type: "header", text: "Architecte", style: { textAlign: 'center' } },
+      { type: "header", text: "" },
+      ...selectedContacts.flatMap(c => [
+        { type: "header", text: c.name, style: { textAlign: 'center' } },
+        { type: "header", text: "" }
+      ]),
+      { type: "header", text: "" }
+    ] as HeaderCell[]
+  };
+
+  const headerRow2: Row = {
+    rowId: "header2",
+    cells: [
+      { type: "header", text: "" },
+      { type: "header", text: "" },
+      { type: "header", text: "" },
+      { type: "header", text: "" },
+      { type: "header", text: "%" },
+      { type: "header", text: "€" },
+      ...selectedContacts.flatMap(c => [
+        { type: "header", text: "%" },
+        { type: "header", text: "€" }
+      ]),
+      { type: "header", text: "" }
+    ] as HeaderCell[]
+  };
+
+  const precision = (typeof proposal.decimal_precision === 'number' && !isNaN(proposal.decimal_precision)) ? proposal.decimal_precision : 2;
+
+  const totalBaseAmount = React.useMemo(() => {
+    return data.missions
+      .filter((m: any) => m.category === 'Mission base')
+      .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+  }, [data.missions]);
+
+  const buildRow = (m: any) => {
+    const isBaseMission = m.category === 'Mission base';
+    const missionAmount = m.amount || 0;
+    const relPct = totalBaseAmount > 0 ? (missionAmount / totalBaseAmount) * 100 : 0;
+    const archPct = m.percentages['architect'] || 0;
+    const archAmt = missionAmount * (archPct / 100);
+    
+    let sumPct = archPct;
+    selectedContacts.forEach(c => {
+      sumPct += (m.percentages[c.id] || 0);
+    });
+    const soldePct = 100 - sumPct;
+    const soldeAmt = missionAmount * (soldePct / 100);
+
+    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
+
+    return {
+      rowId: m.id,
+      cells: [
+        { type: "text", text: m.name } as TextCell,
+        { type: "number", value: safeNum(missionAmount) } as NumberCell,
+        { type: "number", value: safeNum(relPct) } as NumberCell,
+        { type: "number", value: safeNum(soldeAmt) } as NumberCell,
+        { type: "number", value: safeNum(archPct) } as NumberCell,
+        { type: "number", value: safeNum(archAmt) } as NumberCell,
+        ...selectedContacts.flatMap(c => {
+          const pct = m.percentages[c.id] || 0;
+          const amt = missionAmount * (pct / 100);
+          return [
+            { type: "number", value: safeNum(pct) } as NumberCell,
+            { type: "number", value: safeNum(amt) } as NumberCell
+          ];
+        }),
+        { type: "text", text: isBaseMission ? "" : "🗑️", style: { cursor: isBaseMission ? 'default' : 'pointer' } } as TextCell
+      ]
+    };
+  };
+
+  const buildTotalRow = (rowId: string, label: string, missions: any[], isCumulative = false) => {
+    const totalAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+    const relPct = totalBaseAmount > 0 ? (totalAmt / totalBaseAmount) * 100 : 0;
+    
+    const totalSolde = missions.reduce((acc: number, m: any) => {
+      const missionAmount = m.amount || 0;
+      const archPct = m.percentages['architect'] || 0;
+      let sumPct = archPct;
+      selectedContacts.forEach(c => {
+        sumPct += (m.percentages[c.id] || 0);
+      });
+      return acc + (missionAmount * ((100 - sumPct) / 100));
+    }, 0);
+
+    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + ((m.amount || 0) * ((m.percentages['architect'] || 0) / 100)), 0);
+
+    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
+
+    return {
+      rowId,
+      cells: [
+        { type: "text", text: label, style: { fontWeight: 'bold', background: '#f8fafc' } } as TextCell,
+        { type: "number", value: safeNum(totalAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+        { type: "number", value: safeNum(relPct), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+        { type: "number", value: safeNum(totalSolde), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+        { type: "number", value: 0, style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+        { type: "number", value: safeNum(totalArchAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+        ...selectedContacts.flatMap(c => {
+          const contactTotalAmt = missions.reduce((acc: number, m: any) => acc + ((m.amount || 0) * ((m.percentages[c.id] || 0) / 100)), 0);
+          return [
+            { type: "number", value: 0, style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
+            { type: "number", value: safeNum(contactTotalAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell
+          ];
+        }),
+        { type: "text", text: "", style: { background: '#f8fafc' } } as TextCell
+      ]
+    };
+  };
+
+  const buildVATRows = (missions: any[]) => {
+    const totalHT = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+    const vatRate = proposal.vat_rate || 20;
+    const vatAmt = totalHT * (vatRate / 100);
+    const totalTTC = totalHT + vatAmt;
+
+    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
+
+    return [
+      {
+        rowId: `vat-${missions.length}`,
+        cells: [
+          { type: "text", text: `TVA (${vatRate}%)`, style: { fontStyle: 'italic', color: '#64748b' } } as TextCell,
+          { type: "number", value: safeNum(vatAmt), style: { fontStyle: 'italic', color: '#64748b' } } as NumberCell,
+          ...Array(columns.length - 2).fill({ type: "text", text: "" })
+        ]
+      },
+      {
+        rowId: `ttc-${missions.length}`,
+        cells: [
+          { type: "text", text: "TOTAL TTC", style: { fontWeight: 'bold', color: '#1e40af' } } as TextCell,
+          { type: "number", value: safeNum(totalTTC), style: { fontWeight: 'bold', color: '#1e40af' } } as NumberCell,
+          ...Array(columns.length - 2).fill({ type: "text", text: "" })
+        ]
+      }
+    ];
+  };
+
+  const baseMissions = data.missions.filter((m: any) => m.category === 'Mission base');
+  const exeMissions = data.missions.filter((m: any) => m.category === 'Mission Exécution');
+  const compMissions = data.missions.filter((m: any) => m.category === 'Missions complémentaires');
+
+  const rows: Row[] = [
+    headerRow1,
+    headerRow2,
+    { rowId: 'cat-base', cells: [{ type: 'header', text: 'Mission base' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
+    ...baseMissions.map((m: any) => buildRow(m)),
+    buildTotalRow('total-base', 'Sous-total Base', baseMissions),
+
+    { rowId: 'cat-exe', cells: [{ type: 'header', text: 'Mission Exécution' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
+    ...exeMissions.map((m: any) => buildRow(m)),
+    buildTotalRow('total-exe', 'Sous-total Exécution', exeMissions),
+    buildTotalRow('cumul-exe', 'Total Base + Exé', [...baseMissions, ...exeMissions], true),
+
+    { rowId: 'cat-comp', cells: [{ type: 'header', text: 'Missions complémentaires' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
+    ...compMissions.map((m: any) => buildRow(m)),
+    buildTotalRow('total-comp', 'Sous-total Complémentaire', compMissions),
+    buildTotalRow('cumul-comp', 'TOTAL GENERAL HT', [...baseMissions, ...exeMissions, ...compMissions], true),
+    ...buildVATRows([...baseMissions, ...exeMissions, ...compMissions])
+  ];
+
+  const handleChanges = (changes: CellChange[]) => {
+    let newData = { ...data };
+    changes.forEach(change => {
+      const missionIndex = newData.missions.findIndex((m: any) => m.id === change.rowId);
+      if (missionIndex === -1) return;
+
+      const isBaseMission = newData.missions[missionIndex].category === 'Mission base';
+
+      if (change.columnId === "mission") {
+        newData.missions[missionIndex].name = (change.newCell as TextCell).text;
+      } else if (change.columnId === "amount") {
+        newData.missions[missionIndex].amount = (change.newCell as NumberCell).value;
+      } else if (change.columnId === "rel_pct") {
+        const newRelPct = (change.newCell as NumberCell).value;
+        if (isBaseMission) {
+          const baseMissions = newData.missions.filter((m: any) => m.category === 'Mission base');
+          const idx = baseMissions.findIndex((m: any) => m.id === change.rowId);
+          const targetTotal = proposal.amount || 0;
+          
+          let sumAbove = 0;
+          for (let i = 0; i < idx; i++) {
+            sumAbove += (baseMissions[i].amount / targetTotal) * 100;
+          }
+          
+          const remaining = 100 - sumAbove - newRelPct;
+          newData.missions[missionIndex].amount = (newRelPct * targetTotal) / 100;
+          
+          const missionsBelow = baseMissions.slice(idx + 1);
+          const sumBelow = missionsBelow.reduce((acc, m) => acc + (m.amount || 0), 0);
+          
+          if (missionsBelow.length > 0) {
+            missionsBelow.forEach(mb => {
+              const mbIdx = newData.missions.findIndex((m: any) => m.id === mb.id);
+              if (sumBelow > 0) {
+                const mbRelWeight = mb.amount / sumBelow;
+                newData.missions[mbIdx].amount = (mbRelWeight * remaining * targetTotal) / 100;
+              } else {
+                newData.missions[mbIdx].amount = (remaining / missionsBelow.length * targetTotal) / 100;
+              }
+            });
+          }
+        } else {
+          newData.missions[missionIndex].amount = (newRelPct * totalBaseAmount) / 100;
+        }
+      } else if (change.columnId === "architect_pct") {
+        newData.missions[missionIndex].percentages['architect'] = (change.newCell as NumberCell).value;
+      } else if (typeof change.columnId === 'string' && change.columnId.endsWith("_pct")) {
+        const contactId = change.columnId.replace("_pct", "");
+        newData.missions[missionIndex].percentages[contactId] = (change.newCell as NumberCell).value;
+      } else if (change.columnId === "actions" && !isBaseMission) {
+        // Handle delete via clearing the cell or typing something
+        if ((change.newCell as TextCell).text === "") {
+          newData.missions = newData.missions.filter((m: any) => m.id !== change.rowId);
+        }
+      }
+    });
+    onChange(newData);
+  };
+
+  return (
+    <ReactGrid 
+      rows={rows} 
+      columns={columns} 
+      onCellsChanged={handleChanges}
+      enableRowSelection
+      enableColumnSelection
+    />
+  );
+};
+
+const exportToXlsx = (proposal: Partial<Proposal>, contacts: Contact[]) => {
+  if (!proposal.fee_distribution) return;
+  try {
+    const data = JSON.parse(proposal.fee_distribution);
+    const specialties = proposal.specialties_list || [];
+    const selectedContacts = specialties.map(s => {
+      const contact = contacts.find(c => c.id === s.contact_id);
+      return {
+        id: s.contact_id || s.id,
+        name: contact ? `${contact.first_name} ${contact.last_name}` : s.specialty_name
+      };
+    }).filter(c => c.id);
+
+    const aoa: any[][] = [];
+    
+    // Header Level 1
+    const h1 = ["Désignation", "Montant HT", "Rel %", "Solde", "Architecte", ""];
+    selectedContacts.forEach(c => h1.push(c.name, ""));
+    aoa.push(h1);
+
+    // Header Level 2
+    const h2 = ["", "", "", "", "%", "€"];
+    selectedContacts.forEach(() => h2.push("%", "€"));
+    aoa.push(h2);
+
+    const getCol = (idx: number) => {
+      let letter = '';
+      idx++;
+      while (idx > 0) {
+        let mod = (idx - 1) % 26;
+        letter = String.fromCharCode(65 + mod) + letter;
+        idx = Math.floor((idx - mod) / 26);
+      }
+      return letter;
+    };
+
+    const categories = [
+      { label: "Mission base", category: "Mission base" },
+      { label: "Mission Exécution", category: "Mission Exécution" },
+      { label: "Missions complémentaires", category: "Missions complémentaires" }
+    ];
+
+    let currentRow = 2; // Rows already in aoa
+    const baseSubtotalRowRef = { row: 0 };
+
+    categories.forEach((cat) => {
+      aoa.push([cat.label]);
+      currentRow++;
+      
+      const missions = data.missions.filter((m: any) => m.category === cat.category);
+      const startRow = currentRow + 1;
+      
+      missions.forEach((m: any) => {
+        currentRow++;
+        const r = currentRow;
+        const rowData: any[] = [m.name];
+        
+        // Montant HT (Col B)
+        rowData.push(m.amount || 0);
+        
+        // Rel % (Col C) - Placeholder, filled later
+        rowData.push(0); 
+
+        // Solde (Col D)
+        let soldeFormula = `B${r}*(100-(${getCol(4)}${r}`;
+        selectedContacts.forEach((_, i) => {
+          soldeFormula += `+${getCol(6 + i * 2)}${r}`;
+        });
+        soldeFormula += "))/100";
+        rowData.push({ f: soldeFormula });
+
+        // Architecte % (Col E)
+        rowData.push(m.percentages['architect'] || 0);
+
+        // Architecte € (Col F)
+        rowData.push({ f: `B${r}*E${r}/100` });
+
+        // Contacts
+        selectedContacts.forEach((c, i) => {
+          const pct = m.percentages[c.id] || 0;
+          rowData.push(pct); // % (Col G, I...)
+          rowData.push({ f: `B${r}*${getCol(6 + i * 2)}${r}/100` }); // € (Col H, J...)
+        });
+        
+        aoa.push(rowData);
+      });
+
+      // Subtotal Row
+      currentRow++;
+      const subRowIdx = currentRow;
+      if (cat.category === "Mission base") baseSubtotalRowRef.row = subRowIdx;
+      
+      const subRow: any[] = [`Sous-total ${cat.label}`];
+      // Montant HT (Col B)
+      subRow.push({ f: `SUM(B${startRow}:B${subRowIdx - 1})` });
+      // Rel % (Col C)
+      subRow.push({ f: `SUM(C${startRow}:C${subRowIdx - 1})` });
+      // Solde (Col D)
+      subRow.push({ f: `SUM(D${startRow}:D${subRowIdx - 1})` });
+      // Architecte % (Col E)
+      subRow.push("");
+      // Architecte € (Col F)
+      subRow.push({ f: `SUM(F${startRow}:F${subRowIdx - 1})` });
+      
+      selectedContacts.forEach((_, i) => {
+        subRow.push("");
+        subRow.push({ f: `SUM(${getCol(7 + i * 2)}${startRow}:${getCol(7 + i * 2)}${subRowIdx - 1})` });
+      });
+      
+      aoa.push(subRow);
+      aoa.push([]);
+      currentRow++;
+    });
+
+    // Fix Rel % formulas for all missions
+    const baseSubtotalRow = baseSubtotalRowRef.row;
+    let rowPtr = 2;
+    categories.forEach(cat => {
+      rowPtr++; // Category label
+      const missions = data.missions.filter((m: any) => m.category === cat.category);
+      missions.forEach(() => {
+        rowPtr++;
+        aoa[rowPtr - 1][2] = { f: `B${rowPtr}/$B$${baseSubtotalRow}*100` };
+      });
+      rowPtr++; // Subtotal
+      rowPtr++; // Empty
+    });
+
+    // Totals
+    const subtotalRows: number[] = [];
+    aoa.forEach((row, i) => {
+      if (row[0] && typeof row[0] === 'string' && row[0].startsWith("Sous-total")) {
+        subtotalRows.push(i + 1);
+      }
+    });
+    
+    const htSumFormula = subtotalRows.map(r => `B${r}`).join("+");
+    aoa.push(["TOTAL GENERAL HT", { f: htSumFormula }]);
+    currentRow++;
+    
+    const vatRate = proposal.vat_rate || 20;
+    aoa.push([`TVA (${vatRate}%)`, { f: `B${currentRow}*${vatRate}/100` }]);
+    currentRow++;
+    
+    aoa.push(["TOTAL GENERAL TTC", { f: `B${currentRow-1}+B${currentRow}` }]);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Répartition Honoraires");
+    
+    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Repartition_Honoraires_${proposal.reference || 'Projet'}.xlsx`);
+  } catch (e) {
+    console.error("Export failed:", e);
+  }
+};

@@ -36,6 +36,7 @@ import References from './pages/References';
 import Documents from './pages/Documents';
 import Settings from './pages/Settings';
 import TenderDetail from './pages/TenderDetail';
+import ProposalModule from './components/ProposalModule';
 
 function SyncStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -268,6 +269,7 @@ export default function App() {
                   <Route path="/gantt" element={<Gantt />} />
                   <Route path="/contacts" element={<Contacts />} />
                   <Route path="/templates" element={<ProjectTemplates />} />
+                  <Route path="/proposal-generator" element={<ProposalModule />} />
                   <Route path="/settings" element={<Settings />} />
                 </Routes>
               </main>

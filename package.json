@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
@@ -13,6 +14,7 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@silevis/reactgrid": "^4.1.17",
     "@table-library/react-table-library": "^4.1.15",
     "@tabler/icons-react": "^3.37.1",
     "@tailwindcss/vite": "^4.1.14",

@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
-import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper.js";
+import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
@@ -517,6 +517,7 @@ try {
       custom_building TEXT,
       custom_architect TEXT,
       custom_client TEXT,
+      fee_distribution TEXT,
 
       FOREIGN KEY(client_id) REFERENCES contacts(id)
     );
@@ -813,7 +814,8 @@ try {
       'client_suffixtitle', 'client_nameorder', 'client_company', 'client_fulladdress', 'client_address_1',
       'client_address_2', 'client_address_3', 'client_postbox', 'client_city', 'client_state',
       'client_postcode', 'client_country', 'client_email', 'client_phone', 'client_fax',
-      'ed_report_header', 'custom_building', 'custom_architect', 'custom_client'
+      'ed_report_header', 'custom_building', 'custom_architect', 'custom_client', 'fee_distribution',
+      'construction_cost', 'complexity_rate', 'base_fee_percent', 'exe_fee_percent', 'comp_fee_percent', 'vat_rate', 'decimal_precision'
     ] },
     { table: 'ordres_de_service', columns: [
       'march_number', 'lot', 'maitrise_oeuvre_adresse', 'entreprise', 'origine_demande', 
@@ -2903,10 +2905,10 @@ async function startServer() {
             client_suffixtitle, client_nameorder, client_company, client_fulladdress, client_address_1,
             client_address_2, client_address_3, client_postbox, client_city, client_state,
             client_postcode, client_country, client_email, client_phone, client_fax,
-            ed_report_header, custom_building, custom_architect, custom_client
+            ed_report_header, custom_building, custom_architect, custom_client, fee_distribution
           ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `);
 
@@ -2933,7 +2935,7 @@ async function startServer() {
           p.client_suffixtitle, p.client_nameorder, p.client_company, p.client_fulladdress, p.client_address_1,
           p.client_address_2, p.client_address_3, p.client_postbox, p.client_city, p.client_state,
           p.client_postcode, p.client_country, p.client_email, p.client_phone, p.client_fax,
-          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client
+          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client, p.fee_distribution
         );
 
         if (p.specialties_list && Array.isArray(p.specialties_list)) {
@@ -3004,7 +3006,7 @@ async function startServer() {
               client_suffixtitle = ?, client_nameorder = ?, client_company = ?, client_fulladdress = ?, client_address_1 = ?,
               client_address_2 = ?, client_address_3 = ?, client_postbox = ?, client_city = ?, client_state = ?,
               client_postcode = ?, client_country = ?, client_email = ?, client_phone = ?, client_fax = ?,
-              ed_report_header = ?, custom_building = ?, custom_architect = ?, custom_client = ?
+              ed_report_header = ?, custom_building = ?, custom_architect = ?, custom_client = ?, fee_distribution = ?
           WHERE id = ?
         `);
 
@@ -3033,7 +3035,7 @@ async function startServer() {
           p.client_suffixtitle, p.client_nameorder, p.client_company, p.client_fulladdress, p.client_address_1,
           p.client_address_2, p.client_address_3, p.client_postbox, p.client_city, p.client_state,
           p.client_postcode, p.client_country, p.client_email, p.client_phone, p.client_fax,
-          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client,
+          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client, p.fee_distribution,
           id
         );
 

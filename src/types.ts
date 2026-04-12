@@ -247,6 +247,8 @@ export interface Milestone {
   title: string;
   due_date: string;
   completed: boolean;
+  duration_days?: number;
+  dependencies?: string[]; // Array of milestone IDs
 }
 
 export interface TenderSpecialty {
@@ -389,8 +391,6 @@ export interface ProposalSpecialty {
   specialty_name: string;
   contact_id?: string;
   contact_name?: string;
-  architect_percentage?: number;
-  cotraitant_percentage?: number;
 }
 
 export interface Proposal {
@@ -439,6 +439,7 @@ export interface Proposal {
   ind?: string;
   date_modification?: string;
   specialties_list?: ProposalSpecialty[];
+  fee_distribution?: string; // JSON string for reactgrid data
 
   // New XML fields
   project_code?: string;
@@ -524,6 +525,13 @@ export interface Proposal {
   custom_building?: string;
   custom_architect?: string;
   custom_client?: string;
+  construction_cost?: number;
+  complexity_rate?: number;
+  base_fee_percent?: number;
+  exe_fee_percent?: number;
+  comp_fee_percent?: number;
+  vat_rate?: number;
+  decimal_precision?: number;
 }
 
 export interface Invoice {
