@@ -376,8 +376,8 @@ export default function Projects() {
     if (!editForm || isSaving) return;
 
     // Basic validation
-    if (!editForm.name.trim()) {
-      alert('Project name is required');
+    if (!editForm.name.trim() || !editForm.client.trim()) {
+      alert('Project name and client are required');
       return;
     }
 

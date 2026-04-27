@@ -31,7 +31,6 @@ export const NAV_ITEMS = [
   { name: 'team', path: '/team', icon: IconUsers },
   { name: 'contacts', path: '/contacts', icon: IconAddressBook },
   { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
-  { name: 'pdf_generator', path: '/proposal-generator', icon: IconFileText },
   { name: 'settings', path: '/settings', icon: IconSettings },
 ];
 

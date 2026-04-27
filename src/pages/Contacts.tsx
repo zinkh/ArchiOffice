@@ -44,7 +44,7 @@ export default function Contacts() {
   };
 
   const fetchCategories = () => {
-    fetchJson('/api/contact_categories')
+    fetchJson('/api/contact-categories')
       .then(setCategories)
       .catch(err => console.error('Error fetching categories:', err));
   };
@@ -182,7 +182,7 @@ export default function Contacts() {
     if (!newCategoryName.trim()) return;
 
     try {
-      const res = await fetch('/api/contact_categories', {
+      const res = await fetch('/api/contact-categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: crypto.randomUUID(), name: newCategoryName })
@@ -200,7 +200,7 @@ export default function Contacts() {
   const handleDeleteCategory = async (id: string) => {
     if (!confirm('Are you sure you want to delete this category?')) return;
     try {
-      const res = await fetch(`/api/contact_categories/${id}`, {
+      const res = await fetch(`/api/contact-categories/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) {

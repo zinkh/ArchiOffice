@@ -148,6 +148,23 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [isGenerating, setIsGenerating] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!containerRef.current || !previewRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const containerWidth = entry.contentRect.width;
+        const pdfWidth = previewRef.current?.offsetWidth || 1;
+        const scale = Math.min(1, (containerWidth - 40) / pdfWidth);
+        containerRef.current?.style.setProperty('--pdf-scale', scale.toString());
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [view]);
 
   const addCotraitant = () => {
     setData({
@@ -245,16 +262,16 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 bg-zinc-100 dark:bg-zinc-950 relative">
           {/* Always render preview hidden if not in preview mode to allow PDF generation from edit mode */}
-          <div className={view === 'preview' ? "flex flex-col items-center gap-8 py-8 min-h-full" : "fixed -left-[9999px] top-0"}>
+          <div ref={containerRef} className={view === 'preview' ? "flex flex-col items-center gap-8 py-8 min-h-full w-full overflow-x-auto" : "fixed -left-[9999px] top-0"}>
             {/* PDF Preview Container */}
-            <div ref={previewRef} className="flex flex-col gap-8">
+            <div ref={previewRef} className="flex flex-col gap-16 origin-top" style={{ transform: 'scale(var(--pdf-scale, 1))' }}>
               {/* PAGE 1: Cover */}
               <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
-                <h1 className="text-4xl font-bold text-center mt-20 mb-10">PROPOSITION D'HONORAIRES</h1>
-                <h2 className="text-2xl text-center mb-20">{data.project.title}</h2>
+                <h1 className="text-4xl font-bold text-center mt-20 mb-16">PROPOSITION D'HONORAIRES</h1>
+                <h2 className="text-2xl text-center mb-24">{data.project.title}</h2>
                 <div className="mt-auto">
-                  <h3 className="font-bold underline mb-4">Intervenants :</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <h3 className="font-bold underline mb-6">Intervenants :</h3>
+                  <div className="grid grid-cols-2 gap-6">
                     {data.stakeholders.map((s, i) => (
                       <div key={i}><span className="font-bold">{s.role} :</span> {s.name}</div>
                     ))}
@@ -264,17 +281,17 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
 
               {/* PAGE 2: Companies */}
               <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
-                <h3 className="font-bold underline mb-8">Entreprises :</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <h3 className="font-bold underline mb-12">Entreprises :</h3>
+                <div className="grid grid-cols-2 gap-6">
                   {data.companies.map((c, i) => (
                     <div key={i}><span className="font-bold">{c.trade} :</span> {c.name}</div>
                   ))}
                 </div>
                 
                 {data.fieldCompanies.length > 0 && (
-                  <div className="mt-8">
-                    <h3 className="font-bold underline mb-8">Entreprises de terrain :</h3>
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="mt-12">
+                    <h3 className="font-bold underline mb-12">Entreprises de terrain :</h3>
+                    <div className="grid grid-cols-2 gap-6">
                       {data.fieldCompanies.map((c, i) => (
                         <div key={i}><span className="font-bold">{c.trade} :</span> {c.name}</div>
                       ))}
@@ -285,7 +302,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
 
               {/* PAGE 3: Meeting Notes */}
               <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
-                <h3 className="font-bold underline mb-8">Notes de réunion :</h3>
+                <h3 className="font-bold underline mb-12">Notes de réunion :</h3>
                 <p className="whitespace-pre-wrap">{data.meetingNotes}</p>
               </div>
 
@@ -406,7 +423,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                 </div>
 
                 {/* Missions */}
-                <div className="mb-8">
+                <div className="mb-8 mt-12">
                   <h3 className="font-bold underline mb-2">Proposition de missions :</h3>
                   <p className="text-[8pt] font-bold uppercase mb-2">MISSION LIMITÉE AU PROJET ARCHITECTURAL NÉCESSAIRE À LA DEMANDE DE L'AUTORISATION D'URBANISME</p>
                   <ul className="list-none space-y-1 text-[9pt]">

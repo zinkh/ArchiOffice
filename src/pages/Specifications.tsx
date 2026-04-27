@@ -241,7 +241,7 @@ export default function Specifications() {
   };
 
   return (
-    <div className="h-[calc(100vh-160px)] flex flex-col md:flex-row gap-4 max-w-7xl mx-auto">
+    <div className="h-full min-h-[calc(100vh-160px)] flex flex-col md:flex-row gap-4 max-w-7xl mx-auto">
       <div className="w-full md:w-80 flex flex-col gap-4 shrink-0">
         <header className="space-y-1">
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('specifications')}</h2>

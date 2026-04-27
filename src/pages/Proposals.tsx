@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText } from '@tabler/icons-react';
+import { useNavigate } from 'react-router-dom';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -82,6 +83,7 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
 
 export default function Proposals() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -476,6 +478,13 @@ export default function Proposals() {
                         title="Export XML"
                       >
                         <IconFileText size={20} />
+                      </button>
+                      <button 
+                        onClick={() => navigate('/proposal-generator', { state: { proposal } })}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        title={t('pdf_generator')}
+                      >
+                        <IconFileTypePdf size={20} />
                       </button>
                       {proposal.status !== 'Accepted' && (
                         <>

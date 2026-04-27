@@ -1,0 +1,9 @@
+{
+  "endpoints": [
+    {
+      "path": "/api-proxy/**",
+      "target": "https://generativelanguage.googleapis.com",
+      "methods": ["GET", "POST"]
+    }
+  ]
+}

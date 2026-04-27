@@ -999,6 +999,16 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+  // Debug middleware for API routes
+  app.use("/api/*", (req, res, next) => {
+    console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", environment: process.env.NODE_ENV });
+  });
+
   app.get("/api/rnb-buildings", async (req, res) => {
     try {
       const { q } = req.query;
@@ -2663,8 +2673,10 @@ async function startServer() {
   });
 
   app.post("/api/contacts", (req, res) => {
+    console.log("POST /api/contacts hit");
     try {
       const contact = req.body;
+      console.log("Contact body:", JSON.stringify(contact));
       const sanitize = (val: any) => val === undefined ? null : val;
 
       const stmt = db.prepare(`
@@ -2672,14 +2684,14 @@ async function startServer() {
           id, prefix, first_name, middle_name, last_name, suffix, nickname,
           company_name, job_title, department,
           email_work, email_home, email_other, email,
-          phone_mobile, phone_work, phone_home, phone_main, phone_fax_work, phone_fax_home, phone_pager, phone_other, phone,
+          phone_mobile, phone_work, market_number, market_amount_base, market_amount_options, market_amount_avenants, phone_home, phone_main, phone_fax_work, phone_fax_home, phone_pager, phone_other, phone,
           address_work_street, address_work_city, address_work_state, address_work_zip, address_work_country,
           address_home_street, address_home_city, address_home_state, address_home_zip, address_home_country,
           address, zip, city, state, country,
           candidatures, affaires, logo, ca_amount, electronic_signature, contact_references, 
           tags, category, notes, birthday, website, created_at, created_by, siret, vat_number
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       
@@ -2700,6 +2712,10 @@ async function startServer() {
         sanitize(contact.email), 
         sanitize(contact.phone_mobile), 
         sanitize(contact.phone_work), 
+        sanitize(contact.market_number),
+        sanitize(contact.market_amount_base),
+        sanitize(contact.market_amount_options),
+        sanitize(contact.market_amount_avenants),
         sanitize(contact.phone_home), 
         sanitize(contact.phone_main), 
         sanitize(contact.phone_fax_work), 
@@ -2838,7 +2854,8 @@ async function startServer() {
     }
   });
 
-  app.get("/api/contact_categories", (req, res) => {
+  app.get("/api/contact-categories", (req, res) => {
+    console.log("GET /api/contact-categories called");
     try {
       const categories = db.prepare("SELECT * FROM contact_categories ORDER BY name").all();
       res.json(categories);
@@ -3305,7 +3322,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/contact_categories", (req, res) => {
+  app.post("/api/contact-categories", (req, res) => {
     try {
       const { id, name } = req.body;
       db.prepare("INSERT INTO contact_categories (id, name) VALUES (?, ?)").run(id, name);
@@ -3316,7 +3333,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/contact_categories/:id", (req, res) => {
+  app.delete("/api/contact-categories/:id", (req, res) => {
     try {
       const { id } = req.params;
       db.prepare("DELETE FROM contact_categories WHERE id = ?").run(id);
@@ -4162,22 +4179,50 @@ async function startServer() {
     }
   });
 
-  // Catch-all for API routes to prevent falling through to Vite
-  app.all("/api/*", (req, res) => {
-    res.status(404).json({ error: "API route not found" });
-  });
+  const distPath = path.join(process.cwd(), "dist");
+  const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom", // Disable Vite's own SPA fallback
     });
     app.use(vite.middlewares);
+
+    // Custom SPA fallback for dev
+    app.use("*", async (req, res, next) => {
+      if (req.path.startsWith("/api/")) return next();
+      if (req.path.match(/\.[a-zA-Z0-9]+$/)) {
+        return res.status(404).send("Not found");
+      }
+      try {
+        const url = req.originalUrl;
+        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
+
   } else {
-    app.use(express.static(path.join(process.cwd(), "dist")));
+    // Production serving
+    app.use(express.static(distPath));
+
+    // Specifically handle missing assets (like CSS, JS, etc.) to avoid sending index.html and causing loops
+    app.use((req, res, next) => {
+      // If request has a file extension, do not fall back to index.html
+      if (req.path.match(/\.[a-zA-Z0-9]+$/)) {
+        return res.status(404).send("Not found");
+      }
+      next();
+    });
+
+    // SPA fallback for production
     app.get("*", (req, res) => {
-      res.sendFile(path.join(process.cwd(), "dist", "index.html"));
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 

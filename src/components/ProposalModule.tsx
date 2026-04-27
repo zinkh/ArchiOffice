@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import type { Proposal } from '../types';
 import { 
   FileText, 
   Download, 
@@ -14,7 +16,8 @@ import {
   Layout,
   Type,
   Palette,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -1233,8 +1236,111 @@ const DEMO_DATA: ProposalData = {
   architecteNom: "Marc Voisin",
 };
 
+const mapProposalToProposalData = (p: Proposal): ProposalData => {
+  let missions: MissionLine[] = [];
+  try {
+    const feeData = JSON.parse(p.fee_distribution || '{}');
+    if (feeData.missions) {
+      missions = feeData.missions.map((m: any) => ({
+        id: m.id,
+        designation: m.name,
+        categorie: String(m.category).toLowerCase().includes('exécution') ? 'execution' : 
+                   (String(m.category).toLowerCase().includes('bas') || String(m.category).toLowerCase().includes('base')) ? 'base' : 'complementaire',
+        montantHT: m.amount || 0,
+        relPct: m.default_pct || 0,
+        intervenants: [{ 
+          nom: "Architecte", 
+          montantBase: m.amount || 0, 
+          pctBase: 100, 
+          montantExe: 0, 
+          pctExe: 0, 
+          montantComp: 0, 
+          pctComp: 0 
+        }]
+      }));
+    }
+  } catch (e) {
+    console.error("Error parsing fee distribution", e);
+  }
+
+  return {
+    reference: p.reference || p.project_code || "N/A",
+    titre: p.title || "Sans titre",
+    status: p.status || 'Draft',
+    indice: p.ind || "A",
+    dateEmission: new Date().toLocaleDateString('fr-FR'),
+    clientNom: p.client_name || "Client",
+    entreprise: p.is_entreprise || false,
+    nomSociete: p.nom_societe || "",
+    rcs: p.rcs || "",
+    representant: p.representant || "",
+    qualite: p.qualite || "",
+    adresse: p.adresse_client || "",
+    codePostal: p.cp_client || "",
+    ville: p.ville_client || "",
+    telephone: p.telephone || "",
+    portable: p.portable || "",
+    email: p.email_client || "",
+    detailProjet: p.projet_detail || "",
+    descriptionGenerale: p.description || "",
+    adresseTerrain: p.adresse_terrain || "",
+    cpTerrain: p.cp_ville_terrain ? p.cp_ville_terrain.split(' ')[0] : "",
+    villeTerrain: p.cp_ville_terrain ? p.cp_ville_terrain.split(' ').slice(1).join(' ') : (p.site_city || ""),
+    refCadastrale: p.ref_cadastrale || "",
+    zonePLU: p.zone_plu || "",
+    surfaceParcelle: Number(p.surface_parcelle) || 0,
+    nomEtablissement: p.nom_etablissement || "",
+    avantTravaux: p.avant_trav || "",
+    apresTravaux: p.apres_trav || "",
+    typeEtCat: p.type_et_cat || "",
+    type: p.type_projet || "",
+    categorie: p.categorie_projet || "",
+    surfPlancher: Number(p.surface_plancher) || 0,
+    surfExtension: Number(p.surface_plancher_ext) || 0,
+    surfERP: Number(p.surface_erp) || 0,
+    surfERT: Number(p.surface_ert) || 0,
+    effectifPublic: Number(p.effectif_public) || 0,
+    effectifPersonnel: Number(p.effectif_personnel) || 0,
+    dateModif: p.date_modification || new Date().toLocaleDateString('fr-FR'),
+    montantTravaux: p.construction_cost || 0,
+    tauxComplexite: p.complexity_rate || 1,
+    pctHonorairesBase: p.base_fee_percent || 0,
+    montantHonorairesHT: p.amount || 0,
+    pctAvecExe: 0,
+    pctMissionsComp: 0,
+    tauxTVA: p.vat_rate || 20,
+    montantTVA: (p.amount || 0) * ((p.vat_rate || 20) / 100),
+    montantTTC: (p.amount || 0) * (1 + (p.vat_rate || 20) / 100),
+    cotraitants: (p.specialties_list || []).map(s => ({
+      specialite: s.specialty_name,
+      contact: s.contact_name || "",
+      role: ""
+    })),
+    missions: missions,
+    calendrier: missions.map(m => ({
+      id: "c_" + m.id,
+      mission: m.designation,
+      dureeJours: 15,
+      apres: ""
+    })),
+    agenceNom: "ATELIER ARCHI-DESIGN",
+    agenceAdresse: "8 Rue de Rivoli, 75004 Paris",
+    architecteNom: "Marc Voisin",
+  };
+};
+
 export default function ProposalModule() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [template, setTemplate] = useState<ProposalTemplate | null>(null);
+  
+  const proposalData = useMemo(() => {
+    const state = location.state as { proposal?: Proposal } | null;
+    if (state?.proposal) {
+      return mapProposalToProposalData(state.proposal);
+    }
+    return DEMO_DATA;
+  }, [location.state]);
 
   return (
     <div className="flex h-screen bg-zinc-100 dark:bg-zinc-950 overflow-hidden">
@@ -1242,10 +1348,22 @@ export default function ProposalModule() {
       <TemplateEditor onSave={setTemplate} />
 
       {/* Main Preview & Export */}
-      <div className="flex-1 h-full">
-        {template ? (
-          <ProposalGenerator data={DEMO_DATA} template={template} />
-        ) : (
+      <div className="flex-1 h-full flex flex-col">
+        {/* Top Header for navigation */}
+        <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 p-2 flex items-center">
+          <button 
+            onClick={() => navigate('/proposals')}
+            className="flex items-center gap-2 px-3 py-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-sm font-medium">Retour aux Propositions</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-hidden">
+          {template ? (
+            <ProposalGenerator data={proposalData} template={template} />
+          ) : (
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-4 text-zinc-400">
               <Clock className="animate-spin" size={32} />
@@ -1253,6 +1371,7 @@ export default function ProposalModule() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
