@@ -160,16 +160,10 @@ export default function Contacts() {
     if (!newCategoryName.trim()) return;
 
     try {
-      const res = await fetch('/api/contact-categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: crypto.randomUUID(), name: newCategoryName })
-      });
-
-      if (res.ok) {
-        setNewCategoryName('');
-        fetchCategories();
-      }
+      const newCat = { id: crypto.randomUUID(), name: newCategoryName };
+      await offlineMutate(db.contactCategories, 'contactCategories', 'POST', '/api/contact-categories', newCat);
+      setNewCategoryName('');
+      fetchCategories();
     } catch (err) {
       console.error(err);
     }
@@ -178,12 +172,9 @@ export default function Contacts() {
   const handleDeleteCategory = async (id: string) => {
     if (!confirm('Are you sure you want to delete this category?')) return;
     try {
-      const res = await fetch(`/api/contact-categories/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchCategories();
-      }
+      const catToDelete = categories.find(c => c.id === id);
+      await offlineMutate(db.contactCategories, 'contactCategories', 'DELETE', `/api/contact-categories/${id}`, catToDelete);
+      fetchCategories();
     } catch (err) {
       console.error(err);
     }
@@ -199,12 +190,9 @@ export default function Contacts() {
   const handleDeleteContact = async (id: string) => {
     if (!confirm('Are you sure you want to delete this contact?')) return;
     try {
-      const res = await fetch(`/api/contacts/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchContacts();
-      }
+      const contactToDelete = contacts.find(c => c.id === id);
+      await offlineMutate(db.contacts, 'contacts', 'DELETE', `/api/contacts/${id}`, contactToDelete);
+      fetchContacts();
     } catch (err) {
       console.error(err);
     }

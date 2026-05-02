@@ -3,6 +3,8 @@ import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUp
 import { motion, AnimatePresence } from 'motion/react';
 import { Document, Project } from '../types';
 import { useUser } from '../UserContext';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 
 export default function Documents() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -24,20 +26,16 @@ export default function Documents() {
   const [docToDelete, setDocToDelete] = useState<string | null>(null);
 
   const refreshDocuments = () => {
-    fetch('/api/documents').then(res => res.json()).then(setDocuments);
+    getOfflineFirst(db.documents, '/api/documents', setDocuments);
   };
 
   const handleDelete = async () => {
     if (!docToDelete) return;
     try {
-      const response = await fetch(`/api/documents/${docToDelete}`, { method: 'DELETE' });
-      if (response.ok) {
-        refreshDocuments();
-        setDocToDelete(null);
-      } else {
-        const errorText = await response.text();
-        alert(`Failed to delete document: ${response.status} ${errorText}`);
-      }
+      const docObj = documents.find(d => d.id === docToDelete);
+      await offlineMutate(db.documents, 'documents', 'DELETE', `/api/documents/${docToDelete}`, docObj);
+      refreshDocuments();
+      setDocToDelete(null);
     } catch (error) {
       alert('Error deleting document: ' + error);
     }
@@ -118,8 +116,8 @@ export default function Documents() {
   };
 
   useEffect(() => {
-    fetch('/api/projects').then(res => res.json()).then(setProjects);
-    fetch('/api/documents').then(res => res.json()).then(setDocuments);
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
+    getOfflineFirst(db.documents, '/api/documents', setDocuments);
   }, []);
 
   return (
