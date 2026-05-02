@@ -147,9 +147,9 @@ async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000)
   }
 }
 
-const uploadDir = path.join(process.cwd(), 'uploads');
+const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -165,7 +165,7 @@ const upload = multer({ storage: storage });
 
 dotenv.config();
 
-const db = new Database("archimanager.db");
+const db = new Database("/tmp/archimanager.db");
 
 try {
   // Initialize database
@@ -989,12 +989,13 @@ try {
   db.prepare("UPDATE team_members SET system_role = 'user' WHERE id IN ('t3', 't4')").run();
 } catch (error) {
   console.error("Failed to initialize database:", error);
+  process.exit(1);
 }
 
 async function startServer() {
   const app = express();
   app.use('/uploads', express.static(uploadDir));
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -4232,4 +4233,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
