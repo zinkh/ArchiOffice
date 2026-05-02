@@ -4,6 +4,8 @@ import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson } from '../lib/api';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
@@ -38,27 +40,19 @@ export default function Contacts() {
   }, []);
 
   const fetchContacts = () => {
-    fetchJson('/api/contacts')
-      .then(setContacts)
-      .catch(err => console.error('Error fetching contacts:', err));
+    getOfflineFirst(db.contacts, '/api/contacts', setContacts);
   };
 
   const fetchCategories = () => {
-    fetchJson('/api/contact-categories')
-      .then(setCategories)
-      .catch(err => console.error('Error fetching categories:', err));
+    getOfflineFirst(db.contactCategories, '/api/contact-categories', setCategories);
   };
 
   const fetchProjects = () => {
-    fetchJson('/api/projects')
-      .then(setProjects)
-      .catch(err => console.error('Error fetching projects:', err));
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
   };
 
   const fetchTenders = () => {
-    fetchJson('/api/tenders')
-      .then(setTenders)
-      .catch(err => console.error('Error fetching tenders:', err));
+    getOfflineFirst(db.tenders, '/api/tenders', setTenders);
   };
 
   const defaultContact: Contact = {
@@ -145,32 +139,16 @@ export default function Contacts() {
     };
 
     try {
-      const url = isEditing ? `/api/contacts/${editingId}` : '/api/contacts';
-      const method = isEditing ? 'PUT' : 'POST';
-      
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(contact)
-      });
-      
-      if (res.ok) {
-        setIsModalOpen(false);
-        setIsEditing(false);
-        setEditingId(null);
-        setNewContact({});
-        fetchContacts();
+      if (isEditing) {
+        await offlineMutate(db.contacts, 'contacts', 'PUT', `/api/contacts/${editingId}`, contact);
       } else {
-        const text = await res.text();
-        try {
-          const errorData = JSON.parse(text);
-          console.error('Failed to save contact:', errorData);
-          alert(`Failed to save contact: ${errorData.error || 'Unknown error'}`);
-        } catch (e) {
-          console.error('Failed to save contact (non-JSON response):', text);
-          alert(`Failed to save contact: Server returned ${res.status} ${res.statusText}`);
-        }
+        await offlineMutate(db.contacts, 'contacts', 'POST', '/api/contacts', contact);
       }
+      setIsModalOpen(false);
+      setIsEditing(false);
+      setEditingId(null);
+      setNewContact({});
+      fetchContacts();
     } catch (err) {
       console.error('Error submitting contact:', err);
       alert('Failed to save contact. Please check the console for details.');

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { IconPlus, IconFile, IconCheck, IconTrash } from '@tabler/icons-react';
 import { DPGFItem, Situation, DetailSituation } from '../types';
+import { db } from '../db';
 
 export default function Situations({ projectId: propProjectId }: { projectId?: string }) {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
@@ -13,62 +14,81 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
 
   useEffect(() => {
     if (projectId) {
-      fetch(`/api/dpgf/${projectId}`)
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to fetch dpgf items');
-          return res.json();
-        })
-        .then(data => {
-          if (Array.isArray(data)) {
-            setDpgfItems(data);
-          } else {
-            console.error('Expected array for dpgf items, received:', data);
-            setDpgfItems([]);
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          setDpgfItems([]);
-        });
-      fetch(`/api/situations/${projectId}`)
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to fetch situations');
-          return res.json();
-        })
-        .then(data => {
-          if (Array.isArray(data)) {
-            setSituations(data);
-          } else {
-            console.error('Expected array for situations, received:', data);
-            setSituations([]);
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          setSituations([]);
-        });
+      // DPGF: load from Dexie cache first, then sync from server if online
+      db.dpgfs.where('project_id').equals(projectId).toArray().then(cached => {
+        if (cached.length > 0) setDpgfItems(cached);
+      });
+      if (navigator.onLine) {
+        fetch(`/api/dpgf/${projectId}`)
+          .then(res => {
+            if (!res.ok) throw new Error('Failed to fetch dpgf items');
+            return res.json();
+          })
+          .then(data => {
+            if (Array.isArray(data)) {
+              db.dpgfs.bulkPut(data);
+              setDpgfItems(data);
+            } else {
+              console.error('Expected array for dpgf items, received:', data);
+              setDpgfItems([]);
+            }
+          })
+          .catch(err => {
+            console.error(err);
+          });
+      }
+
+      // Situations: load from Dexie cache first, then sync from server if online
+      db.situations.where('project_id').equals(projectId).toArray().then(cached => {
+        if (cached.length > 0) setSituations(cached);
+      });
+      if (navigator.onLine) {
+        fetch(`/api/situations/${projectId}`)
+          .then(res => {
+            if (!res.ok) throw new Error('Failed to fetch situations');
+            return res.json();
+          })
+          .then(data => {
+            if (Array.isArray(data)) {
+              db.situations.bulkPut(data);
+              setSituations(data);
+            } else {
+              console.error('Expected array for situations, received:', data);
+              setSituations([]);
+            }
+          })
+          .catch(err => {
+            console.error(err);
+          });
+      }
     }
   }, [projectId]);
 
   useEffect(() => {
     if (selectedSituation) {
-      fetch(`/api/situations/${selectedSituation.id}/details`)
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to fetch situation details');
-          return res.json();
-        })
-        .then(data => {
-          if (Array.isArray(data)) {
-            setDetails(data);
-          } else {
-            console.error('Expected array for details, received:', data);
-            setDetails([]);
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          setDetails([]);
-        });
+      // Details: load from Dexie cache first, then sync from server if online
+      db.detailSituations.where('situation_id').equals(selectedSituation.id).toArray().then(cached => {
+        if (cached.length > 0) setDetails(cached);
+      });
+      if (navigator.onLine) {
+        fetch(`/api/situations/${selectedSituation.id}/details`)
+          .then(res => {
+            if (!res.ok) throw new Error('Failed to fetch situation details');
+            return res.json();
+          })
+          .then(data => {
+            if (Array.isArray(data)) {
+              db.detailSituations.bulkPut(data);
+              setDetails(data);
+            } else {
+              console.error('Expected array for details, received:', data);
+              setDetails([]);
+            }
+          })
+          .catch(err => {
+            console.error(err);
+          });
+      }
     }
   }, [selectedSituation]);
 

@@ -12,6 +12,8 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
+import { db } from '../db';
+import { getOfflineFirst } from '../lib/offline';
 import { 
   ResponsiveContainer, 
   PieChart, 
@@ -36,21 +38,8 @@ export default function Dashboard() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   useEffect(() => {
-    fetch('/api/projects')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch projects');
-        return res.json();
-      })
-      .then(setProjects)
-      .catch(err => console.error(err));
-
-    fetch('/api/milestones')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch milestones');
-        return res.json();
-      })
-      .then(setMilestones)
-      .catch(err => console.error(err));
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
+    getOfflineFirst(db.milestones, '/api/milestones', setMilestones);
   }, []);
 
   const stats = [

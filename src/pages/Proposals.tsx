@@ -5,6 +5,8 @@ import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconT
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 import type { Proposal, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
@@ -148,72 +150,39 @@ export default function Proposals() {
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [proposalsData, contactsData, milestonesData] = await Promise.all([
-          fetchJson<Proposal[]>('/api/proposals'),
-          fetchJson<Contact[]>('/api/contacts'),
-          fetchJson<Milestone[]>('/api/milestones')
-        ]);
-        setProposals(proposalsData);
-        setContacts(contactsData);
-        setMilestones(milestonesData);
-      } catch (err) {
-        console.error('Proposals data fetch failed:', err);
-      }
-    };
-    loadData();
+    getOfflineFirst(db.proposals, '/api/proposals', setProposals);
+    getOfflineFirst(db.contacts, '/api/contacts', setContacts);
+    getOfflineFirst(db.milestones, '/api/milestones', setMilestones);
   }, []);
 
-  const fetchMilestones = async () => {
-    try {
-      const data = await fetchJson<Milestone[]>('/api/milestones');
-      setMilestones(data);
-    } catch (err) {
-      console.error('Milestones fetch failed:', err);
-    }
+  const fetchMilestones = () => {
+    getOfflineFirst(db.milestones, '/api/milestones', setMilestones);
   };
 
-  const fetchProposals = async () => {
-    try {
-      const data = await fetchJson<Proposal[]>('/api/proposals');
-      setProposals(data);
-    } catch (err) {
-      console.error('Proposals fetch failed:', err);
-    }
+  const fetchProposals = () => {
+    getOfflineFirst(db.proposals, '/api/proposals', setProposals);
   };
 
-  const fetchContacts = async () => {
-    try {
-      const data = await fetchJson<Contact[]>('/api/contacts');
-      setContacts(data);
-    } catch (err) {
-      console.error('Contacts fetch failed:', err);
-    }
+  const fetchContacts = () => {
+    getOfflineFirst(db.contacts, '/api/contacts', setContacts);
   };
 
   const handleSubmitProposal = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const url = editingProposal ? `/api/proposals/${editingProposal.id}` : '/api/proposals';
-      const method = editingProposal ? 'PUT' : 'POST';
-      
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProposal)
-      });
-      if (res.ok) {
-        const saved = await res.json();
-        if (editingProposal) {
-          setProposals(proposals.map(p => p.id === saved.id ? saved : p));
-        } else {
-          setProposals([saved, ...proposals]);
-        }
-        setIsModalOpen(false);
-        setEditingProposal(null);
-        setNewProposal(initialProposalState);
+      let saved: any;
+      if (editingProposal) {
+        saved = await offlineMutate(db.proposals, 'proposals', 'PUT', `/api/proposals/${editingProposal.id}`, newProposal);
+        const result = saved || newProposal;
+        setProposals(proposals.map(p => p.id === result.id ? result : p));
+      } else {
+        saved = await offlineMutate(db.proposals, 'proposals', 'POST', '/api/proposals', newProposal);
+        const result = saved || newProposal;
+        setProposals([result, ...proposals]);
       }
+      setIsModalOpen(false);
+      setEditingProposal(null);
+      setNewProposal(initialProposalState);
     } catch (err) {
       console.error(err);
     }
@@ -233,17 +202,12 @@ export default function Proposals() {
 
   const handleUpdateStatus = async (proposal: Proposal, newStatus: Proposal['status']) => {
     try {
-      const res = await fetch(`/api/proposals/${proposal.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...proposal, status: newStatus })
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setProposals(proposals.map(p => p.id === updated.id ? updated : p));
-        if (newStatus === 'Accepted') {
-          alert('Proposal accepted! A new project has been created.');
-        }
+      const updatedData = { ...proposal, status: newStatus };
+      const updated = await offlineMutate(db.proposals, 'proposals', 'PUT', `/api/proposals/${proposal.id}`, updatedData);
+      const result = updated || updatedData;
+      setProposals(proposals.map(p => p.id === result.id ? result : p));
+      if (newStatus === 'Accepted') {
+        alert('Proposal accepted! A new project has been created.');
       }
     } catch (err) {
       console.error(err);

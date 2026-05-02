@@ -4,6 +4,8 @@ import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 import type { Invoice, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
@@ -29,68 +31,57 @@ export default function Invoices() {
   });
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [invoicesData, projectsData, settingsData] = await Promise.all([
-          fetchJson<Invoice[]>('/api/invoices'),
-          fetchJson<Project[]>('/api/projects'),
-          fetchJson<any>('/api/settings')
-        ]);
+    getOfflineFirst(db.projects, '/api/projects', (projectsData: Project[]) => {
+      setProjects(projectsData);
+      getOfflineFirst(db.invoices, '/api/invoices', (invoicesData: Invoice[]) => {
         const enrichedInvoices = invoicesData.map(inv => ({
           ...inv,
           project_name: projectsData.find(p => p.id === inv.project_id)?.name || inv.project_name
         }));
         setInvoices(enrichedInvoices);
-        setProjects(projectsData);
-        if (settingsData?.currency) setCurrency(settingsData.currency);
-      } catch (err) {
-        console.error('Invoices data fetch failed:', err);
-      }
-    };
-    loadData();
+      });
+    });
+    // Settings: load from cache first, then sync
+    db.settings.get('main').then((cached: any) => {
+      if (cached?.currency) setCurrency(cached.currency);
+    });
+    fetchJson<any>('/api/settings').then((settingsData: any) => {
+      if (settingsData?.currency) setCurrency(settingsData.currency);
+      db.settings.put({ id: 'main', ...settingsData });
+    }).catch(() => {});
   }, []);
 
-  const fetchInvoices = async () => {
-    try {
-      const data = await fetchJson<Invoice[]>('/api/invoices');
+  const fetchInvoices = () => {
+    getOfflineFirst(db.invoices, '/api/invoices', (data: Invoice[]) => {
       const enriched = data.map(inv => ({
         ...inv,
         project_name: projects.find(p => p.id === inv.project_id)?.name || inv.project_name
       }));
       setInvoices(enriched);
-    } catch (err) {
-      console.error('Invoices fetch failed:', err);
-    }
+    });
   };
 
-  const fetchProjects = async () => {
-    try {
-      const data = await fetchJson<Project[]>('/api/projects');
-      setProjects(data);
-    } catch (err) {
-      console.error('Projects fetch failed:', err);
-    }
+  const fetchProjects = () => {
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
   };
 
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const saved = await fetchJson<Invoice>('/api/invoices', {
-        method: 'POST',
-        body: JSON.stringify(newInvoice)
-      });
+      const saved = await offlineMutate(db.invoices, 'invoices', 'POST', '/api/invoices', newInvoice);
+      const result = saved || newInvoice;
       const enrichedSaved = {
-        ...saved,
-        project_name: projects.find(p => p.id === saved.project_id)?.name || saved.project_name
+        ...result,
+        project_name: projects.find(p => p.id === result.project_id)?.name || result.project_name
       };
       setInvoices([enrichedSaved, ...invoices]);
       setIsModalOpen(false);
-      setNewInvoice({ 
-        project_id: '', 
-        amount: 0, 
-        description: '', 
-        status: 'Draft', 
-        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] 
+      setNewInvoice({
+        project_id: '',
+        amount: 0,
+        description: '',
+        status: 'Draft',
+        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       });
     } catch (err) {
       console.error('Create invoice failed:', err);
@@ -99,13 +90,12 @@ export default function Invoices() {
 
   const handleUpdateStatus = async (invoice: Invoice, newStatus: Invoice['status']) => {
     try {
-      const updated = await fetchJson<Invoice>(`/api/invoices/${invoice.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ ...invoice, status: newStatus })
-      });
+      const updatedData = { ...invoice, status: newStatus };
+      const updated = await offlineMutate(db.invoices, 'invoices', 'PUT', `/api/invoices/${invoice.id}`, updatedData);
+      const result = updated || updatedData;
       const enrichedUpdated = {
-        ...updated,
-        project_name: projects.find(p => p.id === updated.project_id)?.name || updated.project_name
+        ...result,
+        project_name: projects.find(p => p.id === result.project_id)?.name || result.project_name
       };
       setInvoices(invoices.map(i => i.id === enrichedUpdated.id ? enrichedUpdated : i));
     } catch (err) {

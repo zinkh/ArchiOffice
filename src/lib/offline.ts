@@ -1,31 +1,61 @@
-import { db } from '../db';
 import { Table } from 'dexie';
+import { enqueueMutation } from '../services/syncService';
 
 export async function getOfflineFirst<T>(
   table: Table<T>,
   apiUrl: string,
   setter: (data: T[]) => void
 ) {
-  // 1. Load from IndexedDB
   const localData = await table.toArray();
   if (localData.length > 0) {
     setter(localData);
   }
 
-  // 2. Fetch from API
   if (navigator.onLine) {
     try {
       const response = await fetch(apiUrl);
       const remoteData = await response.json();
-      
-      // 3. Update IndexedDB
       await table.clear();
       await table.bulkPut(remoteData);
-      
-      // 4. Update UI
       setter(remoteData);
     } catch (error) {
       console.error(`Failed to fetch from ${apiUrl}:`, error);
     }
   }
+}
+
+// Offline-safe mutation: writes to Dexie first, syncs to server if online,
+// otherwise enqueues for later replay via syncService.
+export async function offlineMutate<T>(
+  table: Table<T>,
+  tableKey: string,
+  method: 'POST' | 'PUT' | 'DELETE',
+  url: string,
+  data: T
+): Promise<T> {
+  const id = (data as any)?.id;
+
+  if (method === 'DELETE') {
+    await table.delete(id);
+  } else {
+    await table.put(data);
+  }
+
+  if (navigator.onLine) {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method !== 'DELETE' ? JSON.stringify(data) : undefined,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (method !== 'DELETE') {
+      const result: T = await res.json();
+      await table.put(result);
+      return result;
+    }
+  } else {
+    await enqueueMutation(tableKey, method, data, url);
+  }
+
+  return data;
 }

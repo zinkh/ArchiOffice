@@ -5,6 +5,8 @@ import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, 
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import type { Tender, Contact, Milestone } from '../types';
@@ -43,35 +45,15 @@ export default function Tenders() {
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [tendersData, contactsData] = await Promise.all([
-          fetchJson<any[]>('/api/tenders'),
-          fetchJson<Contact[]>('/api/contacts')
-        ]);
-
-        const formattedTenders = tendersData.map((t: any) => ({
-          ...t,
-          mandatory_visit: !!t.mandatory_visit
-        }));
-        setTenders(formattedTenders);
-        setContacts(contactsData);
-      } catch (err) {
-        console.error('Tenders data fetch failed:', err);
-      }
-    };
-
-    loadData();
+    getOfflineFirst(db.tenders, '/api/tenders', (data: any[]) => {
+      setTenders(data.map((t: any) => ({ ...t, mandatory_visit: !!t.mandatory_visit })));
+    });
+    getOfflineFirst(db.contacts, '/api/contacts', setContacts);
     fetchMilestones();
   }, []);
 
   const fetchMilestones = async () => {
-    try {
-      const data = await fetchJson<Milestone[]>('/api/milestones');
-      setMilestones(data);
-    } catch (err) {
-      console.error('Milestones fetch failed:', err);
-    }
+    getOfflineFirst(db.milestones, '/api/milestones', setMilestones);
   };
 
   const addSpecialtyRow = () => {
@@ -106,33 +88,32 @@ export default function Tenders() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const url = editingTender ? `/api/tenders/${editingTender.id}` : '/api/tenders';
-      const method = editingTender ? 'PUT' : 'POST';
-      
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newTender,
-          status: editingTender ? newTender.status : 'Draft',
-          notes: newTender.notes || '',
-          specialties_list: formSpecialties,
-          milestones_list: formMilestones
-        })
-      });
-      if (!res.ok) throw new Error('Failed to save tender');
-      const savedTender = await res.json();
-      const formattedTender = {
-        ...savedTender,
-        mandatory_visit: !!savedTender.mandatory_visit
+      const tenderData = {
+        ...newTender,
+        status: editingTender ? newTender.status : 'Draft',
+        notes: newTender.notes || '',
+        specialties_list: formSpecialties,
+        milestones_list: formMilestones
       };
-      
+
+      let savedTender: any;
+      if (editingTender) {
+        savedTender = await offlineMutate(db.tenders, 'tenders', 'PUT', `/api/tenders/${editingTender.id}`, tenderData);
+      } else {
+        savedTender = await offlineMutate(db.tenders, 'tenders', 'POST', '/api/tenders', tenderData);
+      }
+
+      const formattedTender = {
+        ...(savedTender || tenderData),
+        mandatory_visit: !!(savedTender || tenderData).mandatory_visit
+      };
+
       if (editingTender) {
         setTenders(tenders.map(t => t.id === formattedTender.id ? formattedTender : t));
       } else {
         setTenders([formattedTender, ...tenders]);
       }
-      
+
       setShowSuccess(true);
       setTimeout(() => {
         setIsModalOpen(false);
@@ -160,17 +141,10 @@ export default function Tenders() {
 
   const handleArchive = async (tender: Tender) => {
     try {
-      const res = await fetch(`/api/tenders/${tender.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...tender,
-          archived: !tender.archived
-        })
-      });
-      if (!res.ok) throw new Error('Failed to archive tender');
-      const updatedTender = await res.json();
-      setTenders(tenders.map(t => t.id === updatedTender.id ? { ...updatedTender, mandatory_visit: !!updatedTender.mandatory_visit } : t));
+      const updatedData = { ...tender, archived: !tender.archived };
+      const updatedTender = await offlineMutate(db.tenders, 'tenders', 'PUT', `/api/tenders/${tender.id}`, updatedData);
+      const result = updatedTender || updatedData;
+      setTenders(tenders.map(t => t.id === result.id ? { ...result, mandatory_visit: !!result.mandatory_visit } : t));
     } catch (err) {
       console.error(err);
     }
@@ -427,12 +401,12 @@ export default function Tenders() {
                           >
                             <IconPlus size={18} className="rotate-45" />
                           </button>
-                          <button 
+                          <button
                             onClick={async () => {
                               if (!confirm('Delete tender permanently?')) return;
                               try {
-                                const res = await fetch(`/api/tenders/${tender.id}`, { method: 'DELETE' });
-                                if (res.ok) setTenders(tenders.filter(t => t.id !== tender.id));
+                                await offlineMutate(db.tenders, 'tenders', 'DELETE', `/api/tenders/${tender.id}`, tender);
+                                setTenders(tenders.filter(t => t.id !== tender.id));
                               } catch (err) {
                                 console.error(err);
                               }
@@ -748,16 +722,7 @@ export default function Tenders() {
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={() => {
-          // Refetch contacts
-          const loadContacts = async () => {
-            try {
-              const data = await fetchJson<Contact[]>('/api/contacts');
-              setContacts(data);
-            } catch (err) {
-              console.error('Contacts fetch failed:', err);
-            }
-          };
-          loadContacts();
+          getOfflineFirst(db.contacts, '/api/contacts', setContacts);
         }}
       />
     </div>

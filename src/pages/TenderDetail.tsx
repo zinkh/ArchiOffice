@@ -14,6 +14,8 @@ import {
 import { motion } from 'motion/react';
 import { fetchJson } from '../lib/api';
 import { Tender, Contact, Milestone } from '../types';
+import { db } from '../db';
+import { getOfflineFirst } from '../lib/offline';
 import { OrgChart, OrgNode } from '../components/OrgChart';
 import { formatCurrency, cn } from '../lib/utils';
 
@@ -57,12 +59,20 @@ export default function TenderDetail() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [tenderData, contactsData] = await Promise.all([
-          fetchJson<Tender>(`/api/tenders/${id}`),
-          fetchJson<Contact[]>('/api/contacts')
-        ]);
-        setTender(tenderData);
-        setContacts(contactsData);
+        // Load contacts via offline-first helper
+        getOfflineFirst(db.contacts, '/api/contacts', setContacts);
+
+        // Load single tender: fallback to Dexie cache, then sync from server if online
+        const numericId = Number(id);
+        const cachedTender = await db.tenders.get(numericId);
+        if (cachedTender) {
+          setTender(cachedTender);
+        }
+        if (navigator.onLine) {
+          const tenderData = await fetchJson<Tender>(`/api/tenders/${id}`);
+          await db.tenders.put(tenderData);
+          setTender(tenderData);
+        }
       } catch (err) {
         console.error('Failed to load tender details:', err);
       } finally {

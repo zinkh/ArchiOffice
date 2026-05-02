@@ -21,6 +21,8 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } fro
 import { saveAs } from 'file-saver';
 import MarkdownEditor from '../components/MarkdownEditor';
 import { fetchJson } from '../lib/api';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 
 export default function Specifications() {
   const { t } = useTranslation();
@@ -50,15 +52,11 @@ export default function Specifications() {
   }, [specId, specs]);
 
   const fetchSpecs = () => {
-    fetchJson('/api/specifications')
-      .then(setSpecs)
-      .catch(err => console.error(err));
+    getOfflineFirst(db.specifications, '/api/specifications', setSpecs);
   };
 
   const fetchProjects = () => {
-    fetchJson('/api/projects')
-      .then(setProjects)
-      .catch(err => console.error(err));
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
   };
 
   const handleSelectSpec = (spec: Specification) => {
@@ -99,25 +97,16 @@ export default function Specifications() {
       const isNew = !specs.some(s => s.id === activeSpec.id);
       const method = isNew ? 'POST' : 'PUT';
       const url = isNew ? '/api/specifications' : `/api/specifications/${activeSpec.id}`;
-      
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...activeSpec,
-          content: JSON.stringify(sections)
-        })
-      });
+      const specToSave = { ...activeSpec, content: JSON.stringify(sections) };
 
-      if (res.ok) {
-        const data = await res.json();
-        if (isNew) {
-          setSpecs(prev => [{ ...activeSpec, last_updated: data.last_updated }, ...prev]);
-        } else {
-          setSpecs(prev => prev.map(s => s.id === activeSpec.id ? { ...activeSpec, last_updated: data.last_updated } : s));
-        }
-        setActiveSpec(prev => prev ? { ...prev, last_updated: data.last_updated } : null);
+      const result = await offlineMutate(db.specifications, 'specifications', method as 'POST' | 'PUT', url, specToSave);
+
+      if (isNew) {
+        setSpecs(prev => [{ ...activeSpec, last_updated: (result as any).last_updated }, ...prev]);
+      } else {
+        setSpecs(prev => prev.map(s => s.id === activeSpec.id ? { ...activeSpec, last_updated: (result as any).last_updated } : s));
       }
+      setActiveSpec(prev => prev ? { ...prev, last_updated: (result as any).last_updated } : null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -128,14 +117,10 @@ export default function Specifications() {
   const handleDelete = async () => {
     if (!activeSpec || !confirm('Are you sure you want to delete this specification?')) return;
     try {
-      const res = await fetch(`/api/specifications/${activeSpec.id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        setSpecs(prev => prev.filter(s => s.id !== activeSpec.id));
-        setActiveSpec(null);
-        setSections([]);
-      }
+      await offlineMutate(db.specifications, 'specifications', 'DELETE', `/api/specifications/${activeSpec.id}`, activeSpec);
+      setSpecs(prev => prev.filter(s => s.id !== activeSpec.id));
+      setActiveSpec(null);
+      setSections([]);
     } catch (err) {
       console.error(err);
     }
@@ -155,21 +140,13 @@ export default function Specifications() {
     };
 
     try {
-      const res = await fetch('/api/specifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSpec)
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const savedSpec = { ...newSpec, last_updated: data.last_updated };
-        setSpecs(prev => [savedSpec, ...prev]);
-        handleSelectSpec(savedSpec);
-        setIsNewSpecModalOpen(false);
-        setNewSpecTitle('');
-        setSelectedProjectId('');
-      }
+      const result = await offlineMutate(db.specifications, 'specifications', 'POST', '/api/specifications', newSpec);
+      const savedSpec = { ...newSpec, last_updated: (result as any).last_updated ?? newSpec.last_updated };
+      setSpecs(prev => [savedSpec, ...prev]);
+      handleSelectSpec(savedSpec);
+      setIsNewSpecModalOpen(false);
+      setNewSpecTitle('');
+      setSelectedProjectId('');
     } catch (err) {
       console.error(err);
     }

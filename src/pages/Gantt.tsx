@@ -6,6 +6,8 @@ import { cn } from '../lib/utils';
 import type { Project, Milestone, Task } from '../types';
 import { useTranslation } from 'react-i18next';
 import TaskModal from '../components/TaskModal';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 
 export default function Gantt() {
   const { t } = useTranslation();
@@ -50,28 +52,13 @@ export default function Gantt() {
   }, [tasks, projects, viewDate, isModalOpen]);
 
   useEffect(() => {
-    fetch('/api/projects')
-      .then(res => res.json())
-      .then(setProjects)
-      .catch(err => console.error(err));
-
-    fetch('/api/milestones')
-      .then(res => res.json())
-      .then(setMilestones)
-      .catch(err => console.error(err));
-
-    fetch('/api/tasks')
-      .then(res => res.json())
-      .then(setTasks)
-      .catch(err => console.error(err));
+    getOfflineFirst(db.projects, '/api/projects', setProjects);
+    getOfflineFirst(db.milestones, '/api/milestones', setMilestones);
+    getOfflineFirst(db.tasks, '/api/tasks', setTasks);
   }, []);
 
   const handleSaveTask = async (task: Task) => {
-    await fetch(`/api/tasks/${task.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(task)
-    });
+    await offlineMutate(db.tasks, 'tasks', 'PUT', `/api/tasks/${task.id}`, task);
     setTasks(prev => prev.map(t => t.id === task.id ? task : t));
     setIsModalOpen(false);
   };
@@ -81,11 +68,7 @@ export default function Gantt() {
     setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
     
     try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedTask)
-      });
+      await offlineMutate(db.tasks, 'tasks', 'PUT', `/api/tasks/${task.id}`, updatedTask);
     } catch (err) {
       console.error(err);
     }
