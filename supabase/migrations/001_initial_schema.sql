@@ -503,24 +503,74 @@ CREATE POLICY "Authenticated users can delete own uploads" ON storage.objects
   USING (bucket_id = 'uploads');
 
 -- ─── Row Level Security ───────────────────────────────────────────────────────
--- Enable RLS on all tables (server uses secret key so it bypasses RLS)
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+-- Enable RLS on ALL tables (server uses secret key so it bypasses RLS)
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contact_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_categories_junction ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_team ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_specialties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE specifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proposal_specialties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ordres_de_service ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_cotraitants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_stakeholders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_lots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE site_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE site_report_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE visas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE receptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reserves ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dpgf_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE situations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detail_situations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cctps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dpgfs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 
 -- Authenticated users can read/write everything (server enforces finer access)
-CREATE POLICY "Authenticated full access" ON projects TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON contacts TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_categories TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON contact_categories TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON team_members TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON projects TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_categories_junction TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_team TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON milestones TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON tenders TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON tender_specialties TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON specifications TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON proposals TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON proposal_specialties TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON invoices TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON invoice_items TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON ordres_de_service TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_cotraitants TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_stakeholders TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON project_lots TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON tasks TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON site_reports TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON site_report_notes TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON documents TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON document_versions TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON visas TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON receptions TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON plans TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON reserves TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON dpgf_items TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON situations TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON detail_situations TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON cctps TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated full access" ON dpgfs TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated full access" ON settings TO authenticated USING (true) WITH CHECK (true);
