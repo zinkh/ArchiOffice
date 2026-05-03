@@ -50,6 +50,8 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
 
 import { useTranslation } from 'react-i18next';
+import { db } from '../db';
+import { getOfflineFirst, offlineMutate } from '../lib/offline';
 
 interface CategoryOption {
   value: string;
@@ -243,19 +245,55 @@ export default function ProjectDetail() {
 
   const fetchFullProject = async () => {
     try {
-      const res = await fetch(`/api/projects/${id}/full`);
-      if (res.ok) {
-        const data = await res.json();
-        setProject({ ...data.project, is_complete_mission: !!data.project.is_complete_mission });
-        setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
-        setInvoices(data.invoices);
-        setSpecifications(data.specifications);
-        setOrdresDeService(data.ordres_de_service);
-        setVisas(data.visas);
-        setReceptions(data.receptions);
-        setReserves(data.reserves);
-        setPlans(data.plans);
-      } else {
+      // Load offline fallback from Dexie first
+      const [cachedProject, cachedMilestones, cachedInvoices, cachedSpecs, cachedOs, cachedVisas, cachedReceptions, cachedReserves, cachedPlans] = await Promise.all([
+        db.projects.get(id!),
+        db.milestones.where('project_id').equals(id!).toArray(),
+        db.invoices.where('project_id').equals(id!).toArray(),
+        db.specifications.where('project_id').equals(id!).toArray(),
+        db.ordresDeService.where('project_id').equals(id!).toArray(),
+        db.visas.where('project_id').equals(id!).toArray(),
+        db.receptions.where('project_id').equals(id!).toArray(),
+        db.reserves.where('project_id').equals(id!).toArray(),
+        db.plans.where('project_id').equals(id!).toArray(),
+      ]);
+      if (cachedProject) setProject({ ...cachedProject, is_complete_mission: !!cachedProject.is_complete_mission });
+      if (cachedMilestones.length) setMilestones(cachedMilestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+      if (cachedInvoices.length) setInvoices(cachedInvoices);
+      if (cachedSpecs.length) setSpecifications(cachedSpecs);
+      if (cachedOs.length) setOrdresDeService(cachedOs);
+      if (cachedVisas.length) setVisas(cachedVisas);
+      if (cachedReceptions.length) setReceptions(cachedReceptions);
+      if (cachedReserves.length) setReserves(cachedReserves);
+      if (cachedPlans.length) setPlans(cachedPlans);
+
+      if (navigator.onLine) {
+        const res = await fetch(`/api/projects/${id}/full`);
+        if (res.ok) {
+          const data = await res.json();
+          setProject({ ...data.project, is_complete_mission: !!data.project.is_complete_mission });
+          setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+          setInvoices(data.invoices);
+          setSpecifications(data.specifications);
+          setOrdresDeService(data.ordres_de_service);
+          setVisas(data.visas);
+          setReceptions(data.receptions);
+          setReserves(data.reserves);
+          setPlans(data.plans);
+          // Update Dexie cache
+          await db.projects.put(data.project);
+          await db.milestones.bulkPut(data.milestones);
+          await db.invoices.bulkPut(data.invoices);
+          await db.specifications.bulkPut(data.specifications);
+          await db.ordresDeService.bulkPut(data.ordres_de_service);
+          await db.visas.bulkPut(data.visas);
+          await db.receptions.bulkPut(data.receptions);
+          await db.reserves.bulkPut(data.reserves);
+          await db.plans.bulkPut(data.plans);
+        } else if (!cachedProject) {
+          navigate('/projects');
+        }
+      } else if (!cachedProject) {
         navigate('/projects');
       }
     } catch (err) {
@@ -265,8 +303,16 @@ export default function ProjectDetail() {
 
   const fetchVisas = async () => {
     try {
-      const res = await fetch(`/api/visas?project_id=${id}`);
-      if (res.ok) setVisas(await res.json());
+      const cached = await db.visas.where('project_id').equals(id!).toArray();
+      if (cached.length) setVisas(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/visas?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setVisas(data);
+          await db.visas.bulkPut(data);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -274,8 +320,16 @@ export default function ProjectDetail() {
 
   const fetchReceptions = async () => {
     try {
-      const res = await fetch(`/api/receptions?project_id=${id}`);
-      if (res.ok) setReceptions(await res.json());
+      const cached = await db.receptions.where('project_id').equals(id!).toArray();
+      if (cached.length) setReceptions(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/receptions?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setReceptions(data);
+          await db.receptions.bulkPut(data);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -283,8 +337,16 @@ export default function ProjectDetail() {
 
   const fetchReserves = async () => {
     try {
-      const res = await fetch(`/api/reserves?project_id=${id}`);
-      if (res.ok) setReserves(await res.json());
+      const cached = await db.reserves.where('project_id').equals(id!).toArray();
+      if (cached.length) setReserves(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/reserves?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setReserves(data);
+          await db.reserves.bulkPut(data);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -292,8 +354,16 @@ export default function ProjectDetail() {
 
   const fetchPlans = async () => {
     try {
-      const res = await fetch(`/api/plans?project_id=${id}`);
-      if (res.ok) setPlans(await res.json());
+      const cached = await db.plans.where('project_id').equals(id!).toArray();
+      if (cached.length) setPlans(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/plans?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setPlans(data);
+          await db.plans.bulkPut(data);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -301,8 +371,7 @@ export default function ProjectDetail() {
 
   const fetchProjectTenders = async () => {
     try {
-      const res = await fetch('/api/tenders');
-      if (res.ok) setProjectTenders(await res.json());
+      await getOfflineFirst(db.tenders, '/api/tenders', setProjectTenders);
     } catch (err) {
       console.error(err);
     }
@@ -310,11 +379,7 @@ export default function ProjectDetail() {
 
   const fetchTeam = async () => {
     try {
-      const res = await fetch('/api/team');
-      if (res.ok) {
-        const data = await res.json();
-        setTeam(data);
-      }
+      await getOfflineFirst(db.users, '/api/team', setTeam);
     } catch (err) {
       console.error('Failed to fetch team:', err);
     }
@@ -322,17 +387,22 @@ export default function ProjectDetail() {
 
   const fetchOrdresDeService = async () => {
     try {
-      const res = await fetch(`/api/ordres_de_service?project_id=${id}`);
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          setOrdresDeService(data);
-        } catch (e) {
-          console.error("Failed to parse OS JSON:", text);
+      const cached = await db.ordresDeService.where('project_id').equals(id!).toArray();
+      if (cached.length) setOrdresDeService(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/ordres_de_service?project_id=${id}`);
+        if (res.ok) {
+          const text = await res.text();
+          try {
+            const data = JSON.parse(text);
+            setOrdresDeService(data);
+            await db.ordresDeService.bulkPut(data);
+          } catch (e) {
+            console.error("Failed to parse OS JSON:", text);
+          }
+        } else {
+          console.error("Failed to fetch OS:", res.status, await res.text());
         }
-      } else {
-        console.error("Failed to fetch OS:", res.status, await res.text());
       }
     } catch (err) {
       console.error(err);
@@ -341,19 +411,10 @@ export default function ProjectDetail() {
 
   const fetchContacts = async () => {
     try {
-      const res = await fetch('/api/contacts');
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          console.log('ProjectDetail fetched contacts:', data);
-          setContacts(data);
-        } catch (e) {
-          console.error("Failed to parse contacts JSON:", text);
-        }
-      } else {
-        console.error("Failed to fetch contacts:", res.status, await res.text());
-      }
+      await getOfflineFirst(db.contacts, '/api/contacts', (data) => {
+        console.log('ProjectDetail fetched contacts:', data);
+        setContacts(data);
+      });
     } catch (err) {
       console.error(err);
     }
@@ -363,17 +424,22 @@ export default function ProjectDetail() {
 
   const fetchMilestones = async () => {
     try {
-      const res = await fetch(`/api/milestones?project_id=${id}`);
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
-        } catch (e) {
-          console.error("Failed to parse milestones JSON:", text);
+      const cached = await db.milestones.where('project_id').equals(id!).toArray();
+      if (cached.length) setMilestones(cached.map((m: any) => ({ ...m, completed: !!m.completed })));
+      if (navigator.onLine) {
+        const res = await fetch(`/api/milestones?project_id=${id}`);
+        if (res.ok) {
+          const text = await res.text();
+          try {
+            const data = JSON.parse(text);
+            setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
+            await db.milestones.bulkPut(data);
+          } catch (e) {
+            console.error("Failed to parse milestones JSON:", text);
+          }
+        } else {
+          console.error("Failed to fetch milestones:", res.status, await res.text());
         }
-      } else {
-        console.error("Failed to fetch milestones:", res.status, await res.text());
       }
     } catch (err) {
       console.error(err);
@@ -417,9 +483,15 @@ export default function ProjectDetail() {
 
   const fetchInvoices = async () => {
     try {
-      const res = await fetch(`/api/invoices?project_id=${id}`);
-      if (res.ok) {
-        setInvoices(await res.json());
+      const cached = await db.invoices.where('project_id').equals(id!).toArray();
+      if (cached.length) setInvoices(cached);
+      if (navigator.onLine) {
+        const res = await fetch(`/api/invoices?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setInvoices(data);
+          await db.invoices.bulkPut(data);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch invoices:', err);
@@ -428,10 +500,15 @@ export default function ProjectDetail() {
 
   const fetchSpecifications = async () => {
     try {
-      const res = await fetch(`/api/specifications?project_id=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(data.map((s: any) => ({ ...s, is_template: !!s.is_template })));
+      const cached = await db.specifications.where('project_id').equals(id!).toArray();
+      if (cached.length) setSpecifications(cached.map((s: any) => ({ ...s, is_template: !!s.is_template })));
+      if (navigator.onLine) {
+        const res = await fetch(`/api/specifications?project_id=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSpecifications(data.map((s: any) => ({ ...s, is_template: !!s.is_template })));
+          await db.specifications.bulkPut(data);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch specifications:', err);
@@ -440,17 +517,7 @@ export default function ProjectDetail() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch('/api/project_categories');
-      if (res.ok) {
-        const text = await res.text();
-        try {
-          setCategories(JSON.parse(text));
-        } catch (e) {
-          console.error("Failed to parse categories JSON:", text);
-        }
-      } else {
-        console.error("Failed to fetch categories:", res.status, await res.text());
-      }
+      await getOfflineFirst(db.projectCategories, '/api/project_categories', setCategories);
     } catch (err) {
       console.error(err);
     }
@@ -460,17 +527,8 @@ export default function ProjectDetail() {
     if (!project || isSaving) return;
     setIsSaving(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': currentUser?.system_role || 'user'
-        },
-        body: JSON.stringify(project)
-      });
-      if (res.ok) {
-        alert('Project saved successfully');
-      }
+      await offlineMutate(db.projects, 'projects', 'PUT', `/api/projects/${project.id}`, project);
+      alert('Project saved successfully');
     } catch (err) {
       console.error(err);
     } finally {
@@ -480,6 +538,7 @@ export default function ProjectDetail() {
 
   const handleDelete = async () => {
     if (!project || !confirm('Are you sure you want to delete this project?')) return;
+    if (!navigator.onLine) { alert('Connexion requise'); return; }
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'DELETE',
@@ -496,23 +555,17 @@ export default function ProjectDetail() {
   const handleAddMilestone = async () => {
     if (!id || !newMilestoneTitle || !newMilestoneDate) return;
     try {
-      const res = await fetch('/api/milestones', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_id: id,
-          title: newMilestoneTitle,
-          due_date: newMilestoneDate,
-          completed: false
-        })
-      });
-      if (res.ok) {
-        const newM = await res.json();
-        setMilestones(prev => [...prev, { ...newM, completed: !!newM.completed }].sort((a, b) => a.due_date.localeCompare(b.due_date)));
-        setNewMilestoneTitle('');
-        setNewMilestoneDate('');
-        setIsAddingMilestone(false);
-      }
+      const milestoneData = {
+        project_id: id,
+        title: newMilestoneTitle,
+        due_date: newMilestoneDate,
+        completed: false
+      };
+      const newM = await offlineMutate(db.milestones, 'milestones', 'POST', '/api/milestones', milestoneData as any);
+      setMilestones(prev => [...prev, { ...newM, completed: !!newM.completed }].sort((a: Milestone, b: Milestone) => a.due_date.localeCompare(b.due_date)));
+      setNewMilestoneTitle('');
+      setNewMilestoneDate('');
+      setIsAddingMilestone(false);
     } catch (err) {
       console.error(err);
     }
@@ -522,27 +575,17 @@ export default function ProjectDetail() {
     if (!id || !newSpecTitle) return;
     try {
       const newSpecId = `spec-${Date.now()}`;
-      const res = await fetch('/api/specifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newSpecId,
-          project_id: id,
-          title: newSpecTitle,
-          content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
-          last_updated: new Date().toISOString()
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title: newSpecTitle, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated }]);
-        setNewSpecTitle('');
-        setIsAddingSpec(false);
-      } else {
-        const errorText = await res.text();
-        console.error('Failed to create specification:', res.status, errorText);
-        alert(`Erreur lors de la création du cahier des charges: ${errorText}`);
-      }
+      const specData = {
+        id: newSpecId,
+        project_id: id,
+        title: newSpecTitle,
+        content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
+        last_updated: new Date().toISOString()
+      };
+      const data = await offlineMutate(db.specifications, 'specifications', 'POST', '/api/specifications', specData);
+      setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title: newSpecTitle, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated || specData.last_updated }]);
+      setNewSpecTitle('');
+      setIsAddingSpec(false);
     } catch (err) {
       console.error('Error creating specification:', err);
       alert('Une erreur est survenue lors de la création du cahier des charges.');
@@ -551,14 +594,9 @@ export default function ProjectDetail() {
 
   const handleToggleMilestone = async (milestone: Milestone) => {
     try {
-      const res = await fetch(`/api/milestones/${milestone.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...milestone, completed: !milestone.completed })
-      });
-      if (res.ok) {
-        setMilestones(prev => prev.map(m => m.id === milestone.id ? { ...m, completed: !m.completed } : m));
-      }
+      const updatedMilestone = { ...milestone, completed: !milestone.completed };
+      await offlineMutate(db.milestones, 'milestones', 'PUT', `/api/milestones/${milestone.id}`, updatedMilestone);
+      setMilestones(prev => prev.map(m => m.id === milestone.id ? { ...m, completed: !m.completed } : m));
     } catch (err) {
       console.error(err);
     }
@@ -567,29 +605,23 @@ export default function ProjectDetail() {
   const handleCreateOs = async () => {
     if (!id || !newOs.title || !newOs.os_number) return;
     try {
-      const res = await fetch('/api/ordres_de_service', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newOs,
-          project_id: id,
-          date: new Date().toISOString(),
-          status: 'draft'
-        })
+      const osData = {
+        ...newOs,
+        project_id: id,
+        date: new Date().toISOString(),
+        status: 'draft'
+      };
+      const data = await offlineMutate(db.ordresDeService, 'ordresDeService', 'POST', '/api/ordres_de_service', osData);
+      setOrdresDeService(prev => [...prev, data]);
+      setNewOs({
+        title: '',
+        os_number: '',
+        lot: '',
+        entreprise: '',
+        maitrise_oeuvre: project?.project_manager || '',
+        montant: ''
       });
-      if (res.ok) {
-        const data = await res.json();
-        setOrdresDeService(prev => [...prev, data]);
-        setNewOs({
-          title: '',
-          os_number: '',
-          lot: '',
-          entreprise: '',
-          maitrise_oeuvre: project?.project_manager || '',
-          montant: ''
-        });
-        setIsAddingOs(false);
-      }
+      setIsAddingOs(false);
     } catch (err) {
       console.error(err);
     }
@@ -598,10 +630,8 @@ export default function ProjectDetail() {
   const handleDeleteOs = async (osId: string) => {
     if (!confirm('Are you sure you want to delete this OS?')) return;
     try {
-      const res = await fetch(`/api/ordres_de_service/${osId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setOrdresDeService(prev => prev.filter(os => os.id !== osId));
-      }
+      await offlineMutate(db.ordresDeService, 'ordresDeService', 'DELETE', `/api/ordres_de_service/${osId}`, { id: osId });
+      setOrdresDeService(prev => prev.filter(os => os.id !== osId));
     } catch (err) {
       console.error(err);
     }
@@ -610,24 +640,18 @@ export default function ProjectDetail() {
   const handleCreateInvoice = async () => {
     if (!id || !newInvoice.invoice_number || !newInvoice.amount) return;
     try {
-      const res = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newInvoice,
-          project_id: id,
-          issue_date: new Date().toISOString(),
-          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'Draft',
-          created_at: new Date().toISOString()
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setInvoices(prev => [...prev, data]);
-        setNewInvoice({ invoice_number: '', amount: 0, description: '' });
-        setIsAddingInvoice(false);
-      }
+      const invoiceData = {
+        ...newInvoice,
+        project_id: id,
+        issue_date: new Date().toISOString(),
+        due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        status: 'Draft',
+        created_at: new Date().toISOString()
+      };
+      const data = await offlineMutate(db.invoices, 'invoices', 'POST', '/api/invoices', invoiceData as any);
+      setInvoices(prev => [...prev, data]);
+      setNewInvoice({ invoice_number: '', amount: 0, description: '' });
+      setIsAddingInvoice(false);
     } catch (err) {
       console.error(err);
     }
@@ -1074,11 +1098,15 @@ export default function ProjectDetail() {
                                   </div>
                                 </div>
                               </div>
-                              <button 
-                                onClick={() => {
+                              <button
+                                onClick={async () => {
                                   if(confirm('Delete milestone?')) {
-                                    fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-                                      .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
+                                    try {
+                                      await offlineMutate(db.milestones, 'milestones', 'DELETE', `/api/milestones/${m.id}`, { id: m.id } as any);
+                                      setMilestones(prev => prev.filter(x => x.id !== m.id));
+                                    } catch (err) {
+                                      console.error(err);
+                                    }
                                   }
                                 }}
                                 className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
@@ -1603,27 +1631,21 @@ export default function ProjectDetail() {
                         >
                           Annuler
                         </button>
-                        <button 
+                        <button
                           onClick={async () => {
                             try {
-                              const res = await fetch('/api/invoices', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  ...newInvoice,
-                                  project_id: id,
-                                  status: 'Draft',
-                                  issue_date: new Date().toISOString(),
-                                  due_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-                                  created_at: new Date().toISOString()
-                                })
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setInvoices(prev => [...prev, data]);
-                                setIsAddingInvoice(false);
-                                setNewInvoice({ invoice_number: '', amount: 0, description: '' });
-                              }
+                              const invoicePayload = {
+                                ...newInvoice,
+                                project_id: id,
+                                status: 'Draft',
+                                issue_date: new Date().toISOString(),
+                                due_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+                                created_at: new Date().toISOString()
+                              };
+                              const data = await offlineMutate(db.invoices, 'invoices', 'POST', '/api/invoices', invoicePayload as any);
+                              setInvoices(prev => [...prev, data]);
+                              setIsAddingInvoice(false);
+                              setNewInvoice({ invoice_number: '', amount: 0, description: '' });
                             } catch (err) {
                               console.error(err);
                             }
@@ -1662,14 +1684,8 @@ export default function ProjectDetail() {
                                 value={inv.status}
                                 onChange={async (e) => {
                                   try {
-                                    const res = await fetch(`/api/invoices/${inv.id}`, {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ status: e.target.value })
-                                    });
-                                    if (res.ok) {
-                                      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: e.target.value as any } : i));
-                                    }
+                                    await offlineMutate(db.invoices, 'invoices', 'PUT', `/api/invoices/${inv.id}`, { status: e.target.value } as any);
+                                    setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: e.target.value as any } : i));
                                   } catch (err) {
                                     console.error(err);
                                   }
@@ -1704,14 +1720,16 @@ export default function ProjectDetail() {
                       <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
                         <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Appels d'Offres</h3>
                         <button 
-                          onClick={() => {
+                          onClick={async () => {
                             const title = prompt('Titre de l\'appel d\'offres:');
                             if (!title) return;
-                            fetch('/api/tenders', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ project_id: id, title, status: 'Draft', client: project.client, submission_deadline: new Date().toISOString() })
-                            }).then(res => res.json()).then(data => setProjectTenders(prev => [...prev, data]));
+                            try {
+                              const tenderData = { project_id: id, title, status: 'Draft', client: project.client, submission_deadline: new Date().toISOString() };
+                              const data = await offlineMutate(db.tenders, 'tenders', 'POST', '/api/tenders', tenderData as any);
+                              setProjectTenders(prev => [...prev, data]);
+                            } catch (err) {
+                              console.error(err);
+                            }
                           }}
                           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
                         >
@@ -1749,8 +1767,8 @@ export default function ProjectDetail() {
                                     onClick={async () => {
                                       if (!confirm('Supprimer cet appel d\'offres ?')) return;
                                       try {
-                                        const res = await fetch(`/api/tenders/${tender.id}`, { method: 'DELETE' });
-                                        if (res.ok) setProjectTenders(prev => prev.filter(t => t.id !== tender.id));
+                                        await offlineMutate(db.tenders, 'tenders', 'DELETE', `/api/tenders/${tender.id}`, { id: tender.id } as any);
+                                        setProjectTenders(prev => prev.filter(t => t.id !== tender.id));
                                       } catch (err) {
                                         console.error(err);
                                       }
@@ -1785,11 +1803,7 @@ export default function ProjectDetail() {
                             const updatedLots = [...(project.lots_list || []), newLot];
                             setProject({...project, lots_list: updatedLots});
                             // Update on server
-                            fetch(`/api/projects/${id}`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ ...project, lots_list: updatedLots })
-                            });
+                            offlineMutate(db.projects, 'projects', 'PUT', `/api/projects/${id}`, { ...project, lots_list: updatedLots }).catch(console.error);
                           }}
                           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
                         >
@@ -1823,11 +1837,7 @@ export default function ProjectDetail() {
                                       if (!confirm('Supprimer ce lot ?')) return;
                                       const updatedLots = (project.lots_list || []).filter(l => l.id !== lot.id);
                                       setProject({...project, lots_list: updatedLots});
-                                      fetch(`/api/projects/${id}`, {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ ...project, lots_list: updatedLots })
-                                      });
+                                      offlineMutate(db.projects, 'projects', 'PUT', `/api/projects/${id}`, { ...project, lots_list: updatedLots }).catch(console.error);
                                     }}
                                     className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
                                   >
@@ -1860,20 +1870,14 @@ export default function ProjectDetail() {
                         const title = prompt('Titre du visa:');
                         if (!title) return;
                         try {
-                          const res = await fetch('/api/visas', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              project_id: id,
-                              title,
-                              date: new Date().toISOString(),
-                              status: 'pending'
-                            })
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setVisas(prev => [...prev, data]);
-                          }
+                          const visaData = {
+                            project_id: id,
+                            title,
+                            date: new Date().toISOString(),
+                            status: 'pending'
+                          };
+                          const data = await offlineMutate(db.visas, 'visas', 'POST', '/api/visas', visaData);
+                          setVisas(prev => [...prev, data]);
                         } catch (err) {
                           console.error(err);
                         }
@@ -1916,8 +1920,8 @@ export default function ProjectDetail() {
                                 onClick={async () => {
                                   if (!confirm('Supprimer ce visa ?')) return;
                                   try {
-                                    const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
-                                    if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
+                                    await offlineMutate(db.visas, 'visas', 'DELETE', `/api/visas/${visa.id}`, { id: visa.id });
+                                    setVisas(prev => prev.filter(v => v.id !== visa.id));
                                   } catch (err) {
                                     console.error(err);
                                   }
@@ -2092,40 +2096,34 @@ export default function ProjectDetail() {
                           onClick={async () => {
                             if (!newReserve.title) return;
                             try {
-                              const res = await fetch('/api/reserves', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  id: window.crypto.randomUUID(),
-                                  project_id: id,
-                                  title: newReserve.title,
-                                  batiment: newReserve.batiment,
-                                  local: newReserve.local,
-                                  status: newReserve.status,
-                                  lots: JSON.stringify(newReserve.lots.map(l => l.label)),
-                                  entreprises: JSON.stringify(newReserve.entreprises.map(e => e.label)),
-                                  created_at: newReserve.created_at,
-                                  due_date: newReserve.due_date,
-                                  plan_id: selectedPlanId,
-                                  x: annotationCoords?.x,
-                                  y: annotationCoords?.y
-                                })
+                              const reserveData = {
+                                id: window.crypto.randomUUID(),
+                                project_id: id,
+                                title: newReserve.title,
+                                batiment: newReserve.batiment,
+                                local: newReserve.local,
+                                status: newReserve.status,
+                                lots: JSON.stringify(newReserve.lots.map((l: any) => l.label)),
+                                entreprises: JSON.stringify(newReserve.entreprises.map((e: any) => e.label)),
+                                created_at: newReserve.created_at,
+                                due_date: newReserve.due_date,
+                                plan_id: selectedPlanId,
+                                x: annotationCoords?.x,
+                                y: annotationCoords?.y
+                              };
+                              const data = await offlineMutate(db.reserves, 'reserves', 'POST', '/api/reserves', reserveData);
+                              setReserves(prev => [...prev, data]);
+                              setIsAddingReserve(false);
+                              setNewReserve({
+                                title: '',
+                                batiment: '',
+                                local: '',
+                                status: 'A faire',
+                                lots: [],
+                                entreprises: [],
+                                created_at: new Date().toISOString().split('T')[0],
+                                due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
                               });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setReserves(prev => [...prev, data]);
-                                setIsAddingReserve(false);
-                                setNewReserve({
-                                  title: '',
-                                  batiment: '',
-                                  local: '',
-                                  status: 'A faire',
-                                  lots: [],
-                                  entreprises: [],
-                                  created_at: new Date().toISOString().split('T')[0],
-                                  due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-                                });
-                              }
                             } catch (err) {
                               console.error(err);
                             }
@@ -2264,16 +2262,10 @@ export default function ProjectDetail() {
                                           onClick={async () => {
                                             if (!editReserveData) return;
                                             try {
-                                              const response = await fetch(`/api/reserves/${editReserveData.id}`, {
-                                                method: 'PUT',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify(editReserveData)
-                                              });
-                                              if (response.ok) {
-                                                setReserves(prev => prev.map(r => r.id === editReserveData.id ? editReserveData : r));
-                                                setEditingReserveId(null);
-                                                setEditReserveData(null);
-                                              }
+                                              await offlineMutate(db.reserves, 'reserves', 'PUT', `/api/reserves/${editReserveData.id}`, editReserveData);
+                                              setReserves(prev => prev.map(r => r.id === editReserveData.id ? editReserveData : r));
+                                              setEditingReserveId(null);
+                                              setEditReserveData(null);
                                             } catch (err) {
                                               console.error(err);
                                             }
@@ -2307,8 +2299,8 @@ export default function ProjectDetail() {
                                           onClick={async () => {
                                             if (!confirm('Supprimer cette réserve ?')) return;
                                             try {
-                                              const response = await fetch(`/api/reserves/${res.id}`, { method: 'DELETE' });
-                                              if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
+                                              await offlineMutate(db.reserves, 'reserves', 'DELETE', `/api/reserves/${res.id}`, { id: res.id });
+                                              setReserves(prev => prev.filter(r => r.id !== res.id));
                                             } catch (err) {
                                               console.error(err);
                                             }
@@ -2369,8 +2361,8 @@ export default function ProjectDetail() {
                                 onClick={async () => {
                                   if (!confirm('Supprimer cette réception ?')) return;
                                   try {
-                                    const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
-                                    if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
+                                    await offlineMutate(db.receptions, 'receptions', 'DELETE', `/api/receptions/${rec.id}`, { id: rec.id });
+                                    setReceptions(prev => prev.filter(r => r.id !== rec.id));
                                   } catch (err) {
                                     console.error(err);
                                   }

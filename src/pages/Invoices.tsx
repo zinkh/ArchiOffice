@@ -68,7 +68,7 @@ export default function Invoices() {
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const saved = await offlineMutate(db.invoices, 'invoices', 'POST', '/api/invoices', newInvoice);
+      const saved = await offlineMutate(db.invoices, 'invoices', 'POST', '/api/invoices', newInvoice as any);
       const result = saved || newInvoice;
       const enrichedSaved = {
         ...result,

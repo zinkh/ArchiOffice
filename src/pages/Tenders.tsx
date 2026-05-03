@@ -98,9 +98,9 @@ export default function Tenders() {
 
       let savedTender: any;
       if (editingTender) {
-        savedTender = await offlineMutate(db.tenders, 'tenders', 'PUT', `/api/tenders/${editingTender.id}`, tenderData);
+        savedTender = await offlineMutate(db.tenders, 'tenders', 'PUT', `/api/tenders/${editingTender.id}`, tenderData as any);
       } else {
-        savedTender = await offlineMutate(db.tenders, 'tenders', 'POST', '/api/tenders', tenderData);
+        savedTender = await offlineMutate(db.tenders, 'tenders', 'POST', '/api/tenders', tenderData as any);
       }
 
       const formattedTender = {
