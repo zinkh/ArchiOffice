@@ -1,8 +1,17 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
+import type { Session, User } from '@supabase/supabase-js';
+import { supabase } from './lib/supabase';
 import type { TeamMember as UserProfile } from './types';
 
 interface UserContextType {
+  // Supabase Auth
+  user: User | null;
+  session: Session | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
+
+  // Legacy / app-level user profile (mapped from Supabase user + allUsers list)
   currentUser: UserProfile | null;
   setCurrentUser: (user: UserProfile | null) => void;
   allUsers: UserProfile[];
@@ -13,78 +22,93 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-const MOCK_USERS: UserProfile[] = [
-  {
-    id: 'admin-user',
-    email: 'admin@example.com',
-    name: 'Admin User',
-    system_role: 'admin',
-    role: 'admin',
-    avatar: 'https://picsum.photos/seed/admin/32/32'
-  },
-  {
-    id: 'pm-user',
-    email: 'pm@example.com',
-    name: 'Project Manager',
-    system_role: 'pm',
-    role: 'pm',
-    avatar: 'https://picsum.photos/seed/pm/32/32'
-  },
-  {
-    id: 'regular-user',
-    email: 'user@example.com',
-    name: 'Regular User',
-    system_role: 'user',
-    role: 'user',
-    avatar: 'https://picsum.photos/seed/user/32/32'
-  }
-];
-
-// Mock service functions
-const getUserProfile = async (id: string) => MOCK_USERS.find(u => u.id === id) || null;
-const getAllUsers = async () => MOCK_USERS;
-const saveUserProfile = async (user: UserProfile) => {};
+/** Map a Supabase User to a minimal UserProfile so existing pages keep working. */
+function mapSupabaseUserToProfile(supabaseUser: User): UserProfile {
+  const meta = supabaseUser.user_metadata ?? {};
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email ?? '',
+    name: meta.full_name ?? meta.name ?? (supabaseUser.email?.split('@')[0] ?? 'User'),
+    system_role: (meta.system_role as UserProfile['system_role']) ?? 'user',
+    role: meta.role ?? 'user',
+    avatar: meta.avatar_url ?? meta.picture ?? `https://picsum.photos/seed/${supabaseUser.id}/32/32`,
+    phone: meta.phone ?? '',
+    address: meta.address ?? '',
+    jobTitle: meta.jobTitle ?? '',
+    department: meta.department ?? '',
+    senderOption: meta.senderOption ?? 'agency',
+    defaultEmailTemplate: meta.defaultEmailTemplate ?? '',
+  };
+}
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [currentUser, setCurrentUserState] = useState<UserProfile | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [headerTitle, setHeaderTitle] = useState('Dashboard');
 
+  // Restore session on mount and subscribe to auth state changes
   useEffect(() => {
-    const initUser = async () => {
-      try {
-        // Set default user if none selected
-        const savedUserId = localStorage.getItem('selectedUserId') || MOCK_USERS[0].id;
-        let profile = await getUserProfile(savedUserId);
-        if (!profile) {
-          profile = MOCK_USERS[0];
-        }
-        setCurrentUser(profile);
-        
-        const users = await getAllUsers();
-        setAllUsers(users);
-      } catch (err) {
-        console.error('Failed to initialize user:', err);
-      } finally {
-        setIsLoading(false);
+    // Get existing session
+    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      setSession(existingSession);
+      const supabaseUser = existingSession?.user ?? null;
+      setUser(supabaseUser);
+      if (supabaseUser) {
+        setCurrentUserState(mapSupabaseUserToProfile(supabaseUser));
+        setAllUsers([mapSupabaseUserToProfile(supabaseUser)]);
       }
-    };
+      setLoading(false);
+    });
 
-    initUser();
+    // Listen for auth changes (login, logout, token refresh, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      const supabaseUser = newSession?.user ?? null;
+      setUser(supabaseUser);
+      if (supabaseUser) {
+        const profile = mapSupabaseUserToProfile(supabaseUser);
+        setCurrentUserState(profile);
+        setAllUsers([profile]);
+      } else {
+        setCurrentUserState(null);
+        setAllUsers([]);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const handleSetCurrentUser = (user: UserProfile | null) => {
-    setCurrentUser(user);
-    if (user) {
-      localStorage.setItem('selectedUserId', user.id);
-    } else {
-      localStorage.removeItem('selectedUserId');
-    }
+  const handleSetCurrentUser = (updatedUser: UserProfile | null) => {
+    setCurrentUserState(updatedUser);
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  // isLoading is an alias for loading to keep backward compat with any consumers
+  const isLoading = loading;
+
   return (
-    <UserContext.Provider value={{ currentUser, setCurrentUser: handleSetCurrentUser, allUsers, isLoading, headerTitle, setHeaderTitle }}>
+    <UserContext.Provider value={{
+      user,
+      session,
+      loading,
+      signOut,
+      currentUser,
+      setCurrentUser: handleSetCurrentUser,
+      allUsers,
+      isLoading,
+      headerTitle,
+      setHeaderTitle,
+    }}>
       {children}
     </UserContext.Provider>
   );

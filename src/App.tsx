@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
   IconSearch,
   IconBell,
@@ -11,7 +11,7 @@ import {
   IconCloudUpload,
   IconCheck,
 } from '@tabler/icons-react';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -37,6 +37,7 @@ import Documents from './pages/Documents';
 import Settings from './pages/Settings';
 import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
+import Login from './pages/Login';
 
 function SyncStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -242,49 +243,79 @@ function Header() {
   );
 }
 
+/** Full-page spinner shown while the auth session is being restored. */
+function AuthSpinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
+      <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+/** Wraps all protected pages: shows spinner while loading, redirects to /login if unauthenticated. */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useUser();
+  if (loading) return <AuthSpinner />;
+  if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <UserProvider>
         <Router>
-          <div className="flex min-h-screen bg-zinc-50 dark:bg-[#050505] text-zinc-900 dark:text-zinc-100 font-sans transition-colors duration-300 overflow-x-hidden">
-            <Sidebar />
-            <div className="flex-1 flex flex-col w-full overflow-x-hidden">
-              <Header />
-              
-              <main className="container mx-auto px-4 py-8 flex-1">
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/projects" element={<Projects />} />
-                  <Route path="/projects/:id" element={<ProjectDetail />} />
-                  <Route path="/references" element={<References />} />
-                  <Route path="/documents" element={<Documents />} />
-                  <Route path="/proposals" element={<Proposals />} />
-                  <Route path="/invoices" element={<Invoices />} />
-                  <Route path="/tenders" element={<Tenders />} />
-                  <Route path="/tenders/:id" element={<TenderDetail />} />
-                  <Route path="/specifications" element={<Specifications />} />
-                  <Route path="/specifications/:specId" element={<Specifications />} />
-                  <Route path="/team" element={<Team />} />
-                  <Route path="/gantt" element={<Gantt />} />
-                  <Route path="/contacts" element={<Contacts />} />
-                  <Route path="/templates" element={<ProjectTemplates />} />
-                  <Route path="/proposal-generator" element={<ProposalModule />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
-              </main>
+          <Routes>
+            {/* Public route */}
+            <Route path="/login" element={<Login />} />
 
-              <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl mt-auto py-8">
-                <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
-                  <div>© 2026 ArchiManager. All rights reserved.</div>
-                  <div className="flex gap-6">
-                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Privacy Policy</a>
-                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Terms of Service</a>
+            {/* All other routes are protected */}
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <div className="flex min-h-screen bg-zinc-50 dark:bg-[#050505] text-zinc-900 dark:text-zinc-100 font-sans transition-colors duration-300 overflow-x-hidden">
+                    <Sidebar />
+                    <div className="flex-1 flex flex-col w-full overflow-x-hidden">
+                      <Header />
+
+                      <main className="container mx-auto px-4 py-8 flex-1">
+                        <Routes>
+                          <Route path="/" element={<Dashboard />} />
+                          <Route path="/projects" element={<Projects />} />
+                          <Route path="/projects/:id" element={<ProjectDetail />} />
+                          <Route path="/references" element={<References />} />
+                          <Route path="/documents" element={<Documents />} />
+                          <Route path="/proposals" element={<Proposals />} />
+                          <Route path="/invoices" element={<Invoices />} />
+                          <Route path="/tenders" element={<Tenders />} />
+                          <Route path="/tenders/:id" element={<TenderDetail />} />
+                          <Route path="/specifications" element={<Specifications />} />
+                          <Route path="/specifications/:specId" element={<Specifications />} />
+                          <Route path="/team" element={<Team />} />
+                          <Route path="/gantt" element={<Gantt />} />
+                          <Route path="/contacts" element={<Contacts />} />
+                          <Route path="/templates" element={<ProjectTemplates />} />
+                          <Route path="/proposal-generator" element={<ProposalModule />} />
+                          <Route path="/settings" element={<Settings />} />
+                        </Routes>
+                      </main>
+
+                      <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl mt-auto py-8">
+                        <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
+                          <div>© 2026 ArchiManager. All rights reserved.</div>
+                          <div className="flex gap-6">
+                            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Privacy Policy</a>
+                            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Terms of Service</a>
+                          </div>
+                        </div>
+                      </footer>
+                    </div>
                   </div>
-                </div>
-              </footer>
-            </div>
-          </div>
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
         </Router>
       </UserProvider>
     </ThemeProvider>

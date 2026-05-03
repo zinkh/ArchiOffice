@@ -15,6 +15,7 @@
     "@google/genai": "^1.29.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@silevis/reactgrid": "^4.1.17",
+    "@supabase/supabase-js": "^2.105.1",
     "@table-library/react-table-library": "^4.1.15",
     "@tabler/icons-react": "^3.37.1",
     "@tanstack/react-table": "^8.21.3",
