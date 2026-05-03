@@ -21,7 +21,6 @@
     "@tanstack/react-table": "^8.21.3",
     "@tremor/react": "^3.18.7",
     "axios": "^1.14.0",
-    "better-sqlite3": "^12.4.1",
     "chroma-js": "^3.2.0",
     "clsx": "^2.1.1",
     "d3": "^7.9.0",
