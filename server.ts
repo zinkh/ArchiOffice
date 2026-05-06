@@ -156,7 +156,7 @@ dotenv.config();
 // Validate required server-side environment variables (Supabase service role)
 // These are required for server to start. Vite client variables (VITE_*) should be configured separately.
 (() => {
-  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"];
+  const required = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"];
   const missing = required.filter(k => !process.env[k]);
   if (missing.length > 0) {
     console.error('Missing required server environment variables:', missing.join(', '));
