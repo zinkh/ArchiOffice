@@ -37,7 +37,8 @@ export async function offlineMutate<T>(
 
   if (method === 'DELETE') {
     await table.delete(id);
-  } else {
+  } else if (id) {
+    // Only write to Dexie pre-emptively if we have a primary key
     await table.put(data);
   }
 
@@ -53,7 +54,7 @@ export async function offlineMutate<T>(
       await table.put(result);
       return result;
     }
-  } else {
+  } else if (id) {
     await enqueueMutation(tableKey, method, data, url);
   }
 
