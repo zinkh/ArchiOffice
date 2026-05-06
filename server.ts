@@ -184,6 +184,15 @@ async function startServer() {
     res.json({ status: "ok", environment: process.env.NODE_ENV });
   });
 
+  // Runtime env injection: loaded by index.html before the app bundle
+  app.get("/env.js", (_req, res) => {
+    res.setHeader("Content-Type", "application/javascript");
+    res.send(`window.__env__ = ${JSON.stringify({
+      SUPABASE_URL: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '',
+      SUPABASE_PUBLISHABLE_KEY: process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '',
+    })};`);
+  });
+
   app.get("/api/rnb-buildings", async (req, res) => {
     try {
       const { q } = req.query;
