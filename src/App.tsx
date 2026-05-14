@@ -39,6 +39,7 @@ import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 
 function SyncStatus() {
+  const { t } = useTranslation();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -58,7 +59,7 @@ function SyncStatus() {
     return (
       <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded text-[10px] font-bold uppercase tracking-wider border border-amber-200 dark:border-amber-800/50">
         <IconCloudOff size={14} />
-        Offline
+        {t('sync_offline')}
       </div>
     );
   }
@@ -66,7 +67,7 @@ function SyncStatus() {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase tracking-wider border border-emerald-200 dark:border-emerald-800/50">
       <IconCheck size={14} />
-      Online (Local)
+      {t('sync_online')}
     </div>
   );
 }
@@ -101,7 +102,7 @@ function Header() {
             <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white">
               <IconCommand size={20} />
             </div>
-            ArchiManager
+            {t('app_name')}
           </Link>
         </div>
         <div className="hidden md:flex items-center gap-4">
@@ -158,7 +159,7 @@ function Header() {
                       className="absolute right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl z-50 overflow-hidden"
                     >
                       <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">Switch User (Demo)</p>
+                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">{t('switch_user_demo')}</p>
                         <div className="space-y-1">
                           {allUsers.map(user => (
                             <button
@@ -194,7 +195,7 @@ function Header() {
                           className="w-full flex items-center gap-2 p-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                         >
                           <IconSettings size={16} />
-                          Account Settings
+                          {t('account_settings')}
                         </button>
                       </div>
                     </motion.div>
@@ -276,10 +277,10 @@ export default function App() {
 
               <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl mt-auto py-8">
                 <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
-                  <div>© 2026 ArchiManager. All rights reserved.</div>
+                  <div>{t('footer_rights')}</div>
                   <div className="flex gap-6">
-                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Privacy Policy</a>
-                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">Terms of Service</a>
+                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_privacy')}</a>
+                    <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_terms')}</a>
                   </div>
                 </div>
               </footer>

@@ -178,15 +178,15 @@ export default function Invoices() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">Invoices</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">Track project billing and payment status</p>
+          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('invoices')}</h1>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('invoices_subtitle')}</p>
         </div>
-        <button 
+        <button
           onClick={() => setIsModalOpen(true)}
           className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
         >
           <IconPlus size={20} />
-          Create Invoice
+          {t('invoices_create_btn')}
         </button>
       </div>
 
@@ -195,7 +195,7 @@ export default function Invoices() {
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input 
             type="text" 
-            placeholder="Search invoices by number, project or description..."
+            placeholder={t('invoices_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all text-zinc-900 dark:text-white"
@@ -210,9 +210,9 @@ export default function Invoices() {
             )}
           >
             <IconLayoutGrid size={16} />
-            Group by Project
+            {t('invoices_group_by_project')}
           </button>
-          <button 
+          <button
             onClick={() => setIsGroupedByProject(false)}
             className={cn(
               "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all",
@@ -220,7 +220,7 @@ export default function Invoices() {
             )}
           >
             <IconList size={16} />
-            List View
+            {t('invoices_list_view')}
           </button>
         </div>
       </div>
@@ -235,38 +235,38 @@ export default function Invoices() {
                   onClick={() => handleSort('project_name')}
                 >
                   <div className="flex items-center gap-2">
-                    Invoice / Project
+                    {t('invoices_col_invoice_project')}
                     <SortIcon column="project_name" />
                   </div>
                 </th>
-                <th 
+                <th
                   className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
                   onClick={() => handleSort('amount')}
                 >
                   <div className="flex items-center gap-2">
-                    Amount
+                    {t('invoices_col_amount')}
                     <SortIcon column="amount" />
                   </div>
                 </th>
-                <th 
+                <th
                   className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
                   onClick={() => handleSort('due_date')}
                 >
                   <div className="flex items-center gap-2">
-                    Due Date
+                    {t('invoices_col_due_date')}
                     <SortIcon column="due_date" />
                   </div>
                 </th>
-                <th 
+                <th
                   className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
                   onClick={() => handleSort('status')}
                 >
                   <div className="flex items-center gap-2">
-                    Status
+                    {t('invoices_col_status')}
                     <SortIcon column="status" />
                   </div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">Actions</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">{t('invoices_col_actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
@@ -284,7 +284,7 @@ export default function Invoices() {
                           </div>
                           <span className="font-bold text-sm text-zinc-900 dark:text-white group-hover/header:text-emerald-600 transition-colors">{group.name}</span>
                           <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full text-[10px] font-bold">
-                            {group.invoices.length} {group.invoices.length > 1 ? 'invoices' : 'invoice'}
+                            {group.invoices.length > 1 ? t('invoices_count_invoices_plural', { count: group.invoices.length }) : t('invoices_count_invoices', { count: group.invoices.length })}
                           </span>
                         </div>
                       </td>
@@ -410,7 +410,7 @@ export default function Invoices() {
               {sortedInvoices.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
-                    No invoices found.
+                    {t('invoices_no_invoices')}
                   </td>
                 </tr>
               )}
@@ -441,28 +441,28 @@ export default function Invoices() {
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">New Invoice</h2>
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('invoices_new_title')}</h2>
                 <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
                   <IconX size={24} />
                 </button>
               </div>
               <form onSubmit={handleCreateInvoice} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Project</label>
-                  <select 
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_project_label')}</label>
+                  <select
                     required
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
                     value={newInvoice.project_id}
                     onChange={e => setNewInvoice({...newInvoice, project_id: e.target.value})}
                   >
-                    <option value="">Select Project</option>
+                    <option value="">{t('invoices_select_project')}</option>
                     {projects.map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Amount</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_amount_label')}</label>
                   <input 
                     type="number"
                     required
@@ -472,7 +472,7 @@ export default function Invoices() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Due Date</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_due_date_label')}</label>
                   <input 
                     type="date"
                     required
@@ -482,7 +482,7 @@ export default function Invoices() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_description_label')}</label>
                   <textarea 
                     className="w-full h-32 px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white resize-none"
                     value={newInvoice.description ?? ''}
@@ -495,13 +495,13 @@ export default function Invoices() {
                     onClick={() => setIsModalOpen(false)}
                     className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                   >
-                    Cancel
+                    {t('btn_cancel')}
                   </button>
-                  <button 
+                  <button
                     type="submit"
                     className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20"
                   >
-                    Create Invoice
+                    {t('invoices_create_btn')}
                   </button>
                 </div>
               </form>

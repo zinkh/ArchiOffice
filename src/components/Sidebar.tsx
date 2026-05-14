@@ -45,7 +45,7 @@ export function Sidebar() {
           <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white">
             <IconCommand size={20} />
           </div>
-          ArchiManager
+          {t('app_name')}
         </Link>
       </div>
       <nav className="flex-1 px-4 space-y-1">

@@ -174,17 +174,13 @@ export default function Settings() {
             </div>
           </div>
 
-          <h2 className="text-xl font-bold mt-8">Configuration SMTP</h2>
-          <p className="text-sm text-zinc-500 mb-4">
-            Utilisé pour l'envoi des identifiants aux nouveaux membres et les notifications. 
-            <br />
-            <span className="text-blue-600 dark:text-blue-400">Note pour Gmail :</span> Vous devez utiliser un <strong>"Mot de passe d'application"</strong> (généré dans votre compte Google) et non votre mot de passe habituel.
-          </p>
+          <h2 className="text-xl font-bold mt-8">{t('settings_smtp_title')}</h2>
+          <p className="text-sm text-zinc-500 mb-4">{t('settings_smtp_explanation')}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input className="p-2 border rounded" placeholder="SMTP Host (ex: smtp.gmail.com)" value={settings.smtpHost} onChange={e => setSettings({...settings, smtpHost: e.target.value})} />
-            <input className="p-2 border rounded" placeholder="SMTP Port (ex: 587, 465)" value={settings.smtpPort} onChange={e => setSettings({...settings, smtpPort: e.target.value})} />
-            <input className="p-2 border rounded" placeholder="SMTP User" value={settings.smtpUser} onChange={e => setSettings({...settings, smtpUser: e.target.value})} />
-            <input className="p-2 border rounded" type="password" placeholder="SMTP Password" value={settings.smtpPass} onChange={e => setSettings({...settings, smtpPass: e.target.value})} />
+            <input className="p-2 border rounded" placeholder={t('settings_smtp_host_placeholder')} value={settings.smtpHost} onChange={e => setSettings({...settings, smtpHost: e.target.value})} />
+            <input className="p-2 border rounded" placeholder={t('settings_smtp_port_placeholder')} value={settings.smtpPort} onChange={e => setSettings({...settings, smtpPort: e.target.value})} />
+            <input className="p-2 border rounded" placeholder={t('settings_smtp_user_placeholder')} value={settings.smtpUser} onChange={e => setSettings({...settings, smtpUser: e.target.value})} />
+            <input className="p-2 border rounded" type="password" placeholder={t('settings_smtp_password_placeholder')} value={settings.smtpPass} onChange={e => setSettings({...settings, smtpPass: e.target.value})} />
           </div>
           <div className="mt-4 flex flex-col gap-2">
             <button
@@ -196,9 +192,9 @@ export default function Settings() {
               {isTestingSmtp ? (
                 <div className="flex items-center gap-2">
                   <IconLoader2 className="w-4 h-4 animate-spin" />
-                  Test en cours...
+                  {t('settings_smtp_testing')}
                 </div>
-              ) : "Tester la connexion SMTP"}
+              ) : t('settings_smtp_test_btn')}
             </button>
             {smtpTestResult && (
               <div className={cn(

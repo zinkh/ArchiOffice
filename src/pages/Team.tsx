@@ -63,7 +63,7 @@ export default function Team() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('personnel_directory')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">Manage design team members and external consultants.</p>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('team_subtitle')}</p>
         </div>
         {isAdmin && (
           <button
@@ -71,7 +71,7 @@ export default function Team() {
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20"
           >
             <IconUserPlus size={18} />
-            Add Team Member
+            {t('team_add_member_btn')}
           </button>
         )}
       </div>
@@ -97,16 +97,16 @@ export default function Team() {
             <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{member.email}</p>
             
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">System Access</label>
+              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
               {isAdmin ? (
-                <select 
+                <select
                   value={member.system_role}
                   onChange={(e) => handleRoleChange(member.id, e.target.value as any)}
                   className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white text-sm"
                 >
-                  <option value="user">User</option>
-                  <option value="pm">Project Manager</option>
-                  <option value="admin">Administrator</option>
+                  <option value="user">{t('team_role_user')}</option>
+                  <option value="pm">{t('team_role_pm')}</option>
+                  <option value="admin">{t('team_role_admin')}</option>
                 </select>
               ) : (
                 <div className="px-3 py-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-medium border border-zinc-100 dark:border-zinc-800">
@@ -128,54 +128,54 @@ export default function Team() {
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Add New Team Member</h3>
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('team_add_member_title')}</h3>
                 <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
                   <IconX size={20} />
                 </button>
               </div>
               <form onSubmit={handleAddUser} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Full Name</label>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_full_name_label')}</label>
                   <input
                     type="text"
                     required
                     value={newUser.name}
                     onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
                     className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder="John Doe"
+                    placeholder={t('team_full_name_placeholder')}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Email Address</label>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_email_label')}</label>
                   <input
                     type="email"
                     required
                     value={newUser.email}
                     onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                     className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder="john@example.com"
+                    placeholder={t('team_email_placeholder')}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Job Title / Role</label>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_job_title_label')}</label>
                   <input
                     type="text"
                     value={newUser.role}
                     onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                     className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder="Architect, Engineer..."
+                    placeholder={t('team_job_title_placeholder')}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">System Access Level</label>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_system_access_level')}</label>
                   <select
                     value={newUser.system_role}
                     onChange={(e) => setNewUser({ ...newUser, system_role: e.target.value as any })}
                     className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                   >
-                    <option value="user">User (View only/Limited)</option>
-                    <option value="pm">Project Manager</option>
-                    <option value="admin">Administrator</option>
+                    <option value="user">{t('team_role_user')}</option>
+                    <option value="pm">{t('team_role_pm')}</option>
+                    <option value="admin">{t('team_role_admin')}</option>
                   </select>
                 </div>
                 <div className="pt-4 flex gap-3">
@@ -184,7 +184,7 @@ export default function Team() {
                     onClick={() => setIsModalOpen(false)}
                     className="flex-1 px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 font-bold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
                   >
-                    Cancel
+                    {t('btn_cancel')}
                   </button>
                   <button
                     type="submit"
@@ -196,7 +196,7 @@ export default function Team() {
                     ) : (
                       <IconCheck size={18} />
                     )}
-                    Create User
+                    {t('team_create_user_btn')}
                   </button>
                 </div>
               </form>

@@ -305,7 +305,7 @@ export default function Specifications() {
                     onChange={e => setActiveSpec({ ...activeSpec, is_template: e.target.checked })}
                     className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <label htmlFor="is_template" className="text-xs text-zinc-500 dark:text-zinc-400">Save as Template</label>
+                  <label htmlFor="is_template" className="text-xs text-zinc-500 dark:text-zinc-400">{t('specs_save_as_template')}</label>
                 </div>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                   {t('revision_date')}: {new Date(activeSpec.last_updated).toLocaleDateString()}
@@ -443,41 +443,41 @@ export default function Specifications() {
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">New Specification</h3>
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('specs_new_title')}</h3>
                 <button onClick={() => setIsNewSpecModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
                   <IconArrowUpRight className="rotate-45" size={20} />
                 </button>
               </div>
               <div className="p-6 space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Template (Optional)</label>
-                  <select 
+                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('specs_template_optional')}</label>
+                  <select
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                     onChange={e => setSelectedTemplateId(e.target.value)}
                   >
-                    <option value="">Select a template</option>
+                    <option value="">{t('specs_select_template')}</option>
                     {specs.filter(s => s.is_template).map(s => (
                       <option key={s.id} value={s.id}>{s.title}</option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Title</label>
-                  <input 
+                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('specs_title_label')}</label>
+                  <input
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                    placeholder="e.g. CCTP Lot 01"
+                    placeholder={t('specs_title_example')}
                     value={newSpecTitle}
                     onChange={e => setNewSpecTitle(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Project</label>
-                  <select 
+                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('specs_project_label')}</label>
+                  <select
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                     value={selectedProjectId}
                     onChange={e => setSelectedProjectId(e.target.value)}
                   >
-                    <option value="">Select a project</option>
+                    <option value="">{t('specs_select_project')}</option>
                     {projects.map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
@@ -489,14 +489,14 @@ export default function Specifications() {
                   onClick={() => setIsNewSpecModalOpen(false)}
                   className="flex-1 px-4 py-2 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
                 >
-                  Cancel
+                  {t('btn_cancel')}
                 </button>
-                <button 
+                <button
                   onClick={handleNewSpec}
                   disabled={!newSpecTitle || !selectedProjectId}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-50"
                 >
-                  Create
+                  {t('btn_create')}
                 </button>
               </div>
             </motion.div>

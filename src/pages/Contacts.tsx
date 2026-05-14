@@ -249,6 +249,7 @@ export default function Contacts() {
   };
 
   const MappingModal = () => {
+    const { t } = useTranslation();
     const [mapping, setMapping] = useState<Record<string, string>>({});
     const contactFields = [
       'prefix', 'first_name', 'middle_name', 'last_name', 'suffix', 'nickname',
@@ -301,7 +302,7 @@ export default function Contacts() {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-          <h2 className="text-xl font-semibold mb-4">Mapper les champs</h2>
+          <h2 className="text-xl font-semibold mb-4">{t('contacts_map_fields_title')}</h2>
           <div className="grid grid-cols-2 gap-4">
             {contactFields.map(field => (
               <div key={field} className="flex flex-col">
@@ -311,7 +312,7 @@ export default function Contacts() {
                   onChange={(e) => setMapping({...mapping, [field]: e.target.value})}
                   value={mapping[field] || ''}
                 >
-                  <option value="">Sélectionner une colonne</option>
+                  <option value="">{t('contacts_select_column')}</option>
                   {importData.headers.map(header => (
                     <option key={header} value={header}>{header}</option>
                   ))}
@@ -320,8 +321,8 @@ export default function Contacts() {
             ))}
           </div>
           <div className="mt-6 flex justify-end gap-4">
-            <button className="px-4 py-2 bg-gray-200 rounded" onClick={() => setIsMappingModalOpen(false)}>Annuler</button>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={handleConfirm}>Importer</button>
+            <button className="px-4 py-2 bg-gray-200 rounded" onClick={() => setIsMappingModalOpen(false)}>{t('btn_cancel')}</button>
+            <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={handleConfirm}>{t('contacts_import_btn')}</button>
           </div>
         </div>
       </div>
@@ -409,7 +410,7 @@ export default function Contacts() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('contacts')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">Manage your professional network and leads.</p>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('contacts_subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -417,7 +418,7 @@ export default function Contacts() {
             className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >
             <IconFileText size={14} className="md:size-[18px]" />
-            <span className="hidden md:inline">Import</span>
+            <span className="hidden md:inline">{t('contacts_import_label')}</span>
           </button>
           <input id="file-upload" type="file" className="hidden" accept=".vcf,.xlsx,.xls,.csv,.xml" onChange={handleImport} />
           <button 
@@ -425,14 +426,14 @@ export default function Contacts() {
             className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >
             <IconFileText size={14} className="md:size-[18px]" />
-            <span className="hidden md:inline">Export</span>
+            <span className="hidden md:inline">{t('contacts_export_label')}</span>
           </button>
           <button 
             onClick={() => setIsCategoryModalOpen(true)}
             className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >
             <IconSettings size={14} className="md:size-[18px]" />
-            <span className="hidden md:inline">Categories</span>
+            <span className="hidden md:inline">{t('contacts_categories_label')}</span>
           </button>
           <button 
             onClick={() => {
@@ -455,7 +456,7 @@ export default function Contacts() {
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input 
             type="text"
-            placeholder="Search contacts..."
+            placeholder={t('contacts_search_placeholder')}
             className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -469,7 +470,7 @@ export default function Contacts() {
               value={filterCategory}
               onChange={e => setFilterCategory(e.target.value)}
             >
-              <option value="">All Categories</option>
+              <option value="">{t('contacts_all_categories')}</option>
               {categories.map(cat => (
                 <option key={cat.id} value={cat.name}>{cat.name}</option>
               ))}
@@ -485,7 +486,7 @@ export default function Contacts() {
               <tr>
                 <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors" onClick={() => handleSort('prefix')}>
                   <div className="flex items-center gap-1">
-                    Prefix
+                    {t('contacts_col_prefix')}
                     {sortConfig.field === 'prefix' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
@@ -496,7 +497,7 @@ export default function Contacts() {
                   </div>
                 </th>
                 <th className="px-6 py-4">{t('first_name')}</th>
-                <th className="px-6 py-4">Category</th>
+                <th className="px-6 py-4">{t('contacts_col_category')}</th>
                 <th className="px-6 py-4">{t('phone')}</th>
                 <th className="px-6 py-4">{t('email')}</th>
                 <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors" onClick={() => handleSort('city')}>
@@ -511,7 +512,7 @@ export default function Contacts() {
                     {sortConfig.field === 'ca_amount' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
-                <th className="px-6 py-4 text-right">Actions</th>
+                <th className="px-6 py-4 text-right">{t('contacts_col_actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
@@ -561,7 +562,7 @@ export default function Contacts() {
                   <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 dark:text-zinc-400">
                     <div className="flex flex-col items-center gap-2">
                       <IconUser size={32} className="opacity-20" />
-                      <p>{searchQuery || filterCategory ? 'No contacts match your filters' : t('no_contacts')}</p>
+                      <p>{searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
                     </div>
                   </td>
                 </tr>
@@ -581,7 +582,7 @@ export default function Contacts() {
           >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
-                {isEditing ? 'Edit Contact' : t('add_contact')}
+                {isEditing ? t('contacts_edit_title') : t('add_contact')}
               </h3>
               <button 
                 onClick={() => {
@@ -597,15 +598,15 @@ export default function Contacts() {
             <form onSubmit={handleSubmit} className="p-6 space-y-8">
               {/* Identité Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Identité</h4>
+                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_identity')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Prefix</label>
-                    <input 
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_prefix_label')}</label>
+                    <input
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.prefix || ''}
                       onChange={e => setNewContact({...newContact, prefix: e.target.value})}
-                      placeholder="M., Mme, Dr..."
+                      placeholder={t('contacts_prefix_placeholder')}
                     />
                   </div>
                   <div className="space-y-1">
@@ -618,7 +619,7 @@ export default function Contacts() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Middle Name</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_middle_name_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.middle_name || ''}
@@ -635,7 +636,7 @@ export default function Contacts() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Suffix</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_suffix_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.suffix || ''}
@@ -643,7 +644,7 @@ export default function Contacts() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Nickname</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_nickname_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.nickname || ''}
@@ -655,10 +656,10 @@ export default function Contacts() {
 
               {/* Organisation Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Organisation</h4>
+                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_organisation')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Société</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_company_name_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.company_name || ''}
@@ -666,7 +667,7 @@ export default function Contacts() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Fonction</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_job_title_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.job_title || ''}
@@ -674,7 +675,7 @@ export default function Contacts() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Service</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_department_label')}</label>
                     <input 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.department || ''}
@@ -686,16 +687,16 @@ export default function Contacts() {
 
               {/* Coordonnées Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Coordonnées</h4>
+                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_contact_info')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Emails</h5>
+                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_emails_label')}</h5>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <IconMail size={16} className="text-zinc-400" />
                         <input 
                           type="email"
-                          placeholder="Travail"
+                          placeholder={t('contacts_email_work_placeholder')}
                           className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.email_work || ''}
                           onChange={e => setNewContact({...newContact, email_work: e.target.value})}
@@ -705,7 +706,7 @@ export default function Contacts() {
                         <IconMail size={16} className="text-zinc-400" />
                         <input 
                           type="email"
-                          placeholder="Personnel"
+                          placeholder={t('contacts_email_personal_placeholder')}
                           className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.email_home || ''}
                           onChange={e => setNewContact({...newContact, email_home: e.target.value})}
@@ -714,12 +715,12 @@ export default function Contacts() {
                     </div>
                   </div>
                   <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Téléphones</h5>
+                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_phones_label')}</h5>
                     <div className="grid grid-cols-1 gap-2">
                       <div className="flex items-center gap-2">
                         <IconPhone size={16} className="text-zinc-400" />
                         <input 
-                          placeholder="Mobile"
+                          placeholder={t('contacts_phone_mobile_placeholder')}
                           className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.phone_mobile || ''}
                           onChange={e => setNewContact({...newContact, phone_mobile: e.target.value})}
@@ -728,7 +729,7 @@ export default function Contacts() {
                       <div className="flex items-center gap-2">
                         <IconPhone size={16} className="text-zinc-400" />
                         <input 
-                          placeholder="Travail"
+                          placeholder={t('contacts_phone_work_placeholder')}
                           className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.phone_work || ''}
                           onChange={e => setNewContact({...newContact, phone_work: e.target.value})}
@@ -741,25 +742,25 @@ export default function Contacts() {
 
               {/* Adresses Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Adresses</h4>
+                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_addresses')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Travail</h5>
-                    <input 
-                      placeholder="Rue"
+                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_address_work_label')}</h5>
+                    <input
+                      placeholder={t('contacts_street_placeholder')}
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.address_work_street || ''}
                       onChange={e => setNewContact({...newContact, address_work_street: e.target.value})}
                     />
                     <div className="grid grid-cols-2 gap-2">
-                      <input 
-                        placeholder="Code Postal"
+                      <input
+                        placeholder={t('contacts_postal_code_placeholder')}
                         className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.address_work_zip || ''}
                         onChange={e => setNewContact({...newContact, address_work_zip: e.target.value})}
                       />
-                      <input 
-                        placeholder="Ville"
+                      <input
+                        placeholder={t('contacts_city_placeholder')}
                         className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.address_work_city || ''}
                         onChange={e => setNewContact({...newContact, address_work_city: e.target.value})}
@@ -767,22 +768,22 @@ export default function Contacts() {
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Domicile</h5>
-                    <input 
-                      placeholder="Rue"
+                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_address_home_label')}</h5>
+                    <input
+                      placeholder={t('contacts_street_placeholder')}
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                       value={newContact.address_home_street || ''}
                       onChange={e => setNewContact({...newContact, address_home_street: e.target.value})}
                     />
                     <div className="grid grid-cols-2 gap-2">
-                      <input 
-                        placeholder="Code Postal"
+                      <input
+                        placeholder={t('contacts_postal_code_placeholder')}
                         className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.address_home_zip || ''}
                         onChange={e => setNewContact({...newContact, address_home_zip: e.target.value})}
                       />
-                      <input 
-                        placeholder="Ville"
+                      <input
+                        placeholder={t('contacts_city_placeholder')}
                         className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.address_home_city || ''}
                         onChange={e => setNewContact({...newContact, address_home_city: e.target.value})}
@@ -794,33 +795,33 @@ export default function Contacts() {
 
               {/* Autres Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Autres & App Spécifique</h4>
+                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_other')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Catégorie</label>
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_category_label')}</label>
                       <select
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.category || ''}
                         onChange={e => setNewContact({...newContact, category: e.target.value})}
                       >
-                        <option value="">Sélectionner une catégorie</option>
+                        <option value="">{t('contacts_select_category')}</option>
                         {categories.map(cat => (
                           <option key={cat.id} value={cat.name}>{cat.name}</option>
                         ))}
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Labels (Tags)</label>
-                      <input 
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_tags_label')}</label>
+                      <input
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                         value={newContact.tags || ''}
                         onChange={e => setNewContact({...newContact, tags: e.target.value})}
-                        placeholder="Client, Prospect, Ami..."
+                        placeholder={t('contacts_tags_placeholder')}
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Notes</label>
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_notes_label')}</label>
                       <textarea 
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white h-24"
                         value={newContact.notes || ''}
@@ -831,7 +832,7 @@ export default function Contacts() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">SIRET</label>
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_siret_label')}</label>
                         <input 
                           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.siret || ''}
@@ -839,7 +840,7 @@ export default function Contacts() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">TVA</label>
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_vat_label')}</label>
                         <input 
                           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                           value={newContact.vat_number || ''}
@@ -848,7 +849,7 @@ export default function Contacts() {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">CA Annuel (€)</label>
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_annual_turnover_label')}</label>
                       <input 
                         type="number"
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
@@ -857,7 +858,7 @@ export default function Contacts() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Anniversaire</label>
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_birthday_label')}</label>
                       <input 
                         type="date"
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
@@ -923,13 +924,13 @@ export default function Contacts() {
                   }}
                   className="px-4 py-2 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
                 >
-                  Cancel
+                  {t('btn_cancel')}
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  {isEditing ? 'Update Contact' : 'Save Contact'}
+                  {isEditing ? t('contacts_update_btn') : t('contacts_save_btn')}
                 </button>
               </div>
             </form>
@@ -946,7 +947,7 @@ export default function Contacts() {
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
           >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Manage Categories</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('contacts_manage_categories')}</h3>
               <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
                 ✕
               </button>
@@ -955,7 +956,7 @@ export default function Contacts() {
               <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
                 <input 
                   className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="New category name"
+                  placeholder={t('contacts_new_category_placeholder')}
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
                 />
@@ -963,7 +964,7 @@ export default function Contacts() {
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  Add
+                  {t('contacts_add_category_btn')}
                 </button>
               </form>
               <div className="space-y-2">

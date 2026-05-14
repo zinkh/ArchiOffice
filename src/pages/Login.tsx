@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconCommand } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
+import { useTranslation } from 'react-i18next';
 
 export default function Login() {
   const [email, setEmail] = useState('sektaoui.khaldoun@gmail.com');
   const navigate = useNavigate();
   const { setCurrentUser } = useUser();
+  const { t } = useTranslation();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,11 +32,11 @@ export default function Login() {
           </div>
         </div>
         <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-8">
-          Welcome to ArchiManager
+          {t('login_welcome')}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Email</label>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('email')}</label>
             <input
               type="email"
               value={email}
@@ -47,11 +49,11 @@ export default function Login() {
             type="submit"
             className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
           >
-            Enter Application
+            {t('login_enter')}
           </button>
-          
+
           <p className="text-center text-sm text-zinc-600 dark:text-zinc-400 mt-4">
-            This is a local-first application. Your data is stored in your browser.
+            {t('login_local_info')}
           </p>
         </form>
       </div>

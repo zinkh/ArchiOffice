@@ -507,7 +507,7 @@ export default function Projects() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('projects')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">Manage your architectural portfolio and active works.</p>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('projects_subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg mr-2">
@@ -535,7 +535,7 @@ export default function Projects() {
             className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 rounded-md font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >
             <IconSettings size={18} />
-            Domaines
+            {t('projects_domains_btn')}
           </button>
           <button 
             onClick={handleAddProject}
@@ -569,31 +569,31 @@ export default function Projects() {
             )}
           >
             <IconFilter size={18} />
-            {filterStatus === 'All' ? 'Status' : filterStatus}
+            {filterStatus === 'All' ? t('projects_filter_status') : filterStatus}
           </button>
-          <button 
+          <button
             onClick={cycleCategoryFilter}
             className={cn(
               "flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors",
-              filterCategory === 'All' 
+              filterCategory === 'All'
                 ? "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
                 : "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
             )}
           >
             <IconTag size={18} />
-            {filterCategory === 'All' ? 'Domaine' : filterCategory}
+            {filterCategory === 'All' ? t('projects_filter_domain') : filterCategory}
           </button>
-          <button 
+          <button
             onClick={cycleProjectManagerFilter}
             className={cn(
               "flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors",
-              filterProjectManager === 'All' 
+              filterProjectManager === 'All'
                 ? "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
                 : "border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
             )}
           >
             <IconUser size={18} />
-            {filterProjectManager === 'All' ? 'Manager' : filterProjectManager}
+            {filterProjectManager === 'All' ? t('projects_filter_manager') : filterProjectManager}
           </button>
         </div>
       </div>
@@ -655,7 +655,7 @@ export default function Projects() {
                   </div>
                 </div>
                 <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 mb-4 flex-1">
-                  {project.description || "No description provided for this project."}
+                  {project.description || t('projects_no_description')}
                 </p>
                 <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-700 mt-auto">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -681,54 +681,54 @@ export default function Projects() {
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('project_code')}
                   >
-                    <div className="flex items-center gap-1">Code {getSortIcon('project_code')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_code')} {getSortIcon('project_code')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('name')}
                   >
-                    <div className="flex items-center gap-1">Nom {getSortIcon('name')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_name')} {getSortIcon('name')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('client')}
                   >
-                    <div className="flex items-center gap-1">Maître d'Ouvrage {getSortIcon('client')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_client')} {getSortIcon('client')}</div>
                   </th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">Description</th>
-                  <th 
+                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_description')}</th>
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('surface')}
                   >
-                    <div className="flex items-center gap-1">Surface {getSortIcon('surface')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_surface')} {getSortIcon('surface')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('construction_cost')}
                   >
-                    <div className="flex items-center gap-1">Montant Travaux {getSortIcon('construction_cost')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_construction_cost')} {getSortIcon('construction_cost')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('remuneration')}
                   >
-                    <div className="flex items-center gap-1">Rémunération {getSortIcon('remuneration')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_remuneration')} {getSortIcon('remuneration')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('progression')}
                   >
-                    <div className="flex items-center gap-1">Progression {getSortIcon('progression')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_progression')} {getSortIcon('progression')}</div>
                   </th>
-                  <th 
+                  <th
                     className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                     onClick={() => requestSort('project_manager')}
                   >
-                    <div className="flex items-center gap-1">Chef de projet {getSortIcon('project_manager')}</div>
+                    <div className="flex items-center gap-1">{t('projects_col_manager')} {getSortIcon('project_manager')}</div>
                   </th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">Cotraitants</th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">Intervenants</th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">Entreprises</th>
+                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_cotraitants')}</th>
+                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_intervenants')}</th>
+                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_entreprises')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
@@ -776,7 +776,7 @@ export default function Projects() {
                 />
                 <div className="absolute top-4 left-4">
                   <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
-                    Project Code: {selectedProject.project_code || '---'}
+                    {t('projects_code_label')} {selectedProject.project_code || '---'}
                   </span>
                 </div>
                 <button 
@@ -790,8 +790,8 @@ export default function Projects() {
               <div className="p-6 overflow-y-auto flex-1">
                 {isEditing && !projects.some(p => p.id === editForm?.id) && (
                   <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
-                    <label className="block text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">Use Template</label>
-                    <select 
+                    <label className="block text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">{t('projects_use_template')}</label>
+                    <select
                       className="w-full p-2 border rounded bg-white dark:bg-zinc-800"
                       onChange={e => {
                         const template = templates.find(t => t.id === e.target.value);
@@ -806,7 +806,7 @@ export default function Projects() {
                         }
                       }}
                     >
-                      <option value="">Select a template...</option>
+                      <option value="">{t('projects_select_template')}</option>
                       {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
@@ -817,7 +817,7 @@ export default function Projects() {
                       <input 
                         className="text-2xl font-bold text-zinc-900 dark:text-white bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-blue-500 outline-none w-full"
                         value={editForm?.name ?? ''}
-                        placeholder="Project Name"
+                        placeholder={t('projects_name_placeholder')}
                         onChange={e => setEditForm(prev => prev ? ({...prev, name: e.target.value}) : null)}
                       />
                     ) : (
@@ -844,7 +844,7 @@ export default function Projects() {
                         <AddressAutocomplete 
                           value={editForm?.address || ''} 
                           onChange={(val: string) => setEditForm(prev => prev ? ({...prev, address: val}) : null)}
-                          placeholder="Project Address (for Map)"
+                          placeholder={t('projects_address_placeholder')}
                         />
                       </div>
                     ) : (
@@ -875,15 +875,15 @@ export default function Projects() {
                       {isSaving ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Saving...
+                          {t('saving')}
                         </>
                       ) : isEditing ? (
                         <>
                           <IconDeviceFloppy size={18} />
-                          Save
+                          {t('btn_save')}
                         </>
                       ) : (
-                        'Edit Project'
+                        t('btn_edit')
                       )}
                     </button>
                     {!isEditing && (
@@ -901,7 +901,7 @@ export default function Projects() {
                 <div className="grid grid-cols-2 gap-6 mb-8">
                   {isEditing && (
                     <div className="col-span-2 space-y-2">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Project Image</label>
+                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_image_label')}</label>
                       <div className="flex items-center gap-4">
                         <div className="w-24 h-24 rounded-lg bg-zinc-100 dark:bg-zinc-800 border-2 border-dashed border-zinc-200 dark:border-zinc-700 overflow-hidden flex items-center justify-center shrink-0">
                           {editForm?.image_url ? (
@@ -913,7 +913,7 @@ export default function Projects() {
                         <div className="flex-1">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-lg cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
                             <IconUpload size={18} />
-                            Upload Image
+                            {t('projects_upload_image')}
                             <input 
                               type="file" 
                               className="hidden" 
@@ -921,7 +921,7 @@ export default function Projects() {
                               onChange={handleImageUpload}
                             />
                           </label>
-                          <p className="text-[10px] text-zinc-500 mt-2">Recommended: 800x400px. JPG, PNG or WebP.</p>
+                          <p className="text-[10px] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
                         </div>
                       </div>
                     </div>
@@ -934,10 +934,10 @@ export default function Projects() {
                         value={editForm?.status || 'Planning'}
                         onChange={e => setEditForm(prev => prev ? ({...prev, status: e.target.value as any}) : null)}
                       >
-                        <option value="Planning">Planning</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Completed">Completed</option>
-                        <option value="On Hold">On Hold</option>
+                        <option value="Planning">{t('projects_status_planning')}</option>
+                        <option value="In Progress">{t('projects_status_in_progress')}</option>
+                        <option value="Completed">{t('projects_status_completed')}</option>
+                        <option value="On Hold">{t('projects_status_on_hold')}</option>
                       </select>
                     ) : (
                       <div className={cn(
@@ -951,20 +951,20 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Domaine</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_domain_label')}</label>
                     {isEditing ? (
-                      <select 
+                      <select
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                         value={editForm?.category || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, category: e.target.value}) : null)}
                       >
-                        <option value="">Sélectionner un domaine</option>
+                        <option value="">{t('projects_select_domain')}</option>
                         {categories.map(cat => (
                           <option key={cat.id} value={cat.name}>{cat.name}</option>
                         ))}
                       </select>
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.category || 'Non classé'}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.category || t('projects_uncategorized')}</p>
                     )}
                   </div>
                   <div className="space-y-1">
@@ -981,7 +981,7 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Start Date</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_start_date')}</label>
                     {isEditing ? (
                       <input 
                         type="date"
@@ -1008,7 +1008,7 @@ export default function Projects() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Surface (m²)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_surface_m2')}</label>
                     {isEditing ? (
                       <input 
                         type="number"
@@ -1022,7 +1022,7 @@ export default function Projects() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Montant Travaux (€)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_construction_cost_eur')}</label>
                     {isEditing ? (
                       <input 
                         type="number"
@@ -1036,7 +1036,7 @@ export default function Projects() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Rémunération (€)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_remuneration_eur')}</label>
                     {isEditing ? (
                       <input 
                         type="number"
@@ -1050,7 +1050,7 @@ export default function Projects() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Progression (%)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_progression_pct')}</label>
                     {isEditing ? (
                       <input 
                         type="number"
@@ -1064,14 +1064,14 @@ export default function Projects() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Chef de projet</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_manager_label')}</label>
                     {isEditing ? (
-                      <select 
+                      <select
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                         value={editForm?.project_manager || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, project_manager: e.target.value}) : null)}
                       >
-                        <option value="">Select Project Manager</option>
+                        <option value="">{t('projects_select_manager')}</option>
                         {team.map(member => (
                           <option key={member.id} value={member.name}>{member.name}</option>
                         ))}
@@ -1084,13 +1084,13 @@ export default function Projects() {
 
                 <div className="grid grid-cols-1 gap-4 mb-8">
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Cotraitants (Tableau)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_table')}</label>
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">Spécialité</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">Cotraitant</th>
+                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_specialty_label')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_cotraitant_label')}</th>
                             {isEditing && <th className="px-3 py-2 text-right font-medium text-zinc-500 w-10"></th>}
                           </tr>
                         </thead>
@@ -1158,7 +1158,7 @@ export default function Projects() {
                                   }}
                                   className="text-blue-500 hover:text-blue-700 flex items-center gap-1 text-xs font-medium"
                                 >
-                                  <IconPlus size={14} /> Ajouter un cotraitant
+                                  <IconPlus size={14} /> {t('projects_add_cotraitant')}
                                 </button>
                               </td>
                             </tr>
@@ -1168,7 +1168,7 @@ export default function Projects() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Cotraitants (Texte libre)</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_freetext')}</label>
                     {isEditing ? (
                       <input 
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -1180,7 +1180,7 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Intervenants externes</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_intervenants')}</label>
                     {isEditing ? (
                       <input 
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -1192,9 +1192,9 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Entreprises</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_entreprises')}</label>
                     {isEditing ? (
-                      <input 
+                      <input
                         className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                         value={editForm?.entreprises || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, entreprises: e.target.value}) : null)}
@@ -1215,7 +1215,7 @@ export default function Projects() {
                     />
                   ) : (
                     <p className="text-zinc-600 dark:text-zinc-300 leading-relaxed">
-                      {selectedProject.description || "No description provided."}
+                      {selectedProject.description || t('projects_no_description')}
                     </p>
                   )}
                 </div>
@@ -1230,13 +1230,13 @@ export default function Projects() {
                     onChange={e => setEditForm(prev => prev ? ({...prev, is_complete_mission: e.target.checked}) : null)}
                   />
                   <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                    Mission Complète
+                    {t('projects_complete_mission')}
                   </label>
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 mt-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Etudes</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_studies_label')}</label>
                     {isEditing ? (
                       <textarea 
                         className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-900 dark:text-white"
@@ -1245,14 +1245,14 @@ export default function Projects() {
                       />
                     ) : (
                       <p className="text-zinc-600 dark:text-zinc-300 leading-relaxed">
-                        {selectedProject.etudes_notes || "Aucune note d'études."}
+                        {selectedProject.etudes_notes || t('projects_no_studies_notes')}
                       </p>
                     )}
                   </div>
 
                   {(isEditing ? editForm?.is_complete_mission : selectedProject.is_complete_mission) && (
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Chantier</label>
+                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_construction_label')}</label>
                       {isEditing ? (
                         <textarea 
                           className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-900 dark:text-white"
@@ -1261,7 +1261,7 @@ export default function Projects() {
                         />
                       ) : (
                         <p className="text-zinc-600 dark:text-zinc-300 leading-relaxed">
-                          {selectedProject.chantier_notes || "Aucune note de chantier."}
+                          {selectedProject.chantier_notes || t('projects_no_construction_notes')}
                         </p>
                       )}
                     </div>
@@ -1271,9 +1271,9 @@ export default function Projects() {
                 {(isEditing ? editForm?.is_complete_mission : selectedProject.is_complete_mission) && (
                   <div className="space-y-2 mt-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Lots & Entreprises</label>
+                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_lots_enterprises')}</label>
                       {isEditing && (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => {
                             const newList = [...(editForm?.lots_list || []), { id: `lot-${Date.now()}`, project_id: selectedProject.id, lot_number: '', lot_title: '', contact_id: '' }];
@@ -1281,7 +1281,7 @@ export default function Projects() {
                           }}
                           className="text-blue-500 hover:text-blue-700 flex items-center gap-1 text-xs font-medium"
                         >
-                          <IconPlus size={14} /> Ajouter un lot
+                          <IconPlus size={14} /> {t('projects_add_lot')}
                         </button>
                       )}
                     </div>
@@ -1289,9 +1289,9 @@ export default function Projects() {
                       <table className="w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500 w-16">N°</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">Lot</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">Entreprise</th>
+                            <th className="px-3 py-2 text-left font-medium text-zinc-500 w-16">{t('projects_num_short')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_lot_label')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_enterprise_label')}</th>
                             {isEditing && <th className="px-3 py-2 text-right font-medium text-zinc-500 w-10"></th>}
                           </tr>
                         </thead>
@@ -1367,7 +1367,7 @@ export default function Projects() {
                           {((isEditing ? editForm?.lots_list : selectedProject.lots_list) || []).length === 0 && (
                             <tr>
                               <td colSpan={isEditing ? 4 : 3} className="px-3 py-4 text-center text-zinc-500 italic">
-                                Aucun lot défini.
+                                {t('projects_no_lots')}
                               </td>
                             </tr>
                           )}
@@ -1386,15 +1386,15 @@ export default function Projects() {
 
                 {(selectedProject.address || (isEditing && editForm?.address)) && (
                   <div className="mt-6">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2 block">Location</label>
+                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2 block">{t('projects_location_label')}</label>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
                       <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
                         <GeoportailMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} />
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">Cadastre</div>
+                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
                       </div>
                       <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
                         <GoogleMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} />
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">Google Maps</div>
+                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_google_maps_label')}</div>
                       </div>
                     </div>
                   </div>
@@ -1402,12 +1402,12 @@ export default function Projects() {
 
                 <div className="mt-8 pt-8 border-t border-zinc-100 dark:border-zinc-800">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Project Milestones</h3>
-                    <button 
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('projects_milestones_title')}</h3>
+                    <button
                       onClick={() => setIsAddingMilestone(!isAddingMilestone)}
                       className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
                     >
-                      <IconPlus size={14} /> Add Milestone
+                      <IconPlus size={14} /> {t('projects_add_milestone')}
                     </button>
                   </div>
 
@@ -1415,16 +1415,16 @@ export default function Projects() {
                     <div className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800 mb-4 space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="col-span-2">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">Milestone Title</label>
-                          <input 
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
+                          <input
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                            placeholder="e.g. Design Approval"
+                            placeholder={t('projects_milestone_example')}
                             value={newMilestoneTitle}
                             onChange={e => setNewMilestoneTitle(e.target.value)}
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">Due Date</label>
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
                           <input 
                             type="date"
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -1433,17 +1433,17 @@ export default function Projects() {
                           />
                         </div>
                         <div className="flex items-end gap-2">
-                          <button 
+                          <button
                             onClick={handleAddMilestone}
                             className="flex-1 bg-blue-600 text-white py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                           >
-                            Save
+                            {t('btn_save')}
                           </button>
-                          <button 
+                          <button
                             onClick={() => setIsAddingMilestone(false)}
                             className="px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-sm font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
                           >
-                            Cancel
+                            {t('btn_cancel')}
                           </button>
                         </div>
                       </div>
@@ -1481,7 +1481,7 @@ export default function Projects() {
                               </p>
                               <div className="flex items-center gap-1 text-[10px] text-zinc-400">
                                 <IconCalendar size={10} />
-                                <span>Due: {new Date(milestone.due_date).toLocaleDateString()}</span>
+                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString()}</span>
                               </div>
                             </div>
                           </div>
@@ -1496,7 +1496,7 @@ export default function Projects() {
                     ) : (
                       <div className="text-center py-8 bg-zinc-50 dark:bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800">
                         <IconCalendar className="mx-auto text-zinc-300 mb-2" size={24} />
-                        <p className="text-xs text-zinc-500">No milestones defined for this project.</p>
+                        <p className="text-xs text-zinc-500">{t('projects_no_milestones_defined')}</p>
                       </div>
                     )}
                   </div>
@@ -1516,7 +1516,7 @@ export default function Projects() {
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
           >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Gérer les Domaines de Projet</h3>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
               <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
                 ✕
               </button>
@@ -1525,7 +1525,7 @@ export default function Projects() {
               <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
                 <input 
                   className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
-                  placeholder="Nom du nouveau domaine"
+                  placeholder={t('projects_new_domain_placeholder')}
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
                 />
@@ -1533,7 +1533,7 @@ export default function Projects() {
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  Add
+                  {t('btn_add')}
                 </button>
               </form>
               <div className="space-y-2">
