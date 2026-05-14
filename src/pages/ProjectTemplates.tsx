@@ -52,7 +52,7 @@ export default function ProjectTemplates() {
           className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md font-medium hover:bg-blue-700 transition-colors shadow-sm"
         >
           <IconPlus size={18} />
-          {t('add_project')} Template
+          {t('templates_add_btn')}
         </button>
       </div>
 
@@ -74,14 +74,14 @@ export default function ProjectTemplates() {
       {isModalOpen && editForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-lg shadow-xl">
-            <h3 className="text-xl font-bold mb-4">{editForm.id ? 'Edit Template' : 'New Template'}</h3>
+            <h3 className="text-xl font-bold mb-4">{editForm.id ? t('templates_edit_title') : t('templates_new_title')}</h3>
             <div className="space-y-4">
-              <input className="w-full p-2 border rounded" placeholder="Name" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
-              <textarea className="w-full p-2 border rounded" placeholder="Description" value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} />
-              <input type="number" className="w-full p-2 border rounded" placeholder="Default Budget" value={editForm.default_budget} onChange={e => setEditForm({...editForm, default_budget: parseFloat(e.target.value)})} />
+              <input className="w-full p-2 border rounded" placeholder={t('templates_name_placeholder')} value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
+              <textarea className="w-full p-2 border rounded" placeholder={t('templates_description_placeholder')} value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} />
+              <input type="number" className="w-full p-2 border rounded" placeholder={t('templates_default_budget_placeholder')} value={editForm.default_budget} onChange={e => setEditForm({...editForm, default_budget: parseFloat(e.target.value)})} />
               <div className="flex justify-end gap-2">
-                <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded bg-zinc-200 dark:bg-zinc-700">Cancel</button>
-                <button onClick={handleSave} className="px-4 py-2 rounded bg-blue-600 text-white">Save</button>
+                <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded bg-zinc-200 dark:bg-zinc-700">{t('btn_cancel')}</button>
+                <button onClick={handleSave} className="px-4 py-2 rounded bg-blue-600 text-white">{t('btn_save')}</button>
               </div>
             </div>
           </div>

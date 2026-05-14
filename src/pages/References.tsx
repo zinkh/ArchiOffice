@@ -212,8 +212,8 @@ export default function References() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">Références</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">Consultez et séléctionnez les références de l'agence par domaine.</p>
+          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('references_title')}</h2>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('references_subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -222,7 +222,7 @@ export default function References() {
             className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <IconFileTypePdf size={18} />
-            PDF ({selectedIds.size})
+            {t('references_export_pdf', { count: selectedIds.size })}
           </button>
           <button 
             onClick={exportToExcel}
@@ -230,7 +230,7 @@ export default function References() {
             className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <IconFileSpreadsheet size={18} />
-            Excel ({selectedIds.size})
+            {t('references_export_excel', { count: selectedIds.size })}
           </button>
         </div>
       </div>
@@ -240,7 +240,7 @@ export default function References() {
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input 
             type="text" 
-            placeholder="Rechercher un projet, un client ou un domaine..."
+            placeholder={t('references_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-white"
@@ -254,12 +254,12 @@ export default function References() {
               onChange={(e) => setDateFilter(e.target.value)}
               className="bg-transparent text-sm outline-none text-zinc-900 dark:text-white cursor-pointer"
             >
-              <option value="all">Toutes les dates</option>
-              <option value="last_year">Année dernière</option>
-              <option value="last_3_years">3 dernières années</option>
-              <option value="last_5_years">5 dernières années</option>
-              <option value="last_10_years">10 dernières années</option>
-              <option value="custom">Durée personnalisée</option>
+              <option value="all">{t('references_all_dates')}</option>
+              <option value="last_year">{t('references_last_year')}</option>
+              <option value="last_3_years">{t('references_last_3_years')}</option>
+              <option value="last_5_years">{t('references_last_5_years')}</option>
+              <option value="last_10_years">{t('references_last_10_years')}</option>
+              <option value="custom">{t('references_custom_range')}</option>
             </select>
           </div>
           
@@ -271,7 +271,7 @@ export default function References() {
                 onChange={(e) => setCustomDateRange(prev => ({ ...prev, start: e.target.value }))}
                 className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
               />
-              <span className="text-zinc-400 text-sm">à</span>
+              <span className="text-zinc-400 text-sm">{t('references_date_separator')}</span>
               <input 
                 type="date" 
                 value={customDateRange.end}
@@ -293,37 +293,37 @@ export default function References() {
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('name')}
                 >
-                  <div className="flex items-center gap-1">Projet {getSortIcon('name')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_project')} {getSortIcon('name')}</div>
                 </th>
                 <th 
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('client')}
                 >
-                  <div className="flex items-center gap-1">Client {getSortIcon('client')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_client')} {getSortIcon('client')}</div>
                 </th>
                 <th 
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('end_date')}
                 >
-                  <div className="flex items-center gap-1">Date de livraison {getSortIcon('end_date')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_delivery')} {getSortIcon('end_date')}</div>
                 </th>
                 <th 
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('surface')}
                 >
-                  <div className="flex items-center gap-1">Surface {getSortIcon('surface')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_surface')} {getSortIcon('surface')}</div>
                 </th>
                 <th 
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('budget')}
                 >
-                  <div className="flex items-center gap-1">Budget {getSortIcon('budget')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_budget')} {getSortIcon('budget')}</div>
                 </th>
                 <th 
                   className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   onClick={() => requestSort('status')}
                 >
-                  <div className="flex items-center gap-1">Statut {getSortIcon('status')}</div>
+                  <div className="flex items-center gap-1">{t('references_col_status')} {getSortIcon('status')}</div>
                 </th>
               </tr>
             </thead>
@@ -472,7 +472,7 @@ export default function References() {
                   <td colSpan={7} className="px-4 py-12 text-center text-zinc-500 dark:text-zinc-400">
                     <div className="flex flex-col items-center gap-2">
                       <IconBriefcase size={48} className="opacity-20" />
-                      <p>Aucun projet trouvé.</p>
+                      <p>{t('references_no_projects')}</p>
                     </div>
                   </td>
                 </tr>

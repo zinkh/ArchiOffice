@@ -14,10 +14,12 @@ import {
 import { motion } from 'motion/react';
 import { fetchJson } from '../lib/api';
 import { Tender, Contact, Milestone } from '../types';
+import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
 import { formatCurrency, cn } from '../lib/utils';
 
 export default function TenderDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [tender, setTender] = useState<Tender | null>(null);
@@ -117,9 +119,9 @@ export default function TenderDetail() {
   if (!tender) {
     return (
       <div className="text-center py-12">
-        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Tender not found</h2>
+        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('tenders_not_found')}</h2>
         <button onClick={() => navigate('/tenders')} className="mt-4 text-blue-600 hover:underline">
-          Back to Tenders
+          {t('tenders_back_link')}
         </button>
       </div>
     );
@@ -134,7 +136,7 @@ export default function TenderDetail() {
           className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors w-fit"
         >
           <IconArrowLeft size={18} />
-          Back to Tenders
+          {t('tenders_back_link')}
         </button>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -165,7 +167,7 @@ export default function TenderDetail() {
               <IconCurrencyEuro size={24} />
             </div>
             <div>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Valuation</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_valuation')}</p>
               <p className="text-xl font-bold text-zinc-900 dark:text-white">{formatCurrency(tender.value)}</p>
             </div>
           </div>
@@ -176,7 +178,7 @@ export default function TenderDetail() {
               <IconCalendar size={24} />
             </div>
             <div>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Deadline</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_deadline')}</p>
               <p className="text-xl font-bold text-zinc-900 dark:text-white">
                 {new Date(tender.submission_deadline).toLocaleDateString()}
               </p>
@@ -189,9 +191,9 @@ export default function TenderDetail() {
               <IconUsers size={24} />
             </div>
             <div>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Team Size</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_team_size')}</p>
               <p className="text-xl font-bold text-zinc-900 dark:text-white">
-                {orgData.children?.reduce((acc, curr) => acc + (curr.children?.length || 0), 0) || 0} Members
+                {orgData.children?.reduce((acc, curr) => acc + (curr.children?.length || 0), 0) || 0} {t('tenders_team_members_label')}
               </p>
             </div>
           </div>
@@ -203,7 +205,7 @@ export default function TenderDetail() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <IconUsers size={24} className="text-blue-600" />
-            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Organisation du Projet</h2>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('tenders_detail_organization')}</h2>
           </div>
         </div>
 
@@ -219,13 +221,13 @@ export default function TenderDetail() {
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-zinc-900 dark:text-white flex items-center gap-2">
               <IconUserPlus size={20} className="text-blue-500" />
-              Gérer les Cotraitants
+              {t('tenders_manage_cotraitants')}
             </h3>
           </div>
           
           <div className="space-y-4">
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Ajoutez des partenaires externes à l'organigramme du projet.
+              {t('tenders_add_partners_desc')}
             </p>
             
             <div className="max-h-64 overflow-y-auto pr-2 space-y-2 scrollbar-thin">
@@ -256,7 +258,7 @@ export default function TenderDetail() {
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
           <h3 className="font-bold text-zinc-900 dark:text-white mb-6 flex items-center gap-2">
             <IconUsers size={20} className="text-purple-500" />
-            Membres Actuels (Cotraitants)
+            {t('tenders_current_members')}
           </h3>
           
           <div className="space-y-3">
@@ -279,7 +281,7 @@ export default function TenderDetail() {
                 </button>
               </div>
             )) || (
-              <p className="text-center py-8 text-zinc-400 text-sm italic">Aucun cotraitant ajouté.</p>
+              <p className="text-center py-8 text-zinc-400 text-sm italic">{t('tenders_no_cotraitants')}</p>
             )}
           </div>
         </div>

@@ -3,6 +3,7 @@ import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUp
 import { motion, AnimatePresence } from 'motion/react';
 import { Document, Project } from '../types';
 import { useUser } from '../UserContext';
+import { useTranslation } from 'react-i18next';
 
 export default function Documents() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -14,6 +15,7 @@ export default function Documents() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentUser } = useUser();
+  const { t } = useTranslation();
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<Document | null>(null);
   const [editName, setEditName] = useState('');
@@ -125,14 +127,14 @@ export default function Documents() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">Documents</h1>
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('documents')}</h1>
         <div className="flex flex-col items-end gap-1">
-          <p className="text-xs text-zinc-500">Allowed: All file types</p>
-          <button 
+          <p className="text-xs text-zinc-500">{t('documents_subtitle')}</p>
+          <button
             onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700"
           >
-            <IconPlus size={18} /> Upload Document
+            <IconPlus size={18} /> {t('documents_upload_btn')}
           </button>
         </div>
       </div>
@@ -147,27 +149,27 @@ export default function Documents() {
               className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-md space-y-4 shadow-2xl"
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-lg font-bold">Upload Document</h2>
+                <h2 className="text-lg font-bold">{t('documents_upload_title')}</h2>
                 <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
                   <IconX size={20} />
                 </button>
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Project</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_project_label')}</label>
                 <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setSelectedProject(e.target.value)} value={selectedProject}>
-                  <option value="">Select Project</option>
+                  <option value="">{t('documents_select_project')}</option>
                   {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Category</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_category_label')}</label>
                 <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setSelectedCategory(e.target.value)} value={selectedCategory}>
-                  <option value="General">General</option>
-                  <option value="Contract">Contract</option>
-                  <option value="Plan">Plan</option>
+                  <option value="General">{t('documents_category_general')}</option>
+                  <option value="Contract">{t('documents_category_contract')}</option>
+                  <option value="Plan">{t('documents_category_plan')}</option>
                 </select>
               </div>
-              <div 
+              <div
                 className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all"
                 onDrop={(e) => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
                 onDragOver={(e) => e.preventDefault()}
@@ -175,7 +177,7 @@ export default function Documents() {
               >
                 <IconUpload className="mx-auto mb-2 text-zinc-400" size={32} />
                 <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {selectedFile ? selectedFile.name : 'Drop file here or click to select'}
+                  {selectedFile ? selectedFile.name : t('documents_drop_file')}
                 </p>
                 <input 
                   type="file" 
@@ -193,7 +195,7 @@ export default function Documents() {
                     : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98]'
                 }`}
               >
-                {isUploading ? 'Uploading...' : 'Upload Document'}
+                {isUploading ? t('documents_uploading') : t('documents_upload_btn')}
               </button>
             </motion.div>
           </div>
@@ -208,46 +210,46 @@ export default function Documents() {
               className="bg-white dark:bg-zinc-900 p-6 rounded-3xl w-full max-w-md space-y-4 shadow-2xl"
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-lg font-bold">Edit Document</h2>
+                <h2 className="text-lg font-bold">{t('documents_edit_title')}</h2>
                 <button onClick={() => setIsUpdateModalOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
                   <IconX size={20} />
                 </button>
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Name</label>
-                <input 
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_name_label')}</label>
+                <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  placeholder="Document name"
+                  placeholder={t('documents_name_placeholder')}
                 />
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Category</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_category_label')}</label>
                 <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setEditCategory(e.target.value)} value={editCategory}>
-                  <option value="General">General</option>
-                  <option value="Contract">Contract</option>
-                  <option value="Plan">Plan</option>
+                  <option value="General">{t('documents_category_general')}</option>
+                  <option value="Contract">{t('documents_category_contract')}</option>
+                  <option value="Plan">{t('documents_category_plan')}</option>
                 </select>
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Description</label>
-                <textarea 
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_description_label')}</label>
+                <textarea
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[100px]"
-                  placeholder="Document description"
+                  placeholder={t('documents_description_placeholder')}
                 />
               </div>
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Replace File (Optional - Increments Version)</label>
-                <div 
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_replace_file_label')}</label>
+                <div
                   className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl p-4 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all"
                   onClick={() => editFileInputRef.current?.click()}
                 >
                   <p className="text-xs text-zinc-500">
-                    {editFile ? editFile.name : 'Click to select new version'}
+                    {editFile ? editFile.name : t('documents_select_new_version')}
                   </p>
                   <input 
                     type="file" 
@@ -264,7 +266,7 @@ export default function Documents() {
                   isUploading ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
-                {isUploading ? 'Updating...' : 'Save Changes'}
+                {isUploading ? t('documents_updating') : t('documents_save_changes')}
               </button>
             </motion.div>
           </div>
@@ -282,9 +284,9 @@ export default function Documents() {
                 <IconTrash size={32} />
               </div>
               <div className="space-y-2">
-                <h2 className="text-xl font-bold">Delete Document?</h2>
+                <h2 className="text-xl font-bold">{t('documents_confirm_delete_title')}</h2>
                 <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-                  This action cannot be undone. All versions of this document will be permanently removed.
+                  {t('documents_confirm_delete_msg')}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -292,13 +294,13 @@ export default function Documents() {
                   onClick={() => setDocToDelete(null)}
                   className="flex-1 py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-bold transition-all"
                 >
-                  Cancel
+                  {t('btn_cancel')}
                 </button>
-                <button 
+                <button
                   onClick={handleDelete}
                   className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-red-500/20"
                 >
-                  Delete
+                  {t('btn_delete')}
                 </button>
               </div>
             </motion.div>
@@ -311,12 +313,12 @@ export default function Documents() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-zinc-50 dark:bg-zinc-900/50 text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-800">
-                <th className="px-6 py-4">Preview</th>
-                <th className="px-6 py-4">Name</th>
-                <th className="px-6 py-4">Project</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Version</th>
-                <th className="px-6 py-4">Uploaded At</th>
+                <th className="px-6 py-4">{t('documents_col_preview')}</th>
+                <th className="px-6 py-4">{t('documents_col_name')}</th>
+                <th className="px-6 py-4">{t('documents_col_project')}</th>
+                <th className="px-6 py-4">{t('documents_col_category')}</th>
+                <th className="px-6 py-4">{t('documents_col_version')}</th>
+                <th className="px-6 py-4">{t('documents_col_uploaded_at')}</th>
                 <th className="px-6 py-4"></th>
               </tr>
             </thead>
@@ -335,7 +337,7 @@ export default function Documents() {
                   <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white" title={doc.name}>
                     {doc.name.length > 10 ? `${doc.name.substring(0, 10)}...` : doc.name}
                   </td>
-                  <td className="px-6 py-4 text-zinc-500">{projects.find(p => p.id === doc.project_id)?.name || 'N/A'}</td>
+                  <td className="px-6 py-4 text-zinc-500">{projects.find(p => p.id === doc.project_id)?.name || t('documents_na')}</td>
                   <td className="px-6 py-4 text-zinc-500">{doc.category}</td>
                   <td className="px-6 py-4 text-zinc-500">v{doc.version}</td>
                   <td className="px-6 py-4 text-zinc-500">{new Date(doc.uploaded_at).toLocaleDateString()}</td>

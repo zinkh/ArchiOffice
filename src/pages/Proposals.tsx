@@ -384,8 +384,8 @@ export default function Proposals() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">Proposals</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">Manage client proposals and convert them to projects</p>
+          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('proposals')}</h1>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('proposals_subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -393,7 +393,7 @@ export default function Proposals() {
             className="flex items-center gap-2 px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-semibold transition-all shadow-sm"
           >
             <IconFileText size={18} />
-            Import XML
+            {t('proposals_import_xml')}
           </button>
           <input id="xml-file-upload" type="file" className="hidden" accept=".xml" onChange={handleImport} />
           <button 
@@ -401,7 +401,7 @@ export default function Proposals() {
             className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-blue-500/20 active:scale-95"
           >
             <IconPlus size={20} />
-            Create Proposal
+            {t('proposals_create_btn')}
           </button>
         </div>
       </div>
@@ -411,7 +411,7 @@ export default function Proposals() {
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input 
             type="text" 
-            placeholder="Search proposals..."
+            placeholder={t('proposals_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-zinc-900 dark:text-white"
@@ -424,11 +424,11 @@ export default function Proposals() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Proposal</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Client</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">Actions</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_proposal')}</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_client')}</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_amount')}</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_status')}</th>
+                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">{t('proposals_col_actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
@@ -511,7 +511,7 @@ export default function Proposals() {
               {filteredProposals.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
-                    No proposals found.
+                    {t('proposals_no_proposals')}
                   </td>
                 </tr>
               )}
@@ -532,10 +532,10 @@ export default function Proposals() {
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50">
                 <div>
                   <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-                    {editingProposal ? 'Edit Proposal' : 'New Proposal'}
+                    {editingProposal ? t('proposals_edit_title') : t('proposals_new_title')}
                   </h2>
                   <p className="text-xs text-zinc-500">
-                    {editingProposal ? 'Update project and client details' : 'Enter project and client details'}
+                    {editingProposal ? t('proposals_edit_subtitle') : t('proposals_new_subtitle')}
                   </p>
                 </div>
                 <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
@@ -548,7 +548,7 @@ export default function Proposals() {
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">01</span>
-                    General Information
+                    {t('proposals_section_general')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
@@ -564,7 +564,7 @@ export default function Proposals() {
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">02</span>
-                    Client Details
+                    {t('proposals_section_client')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30">
@@ -648,7 +648,7 @@ export default function Proposals() {
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">03</span>
-                    Project Specifics
+                    {t('proposals_section_project')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField label="Détail du Projet" type="textarea" value={newProposal.projet_detail} onChange={(v: any) => setNewProposal(prev => ({...prev, projet_detail: v}))} />
@@ -660,7 +660,7 @@ export default function Proposals() {
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">04</span>
-                    Terrain & Technical Info
+                    {t('proposals_section_terrain')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-3 space-y-4">
@@ -714,7 +714,7 @@ export default function Proposals() {
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">05</span>
-                    Surfaces & Capacity
+                    {t('proposals_section_surfaces')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <FormField label="Surf. Plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
@@ -732,7 +732,7 @@ export default function Proposals() {
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
-                      Informations d'urbanisme et risques
+                      {t('proposals_section_urban_risks')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <RNBInfo address={newProposal.adresse_terrain || ''} />
@@ -748,7 +748,7 @@ export default function Proposals() {
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">Location & Risks Maps</label>
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
                         <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
@@ -781,13 +781,13 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">% avec Exé</label>
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedExePercent.toFixed(2)} %
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">% avec Missions Comp.</label>
+                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedTotalPercent.toFixed(2)} %
                       </div>
@@ -815,14 +815,14 @@ export default function Proposals() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">08</span>
-                      Cotraitants / Spécialités
+                      {t('proposals_section_cotraitants')}
                     </h3>
-                    <button 
+                    <button
                       type="button"
                       onClick={addSpecialtyRow}
                       className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider"
                     >
-                      <IconPlus size={14} /> Ajouter une spécialité
+                      <IconPlus size={14} /> {t('proposals_add_specialty')}
                     </button>
                   </div>
                   
@@ -830,8 +830,8 @@ export default function Proposals() {
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                         <tr>
-                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Spécialité</th>
-                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">Contact</th>
+                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">{t('proposals_specialty_col')}</th>
+                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">{t('proposals_contact_col')}</th>
                           <th className="px-4 py-3 text-right font-bold text-zinc-500 uppercase tracking-wider w-10"></th>
                         </tr>
                       </thead>
@@ -870,7 +870,7 @@ export default function Proposals() {
                         {(!newProposal.specialties_list || newProposal.specialties_list.length === 0) && (
                           <tr>
                             <td colSpan={3} className="px-4 py-8 text-center text-zinc-400 italic">
-                              Aucun cotraitant ajouté.
+                              {t('proposals_no_cotraitants')}
                             </td>
                           </tr>
                         )}
@@ -884,7 +884,7 @@ export default function Proposals() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">10</span>
-                      Répartition des Honoraires
+                      {t('proposals_section_fee_distribution')}
                     </h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
@@ -903,7 +903,7 @@ export default function Proposals() {
                         onClick={() => exportToXlsx(newProposal, contacts)}
                         className="text-[10px] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
                       >
-                        <IconFileSpreadsheet size={12} /> Exporter XLSX
+                        <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
                       <button 
                         type="button"
@@ -915,9 +915,9 @@ export default function Proposals() {
                         }}
                         className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                       >
-                        <IconPlus size={12} /> Base
+                        <IconPlus size={12} /> {t('proposals_mission_base')}
                       </button>
-                      <button 
+                      <button
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
@@ -927,9 +927,9 @@ export default function Proposals() {
                         }}
                         className="text-[10px] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
                       >
-                        <IconPlus size={12} /> Exécution
+                        <IconPlus size={12} /> {t('proposals_mission_execution')}
                       </button>
-                      <button 
+                      <button
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
@@ -939,7 +939,7 @@ export default function Proposals() {
                         }}
                         className="text-[10px] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
                       >
-                        <IconPlus size={12} /> Complémentaire
+                        <IconPlus size={12} /> {t('proposals_mission_complementary')}
                       </button>
                     </div>
                   </div>
@@ -966,7 +966,7 @@ export default function Proposals() {
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">09</span>
-                      Calendrier prévisionnel
+                      {t('proposals_section_schedule')}
                     </h3>
                     <MilestoneGantt 
                       milestones={milestones.filter(m => m.proposal_id === editingProposal.id)} 
@@ -991,14 +991,14 @@ export default function Proposals() {
                   onClick={() => setIsModalOpen(false)}
                   className="flex-1 px-4 py-2.5 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 rounded-xl font-bold hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all active:scale-95"
                 >
-                  Cancel
+                  {t('btn_cancel')}
                 </button>
-                <button 
+                <button
                   type="submit"
                   form="proposal-form"
                   className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
                 >
-                  {editingProposal ? 'Update Proposal' : 'Create Proposal'}
+                  {editingProposal ? t('proposals_update_btn') : t('proposals_create_btn')}
                 </button>
               </div>
             </motion.div>

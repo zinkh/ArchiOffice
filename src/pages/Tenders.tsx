@@ -214,7 +214,7 @@ export default function Tenders() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('tenders')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">Track and manage bids for new architectural contracts.</p>
+          <p className="text-zinc-500 dark:text-zinc-400">{t('tenders_subtitle')}</p>
         </div>
         <motion.button 
           whileHover={{ scale: 1.02 }}
@@ -236,7 +236,7 @@ export default function Tenders() {
               onChange={e => setFilterStatus(e.target.value)}
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
             >
-              <option value="All">All Statuses</option>
+              <option value="All">{t('tenders_all_statuses')}</option>
               <option value="Draft">Draft</option>
               <option value="Submitted">Submitted</option>
               <option value="Won">Won</option>
@@ -249,7 +249,7 @@ export default function Tenders() {
               onChange={e => setFilterType(e.target.value)}
               className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
             >
-              <option value="All">All Types</option>
+              <option value="All">{t('tenders_all_types')}</option>
               <option value="Concours">Concours</option>
               <option value="MAPA">MAPA</option>
               <option value="Other">Other</option>
@@ -262,7 +262,7 @@ export default function Tenders() {
             className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             {sortByDeadline === 'asc' ? <IconSortAscending size={18} /> : <IconSortDescending size={18} />}
-            Sort by Deadline
+            {t('tenders_sort_by_deadline')}
           </button>
         </div>
       </div>
@@ -275,7 +275,7 @@ export default function Tenders() {
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('description')}</th>
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('client')}</th>
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">Type</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">Specialties / Partners</th>
+                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('tenders_col_specialties')}</th>
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('deadline')}</th>
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('valuation')}</th>
                 <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('status')}</th>
@@ -309,7 +309,7 @@ export default function Tenders() {
                           </div>
                         ))
                       ) : (
-                        <span className="text-xs text-zinc-400 italic">None</span>
+                        <span className="text-xs text-zinc-400 italic">{t('tenders_no_specialties')}</span>
                       )}
                     </div>
                   </td>
@@ -317,7 +317,7 @@ export default function Tenders() {
                     <div className="flex flex-col">
                       <span>{new Date(tender.submission_deadline).toLocaleDateString()}</span>
                       {tender.withdrawal_deadline && (
-                        <span className="text-[10px] text-red-500">Withdrawal: {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
+                        <span className="text-[10px] text-red-500">{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
                       )}
                     </div>
                   </td>
@@ -363,7 +363,7 @@ export default function Tenders() {
                   <td colSpan={8} className="px-6 py-12 text-center text-zinc-400 dark:text-zinc-500">
                     <div className="flex flex-col items-center gap-2">
                       <IconFileText size={32} className="opacity-20" />
-                      <p>No active tenders found.</p>
+                      <p>{t('tenders_no_active')}</p>
                     </div>
                   </td>
                 </tr>
@@ -377,7 +377,7 @@ export default function Tenders() {
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
             <IconArchive size={20} />
-            <h3 className="text-lg font-bold">Archived Tenders</h3>
+            <h3 className="text-lg font-bold">{t('tenders_archived_title')}</h3>
           </div>
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm opacity-75">
             <div className="overflow-x-auto">
@@ -400,7 +400,7 @@ export default function Tenders() {
                           <Link to={`/tenders/${tender.id}`} className="font-medium text-zinc-900 dark:text-white hover:text-blue-600 transition-colors">
                             {tender.title}
                           </Link>
-                          <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || 'No representative'}</span>
+                          <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || t('tenders_no_representative')}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{tender.client}</td>
@@ -429,7 +429,7 @@ export default function Tenders() {
                           </button>
                           <button 
                             onClick={async () => {
-                              if (!confirm('Delete tender permanently?')) return;
+                              if (!confirm(t('tenders_confirm_delete'))) return;
                               try {
                                 const res = await fetch(`/api/tenders/${tender.id}`, { method: 'DELETE' });
                                 if (res.ok) setTenders(tenders.filter(t => t.id !== tender.id));
@@ -464,7 +464,7 @@ export default function Tenders() {
             >
               <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
-                  {editingTender ? 'Edit Tender Bid' : 'Créer une offre'}
+                  {editingTender ? t('tenders_edit_title') : t('tenders_create_title')}
                 </h3>
                 <button onClick={() => setIsModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
                   <IconX size={20} />
@@ -473,7 +473,7 @@ export default function Tenders() {
               <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Project Title</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_project_title_label')}</label>
                     <input 
                       required
                       placeholder="Réhabilitation du bâtiment URSSAF de Lorraine - S..."
@@ -484,7 +484,7 @@ export default function Tenders() {
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Entité adjudicatrice</label>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('tenders_awarding_entity_label')}</label>
                     </div>
                     <ContactAutocomplete 
                       contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
@@ -500,13 +500,13 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Representative (Mandataire)</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_representative_label')}</label>
                     <select 
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                       value={newTender.mandataire_id || ''}
                       onChange={e => setNewTender({...newTender, mandataire_id: e.target.value})}
                     >
-                      <option value="">Select a contact</option>
+                      <option value="">{t('tenders_select_contact')}</option>
                       {contacts.map(c => (
                         <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>
                       ))}
@@ -525,7 +525,7 @@ export default function Tenders() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Surface (m²)</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_surface_m2_label')}</label>
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -534,7 +534,7 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Construction Cost (HT)</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_construction_cost_label')}</label>
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -543,7 +543,7 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Fee Percentage (%)</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_fee_pct_label')}</label>
                     <input 
                       type="number"
                       step="0.01"
@@ -553,7 +553,7 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Submission Deadline</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_submission_deadline_label')}</label>
                     <input 
                       required
                       type="date"
@@ -563,7 +563,7 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Withdrawal Deadline</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_withdrawal_deadline_label')}</label>
                     <input 
                       type="date"
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -584,7 +584,7 @@ export default function Tenders() {
                         <div className="w-10 h-5 bg-zinc-200 dark:bg-zinc-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
                       </div>
                       <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
-                        Mandatory Visit Required? (Visite obligatoire ?)
+                        {t('tenders_mandatory_visit_label')}
                       </span>
                     </label>
                   </div>
@@ -592,13 +592,13 @@ export default function Tenders() {
                   {newTender.mandatory_visit && (
                     <div className="col-span-2 border-t border-zinc-100 dark:border-zinc-800 pt-4">
                       <div className="flex items-center justify-between mb-2">
-                        <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Dates & Milestones</label>
-                        <button 
+                        <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('tenders_dates_milestones_label')}</label>
+                        <button
                           type="button"
                           onClick={addMilestoneRow}
                           className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase"
                         >
-                          <IconPlus size={12} /> Add Date/Hour
+                          <IconPlus size={12} /> {t('tenders_add_date')}
                         </button>
                       </div>
                       
@@ -606,7 +606,7 @@ export default function Tenders() {
                         {formMilestones.map((m, idx) => (
                           <div key={idx} className="flex items-center gap-2">
                             <input 
-                              placeholder="Title (e.g. Site Visit)"
+                              placeholder={t('tenders_milestone_title_placeholder')}
                               className="flex-1 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                               value={m.title}
                               onChange={e => updateMilestone(idx, 'title', e.target.value)}
@@ -627,13 +627,13 @@ export default function Tenders() {
                           </div>
                         ))}
                         {formMilestones.length === 0 && (
-                          <p className="text-[10px] text-zinc-500 italic">No milestones added yet.</p>
+                          <p className="text-[10px] text-zinc-500 italic">{t('tenders_no_milestones')}</p>
                         )}
                       </div>
 
                       {editingTender && milestones.filter(m => m.tender_id === editingTender.id).length > 0 && (
                         <div className="space-y-4 mb-4">
-                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400">Timeline Preview</h3>
+                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400">{t('tenders_timeline_preview')}</h3>
                           <MilestoneGantt 
                             milestones={milestones.filter(m => m.tender_id === editingTender.id)} 
                             startDate={new Date(editingTender.submission_deadline)} 
@@ -646,13 +646,13 @@ export default function Tenders() {
                   
                   <div className="col-span-2 border-t border-zinc-100 dark:border-zinc-800 pt-4">
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Required Specialties</label>
-                      <button 
+                      <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('tenders_required_specialties_label')}</label>
+                      <button
                         type="button"
                         onClick={addSpecialtyRow}
                         className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase"
                       >
-                        <IconPlus size={12} /> Add Specialty
+                        <IconPlus size={12} /> {t('tenders_add_specialty_btn')}
                       </button>
                     </div>
                     
@@ -660,7 +660,7 @@ export default function Tenders() {
                       {formSpecialties.map((spec, idx) => (
                         <div key={idx} className="flex items-center gap-2">
                           <input 
-                            placeholder="Specialty (e.g. Structure)"
+                            placeholder={t('tenders_specialty_placeholder')}
                             className="flex-1 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                             value={spec.specialty_name}
                             onChange={e => updateSpecialty(idx, 'specialty_name', e.target.value)}
@@ -682,13 +682,13 @@ export default function Tenders() {
                         </div>
                       ))}
                       {formSpecialties.length === 0 && (
-                        <p className="text-[10px] text-zinc-500 italic">No specialties added yet.</p>
+                        <p className="text-[10px] text-zinc-500 italic">{t('tenders_no_specialties_yet')}</p>
                       )}
                     </div>
                   </div>
 
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Valuation (Estimated Fees)</label>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_valuation_label')}</label>
                     <input 
                       required
                       type="number"
@@ -699,7 +699,7 @@ export default function Tenders() {
                   </div>
                   {editingTender && (
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Status</label>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_status_label')}</label>
                       <select 
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                         value={newTender.status || ''}
@@ -727,15 +727,15 @@ export default function Tenders() {
                   {isSaving ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Saving...
+                      {t('tenders_saving')}
                     </>
                   ) : showSuccess ? (
                     <>
                       <IconCircleCheck size={20} />
-                      Saved Successfully!
+                      {t('tenders_saved_ok')}
                     </>
                   ) : (
-                    editingTender ? 'Update Tender Bid' : 'Create Tender Bid'
+                    editingTender ? t('tenders_update_btn') : t('tenders_create_btn')
                   )}
                 </button>
               </form>
