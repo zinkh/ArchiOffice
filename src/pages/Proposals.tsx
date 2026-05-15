@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
-import { ReactGrid, Column, Row, Cell, CellChange, TextCell, NumberCell, HeaderCell } from "@silevis/reactgrid";
 import { ContactModal } from '../components/ContactModal';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
@@ -1034,9 +1033,9 @@ export default function Proposals() {
   );
 }
 
-const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMilestonesChange }: { 
-  proposal: Partial<Proposal>, 
-  contacts: Contact[], 
+const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMilestonesChange }: {
+  proposal: Partial<Proposal>,
+  contacts: Contact[],
   onChange: (data: any) => void,
   milestones: Milestone[],
   onMilestonesChange: (milestones: Milestone[]) => void
@@ -1050,17 +1049,12 @@ const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMiles
     return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
   }, [proposal.fee_distribution]);
 
-  // Sync milestones with missions
   React.useEffect(() => {
     if (!proposal.id) return;
-    
     const currentMissions = data.missions;
     const currentMilestones = milestones.filter(m => m.proposal_id === proposal.id);
-    
     let hasChanges = false;
     const updatedMilestones = [...currentMilestones];
-
-    // Add missing milestones
     currentMissions.forEach((mission: any) => {
       if (!currentMilestones.find(m => m.title === mission.name)) {
         updatedMilestones.push({
@@ -1074,12 +1068,9 @@ const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMiles
         hasChanges = true;
       }
     });
-
-    // Remove extra milestones (those not in missions)
-    const finalMilestones = updatedMilestones.filter(m => 
+    const finalMilestones = updatedMilestones.filter(m =>
       currentMissions.find((mission: any) => mission.name === m.title)
     );
-
     if (finalMilestones.length !== currentMilestones.length || hasChanges) {
       onMilestonesChange(finalMilestones);
     }
@@ -1087,65 +1078,18 @@ const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMiles
 
   const selectedContacts = React.useMemo(() => {
     const list = proposal.specialties_list || [];
-    return list.map(s => {
+    return list.map((s: any) => {
       const contact = contacts.find(c => c.id === s.contact_id);
       return {
         id: s.contact_id || s.id,
         name: contact ? `${contact.first_name} ${contact.last_name}` : s.specialty_name,
         role: s.specialty_name
       };
-    }).filter(c => c.id);
+    }).filter((c: any) => c.id);
   }, [proposal.specialties_list, contacts]);
 
-  const columns: Column[] = [
-    { columnId: "mission", width: 150 },
-    { columnId: "amount", width: 100 },
-    { columnId: "rel_pct", width: 70 },
-    { columnId: "solde", width: 100 },
-    { columnId: "architect_pct", width: 70 },
-    { columnId: "architect_amt", width: 100 },
-    ...selectedContacts.flatMap(c => [
-      { columnId: `${c.id}_pct`, width: 70 },
-      { columnId: `${c.id}_amt`, width: 100 }
-    ]),
-    { columnId: "actions", width: 40 }
-  ];
-
-  const headerRow1: Row = {
-    rowId: "header1",
-    cells: [
-      { type: "header", text: "Désignation" },
-      { type: "header", text: "Montant HT" },
-      { type: "header", text: "Rel %" },
-      { type: "header", text: "Solde" },
-      { type: "header", text: "Architecte", style: { textAlign: 'center' } },
-      { type: "header", text: "" },
-      ...selectedContacts.flatMap(c => [
-        { type: "header", text: c.name, style: { textAlign: 'center' } },
-        { type: "header", text: "" }
-      ]),
-      { type: "header", text: "" }
-    ] as HeaderCell[]
-  };
-
-  const headerRow2: Row = {
-    rowId: "header2",
-    cells: [
-      { type: "header", text: "" },
-      { type: "header", text: "" },
-      { type: "header", text: "" },
-      { type: "header", text: "" },
-      { type: "header", text: "%" },
-      { type: "header", text: "€" },
-      ...selectedContacts.flatMap(c => [
-        { type: "header", text: "%" },
-        { type: "header", text: "€" }
-      ]),
-      { type: "header", text: "" }
-    ] as HeaderCell[]
-  };
-
   const precision = (typeof proposal.decimal_precision === 'number' && !isNaN(proposal.decimal_precision)) ? proposal.decimal_precision : 2;
+  const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
 
   const totalBaseAmount = React.useMemo(() => {
     return data.missions
@@ -1153,201 +1097,216 @@ const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMiles
       .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
   }, [data.missions]);
 
-  const buildRow = (m: any) => {
-    const isBaseMission = m.category === 'Mission base';
-    const missionAmount = m.amount || 0;
-    const relPct = totalBaseAmount > 0 ? (missionAmount / totalBaseAmount) * 100 : 0;
-    const archPct = m.percentages['architect'] || 0;
-    const archAmt = missionAmount * (archPct / 100);
-    
-    let sumPct = archPct;
-    selectedContacts.forEach(c => {
-      sumPct += (m.percentages[c.id] || 0);
-    });
-    const soldePct = 100 - sumPct;
-    const soldeAmt = missionAmount * (soldePct / 100);
-
-    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
-
-    return {
-      rowId: m.id,
-      cells: [
-        { type: "text", text: m.name } as TextCell,
-        { type: "number", value: safeNum(missionAmount) } as NumberCell,
-        { type: "number", value: safeNum(relPct) } as NumberCell,
-        { type: "number", value: safeNum(soldeAmt) } as NumberCell,
-        { type: "number", value: safeNum(archPct) } as NumberCell,
-        { type: "number", value: safeNum(archAmt) } as NumberCell,
-        ...selectedContacts.flatMap(c => {
-          const pct = m.percentages[c.id] || 0;
-          const amt = missionAmount * (pct / 100);
-          return [
-            { type: "number", value: safeNum(pct) } as NumberCell,
-            { type: "number", value: safeNum(amt) } as NumberCell
-          ];
-        }),
-        { type: "text", text: isBaseMission ? "" : "🗑️", style: { cursor: isBaseMission ? 'default' : 'pointer' } } as TextCell
-      ]
-    };
+  const updateMission = (missionId: string, field: string, value: any) => {
+    const newData = { ...data, missions: data.missions.map((m: any) => m.id === missionId ? { ...m, [field]: value } : m) };
+    onChange(newData);
   };
 
-  const buildTotalRow = (rowId: string, label: string, missions: any[], isCumulative = false) => {
+  const updateMissionPct = (missionId: string, key: string, value: number) => {
+    const newData = {
+      ...data,
+      missions: data.missions.map((m: any) =>
+        m.id === missionId ? { ...m, percentages: { ...m.percentages, [key]: value } } : m
+      )
+    };
+    onChange(newData);
+  };
+
+  const handleRelPct = (missionId: string, newRelPct: number) => {
+    const newData = { ...data, missions: [...data.missions] };
+    const missionIndex = newData.missions.findIndex((m: any) => m.id === missionId);
+    if (missionIndex === -1) return;
+    const isBaseMission = newData.missions[missionIndex].category === 'Mission base';
+    if (isBaseMission) {
+      const baseMissions = newData.missions.filter((m: any) => m.category === 'Mission base');
+      const idx = baseMissions.findIndex((m: any) => m.id === missionId);
+      const targetTotal = proposal.amount || 0;
+      let sumAbove = 0;
+      for (let i = 0; i < idx; i++) {
+        sumAbove += (baseMissions[i].amount / targetTotal) * 100;
+      }
+      const remaining = 100 - sumAbove - newRelPct;
+      newData.missions[missionIndex] = { ...newData.missions[missionIndex], amount: (newRelPct * targetTotal) / 100 };
+      const missionsBelow = baseMissions.slice(idx + 1);
+      const sumBelow = missionsBelow.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+      if (missionsBelow.length > 0) {
+        missionsBelow.forEach((mb: any) => {
+          const mbIdx = newData.missions.findIndex((m: any) => m.id === mb.id);
+          newData.missions[mbIdx] = {
+            ...newData.missions[mbIdx],
+            amount: sumBelow > 0
+              ? (mb.amount / sumBelow) * remaining * targetTotal / 100
+              : (remaining / missionsBelow.length * targetTotal) / 100
+          };
+        });
+      }
+    } else {
+      newData.missions[missionIndex] = { ...newData.missions[missionIndex], amount: (newRelPct * totalBaseAmount) / 100 };
+    }
+    onChange(newData);
+  };
+
+  const deleteMission = (missionId: string) => {
+    const newData = { ...data, missions: data.missions.filter((m: any) => m.id !== missionId) };
+    onChange(newData);
+  };
+
+  const thStyle: React.CSSProperties = { padding: '4px 6px', border: '1px solid #e2e8f0', background: '#f1f5f9', fontSize: 12, fontWeight: 600, textAlign: 'center', whiteSpace: 'nowrap' };
+  const tdStyle: React.CSSProperties = { padding: '2px 4px', border: '1px solid #e2e8f0', fontSize: 12 };
+  const inputStyle: React.CSSProperties = { width: '100%', border: 'none', background: 'transparent', fontSize: 12, padding: '2px', outline: 'none', textAlign: 'right' };
+  const catStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#e2e8f0', fontWeight: 700, fontSize: 12 };
+  const totalStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#f8fafc', fontWeight: 700, fontSize: 12, textAlign: 'right' };
+
+  const colCount = 6 + selectedContacts.length * 2 + 1;
+
+  const renderMissionRow = (m: any) => {
+    const isBase = m.category === 'Mission base';
+    const amt = m.amount || 0;
+    const relPct = totalBaseAmount > 0 ? (amt / totalBaseAmount) * 100 : 0;
+    const archPct = m.percentages['architect'] || 0;
+    const archAmt = amt * (archPct / 100);
+    let sumPct = archPct;
+    selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
+    const soldeAmt = amt * ((100 - sumPct) / 100);
+    return (
+      <tr key={m.id}>
+        <td style={tdStyle}>
+          <input style={{ ...inputStyle, textAlign: 'left' }} defaultValue={m.name}
+            onBlur={e => updateMission(m.id, 'name', e.target.value)} />
+        </td>
+        <td style={tdStyle}>
+          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(amt)}
+            onBlur={e => updateMission(m.id, 'amount', parseFloat(e.target.value) || 0)} />
+        </td>
+        <td style={tdStyle}>
+          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(relPct)}
+            onBlur={e => handleRelPct(m.id, parseFloat(e.target.value) || 0)} />
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(soldeAmt).toLocaleString('fr-FR')}</td>
+        <td style={tdStyle}>
+          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(archPct)}
+            onBlur={e => updateMissionPct(m.id, 'architect', parseFloat(e.target.value) || 0)} />
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(archAmt).toLocaleString('fr-FR')}</td>
+        {selectedContacts.map((c: any) => {
+          const pct = m.percentages[c.id] || 0;
+          const cAmt = amt * (pct / 100);
+          return (
+            <React.Fragment key={c.id}>
+              <td style={tdStyle}>
+                <input style={inputStyle} type="number" step="any" defaultValue={safeNum(pct)}
+                  onBlur={e => updateMissionPct(m.id, c.id, parseFloat(e.target.value) || 0)} />
+              </td>
+              <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(cAmt).toLocaleString('fr-FR')}</td>
+            </React.Fragment>
+          );
+        })}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          {!isBase && (
+            <button onClick={() => deleteMission(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 14 }} title="Supprimer">🗑️</button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  const renderTotalRow = (label: string, missions: any[]) => {
     const totalAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
     const relPct = totalBaseAmount > 0 ? (totalAmt / totalBaseAmount) * 100 : 0;
-    
     const totalSolde = missions.reduce((acc: number, m: any) => {
-      const missionAmount = m.amount || 0;
+      const mAmt = m.amount || 0;
       const archPct = m.percentages['architect'] || 0;
       let sumPct = archPct;
-      selectedContacts.forEach(c => {
-        sumPct += (m.percentages[c.id] || 0);
-      });
-      return acc + (missionAmount * ((100 - sumPct) / 100));
+      selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
+      return acc + mAmt * ((100 - sumPct) / 100);
     }, 0);
-
-    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + ((m.amount || 0) * ((m.percentages['architect'] || 0) / 100)), 0);
-
-    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
-
-    return {
-      rowId,
-      cells: [
-        { type: "text", text: label, style: { fontWeight: 'bold', background: '#f8fafc' } } as TextCell,
-        { type: "number", value: safeNum(totalAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-        { type: "number", value: safeNum(relPct), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-        { type: "number", value: safeNum(totalSolde), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-        { type: "number", value: 0, style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-        { type: "number", value: safeNum(totalArchAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-        ...selectedContacts.flatMap(c => {
-          const contactTotalAmt = missions.reduce((acc: number, m: any) => acc + ((m.amount || 0) * ((m.percentages[c.id] || 0) / 100)), 0);
-          return [
-            { type: "number", value: 0, style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell,
-            { type: "number", value: safeNum(contactTotalAmt), style: { fontWeight: 'bold', background: '#f8fafc' } } as NumberCell
-          ];
-        }),
-        { type: "text", text: "", style: { background: '#f8fafc' } } as TextCell
-      ]
-    };
-  };
-
-  const buildVATRows = (missions: any[]) => {
-    const totalHT = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-    const vatRate = proposal.vat_rate || 20;
-    const vatAmt = totalHT * (vatRate / 100);
-    const totalTTC = totalHT + vatAmt;
-
-    const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
-
-    return [
-      {
-        rowId: `vat-${missions.length}`,
-        cells: [
-          { type: "text", text: `TVA (${vatRate}%)`, style: { fontStyle: 'italic', color: '#64748b' } } as TextCell,
-          { type: "number", value: safeNum(vatAmt), style: { fontStyle: 'italic', color: '#64748b' } } as NumberCell,
-          ...Array(columns.length - 2).fill({ type: "text", text: "" })
-        ]
-      },
-      {
-        rowId: `ttc-${missions.length}`,
-        cells: [
-          { type: "text", text: "TOTAL TTC", style: { fontWeight: 'bold', color: '#1e40af' } } as TextCell,
-          { type: "number", value: safeNum(totalTTC), style: { fontWeight: 'bold', color: '#1e40af' } } as NumberCell,
-          ...Array(columns.length - 2).fill({ type: "text", text: "" })
-        ]
-      }
-    ];
+    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages['architect'] || 0) / 100), 0);
+    return (
+      <tr key={label}>
+        <td style={totalStyle}>{label}</td>
+        <td style={totalStyle}>{safeNum(totalAmt).toLocaleString('fr-FR')}</td>
+        <td style={totalStyle}>{safeNum(relPct).toLocaleString('fr-FR')}</td>
+        <td style={totalStyle}>{safeNum(totalSolde).toLocaleString('fr-FR')}</td>
+        <td style={totalStyle}>—</td>
+        <td style={totalStyle}>{safeNum(totalArchAmt).toLocaleString('fr-FR')}</td>
+        {selectedContacts.map((c: any) => {
+          const cAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages[c.id] || 0) / 100), 0);
+          return (
+            <React.Fragment key={c.id}>
+              <td style={totalStyle}>—</td>
+              <td style={totalStyle}>{safeNum(cAmt).toLocaleString('fr-FR')}</td>
+            </React.Fragment>
+          );
+        })}
+        <td style={totalStyle} />
+      </tr>
+    );
   };
 
   const baseMissions = data.missions.filter((m: any) => m.category === 'Mission base');
   const exeMissions = data.missions.filter((m: any) => m.category === 'Mission Exécution');
   const compMissions = data.missions.filter((m: any) => m.category === 'Missions complémentaires');
+  const allMissions = [...baseMissions, ...exeMissions, ...compMissions];
 
-  const rows: Row[] = [
-    headerRow1,
-    headerRow2,
-    { rowId: 'cat-base', cells: [{ type: 'header', text: 'Mission base' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
-    ...baseMissions.map((m: any) => buildRow(m)),
-    buildTotalRow('total-base', 'Sous-total Base', baseMissions),
-
-    { rowId: 'cat-exe', cells: [{ type: 'header', text: 'Mission Exécution' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
-    ...exeMissions.map((m: any) => buildRow(m)),
-    buildTotalRow('total-exe', 'Sous-total Exécution', exeMissions),
-    buildTotalRow('cumul-exe', 'Total Base + Exé', [...baseMissions, ...exeMissions], true),
-
-    { rowId: 'cat-comp', cells: [{ type: 'header', text: 'Missions complémentaires' }, ...Array(columns.length - 1).fill({ type: 'header', text: '' })] as HeaderCell[] },
-    ...compMissions.map((m: any) => buildRow(m)),
-    buildTotalRow('total-comp', 'Sous-total Complémentaire', compMissions),
-    buildTotalRow('cumul-comp', 'TOTAL GENERAL HT', [...baseMissions, ...exeMissions, ...compMissions], true),
-    ...buildVATRows([...baseMissions, ...exeMissions, ...compMissions])
-  ];
-
-  const handleChanges = (changes: CellChange[]) => {
-    let newData = { ...data };
-    changes.forEach(change => {
-      const missionIndex = newData.missions.findIndex((m: any) => m.id === change.rowId);
-      if (missionIndex === -1) return;
-
-      const isBaseMission = newData.missions[missionIndex].category === 'Mission base';
-
-      if (change.columnId === "mission") {
-        newData.missions[missionIndex].name = (change.newCell as TextCell).text;
-      } else if (change.columnId === "amount") {
-        newData.missions[missionIndex].amount = (change.newCell as NumberCell).value;
-      } else if (change.columnId === "rel_pct") {
-        const newRelPct = (change.newCell as NumberCell).value;
-        if (isBaseMission) {
-          const baseMissions = newData.missions.filter((m: any) => m.category === 'Mission base');
-          const idx = baseMissions.findIndex((m: any) => m.id === change.rowId);
-          const targetTotal = proposal.amount || 0;
-          
-          let sumAbove = 0;
-          for (let i = 0; i < idx; i++) {
-            sumAbove += (baseMissions[i].amount / targetTotal) * 100;
-          }
-          
-          const remaining = 100 - sumAbove - newRelPct;
-          newData.missions[missionIndex].amount = (newRelPct * targetTotal) / 100;
-          
-          const missionsBelow = baseMissions.slice(idx + 1);
-          const sumBelow = missionsBelow.reduce((acc, m) => acc + (m.amount || 0), 0);
-          
-          if (missionsBelow.length > 0) {
-            missionsBelow.forEach(mb => {
-              const mbIdx = newData.missions.findIndex((m: any) => m.id === mb.id);
-              if (sumBelow > 0) {
-                const mbRelWeight = mb.amount / sumBelow;
-                newData.missions[mbIdx].amount = (mbRelWeight * remaining * targetTotal) / 100;
-              } else {
-                newData.missions[mbIdx].amount = (remaining / missionsBelow.length * targetTotal) / 100;
-              }
-            });
-          }
-        } else {
-          newData.missions[missionIndex].amount = (newRelPct * totalBaseAmount) / 100;
-        }
-      } else if (change.columnId === "architect_pct") {
-        newData.missions[missionIndex].percentages['architect'] = (change.newCell as NumberCell).value;
-      } else if (typeof change.columnId === 'string' && change.columnId.endsWith("_pct")) {
-        const contactId = change.columnId.replace("_pct", "");
-        newData.missions[missionIndex].percentages[contactId] = (change.newCell as NumberCell).value;
-      } else if (change.columnId === "actions" && !isBaseMission) {
-        // Handle delete via clearing the cell or typing something
-        if ((change.newCell as TextCell).text === "") {
-          newData.missions = newData.missions.filter((m: any) => m.id !== change.rowId);
-        }
-      }
-    });
-    onChange(newData);
-  };
+  const totalHT = allMissions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+  const vatRate = proposal.vat_rate || 20;
+  const vatAmt = totalHT * (vatRate / 100);
+  const totalTTC = totalHT + vatAmt;
 
   return (
-    <ReactGrid 
-      rows={rows} 
-      columns={columns} 
-      onCellsChanged={handleChanges}
-      enableRowSelection
-      enableColumnSelection
-    />
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
+        <thead>
+          <tr>
+            <th style={thStyle} rowSpan={2}>Désignation</th>
+            <th style={thStyle} rowSpan={2}>Montant HT</th>
+            <th style={thStyle} rowSpan={2}>Rel %</th>
+            <th style={thStyle} rowSpan={2}>Solde</th>
+            <th style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>Architecte</th>
+            {selectedContacts.map((c: any) => (
+              <th key={c.id} style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>{c.name}</th>
+            ))}
+            <th style={thStyle} rowSpan={2} />
+          </tr>
+          <tr>
+            <th style={thStyle}>%</th>
+            <th style={thStyle}>€</th>
+            {selectedContacts.map((c: any) => (
+              <React.Fragment key={c.id}>
+                <th style={thStyle}>%</th>
+                <th style={thStyle}>€</th>
+              </React.Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style={catStyle} colSpan={colCount}>Mission base</td></tr>
+          {baseMissions.map(renderMissionRow)}
+          {renderTotalRow('Sous-total Base', baseMissions)}
+
+          <tr><td style={catStyle} colSpan={colCount}>Mission Exécution</td></tr>
+          {exeMissions.map(renderMissionRow)}
+          {renderTotalRow('Sous-total Exécution', exeMissions)}
+          {renderTotalRow('Total Base + Exé', [...baseMissions, ...exeMissions])}
+
+          <tr><td style={catStyle} colSpan={colCount}>Missions complémentaires</td></tr>
+          {compMissions.map(renderMissionRow)}
+          {renderTotalRow('Sous-total Complémentaire', compMissions)}
+          {renderTotalRow('TOTAL GENERAL HT', allMissions)}
+
+          <tr>
+            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }}>TVA ({vatRate}%)</td>
+            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b', textAlign: 'right' }}>{safeNum(vatAmt).toLocaleString('fr-FR')}</td>
+            {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
+          </tr>
+          <tr>
+            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af' }}>TOTAL TTC</td>
+            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af', textAlign: 'right' }}>{safeNum(totalTTC).toLocaleString('fr-FR')}</td>
+            {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 };
 
