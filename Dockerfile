@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package*.json .npmrc* ./
 RUN npm ci
 
 COPY . .
