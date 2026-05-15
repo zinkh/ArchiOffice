@@ -111,8 +111,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
       });
       
       if (res.ok) {
-        const savedContact = await res.json();
-        onSuccess(savedContact);
+        onSuccess(contact);
         onClose();
         setNewContact({ category: initialCategory || '' });
       } else {

@@ -2495,7 +2495,12 @@ export default function ProjectDetail() {
       <ContactModal 
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
-        onSuccess={() => {
+        onSuccess={(newContact) => {
+          setContacts(prev => [...prev, newContact]);
+          setProject(prev => prev ? ({
+            ...prev,
+            client: newContact.company_name || `${newContact.first_name} ${newContact.last_name}`
+          }) : prev);
           fetchContacts();
         }}
       />
