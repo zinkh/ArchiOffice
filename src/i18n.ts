@@ -497,9 +497,13 @@ const resources = {
       "templates_description_placeholder": "Description",
       "templates_default_budget_placeholder": "Default Budget",
 
+      // Integrations section
+      "integrations_title": "Integrations",
+      "integrations_subtitle": "Connect optional third-party services to extend the app.",
+
       // Zoho Invoice Integration
       "zoho_section_title": "Zoho Invoice",
-      "zoho_section_subtitle": "Connect your Zoho Invoice account to sync invoices bidirectionally.",
+      "zoho_section_subtitle": "Sync invoices bidirectionally with your Zoho Invoice account.",
       "zoho_status_connected": "Connected to Zoho Invoice",
       "zoho_status_disconnected": "Not connected",
       "zoho_client_id_label": "Client ID",
@@ -1012,9 +1016,13 @@ const resources = {
       "templates_description_placeholder": "Description",
       "templates_default_budget_placeholder": "Budget par défaut",
 
+      // Integrations section
+      "integrations_title": "Intégrations",
+      "integrations_subtitle": "Connectez des services tiers optionnels pour étendre l'application.",
+
       // Zoho Invoice Integration
       "zoho_section_title": "Zoho Invoice",
-      "zoho_section_subtitle": "Connectez votre compte Zoho Invoice pour synchroniser vos factures.",
+      "zoho_section_subtitle": "Synchronisez vos factures avec votre compte Zoho Invoice.",
       "zoho_status_connected": "Connecté à Zoho Invoice",
       "zoho_status_disconnected": "Non connecté",
       "zoho_client_id_label": "Client ID",
