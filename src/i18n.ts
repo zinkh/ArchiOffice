@@ -495,7 +495,27 @@ const resources = {
       "templates_new_title": "New Template",
       "templates_name_placeholder": "Name",
       "templates_description_placeholder": "Description",
-      "templates_default_budget_placeholder": "Default Budget"
+      "templates_default_budget_placeholder": "Default Budget",
+
+      // Zoho Invoice Integration
+      "zoho_section_title": "Zoho Invoice",
+      "zoho_section_subtitle": "Connect your Zoho Invoice account to sync invoices bidirectionally.",
+      "zoho_status_connected": "Connected to Zoho Invoice",
+      "zoho_status_disconnected": "Not connected",
+      "zoho_client_id_label": "Client ID",
+      "zoho_client_secret_label": "Client Secret",
+      "zoho_org_id_label": "Organization ID",
+      "zoho_data_center_label": "Data Center",
+      "zoho_connect_btn": "Connect to Zoho",
+      "zoho_disconnect_btn": "Disconnect",
+      "zoho_connected_success": "Successfully connected to Zoho Invoice.",
+      "zoho_disconnected": "Disconnected from Zoho Invoice.",
+      "zoho_connect_error": "Connection error. Please check your credentials.",
+      "zoho_callback_hint_title": "Callback URL to register in your Zoho app:",
+      "zoho_callback_hint_desc": "Add this URL as \"Authorized Redirect URI\" in the Zoho API Console.",
+      "zoho_api_console_btn": "Zoho API Console",
+      "zoho_sync_btn": "Sync Zoho",
+      "zoho_sync_result": "Sync complete: {{pushed}} sent, {{pulled}} updated"
     }
   },
   fr: {
@@ -990,7 +1010,27 @@ const resources = {
       "templates_new_title": "Nouveau modèle",
       "templates_name_placeholder": "Nom",
       "templates_description_placeholder": "Description",
-      "templates_default_budget_placeholder": "Budget par défaut"
+      "templates_default_budget_placeholder": "Budget par défaut",
+
+      // Zoho Invoice Integration
+      "zoho_section_title": "Zoho Invoice",
+      "zoho_section_subtitle": "Connectez votre compte Zoho Invoice pour synchroniser vos factures.",
+      "zoho_status_connected": "Connecté à Zoho Invoice",
+      "zoho_status_disconnected": "Non connecté",
+      "zoho_client_id_label": "Client ID",
+      "zoho_client_secret_label": "Client Secret",
+      "zoho_org_id_label": "ID Organisation",
+      "zoho_data_center_label": "Centre de données",
+      "zoho_connect_btn": "Connecter Zoho",
+      "zoho_disconnect_btn": "Déconnecter",
+      "zoho_connected_success": "Connexion à Zoho Invoice réussie.",
+      "zoho_disconnected": "Déconnecté de Zoho Invoice.",
+      "zoho_connect_error": "Erreur de connexion. Vérifiez vos identifiants.",
+      "zoho_callback_hint_title": "URL de callback à enregistrer dans votre app Zoho :",
+      "zoho_callback_hint_desc": "Ajoutez cette URL comme « Authorized Redirect URI » dans la console API Zoho.",
+      "zoho_api_console_btn": "Console API Zoho",
+      "zoho_sync_btn": "Sync Zoho",
+      "zoho_sync_result": "Sync terminée : {{pushed}} envoyées, {{pulled}} mises à jour"
     }
   }
 };
