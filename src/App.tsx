@@ -244,6 +244,7 @@ function Header() {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <UserProvider>
