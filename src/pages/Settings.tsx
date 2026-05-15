@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
+import { IconLanguage } from '@tabler/icons-react';
 
 export default function Settings() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { currentUser, setCurrentUser } = useUser();
   const [settings, setSettings] = useState({
     id: 'general',
@@ -236,6 +237,39 @@ export default function Settings() {
         <input className="p-2 border rounded" placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
         <input className="p-2 border rounded" placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
+      </div>
+
+      <div className="mt-6">
+        <div className="flex items-center gap-3 mb-2">
+          <IconLanguage size={18} className="text-zinc-400" />
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('language')}</span>
+        </div>
+        <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden w-fit">
+          <button
+            type="button"
+            onClick={() => i18n.changeLanguage('fr')}
+            className={cn(
+              "px-5 py-2 text-sm font-medium transition-colors",
+              i18n.language.startsWith('fr')
+                ? "bg-blue-600 text-white"
+                : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+            )}
+          >
+            Français
+          </button>
+          <button
+            type="button"
+            onClick={() => i18n.changeLanguage('en')}
+            className={cn(
+              "px-5 py-2 text-sm font-medium transition-colors border-l border-zinc-200 dark:border-zinc-700",
+              i18n.language.startsWith('en')
+                ? "bg-blue-600 text-white"
+                : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+            )}
+          >
+            English
+          </button>
+        </div>
       </div>
 
       <h2 className="text-xl font-bold mt-8">{t('email_settings')}</h2>
