@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconAlertTriangle, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconAlertTriangle, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -20,6 +20,9 @@ export default function Invoices() {
   const [isGroupedByProject, setIsGroupedByProject] = useState(true);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [sortConfig, setSortConfig] = useState<{ key: keyof Invoice | 'project_name'; direction: 'asc' | 'desc' } | null>({ key: 'due_date', direction: 'desc' });
+  const [zohoConnected, setZohoConnected] = useState(false);
+  const [isSyncingZoho, setIsSyncingZoho] = useState(false);
+  const [zohoSyncResult, setZohoSyncResult] = useState<{ pushed: number; pulled: number; errors: string[] } | null>(null);
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
     project_id: '',
     amount: 0,
@@ -48,7 +51,24 @@ export default function Invoices() {
       }
     };
     loadData();
+    fetch('/api/zoho/status').then(r => r.json()).then(s => setZohoConnected(!!s.connected)).catch(() => {});
   }, []);
+
+  const handleZohoSync = async () => {
+    setIsSyncingZoho(true);
+    setZohoSyncResult(null);
+    try {
+      const res = await fetch('/api/zoho/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync échouée');
+      setZohoSyncResult(data);
+      fetchInvoices();
+    } catch (err: any) {
+      setZohoSyncResult({ pushed: 0, pulled: 0, errors: [err.message] });
+    } finally {
+      setIsSyncingZoho(false);
+    }
+  };
 
   const fetchInvoices = async () => {
     try {
@@ -181,14 +201,45 @@ export default function Invoices() {
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('invoices')}</h1>
           <p className="text-zinc-500 dark:text-zinc-400">{t('invoices_subtitle')}</p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
-        >
-          <IconPlus size={20} />
-          {t('invoices_create_btn')}
-        </button>
+        <div className="flex items-center gap-2">
+          {zohoConnected && (
+            <button
+              onClick={handleZohoSync}
+              disabled={isSyncingZoho}
+              className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-semibold transition-all active:scale-95 disabled:opacity-60"
+            >
+              <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
+              {t('zoho_sync_btn')}
+            </button>
+          )}
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
+          >
+            <IconPlus size={20} />
+            {t('invoices_create_btn')}
+          </button>
+        </div>
       </div>
+
+      {zohoSyncResult && (
+        <div className={cn(
+          "text-sm p-3 rounded-xl border flex items-center justify-between gap-4",
+          zohoSyncResult.errors.length > 0
+            ? "bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300"
+            : "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
+        )}>
+          <span>
+            {t('zoho_sync_result', { pushed: zohoSyncResult.pushed, pulled: zohoSyncResult.pulled })}
+            {zohoSyncResult.errors.length > 0 && (
+              <span className="ml-2">· {zohoSyncResult.errors.join(', ')}</span>
+            )}
+          </span>
+          <button onClick={() => setZohoSyncResult(null)} className="shrink-0 opacity-60 hover:opacity-100">
+            <IconX size={16} />
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
         <div className="relative flex-1 w-full">

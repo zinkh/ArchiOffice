@@ -824,7 +824,9 @@ try {
       'montant_devis_accepte', 'date_signature'
     ] },
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
-    { table: 'settings', columns: ['seller_iban', 'seller_bic'] }
+    { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
+    { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token'] },
+    { table: 'invoices', columns: ['zoho_invoice_id'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -4084,7 +4086,7 @@ async function startServer() {
   app.put("/api/settings", (req, res) => {
     try {
       const data = req.body;
-      const validColumns = ['agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber', 'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl', 'seller_iban', 'seller_bic', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass'];
+      const validColumns = ['agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber', 'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl', 'seller_iban', 'seller_bic', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center'];
       const filteredData = Object.keys(data)
         .filter(k => validColumns.includes(k))
         .reduce((obj, key) => {
@@ -4183,6 +4185,229 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete lot" });
     }
   });
+
+  // ─── Zoho Invoice Integration ──────────────────────────────────────────────
+
+  let zohoAccessTokenCache: { token: string; expiresAt: number } | null = null;
+
+  async function getZohoAccessToken(settings: any): Promise<string> {
+    const now = Date.now();
+    if (zohoAccessTokenCache && zohoAccessTokenCache.expiresAt > now + 60000) {
+      return zohoAccessTokenCache.token;
+    }
+    const dc = settings.zoho_data_center || 'com';
+    const params = new URLSearchParams({
+      refresh_token: settings.zoho_refresh_token,
+      client_id: settings.zoho_client_id,
+      client_secret: settings.zoho_client_secret,
+      grant_type: 'refresh_token',
+    });
+    const resp = await axios.post(
+      `https://accounts.zoho.${dc}/oauth/v2/token`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+    const { access_token, expires_in } = resp.data;
+    if (!access_token) throw new Error('Zoho token refresh failed: ' + JSON.stringify(resp.data));
+    zohoAccessTokenCache = { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 };
+    return access_token;
+  }
+
+  async function getOrCreateZohoCustomer(apiBase: string, headers: any, name: string): Promise<string> {
+    try {
+      const search = await axios.get(`${apiBase}/contacts`, {
+        headers,
+        params: { contact_name_contains: name, per_page: 5 }
+      });
+      const contacts: any[] = search.data.contacts || [];
+      if (contacts.length > 0) return contacts[0].contact_id;
+    } catch (_) {}
+    const create = await axios.post(`${apiBase}/contacts`, {
+      contact_name: name,
+      contact_type: 'customer'
+    }, { headers });
+    return create.data.contact.contact_id;
+  }
+
+  function mapZohoStatus(zohoStatus: string): string | null {
+    const map: Record<string, string> = {
+      draft: 'Draft', sent: 'Sent', paid: 'Paid', overdue: 'Overdue', void: 'Draft'
+    };
+    return map[zohoStatus] ?? null;
+  }
+
+  // GET /api/zoho/status
+  app.get('/api/zoho/status', (req, res) => {
+    try {
+      const settings = db.prepare("SELECT zoho_client_id, zoho_org_id, zoho_data_center, zoho_refresh_token FROM settings WHERE id = 'general'").get() as any;
+      res.json({
+        connected: !!(settings?.zoho_refresh_token),
+        has_credentials: !!(settings?.zoho_client_id && settings?.zoho_client_secret && settings?.zoho_org_id),
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to get Zoho status' });
+    }
+  });
+
+  // GET /api/zoho/auth  — redirects browser to Zoho OAuth consent screen
+  app.get('/api/zoho/auth', (req, res) => {
+    try {
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+      if (!settings?.zoho_client_id || !settings?.zoho_client_secret || !settings?.zoho_org_id) {
+        return res.status(400).send('Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.');
+      }
+      const dc = settings.zoho_data_center || 'com';
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/zoho/callback`;
+      const scope = 'ZohoInvoice.invoices.READ,ZohoInvoice.invoices.CREATE,ZohoInvoice.invoices.UPDATE,ZohoInvoice.contacts.READ,ZohoInvoice.contacts.CREATE';
+      const authUrl = new URL(`https://accounts.zoho.${dc}/oauth/v2/auth`);
+      authUrl.searchParams.set('client_id', settings.zoho_client_id);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('scope', scope);
+      authUrl.searchParams.set('access_type', 'offline');
+      authUrl.searchParams.set('prompt', 'consent');
+      res.redirect(authUrl.toString());
+    } catch (error) {
+      res.status(500).send('Erreur lors de la connexion à Zoho');
+    }
+  });
+
+  // GET /api/zoho/callback  — Zoho redirects here after user grants access
+  app.get('/api/zoho/callback', async (req, res) => {
+    const { code, error: oauthError } = req.query as any;
+    if (oauthError || !code) {
+      return res.redirect('/settings?zoho_error=1');
+    }
+    try {
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+      const dc = settings.zoho_data_center || 'com';
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/zoho/callback`;
+      const params = new URLSearchParams({
+        code,
+        client_id: settings.zoho_client_id,
+        client_secret: settings.zoho_client_secret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      });
+      const resp = await axios.post(
+        `https://accounts.zoho.${dc}/oauth/v2/token`,
+        params.toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      const { refresh_token } = resp.data;
+      if (!refresh_token) throw new Error('No refresh_token in response');
+      zohoAccessTokenCache = null; // invalidate cache
+      db.prepare("UPDATE settings SET zoho_refresh_token = ? WHERE id = 'general'").run(refresh_token);
+      res.redirect('/settings?zoho_connected=1');
+    } catch (error: any) {
+      console.error('[Zoho callback error]', error.message);
+      res.redirect('/settings?zoho_error=1');
+    }
+  });
+
+  // DELETE /api/zoho/disconnect
+  app.delete('/api/zoho/disconnect', (req, res) => {
+    try {
+      zohoAccessTokenCache = null;
+      db.prepare("UPDATE settings SET zoho_refresh_token = NULL WHERE id = 'general'").run();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to disconnect Zoho' });
+    }
+  });
+
+  // POST /api/zoho/sync  — bidirectional sync
+  app.post('/api/zoho/sync', async (req, res) => {
+    try {
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+      if (!settings?.zoho_refresh_token) {
+        return res.status(400).json({ error: 'Zoho non connecté. Veuillez vous connecter dans les Paramètres.' });
+      }
+
+      const accessToken = await getZohoAccessToken(settings);
+      const dc = settings.zoho_data_center || 'com';
+      const apiBase = `https://invoice.zoho.${dc}/api/v3`;
+      const headers = {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        'X-com-zoho-invoice-organizationid': settings.zoho_org_id,
+        'Content-Type': 'application/json',
+      };
+
+      const errors: string[] = [];
+      let pushed = 0;
+      let pulled = 0;
+
+      // 1. Push local invoices not yet in Zoho
+      const localInvoices = db.prepare(`
+        SELECT i.*, p.name as project_name
+        FROM invoices i LEFT JOIN projects p ON i.project_id = p.id
+        WHERE i.zoho_invoice_id IS NULL OR i.zoho_invoice_id = ''
+      `).all() as any[];
+
+      for (const inv of localInvoices) {
+        try {
+          const customerName = inv.project_name || inv.description || 'Client';
+          const customerId = await getOrCreateZohoCustomer(apiBase, headers, customerName);
+          const lineItems = (inv.items && inv.items.length)
+            ? inv.items.map((item: any) => ({
+                description: item.description,
+                quantity: item.quantity || 1,
+                rate: item.unit_price ?? item.amount ?? 0,
+                tax_percentage: item.vat_rate || 0,
+              }))
+            : [{
+                description: inv.description || 'Honoraires',
+                quantity: 1,
+                rate: inv.amount || 0,
+                tax_percentage: inv.vat_rate || 0,
+              }];
+
+          const payload: any = {
+            customer_id: customerId,
+            date: (inv.issue_date || new Date().toISOString()).split('T')[0],
+            due_date: inv.due_date ? inv.due_date.split('T')[0] : undefined,
+            line_items: lineItems,
+            notes: inv.description || undefined,
+          };
+          if (inv.invoice_number) payload.invoice_number = inv.invoice_number;
+
+          const resp = await axios.post(`${apiBase}/invoices`, payload, { headers });
+          const zohoId = resp.data?.invoice?.invoice_id;
+          if (zohoId) {
+            db.prepare("UPDATE invoices SET zoho_invoice_id = ? WHERE id = ?").run(zohoId, inv.id);
+            pushed++;
+          }
+        } catch (err: any) {
+          errors.push(`Envoi échoué (${inv.invoice_number || inv.id}): ${err.response?.data?.message || err.message}`);
+        }
+      }
+
+      // 2. Pull status updates from Zoho
+      try {
+        const resp = await axios.get(`${apiBase}/invoices`, { headers, params: { per_page: 200 } });
+        const zohoInvoices: any[] = resp.data?.invoices || [];
+        for (const zohoInv of zohoInvoices) {
+          const local = db.prepare("SELECT id, status FROM invoices WHERE zoho_invoice_id = ?").get(zohoInv.invoice_id) as any;
+          if (local) {
+            const newStatus = mapZohoStatus(zohoInv.status);
+            if (newStatus && newStatus !== local.status) {
+              db.prepare("UPDATE invoices SET status = ? WHERE id = ?").run(newStatus, local.id);
+              pulled++;
+            }
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Récupération échouée: ${err.response?.data?.message || err.message}`);
+      }
+
+      res.json({ pushed, pulled, errors });
+    } catch (error: any) {
+      console.error('[Zoho sync error]', error.message);
+      res.status(500).json({ error: error.message || 'Sync échouée' });
+    }
+  });
+
+  // ─── End Zoho Invoice Integration ──────────────────────────────────────────
 
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));

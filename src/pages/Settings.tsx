@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
-import { IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
+import { IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX, IconExternalLink, IconPuzzle } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
   const { currentUser, setCurrentUser } = useUser();
+  const location = useLocation();
   const [settings, setSettings] = useState({
     id: 'general',
     agencyName: '',
@@ -27,13 +29,20 @@ export default function Settings() {
     smtpHost: '',
     smtpPort: '587',
     smtpUser: '',
-    smtpPass: ''
+    smtpPass: '',
+    zoho_client_id: '',
+    zoho_client_secret: '',
+    zoho_org_id: '',
+    zoho_data_center: 'com',
   });
 
   const [isSaving, setIsSaving] = useState(false);
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [zohoStatus, setZohoStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
+  const [isDisconnectingZoho, setIsDisconnectingZoho] = useState(false);
+  const [zohoNotice, setZohoNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [userSettings, setUserSettings] = useState({
     senderOption: 'agency' as 'agency' | 'personal',
@@ -49,9 +58,14 @@ export default function Settings() {
       .then(res => res.json())
       .then(s => {
         if (s) setSettings(prev => ({ ...prev, ...s }));
-        // Also sync to local Dexie for offline use if needed
         db.settings.put(s);
       });
+    if (currentUser?.system_role === 'admin') {
+      fetch('/api/zoho/status')
+        .then(res => res.json())
+        .then(s => setZohoStatus(s))
+        .catch(() => {});
+    }
     if (currentUser) {
       setUserSettings({
         senderOption: currentUser.senderOption || 'agency',
@@ -63,6 +77,31 @@ export default function Settings() {
       });
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('zoho_connected') === '1') {
+      setZohoStatus(prev => ({ ...prev!, connected: true }));
+      setZohoNotice({ type: 'success', message: t('zoho_connected_success') });
+      window.history.replaceState({}, '', '/settings');
+    } else if (params.get('zoho_error') === '1') {
+      setZohoNotice({ type: 'error', message: t('zoho_connect_error') });
+      window.history.replaceState({}, '', '/settings');
+    }
+  }, [location.search, t]);
+
+  const handleZohoDisconnect = async () => {
+    setIsDisconnectingZoho(true);
+    try {
+      await fetch('/api/zoho/disconnect', { method: 'DELETE' });
+      setZohoStatus(prev => ({ ...prev!, connected: false }));
+      setZohoNotice({ type: 'success', message: t('zoho_disconnected') });
+    } catch {
+      setZohoNotice({ type: 'error', message: t('zoho_connect_error') });
+    } finally {
+      setIsDisconnectingZoho(false);
+    }
+  };
 
   const handleTestSmtp = async () => {
     setIsTestingSmtp(true);
@@ -221,12 +260,150 @@ export default function Settings() {
                 {t('send_from_personal')}
               </label>
             </div>
-            <textarea 
-              className="w-full p-2 border rounded h-32" 
-              placeholder={t('default_email_template')} 
-              value={settings.defaultEmailTemplate ?? ''} 
-              onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} 
+            <textarea
+              className="w-full p-2 border rounded h-32"
+              placeholder={t('default_email_template')}
+              value={settings.defaultEmailTemplate ?? ''}
+              onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})}
             />
+          </div>
+
+          {/* ── Integrations ── */}
+          <div className="mt-10">
+            <div className="flex items-center gap-2 mb-1">
+              <IconPuzzle size={20} className="text-zinc-400" />
+              <h2 className="text-xl font-bold">{t('integrations_title')}</h2>
+            </div>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">{t('integrations_subtitle')}</p>
+
+            {/* Zoho Invoice card */}
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 overflow-hidden">
+              {/* card header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-700">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+                    <span className="text-orange-600 dark:text-orange-400 font-bold text-sm">Z</span>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-sm">{t('zoho_section_title')}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('zoho_section_subtitle')}</p>
+                  </div>
+                </div>
+                <div className={cn(
+                  "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium",
+                  zohoStatus?.connected
+                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                    : "bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
+                )}>
+                  {zohoStatus?.connected
+                    ? <><IconPlugConnected size={12} />{t('zoho_status_connected')}</>
+                    : <><IconPlugConnectedX size={12} />{t('zoho_status_disconnected')}</>}
+                </div>
+              </div>
+
+              {/* card body */}
+              <div className="px-5 py-5 space-y-4">
+                {zohoNotice && (
+                  <div className={cn(
+                    "text-sm p-3 rounded-lg border",
+                    zohoNotice.type === 'success'
+                      ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
+                      : "bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400"
+                  )}>
+                    {zohoNotice.message}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">{t('zoho_data_center_label')}</label>
+                    <select
+                      className="w-full p-2 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
+                      value={settings.zoho_data_center}
+                      onChange={e => setSettings({ ...settings, zoho_data_center: e.target.value })}
+                    >
+                      <option value="com">Global (.com)</option>
+                      <option value="eu">Europe (.eu)</option>
+                      <option value="in">Inde (.in)</option>
+                      <option value="com.au">Australie (.com.au)</option>
+                      <option value="jp">Japon (.jp)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">{t('zoho_org_id_label')}</label>
+                    <input
+                      className="w-full p-2 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm"
+                      placeholder="123456789"
+                      value={settings.zoho_org_id}
+                      onChange={e => setSettings({ ...settings, zoho_org_id: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">{t('zoho_client_id_label')}</label>
+                    <input
+                      className="w-full p-2 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm font-mono"
+                      placeholder="1000.XXXXXXXXXXXXXXXXXXXXXXXX"
+                      value={settings.zoho_client_id}
+                      onChange={e => setSettings({ ...settings, zoho_client_id: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">{t('zoho_client_secret_label')}</label>
+                    <input
+                      type="password"
+                      className="w-full p-2 border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 text-sm font-mono"
+                      placeholder="••••••••••••••••••••••••••"
+                      value={settings.zoho_client_secret}
+                      onChange={e => setSettings({ ...settings, zoho_client_secret: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
+                  <p className="font-bold mb-1">{t('zoho_callback_hint_title')}</p>
+                  <code className="block bg-white dark:bg-zinc-900 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 font-mono">
+                    {typeof window !== 'undefined' ? `${window.location.origin}/api/zoho/callback` : '/api/zoho/callback'}
+                  </code>
+                  <p className="mt-1 text-blue-600 dark:text-blue-400">{t('zoho_callback_hint_desc')}</p>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap pt-1">
+                  <a
+                    href="https://api-console.zoho.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+                  >
+                    <IconExternalLink size={15} />
+                    {t('zoho_api_console_btn')}
+                  </a>
+                  {!zohoStatus?.connected ? (
+                    <button
+                      type="button"
+                      disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_org_id}
+                      onClick={async () => {
+                        await handleSave();
+                        window.location.href = '/api/zoho/auth';
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <IconPlugConnected size={15} />
+                      {t('zoho_connect_btn')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleZohoDisconnect}
+                      disabled={isDisconnectingZoho}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm font-bold hover:bg-red-200 dark:hover:bg-red-900/40 transition-colors"
+                    >
+                      {isDisconnectingZoho ? <IconLoader2 size={15} className="animate-spin" /> : <IconPlugConnectedX size={15} />}
+                      {t('zoho_disconnect_btn')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -270,26 +447,6 @@ export default function Settings() {
             English
           </button>
         </div>
-      </div>
-
-      <h2 className="text-xl font-bold mt-8">{t('email_settings')}</h2>
-      <div className="space-y-4">
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2">
-            <input type="radio" name="sender" value="agency" checked={settings.senderOption === 'agency'} onChange={e => setSettings({...settings, senderOption: 'agency'})} />
-            {t('send_from_agency')}
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="radio" name="sender" value="personal" checked={settings.senderOption === 'personal'} onChange={e => setSettings({...settings, senderOption: 'personal'})} />
-            {t('send_from_personal')}
-          </label>
-        </div>
-        <textarea 
-          className="w-full p-2 border rounded h-32" 
-          placeholder={t('default_email_template')} 
-          value={settings.defaultEmailTemplate ?? ''} 
-          onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} 
-        />
       </div>
 
       <h2 className="text-xl font-bold mt-8">{t('my_email_settings')}</h2>
