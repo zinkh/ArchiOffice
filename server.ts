@@ -996,6 +996,7 @@ try {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -4249,6 +4250,19 @@ async function startServer() {
     }
   });
 
+  function getZohoRedirectUri(req: any): string {
+    // ZOHO_REDIRECT_URI env var wins — lets the admin hardcode the exact registered URI
+    if (process.env.ZOHO_REDIRECT_URI) return process.env.ZOHO_REDIRECT_URI;
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host  = req.headers['x-forwarded-host']  || req.get('host');
+    return `${proto}://${host}/api/zoho/callback`;
+  }
+
+  // GET /api/zoho/callback-url  — returns the redirect URI the server will actually use
+  app.get('/api/zoho/callback-url', (req, res) => {
+    res.json({ url: getZohoRedirectUri(req) });
+  });
+
   // GET /api/zoho/auth  — redirects browser to Zoho OAuth consent screen
   app.get('/api/zoho/auth', (req, res) => {
     try {
@@ -4257,7 +4271,7 @@ async function startServer() {
         return res.status(400).send('Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.');
       }
       const dc = settings.zoho_data_center || 'com';
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/zoho/callback`;
+      const redirectUri = getZohoRedirectUri(req);
       const scope = 'ZohoInvoice.invoices.READ,ZohoInvoice.invoices.CREATE,ZohoInvoice.invoices.UPDATE,ZohoInvoice.contacts.READ,ZohoInvoice.contacts.CREATE';
       const authUrl = new URL(`https://accounts.zoho.${dc}/oauth/v2/auth`);
       authUrl.searchParams.set('client_id', settings.zoho_client_id);
@@ -4281,7 +4295,7 @@ async function startServer() {
     try {
       const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
       const dc = settings.zoho_data_center || 'com';
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/zoho/callback`;
+      const redirectUri = getZohoRedirectUri(req);
       const params = new URLSearchParams({
         code,
         client_id: settings.zoho_client_id,

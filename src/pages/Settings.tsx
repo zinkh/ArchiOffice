@@ -41,6 +41,7 @@ export default function Settings() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [zohoStatus, setZohoStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
+  const [zohoCallbackUrl, setZohoCallbackUrl] = useState('');
   const [isDisconnectingZoho, setIsDisconnectingZoho] = useState(false);
   const [zohoNotice, setZohoNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -64,6 +65,10 @@ export default function Settings() {
       fetch('/api/zoho/status')
         .then(res => res.json())
         .then(s => setZohoStatus(s))
+        .catch(() => {});
+      fetch('/api/zoho/callback-url')
+        .then(res => res.json())
+        .then(d => setZohoCallbackUrl(d.url))
         .catch(() => {});
     }
     if (currentUser) {
@@ -361,8 +366,8 @@ export default function Settings() {
 
                 <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
                   <p className="font-bold mb-1">{t('zoho_callback_hint_title')}</p>
-                  <code className="block bg-white dark:bg-zinc-900 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 font-mono">
-                    {typeof window !== 'undefined' ? `${window.location.origin}/api/zoho/callback` : '/api/zoho/callback'}
+                  <code className="block bg-white dark:bg-zinc-900 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 font-mono break-all select-all">
+                    {zohoCallbackUrl || `${window.location.origin}/api/zoho/callback`}
                   </code>
                   <p className="mt-1 text-blue-600 dark:text-blue-400">{t('zoho_callback_hint_desc')}</p>
                 </div>
