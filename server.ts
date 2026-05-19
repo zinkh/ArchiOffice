@@ -9,6 +9,7 @@ import multer from "multer";
 import fs from "fs";
 import axios from "axios";
 import https from "https";
+import { createClient } from "@supabase/supabase-js";
 
 interface GeoJSONGeometry {
   type: string;
@@ -1019,6 +1020,27 @@ async function startServer() {
   // Debug middleware for API routes
   app.use("/api/*", (req, res, next) => {
     console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
+  // Supabase auth middleware — vérifie le JWT sur toutes les routes /api sauf /api/health
+  const supabaseAdmin = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
+  const AUTH_EXEMPT = ["/api/health"];
+
+  app.use("/api", async (req: any, res: any, next: any) => {
+    if (AUTH_EXEMPT.some(p => req.path === p || req.path.startsWith(p + "/"))) {
+      return next();
+    }
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authentification requise" });
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: "Token invalide" });
+    req.user = user;
     next();
   });
 
