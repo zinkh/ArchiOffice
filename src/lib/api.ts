@@ -1,7 +1,9 @@
+import { supabase } from './supabase';
+
 export const baseFetchJson = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
   const fetchFn = (window as any)._originalFetch || window.fetch;
   const res = await fetchFn(url, options);
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }
@@ -22,6 +24,19 @@ export const fetchJson = async <T = any>(url: string, options?: RequestInit): Pr
   const headers = new Headers(options?.headers);
   if (options?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  return baseFetchJson<T>(url, { ...options, headers });
+};
+
+// Authenticated fetch — injecte automatiquement le JWT Supabase
+export const apiFetch = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = new Headers(options?.headers);
+  if (options?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (session?.access_token) {
+    headers.set('Authorization', `Bearer ${session.access_token}`);
   }
   return baseFetchJson<T>(url, { ...options, headers });
 };
