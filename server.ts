@@ -1,6 +1,5 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
@@ -166,10 +165,9 @@ const upload = multer({ storage: storage });
 
 dotenv.config();
 
-const db = new Database("/tmp/archimanager.db");
-
-try {
-  // Initialize database
+/* SQLite initialization removed — using Supabase PostgreSQL */
+if (false as any) {
+  const db: any = null; // stub to satisfy TypeScript inside dead-code block
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -999,13 +997,6 @@ try {
     ('s1', 'p1', 'CCTP Lot Gros Œuvre', '[{"id":"sec1","title":"Terrassements","items":[{"id":"i1","code":"02.10","description":"Décapage de la terre végétale","material":"N/A","notes":"Stockage sur site"}]}]', '2016-02-21T10:00:00Z');
   `);
 
-  // Update existing members with roles if they were already in the DB
-  db.prepare("UPDATE team_members SET system_role = 'admin' WHERE id = 't1'").run();
-  db.prepare("UPDATE team_members SET system_role = 'pm' WHERE id = 't2'").run();
-  db.prepare("UPDATE team_members SET system_role = 'user' WHERE id IN ('t3', 't4')").run();
-} catch (error) {
-  console.error("Failed to initialize database:", error);
-  process.exit(1);
 }
 
 async function startServer() {
@@ -1029,6 +1020,17 @@ async function startServer() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  // Résolution tenant_id depuis profiles (mis en cache par request)
+  async function getTenantId(userId: string): Promise<string> {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', userId)
+      .single();
+    if (!data?.tenant_id) throw new Error('Tenant not found for user ' + userId);
+    return data.tenant_id;
+  }
 
   const AUTH_EXEMPT = ["/api/health", "/api/public"];
 
@@ -1419,51 +1421,49 @@ async function startServer() {
   });
 
   // OS Routes
-  app.get("/api/ordres_de_service", (req, res) => {
+  app.get("/api/ordres_de_service", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      const os = db.prepare("SELECT * FROM ordres_de_service WHERE project_id = ?").all(project_id);
-      res.json(os);
-    } catch (error) {
-      console.error(error);
+      const query = supabaseAdmin.from('ordres_de_service').select('*').eq('tenant_id', tenantId);
+      if (project_id) query.eq('project_id', project_id as string);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to fetch OS" });
     }
   });
 
-  app.post("/api/ordres_de_service", (req, res) => {
+  app.post("/api/ordres_de_service", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const {
         project_id, os_number, march_number, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       } = req.body || {};
-      const id = `os-${Date.now()}`;
-      db.prepare(`
-        INSERT INTO ordres_de_service (
-          id, project_id, os_number, march_number, title, date, description, lot, status, type,
-          maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
-          date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-          incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        id, project_id, os_number, march_number, title, date, description, lot,
-        status || 'draft', type || 'travaux',
+      const id = crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('ordres_de_service').insert({
+        id, tenant_id: tenantId, project_id, os_number, march_number, title, date, description, lot,
+        status: status || 'draft', type: type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
-      );
-      const created = db.prepare("SELECT * FROM ordres_de_service WHERE id = ?").get(id);
-      res.status(201).json(created);
-    } catch (error) {
-      console.error("Error creating OS:", error);
-      res.status(500).json({ error: "Failed to create OS", details: error instanceof Error ? error.message : String(error) });
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) {
+      console.error("Error creating OS:", e);
+      res.status(500).json({ error: "Failed to create OS", details: e.message });
     }
   });
 
-  app.put("/api/ordres_de_service/:id", (req, res) => {
+  app.put("/api/ordres_de_service/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
         os_number, march_number, title, date, description, lot, status, type,
@@ -1471,547 +1471,363 @@ async function startServer() {
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       } = req.body;
-      db.prepare(`
-        UPDATE ordres_de_service
-        SET os_number = ?, march_number = ?, title = ?, date = ?, description = ?, lot = ?, status = ?, type = ?,
-            maitrise_oeuvre_adresse = ?, entreprise = ?, origine_demande = ?, montant_marche_ht = ?, objet = ?,
-            date_fourniture = ?, article_ccap = ?, incidences_delais_type = ?, incidences_delais_details = ?,
-            incidences_couts_type = ?, montant_devis_presente = ?, montant_devis_accepte = ?, date_signature = ?
-        WHERE id = ?
-      `).run(
-        os_number, march_number, title, date, description, lot, status, type || 'travaux',
+      const { error } = await supabaseAdmin.from('ordres_de_service').update({
+        os_number, march_number, title, date, description, lot, status, type: type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature, id
-      );
+        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to update OS" });
     }
   });
 
-  app.delete("/api/ordres_de_service/:id", (req, res) => {
+  app.delete("/api/ordres_de_service/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM ordres_de_service WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('ordres_de_service').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to delete OS" });
     }
   });
 
   // Visa Routes
-  app.get("/api/visas", (req, res) => {
+  app.get("/api/visas", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      const visas = db.prepare("SELECT * FROM visas WHERE project_id = ?").all(project_id);
-      res.json(visas);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch visas" });
-    }
+      const { data, error } = await supabaseAdmin.from('visas').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch visas" }); }
   });
 
-  app.post("/api/visas", (req, res) => {
+  app.post("/api/visas", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id, title, date, status, comments, document_url } = req.body;
-      const id = `visa-${Date.now()}`;
-      db.prepare("INSERT INTO visas (id, project_id, title, date, status, comments, document_url) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-        id, project_id, title, date, status || 'pending', comments, document_url
-      );
-      const visa = db.prepare("SELECT * FROM visas WHERE id = ?").get(id);
-      res.json(visa);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create visa" });
-    }
+      const { data, error } = await supabaseAdmin.from('visas').insert({
+        id: crypto.randomUUID(), tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
-  app.delete("/api/visas/:id", (req, res) => {
+  app.delete("/api/visas/:id", async (req: any, res: any) => {
     try {
-      db.prepare("DELETE FROM visas WHERE id = ?").run(req.params.id);
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('visas').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete visa" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete visa" }); }
   });
 
   // Reception Routes
-  app.get("/api/receptions", (req, res) => {
+  app.get("/api/receptions", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      const receptions = db.prepare("SELECT * FROM receptions WHERE project_id = ?").all(project_id);
-      res.json(receptions);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch receptions" });
-    }
+      const { data, error } = await supabaseAdmin.from('receptions').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch receptions" }); }
   });
 
-  app.post("/api/receptions", (req, res) => {
+  app.post("/api/receptions", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id, date, type, has_reserves, reserves_count, document_url } = req.body;
-      const id = `rec-${Date.now()}`;
-      db.prepare("INSERT INTO receptions (id, project_id, date, type, has_reserves, reserves_count, document_url) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-        id, project_id, date, type, has_reserves ? 1 : 0, reserves_count || 0, document_url
-      );
-      const reception = db.prepare("SELECT * FROM receptions WHERE id = ?").get(id);
-      res.json(reception);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create reception" });
-    }
+      const { data, error } = await supabaseAdmin.from('receptions').insert({
+        id: crypto.randomUUID(), tenant_id: tenantId, project_id, date, type, has_reserves: !!has_reserves, reserves_count: reserves_count || 0, document_url
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create reception" }); }
   });
 
-  app.delete("/api/receptions/:id", (req, res) => {
+  app.delete("/api/receptions/:id", async (req: any, res: any) => {
     try {
-      db.prepare("DELETE FROM receptions WHERE id = ?").run(req.params.id);
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('receptions').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete reception" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete reception" }); }
   });
 
   // Reserves
-  app.get("/api/reserves", (req, res) => {
+  app.get("/api/reserves", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      const reserves = db.prepare("SELECT * FROM reserves WHERE project_id = ?").all(project_id);
-      res.json(reserves);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch reserves" });
-    }
+      const { data, error } = await supabaseAdmin.from('reserves').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch reserves" }); }
   });
 
-  app.post("/api/reserves", (req, res) => {
+  app.post("/api/reserves", async (req: any, res: any) => {
     try {
-      const { id, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
-      
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
       // Get the next number for this project
-      const lastReserve = db.prepare("SELECT MAX(number) as max_num FROM reserves WHERE project_id = ?").get(project_id) as { max_num: number | null };
-      const nextNumber = (lastReserve?.max_num || 0) + 1;
-
-      db.prepare(`
-        INSERT INTO reserves (id, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, number)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, project_id, reception_id, title, batiment, local, status || 'A faire', JSON.stringify(lots), JSON.stringify(entreprises), created_at, due_date, plan_id, x, y, nextNumber);
-      
-      res.json({ id, project_id, reception_id, title, batiment, local, status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create reserve" });
-    }
+      const { data: lastRow } = await supabaseAdmin.from('reserves').select('number').eq('tenant_id', tenantId).eq('project_id', project_id).order('number', { ascending: false }).limit(1).single();
+      const nextNumber = ((lastRow as any)?.number || 0) + 1;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('reserves').insert({
+        id, tenant_id: tenantId, project_id, reception_id, title, batiment, local,
+        status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create reserve" }); }
   });
 
-  app.delete("/api/reserves/:id", (req, res) => {
+  app.delete("/api/reserves/:id", async (req: any, res: any) => {
     try {
-      db.prepare("DELETE FROM reserves WHERE id = ?").run(req.params.id);
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('reserves').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete reserve" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete reserve" }); }
   });
 
-  app.put("/api/reserves/:id", (req, res) => {
+  app.put("/api/reserves/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { title, batiment, local, status, lots, entreprises, created_at, due_date } = req.body;
-      db.prepare(`
-        UPDATE reserves 
-        SET title = ?, batiment = ?, local = ?, status = ?, lots = ?, entreprises = ?, created_at = ?, due_date = ?
-        WHERE id = ?
-      `).run(title, batiment, local, status, JSON.stringify(lots), JSON.stringify(entreprises), created_at, due_date, req.params.id);
+      const { error } = await supabaseAdmin.from('reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to update reserve" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
   });
 
   // Plans
-  app.get("/api/plans", (req, res) => {
+  app.get("/api/plans", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      const plans = db.prepare("SELECT * FROM plans WHERE project_id = ?").all(project_id);
-      res.json(plans);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch plans" });
-    }
+      const { data, error } = await supabaseAdmin.from('plans').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch plans" }); }
   });
 
-  app.post("/api/plans", (req, res) => {
+  app.post("/api/plans", async (req: any, res: any) => {
     try {
-      const { id, project_id, name, file_url } = req.body;
-      db.prepare("INSERT INTO plans (id, project_id, name, file_url, uploaded_at) VALUES (?, ?, ?, ?, ?)").run(id, project_id, name, file_url, new Date().toISOString());
-      res.json({ id, project_id, name, file_url, uploaded_at: new Date().toISOString() });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create plan" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, name, file_url } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const uploaded_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('plans').insert({ id, tenant_id: tenantId, project_id, name, file_url, uploaded_at });
+      if (error) throw error;
+      res.json({ id, project_id, name, file_url, uploaded_at });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create plan" }); }
   });
 
   // Document Routes
-  app.get("/api/documents", (req, res) => {
+  app.get("/api/documents", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
-      let docs;
-      if (project_id) {
-        docs = db.prepare("SELECT * FROM documents WHERE project_id = ?").all(project_id);
-      } else {
-        docs = db.prepare("SELECT * FROM documents").all();
-      }
-      res.json(docs);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch documents" });
-    }
+      const query = supabaseAdmin.from('documents').select('*').eq('tenant_id', tenantId);
+      if (project_id) query.eq('project_id', project_id as string);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch documents" }); }
   });
 
-  app.post("/api/documents", upload.single('file'), (req, res) => {
+  app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id, name, category, description, uploaded_by } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
-
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
-      const id = `doc-${Date.now()}`;
+      const id = crypto.randomUUID();
       const file_url = `/uploads/${file.filename}`;
-      
-      db.prepare(`
-        INSERT INTO documents (id, project_id, name, category, version, file_url, uploaded_by, uploaded_at, description)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-      `).run(id, projectIdVal, name, category, file_url, uploaded_by, new Date().toISOString(), description);
-
-      db.prepare(`
-        INSERT INTO document_versions (id, document_id, version, file_url, uploaded_by, uploaded_at, description)
-        VALUES (?, ?, 1, ?, ?, ?, ?)
-      `).run(`ver-${Date.now()}`, id, file_url, uploaded_by, new Date().toISOString(), description);
-
+      const uploaded_at = new Date().toISOString();
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, version: 1, file_url, uploaded_by, uploaded_at, description });
+      if (e1) throw e1;
+      await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to upload document" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document" }); }
   });
 
-  app.delete("/api/documents/:id", (req, res) => {
+  app.delete("/api/documents/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM document_versions WHERE document_id = ?").run(id);
-      db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+      await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
+      const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete document" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
 
-  app.put("/api/documents/:id", upload.single('file'), (req, res) => {
+  app.put("/api/documents/:id", upload.single('file'), async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { name, category, description, uploaded_by } = req.body;
       const file = req.file;
-
       if (file) {
-        // Increment version and update file_url
-        const doc = db.prepare("SELECT version FROM documents WHERE id = ?").get(id) as { version: number } | undefined;
-        const newVersion = (doc?.version || 1) + 1;
+        const { data: doc } = await supabaseAdmin.from('documents').select('version').eq('id', id).eq('tenant_id', tenantId).single();
+        const newVersion = ((doc as any)?.version || 1) + 1;
         const file_url = `/uploads/${file.filename}`;
-        
-        db.prepare("UPDATE documents SET name = ?, category = ?, description = ?, version = ?, file_url = ?, uploaded_at = ? WHERE id = ?")
-          .run(name, category, description, newVersion, file_url, new Date().toISOString(), id);
-          
-        // Add to versions table
-        db.prepare(`
-          INSERT INTO document_versions (id, document_id, version, file_url, uploaded_by, uploaded_at, description)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(`ver-${Date.now()}`, id, newVersion, file_url, uploaded_by || 'System', new Date().toISOString(), description);
+        const uploaded_at = new Date().toISOString();
+        const { error } = await supabaseAdmin.from('documents').update({ name, category, description, version: newVersion, file_url, uploaded_at }).eq('id', id).eq('tenant_id', tenantId);
+        if (error) throw error;
+        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
       } else {
-        // Just update metadata
-        db.prepare("UPDATE documents SET name = ?, category = ?, description = ? WHERE id = ?")
-          .run(name, category, description, id);
+        const { error } = await supabaseAdmin.from('documents').update({ name, category, description }).eq('id', id).eq('tenant_id', tenantId);
+        if (error) throw error;
       }
-      
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to update document" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document" }); }
   });
 
-  app.get("/api/documents/:id/versions", (req, res) => {
+  app.get("/api/documents/:id/versions", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const versions = db.prepare("SELECT * FROM document_versions WHERE document_id = ? ORDER BY version DESC").all(id);
-      res.json(versions);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch document versions" });
-    }
+      const { data, error } = await supabaseAdmin.from('document_versions').select('*').eq('tenant_id', tenantId).eq('document_id', id).order('version', { ascending: false });
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch document versions" }); }
   });
 
-  app.get("/api/projects", (req, res) => {
+  app.get("/api/projects", async (req: any, res: any) => {
     try {
-      const projects = db.prepare("SELECT * FROM projects").all();
-      
-      const projectsWithDetails = projects.map((project: any) => {
-        const cotraitants = db.prepare(`
-          SELECT pc.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_cotraitants pc
-          LEFT JOIN contacts c ON pc.contact_id = c.id
-          WHERE pc.project_id = ?
-        `).all(project.id);
-
-        const lots = db.prepare(`
-          SELECT pl.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_lots pl
-          LEFT JOIN contacts c ON pl.contact_id = c.id
-          WHERE pl.project_id = ?
-        `).all(project.id);
-
-        const stakeholders = db.prepare(`
-          SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM project_stakeholders ps
-          LEFT JOIN contacts c ON ps.contact_id = c.id
-          WHERE ps.project_id = ?
-        `).all(project.id);
-
-        const categories = db.prepare(`
-          SELECT pc.*
-          FROM project_categories pc
-          JOIN project_categories_junction pcj ON pc.id = pcj.category_id
-          WHERE pcj.project_id = ?
-        `).all(project.id);
-
-        return { ...project, cotraitants_list: cotraitants, lots_list: lots, stakeholders_list: stakeholders, categories_list: categories };
-      });
-      
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('projects')
+        .select('*, project_cotraitants(*), project_lots(*), project_stakeholders(*), project_categories_junction(category_id)')
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      const projectsWithDetails = (data || []).map((p: any) => ({
+        ...p,
+        cotraitants_list: p.project_cotraitants || [],
+        lots_list: p.project_lots || [],
+        stakeholders_list: p.project_stakeholders || [],
+        categories_list: (p.project_categories_junction || []).map((j: any) => j.category_id),
+      }));
       res.json(projectsWithDetails);
-    } catch (error) {
-      console.error(error);
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to fetch projects" });
     }
   });
 
-  app.get("/api/projects/:id/full", (req, res) => {
+  app.get("/api/projects/:id/full", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
-      if (!project) {
-        return res.status(404).json({ error: "Project not found" });
-      }
-
-      const milestones = db.prepare("SELECT * FROM milestones WHERE project_id = ?").all(id);
-      const invoices = db.prepare("SELECT * FROM invoices WHERE project_id = ?").all(id);
-      const specifications = db.prepare("SELECT * FROM specifications WHERE project_id = ?").all(id);
-      const ordres_de_service = db.prepare("SELECT * FROM ordres_de_service WHERE project_id = ?").all(id);
-      const visas = db.prepare("SELECT * FROM visas WHERE project_id = ?").all(id);
-      const receptions = db.prepare("SELECT * FROM receptions WHERE project_id = ?").all(id);
-      const reserves = db.prepare("SELECT * FROM reserves WHERE project_id = ?").all(id);
-      const plans = db.prepare("SELECT * FROM plans WHERE project_id = ?").all(id);
-
-      res.json({
-        project,
-        milestones,
-        invoices,
-        specifications,
-        ordres_de_service,
-        visas,
-        receptions,
-        reserves,
-        plans
-      });
-    } catch (error) {
-      console.error(error);
+      const { data: project, error: pe } = await supabaseAdmin.from('projects').select('*').eq('id', id).eq('tenant_id', tenantId).single();
+      if (pe || !project) return res.status(404).json({ error: "Project not found" });
+      const [milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans] = await Promise.all([
+        supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('ordres_de_service').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('visas').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('receptions').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('reserves').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+        supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then(r => r.data || []),
+      ]);
+      res.json({ project, milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans });
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to fetch project details" });
     }
   });
 
-  // API routes FIRST
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
+  // API routes FIRST (duplicate health removed below)
 
   // Situations API
-  app.get("/api/dpgf/:projectId", (req, res) => {
+  app.get("/api/dpgf/:projectId", async (req: any, res: any) => {
     try {
-      const items = db.prepare("SELECT * FROM dpgf_items WHERE project_id = ?").all(req.params.projectId);
-      res.json(items);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch dpgf items" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('dpgf_items').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch dpgf items" }); }
   });
 
-  app.get("/api/situations/:projectId", (req, res) => {
+  app.get("/api/situations/:projectId", async (req: any, res: any) => {
     try {
-      const situations = db.prepare("SELECT * FROM situations WHERE project_id = ?").all(req.params.projectId);
-      res.json(situations);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch situations" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('situations').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch situations" }); }
   });
 
-  app.get("/api/situations/:situationId/details", (req, res) => {
+  app.get("/api/situations/:situationId/details", async (req: any, res: any) => {
     try {
-      const details = db.prepare("SELECT * FROM detail_situations WHERE situation_id = ?").all(req.params.situationId);
-      res.json(details);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch situation details" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', req.params.situationId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch situation details" }); }
   });
 
-  app.post("/api/projects", (req, res) => {
+  app.post("/api/projects", async (req: any, res: any) => {
     try {
-      const { 
-        id, name, client, status, budget, category, start_date, end_date, description, image_url, address, 
+      const tenantId = await getTenantId(req.user.id);
+      const {
+        id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
-        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
-        adresse_client, cp_client, ville_client, telephone, portable, email_client, 
-        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
-        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
+        adresse_client, cp_client, ville_client, telephone, portable, email_client,
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification
       } = req.body;
-      
-      if (!name || !client) {
-        return res.status(400).json({ error: "Name and client are required" });
-      }
-
+      if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       // Generate project code: YYNNN
       const year = new Date().getFullYear().toString().slice(-2);
-      const count = db.prepare("SELECT COUNT(*) as count FROM projects WHERE project_code LIKE ?").get(`${year}%`) as { count: number };
-      const nextNum = (count.count + 1).toString().padStart(3, '0');
-      const project_code = `${year}${nextNum}`;
-
-      const insertProject = db.transaction(() => {
-        db.prepare(`
-          INSERT INTO projects (
-            id, name, client, status, budget, category, start_date, end_date, description, image_url, project_code, address, 
-            is_complete_mission, etudes_notes, chantier_notes, is_public_client,
-            surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
-            reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
-            adresse_client, cp_client, ville_client, telephone, portable, email_client, 
-            adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
-            nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
-            categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
-            surface_ert, effectif_public, effectif_personnel, ind, date_modification
-          ) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id, 
-          name, 
-          client, 
-          status || 'Planning', 
-          budget || 0, 
-          category || null, 
-          start_date || new Date().toISOString().split('T')[0], 
-          end_date || new Date().toISOString().split('T')[0], 
-          description || null, 
-          image_url || null, 
-          project_code,
-          address || null,
-          is_complete_mission ? 1 : 0,
-          etudes_notes || null,
-          chantier_notes || null,
-          is_public_client ? 1 : 0,
-          surface || null,
-          construction_cost || null,
-          remuneration || null,
-          progression || null,
-          project_manager || null,
-          cotraitants || null,
-          external_intervenants || null,
-          entreprises || null,
-          reference || null,
-          projet_detail || null,
-          is_entreprise ? 1 : 0,
-          nom_societe || null,
-          rcs || null,
-          representant || null,
-          qualite || null,
-          adresse_client || null,
-          cp_client || null,
-          ville_client || null,
-          telephone || null,
-          portable || null,
-          email_client || null,
-          adresse_terrain || null,
-          cp_ville_terrain || null,
-          ban_id_terrain || null,
-          city_code_terrain || null,
-          ref_cadastrale || null,
-          zone_plu || null,
-          surface_parcelle || null,
-          nom_etablissement || null,
-          avant_trav || null,
-          apres_trav || null,
-          type_et_cat || null,
-          type_projet || null,
-          categorie_projet || null,
-          surface_plancher || null,
-          surface_plancher_ext || null,
-          surface_erp || null,
-          surface_ert || null,
-          effectif_public || null,
-          effectif_personnel || null,
-          ind || null,
-          date_modification || null
-        );
-
-        if (cotraitants_list && Array.isArray(cotraitants_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_cotraitants (id, project_id, specialty, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
-          }
-        }
-
-        if (lots_list && Array.isArray(lots_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_lots (id, project_id, lot_number, lot_title, contact_id)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
-          }
-        }
-
-        if (stakeholders_list && Array.isArray(stakeholders_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_stakeholders (id, project_id, name, role, contact_id)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
-          }
-        }
-
-        if (categories_list && Array.isArray(categories_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_categories_junction (project_id, category_id)
-            VALUES (?, ?)
-          `);
-          for (const catId of categories_list) {
-            stmt.run(id, catId);
-          }
-        }
+      const { count: countVal } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).like('project_code', `${year}%`).then(r => ({ count: r.count || 0 }));
+      const project_code = `${year}${((countVal as number) + 1).toString().padStart(3, '0')}`;
+      const id = bodyId || crypto.randomUUID();
+      const { error: pe } = await supabaseAdmin.from('projects').insert({
+        id, tenant_id: tenantId, name, client, status: status || 'Planning', budget: budget || 0,
+        category: category || null, start_date: start_date || new Date().toISOString().split('T')[0],
+        end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
+        image_url: image_url || null, project_code, address: address || null,
+        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
+        reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
+        adresse_client, cp_client, ville_client, telephone, portable, email_client,
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification
       });
-
-      insertProject();
-      
+      if (pe) throw pe;
+      if (cotraitants_list?.length) {
+        await supabaseAdmin.from('project_cotraitants').insert(cotraitants_list.map((c: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, specialty: c.specialty, contact_id: c.contact_id || null })));
+      }
+      if (lots_list?.length) {
+        await supabaseAdmin.from('project_lots').insert(lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null })));
+      }
+      if (stakeholders_list?.length) {
+        await supabaseAdmin.from('project_stakeholders').insert(stakeholders_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, name: s.name, role: s.role, contact_id: s.contact_id || null })));
+      }
+      if (categories_list?.length) {
+        await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+      }
       res.status(201).json({ id, project_code });
     } catch (error: any) {
       console.error("Error creating project:", error);
@@ -2019,202 +1835,74 @@ async function startServer() {
     }
   });
 
-  app.put("/api/projects/:id", (req, res) => {
+  app.put("/api/projects/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { 
-        name, client, status, budget, category, start_date, end_date, description, image_url, address, 
+      const {
+        name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
-        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
-        adresse_client, cp_client, ville_client, telephone, portable, email_client, 
-        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
-        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
+        reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
+        adresse_client, cp_client, ville_client, telephone, portable, email_client,
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification
       } = req.body;
-      
-      if (!name || !client) {
-        return res.status(400).json({ error: "Name and client are required" });
+      if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      const { error: ue } = await supabaseAdmin.from('projects').update({
+        name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
+        reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
+        adresse_client, cp_client, ville_client, telephone, portable, email_client,
+        adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (ue) throw ue;
+      // Update related lists (delete + reinsert)
+      await supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId);
+      if (cotraitants_list?.length) {
+        await supabaseAdmin.from('project_cotraitants').insert(cotraitants_list.map((c: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, specialty: c.specialty, contact_id: c.contact_id || null })));
       }
-
-      const updateContactAffaires = (contactId: string, projectId: string) => {
-        const contact = db.prepare("SELECT affaires FROM contacts WHERE id = ?").get(contactId);
-        if (!contact) return;
-        
-        let affaires = contact.affaires ? contact.affaires.split(',').map((s: string) => s.trim()) : [];
-        if (!affaires.includes(projectId)) {
-          affaires.push(projectId);
-          db.prepare("UPDATE contacts SET affaires = ? WHERE id = ?").run(affaires.join(','), contactId);
-        }
-      };
-
-      const updateProject = db.transaction(() => {
-        const result = db.prepare(`
-          UPDATE projects 
-          SET name = ?, client = ?, status = ?, budget = ?, category = ?, start_date = ?, end_date = ?, description = ?, image_url = ?, address = ?, 
-              is_complete_mission = ?, etudes_notes = ?, chantier_notes = ?, is_public_client = ?,
-              surface = ?, construction_cost = ?, remuneration = ?, progression = ?, project_manager = ?, cotraitants = ?, external_intervenants = ?, entreprises = ?,
-              reference = ?, projet_detail = ?, is_entreprise = ?, nom_societe = ?, rcs = ?, representant = ?, qualite = ?, 
-              adresse_client = ?, cp_client = ?, ville_client = ?, telephone = ?, portable = ?, email_client = ?, 
-              adresse_terrain = ?, cp_ville_terrain = ?, ban_id_terrain = ?, city_code_terrain = ?, ref_cadastrale = ?, zone_plu = ?, surface_parcelle = ?, 
-              nom_etablissement = ?, avant_trav = ?, apres_trav = ?, type_et_cat = ?, type_projet = ?, 
-              categorie_projet = ?, surface_plancher = ?, surface_plancher_ext = ?, surface_erp = ?, 
-              surface_ert = ?, effectif_public = ?, effectif_personnel = ?, ind = ?, date_modification = ?
-          WHERE id = ?
-        `).run(
-          name, 
-          client, 
-          status, 
-          budget, 
-          category || null, 
-          start_date, 
-          end_date, 
-          description || null, 
-          image_url || null, 
-          address || null,
-          is_complete_mission ? 1 : 0,
-          etudes_notes || null,
-          chantier_notes || null,
-          is_public_client ? 1 : 0,
-          surface || null,
-          construction_cost || null,
-          remuneration || null,
-          progression || null,
-          project_manager || null,
-          cotraitants || null,
-          external_intervenants || null,
-          entreprises || null,
-          reference || null,
-          projet_detail || null,
-          is_entreprise ? 1 : 0,
-          nom_societe || null,
-          rcs || null,
-          representant || null,
-          qualite || null,
-          adresse_client || null,
-          cp_client || null,
-          ville_client || null,
-          telephone || null,
-          portable || null,
-          email_client || null,
-          adresse_terrain || null,
-          cp_ville_terrain || null,
-          ban_id_terrain || null,
-          city_code_terrain || null,
-          ref_cadastrale || null,
-          zone_plu || null,
-          surface_parcelle || null,
-          nom_etablissement || null,
-          avant_trav || null,
-          apres_trav || null,
-          type_et_cat || null,
-          type_projet || null,
-          categorie_projet || null,
-          surface_plancher || null,
-          surface_plancher_ext || null,
-          surface_erp || null,
-          surface_ert || null,
-          effectif_public || null,
-          effectif_personnel || null,
-          ind || null,
-          date_modification || null,
-          id
-        );
-
-        if (result.changes === 0) {
-          throw new Error("Project not found");
-        }
-
-        // Update cotraitants
-        db.prepare("DELETE FROM project_cotraitants WHERE project_id = ?").run(id);
-        if (cotraitants_list && Array.isArray(cotraitants_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_cotraitants (id, project_id, specialty, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const cot of cotraitants_list) {
-            stmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, cot.specialty, cot.contact_id || null);
-            if (cot.contact_id) updateContactAffaires(cot.contact_id, id);
-          }
-        }
-
-        // Update lots
-        db.prepare("DELETE FROM project_lots WHERE project_id = ?").run(id);
-        if (lots_list && Array.isArray(lots_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_lots (id, project_id, lot_number, lot_title, contact_id)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const lot of lots_list) {
-            stmt.run(`pl${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, lot.lot_number, lot.lot_title, lot.contact_id || null);
-            if (lot.contact_id) updateContactAffaires(lot.contact_id, id);
-          }
-        }
-
-        db.prepare("DELETE FROM project_stakeholders WHERE project_id = ?").run(id);
-        if (stakeholders_list && Array.isArray(stakeholders_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_stakeholders (id, project_id, name, role, contact_id)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const s of stakeholders_list) {
-            stmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, s.name, s.role, s.contact_id || null);
-            if (s.contact_id) updateContactAffaires(s.contact_id, id);
-          }
-        }
-
-        db.prepare("DELETE FROM project_categories_junction WHERE project_id = ?").run(id);
-        if (categories_list && Array.isArray(categories_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO project_categories_junction (project_id, category_id)
-            VALUES (?, ?)
-          `);
-          for (const catId of categories_list) {
-            stmt.run(id, catId);
-          }
-        }
-      });
-
-      updateProject();
+      await supabaseAdmin.from('project_lots').delete().eq('project_id', id).eq('tenant_id', tenantId);
+      if (lots_list?.length) {
+        await supabaseAdmin.from('project_lots').insert(lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null })));
+      }
+      await supabaseAdmin.from('project_stakeholders').delete().eq('project_id', id).eq('tenant_id', tenantId);
+      if (stakeholders_list?.length) {
+        await supabaseAdmin.from('project_stakeholders').insert(stakeholders_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, name: s.name, role: s.role, contact_id: s.contact_id || null })));
+      }
+      await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
+      if (categories_list?.length) {
+        await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+      }
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating project:", error);
-      res.status(error.message === "Project not found" ? 404 : 500).json({ error: "Failed to update project: " + error.message });
+      res.status(500).json({ error: "Failed to update project: " + error.message });
     }
   });
 
-  app.delete("/api/projects/:id", (req, res) => {
+  app.delete("/api/projects/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const userRole = req.headers['x-user-role'];
-      
       console.log(`Attempting to delete project ${id} with role ${userRole}`);
-
-      if (userRole !== 'admin') {
-        console.log(`Access denied for role ${userRole}`);
-        return res.status(403).json({ error: "Only administrators can delete projects" });
-      }
-
-      // Start a transaction to ensure all related data is deleted
-      const deleteProject = db.transaction((projectId) => {
-        const t1 = db.prepare("DELETE FROM project_team WHERE project_id = ?").run(projectId);
-        const t2 = db.prepare("DELETE FROM milestones WHERE project_id = ?").run(projectId);
-        const t3 = db.prepare("DELETE FROM specifications WHERE project_id = ?").run(projectId);
-        const t4 = db.prepare("DELETE FROM project_cotraitants WHERE project_id = ?").run(projectId);
-        const t5 = db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
-        console.log(`Deleted: ${t1.changes} team links, ${t2.changes} milestones, ${t3.changes} specs, ${t4.changes} cotraitants, ${t5.changes} projects`);
-        return t5;
-      });
-
-      const result = deleteProject(id);
-      
-      if (result.changes === 0) {
-        console.log(`Project ${id} not found`);
-        return res.status(404).json({ error: "Project not found" });
-      }
-      console.log(`Project ${id} deleted successfully`);
+      if (userRole !== 'admin') return res.status(403).json({ error: "Only administrators can delete projects" });
+      await Promise.all([
+        supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
+        supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
+        supabaseAdmin.from('specifications').delete().eq('project_id', id).eq('tenant_id', tenantId),
+        supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId),
+      ]);
+      const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting project:", error);
@@ -2222,134 +1910,108 @@ async function startServer() {
     }
   });
 
-  app.get("/api/project_categories", (req, res) => {
+  app.get("/api/project_categories", async (req: any, res: any) => {
     try {
-      const categories = db.prepare("SELECT * FROM project_categories ORDER BY name").all();
-      res.json(categories);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch project categories" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('project_categories').select('*').eq('tenant_id', tenantId).order('name');
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch project categories" }); }
   });
 
-  app.post("/api/project_categories", (req, res) => {
+  app.post("/api/project_categories", async (req: any, res: any) => {
     try {
-      const { id, name } = req.body;
-      db.prepare("INSERT INTO project_categories (id, name) VALUES (?, ?)").run(id, name);
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, name } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('project_categories').insert({ id, tenant_id: tenantId, name });
+      if (error) throw error;
       res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create project category" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create project category" }); }
   });
 
-  app.delete("/api/project_categories/:id", (req, res) => {
+  app.delete("/api/project_categories/:id", async (req: any, res: any) => {
     try {
+      const tenantId2 = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM project_categories WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('project_categories').delete().eq('id', id).eq('tenant_id', tenantId2);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete project category" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete project category" }); }
   });
 
-  app.get("/api/tasks", (req, res) => {
+  app.get("/api/tasks", async (req: any, res: any) => {
     try {
-      const tasks = db.prepare("SELECT * FROM tasks").all();
-      const tasksWithParsedDeps = tasks.map((task: any) => {
-        let dependencies = [];
-        try {
-          dependencies = task.dependencies ? JSON.parse(task.dependencies) : [];
-        } catch (e) {
-          console.error(`Failed to parse dependencies for task ${task.id}:`, task.dependencies);
-        }
-        return {
-          ...task,
-          dependencies
-        };
-      });
-      res.json(tasksWithParsedDeps);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch tasks" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('tasks').select('*').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tasks" }); }
   });
 
-  app.post("/api/tasks", (req, res) => {
+  app.post("/api/tasks", async (req: any, res: any) => {
     try {
-      const { id, project_id, title, start_date, end_date, progress, dependencies } = req.body;
-      db.prepare("INSERT INTO tasks (id, project_id, title, start_date, end_date, progress, dependencies) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(id, project_id, title, start_date, end_date, progress || 0, JSON.stringify(dependencies || []));
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, title, start_date, end_date, progress, dependencies } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('tasks').insert({ id, tenant_id: tenantId, project_id, title, start_date, end_date, progress: progress || 0, dependencies: dependencies || [] });
+      if (error) throw error;
       res.status(201).json({ id });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create task" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create task" }); }
   });
 
-  app.put("/api/tasks/:id", (req, res) => {
+  app.put("/api/tasks/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, start_date, end_date, progress, dependencies } = req.body;
-      db.prepare("UPDATE tasks SET title = ?, start_date = ?, end_date = ?, progress = ?, dependencies = ? WHERE id = ?")
-        .run(title, start_date, end_date, progress, JSON.stringify(dependencies || []), id);
+      const { error } = await supabaseAdmin.from('tasks').update({ title, start_date, end_date, progress, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to update task" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update task" }); }
   });
 
-  app.delete("/api/tasks/:id", (req, res) => {
+  app.delete("/api/tasks/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('tasks').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete task" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete task" }); }
   });
 
-  app.get("/api/team", (req, res) => {
+  app.get("/api/team", async (req: any, res: any) => {
     try {
-      const team = db.prepare("SELECT id, name, email, role, system_role, avatar FROM team_members").all();
-      res.json(team);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch team" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch team" }); }
   });
 
-  app.post("/api/team", async (req, res) => {
+  app.post("/api/team", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { name, email, role, system_role } = req.body;
-      if (!name || !email) {
-        return res.status(400).json({ error: "Name and email are required" });
-      }
-
-      // Check if user already exists
-      const existing = db.prepare("SELECT * FROM team_members WHERE email = ?").get(email);
-      if (existing) {
-        return res.status(400).json({ error: "User with this email already exists" });
-      }
-
-      const id = `t${Date.now()}`;
-      const password = Math.random().toString(36).slice(-8); // Generate random 8-char password
-      
-      db.prepare("INSERT INTO team_members (id, name, email, role, system_role, password) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id, name, email, role || 'Member', system_role || 'user', password);
-
+      if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
+      // Check if user already exists in this tenant
+      const { data: existing } = await supabaseAdmin.from('profiles').select('id').eq('email', email).eq('tenant_id', tenantId).maybeSingle();
+      if (existing) return res.status(400).json({ error: "User with this email already exists" });
+      const password = Math.random().toString(36).slice(-8);
+      // Create Supabase Auth user
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({ email, password, user_metadata: { name }, email_confirm: true });
+      if (authErr || !authData?.user) return res.status(500).json({ error: authErr?.message || "Failed to create auth user" });
+      const id = authData.user.id;
+      await supabaseAdmin.from('profiles').upsert({ id, tenant_id: tenantId, name, email, role: role || 'Member', system_role: system_role || 'user' });
       // Send email
       let emailSent = false;
       let emailError = null;
-
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
-      const smtpHost = settings?.smtpHost || process.env.SMTP_HOST;
-      const smtpPort = settings?.smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = settings?.smtpUser || process.env.SMTP_USER;
-      const smtpPass = settings?.smtpPass || process.env.SMTP_PASS;
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      const smtpHost = (settings as any)?.smtpHost || process.env.SMTP_HOST;
+      const smtpPort = (settings as any)?.smtpPort || process.env.SMTP_PORT || '587';
+      const smtpUser = (settings as any)?.smtpUser || process.env.SMTP_USER;
+      const smtpPass = (settings as any)?.smtpPass || process.env.SMTP_PASS;
 
       console.log(`[Team Creation] Attempting to send email to ${email} using host ${smtpHost}:${smtpPort}`);
 
@@ -2408,849 +2070,365 @@ async function startServer() {
     }
   });
 
-  app.put("/api/team/:id/role", (req, res) => {
+  app.put("/api/team/:id/role", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { role } = req.body;
-      db.prepare("UPDATE team_members SET system_role = ? WHERE id = ?").run(role, id);
+      const { error } = await supabaseAdmin.from('profiles').update({ system_role: role }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error updating user role:", error);
+    } catch (e: any) {
+      console.error("Error updating user role:", e);
       res.status(500).json({ error: "Failed to update role" });
     }
   });
 
-  app.get("/api/tenders", (req, res) => {
+  app.get("/api/tenders", async (req: any, res: any) => {
     try {
-      const tenders = db.prepare(`
-        SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
-        FROM tenders t
-        LEFT JOIN contacts c ON t.mandataire_id = c.id
-      `).all();
-      
-      const tendersWithSpecialties = tenders.map((tender: any) => {
-        const specialties = db.prepare(`
-          SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM tender_specialties ts
-          LEFT JOIN contacts c ON ts.contact_id = c.id
-          WHERE ts.tender_id = ?
-        `).all(tender.id);
-        return { ...tender, specialties_list: specialties };
-      });
-      
-      res.json(tendersWithSpecialties);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch tenders" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json((data || []).map((t: any) => ({ ...t, specialties_list: t.tender_specialties || [] })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tenders" }); }
   });
 
-  app.get("/api/tenders/:id", (req, res) => {
+  app.get("/api/tenders/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const tender = db.prepare(`
-        SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
-        FROM tenders t
-        LEFT JOIN contacts c ON t.mandataire_id = c.id
-        WHERE t.id = ?
-      `).get(id);
-      
-      if (!tender) {
-        return res.status(404).json({ error: "Tender not found" });
-      }
-      
-      const specialties = db.prepare(`
-        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM tender_specialties ts
-        LEFT JOIN contacts c ON ts.contact_id = c.id
-        WHERE ts.tender_id = ?
-      `).all(id);
-      
-      res.json({ ...tender, specialties_list: specialties });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch tender" });
-    }
+      const { data, error } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).eq('tenant_id', tenantId).single();
+      if (error || !data) return res.status(404).json({ error: "Tender not found" });
+      res.json({ ...data, specialties_list: (data as any).tender_specialties || [] });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender" }); }
   });
 
-  app.post("/api/tenders", (req, res) => {
+  app.post("/api/tenders", async (req: any, res: any) => {
     try {
-      const { 
-        title, client, submission_deadline, status, value, notes,
-        mandataire_id, type, surface, construction_cost, honoraires_percent,
-        mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list
-      } = req.body;
-      
-      const id = `t${Date.now()}`;
-      
-      const insertTender = db.transaction(() => {
-        db.prepare(`
-          INSERT INTO tenders (
-            id, title, client, submission_deadline, status, value, notes,
-            mandataire_id, type, surface, construction_cost, honoraires_percent,
-            mandatory_visit, visit_date, withdrawal_deadline, archived
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id, title, client, submission_deadline, status || 'Draft', value || 0, notes || '',
-          mandataire_id || null, type || null, surface || 0, construction_cost || 0, honoraires_percent || 0,
-          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null, archived ? 1 : 0
-        );
-
-        if (specialties_list && Array.isArray(specialties_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO tender_specialties (id, tender_id, specialty_name, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
-          }
-        }
-
-        if (milestones_list && Array.isArray(milestones_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO milestones (id, tender_id, title, due_date, completed)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
-          }
-        }
-      });
-
-      insertTender();
-      
-      // Fetch the created tender with joined data
-      const tender = db.prepare(`
-        SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
-        FROM tenders t
-        LEFT JOIN contacts c ON t.mandataire_id = c.id
-        WHERE t.id = ?
-      `).get(id);
-      
-      const specialties = db.prepare(`
-        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM tender_specialties ts
-        LEFT JOIN contacts c ON ts.contact_id = c.id
-        WHERE ts.tender_id = ?
-      `).all(id);
-      
-      res.status(201).json({ ...tender, specialties_list: specialties });
-    } catch (error: any) {
-      console.error("Error creating tender:", error);
-      res.status(500).json({ error: "Failed to create tender: " + error.message });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list } = req.body;
+      const id = crypto.randomUUID();
+      const { error: te } = await supabaseAdmin.from('tenders').insert({ id, tenant_id: tenantId, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived });
+      if (te) throw te;
+      if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
+      if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
+      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
   });
 
-  app.delete("/api/tenders/:id", (req, res) => {
+  app.delete("/api/tenders/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.transaction(() => {
-        db.prepare("DELETE FROM tender_specialties WHERE tender_id = ?").run(id);
-        db.prepare("DELETE FROM milestones WHERE tender_id = ?").run(id);
-        db.prepare("DELETE FROM tenders WHERE id = ?").run(id);
-      })();
+      await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
+      const { error } = await supabaseAdmin.from('tenders').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete tender" });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender" }); }
   });
 
-  app.put("/api/tenders/:id", (req, res) => {
+  app.put("/api/tenders/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { 
-        title, client, submission_deadline, status, value, notes,
-        mandataire_id, type, surface, construction_cost, honoraires_percent,
-        mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list
-      } = req.body;
-      
-      const updateTender = db.transaction(() => {
-        db.prepare(`
-          UPDATE tenders SET 
-            title = ?, client = ?, submission_deadline = ?, status = ?, value = ?, notes = ?,
-            mandataire_id = ?, type = ?, surface = ?, construction_cost = ?, honoraires_percent = ?,
-            mandatory_visit = ?, visit_date = ?, withdrawal_deadline = ?, archived = ?
-          WHERE id = ?
-        `).run(
-          title, client, submission_deadline, status, value || 0, notes || '',
-          mandataire_id || null, type || null, surface || 0, construction_cost || 0, honoraires_percent || 0,
-          mandatory_visit ? 1 : 0, visit_date || null, withdrawal_deadline || null, archived ? 1 : 0, id
-        );
-
-        // Update specialties
-        db.prepare("DELETE FROM tender_specialties WHERE tender_id = ?").run(id);
-        if (specialties_list && Array.isArray(specialties_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO tender_specialties (id, tender_id, specialty_name, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const spec of specialties_list) {
-            stmt.run(`ts${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
-          }
-        }
-
-        // Update milestones
-        db.prepare("DELETE FROM milestones WHERE tender_id = ?").run(id);
-        if (milestones_list && Array.isArray(milestones_list)) {
-          const stmt = db.prepare(`
-            INSERT INTO milestones (id, tender_id, title, due_date, completed)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const m of milestones_list) {
-            stmt.run(`m${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, m.title, m.due_date, m.completed ? 1 : 0);
-          }
-        }
-      });
-
-      updateTender();
-      
-      const tender = db.prepare(`
-        SELECT t.*, c.first_name || ' ' || c.last_name as mandataire_name 
-        FROM tenders t
-        LEFT JOIN contacts c ON t.mandataire_id = c.id
-        WHERE t.id = ?
-      `).get(id);
-      
-      const specialties = db.prepare(`
-        SELECT ts.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM tender_specialties ts
-        LEFT JOIN contacts c ON ts.contact_id = c.id
-        WHERE ts.tender_id = ?
-      `).all(id);
-      
-      res.json({ ...tender, specialties_list: specialties });
-    } catch (error: any) {
-      console.error("Error updating tender:", error);
-      res.status(500).json({ error: "Failed to update tender: " + error.message });
-    }
+      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list } = req.body;
+      const { error: ue } = await supabaseAdmin.from('tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived }).eq('id', id).eq('tenant_id', tenantId);
+      if (ue) throw ue;
+      await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
+      if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
+      await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
+      if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
+      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
   });
 
-  app.get("/api/milestones", (req, res) => {
+  app.get("/api/milestones", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id, tender_id, proposal_id } = req.query;
-      let milestones;
-      if (project_id) {
-        milestones = db.prepare("SELECT * FROM milestones WHERE project_id = ? ORDER BY due_date ASC").all(project_id);
-      } else if (tender_id) {
-        milestones = db.prepare("SELECT * FROM milestones WHERE tender_id = ? ORDER BY due_date ASC").all(tender_id);
-      } else if (proposal_id) {
-        milestones = db.prepare("SELECT * FROM milestones WHERE proposal_id = ? ORDER BY due_date ASC").all(proposal_id);
-      } else {
-        milestones = db.prepare("SELECT * FROM milestones ORDER BY due_date ASC").all();
-      }
-      res.json(milestones);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch milestones" });
-    }
+      const query = supabaseAdmin.from('milestones').select('*').eq('tenant_id', tenantId).order('due_date', { ascending: true });
+      if (project_id) query.eq('project_id', project_id as string);
+      else if (tender_id) query.eq('tender_id', tender_id as string);
+      else if (proposal_id) query.eq('proposal_id', proposal_id as string);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch milestones" }); }
   });
 
-  app.post("/api/milestones", (req, res) => {
+  app.post("/api/milestones", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { project_id, tender_id, proposal_id, title, due_date, completed } = req.body;
-      const id = `m${Date.now()}`;
-      db.prepare(`
-        INSERT INTO milestones (id, project_id, tender_id, proposal_id, title, due_date, completed)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, project_id || null, tender_id || null, proposal_id || null, title, due_date, completed ? 1 : 0);
-      
-      const milestone = db.prepare("SELECT * FROM milestones WHERE id = ?").get(id);
-      res.status(201).json(milestone);
-    } catch (error: any) {
-      console.error("Error creating milestone:", error);
-      res.status(500).json({ error: "Failed to create milestone: " + error.message });
-    }
+      const id = crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create milestone: " + e.message }); }
   });
 
-  app.put("/api/milestones/:id", (req, res) => {
+  app.put("/api/milestones/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, due_date, completed } = req.body;
-      db.prepare(`
-        UPDATE milestones 
-        SET title = ?, due_date = ?, completed = ?
-        WHERE id = ?
-      `).run(title, due_date, completed ? 1 : 0, id);
+      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error updating milestone:", error);
-      res.status(500).json({ error: "Failed to update milestone: " + error.message });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update milestone: " + e.message }); }
   });
 
-  app.delete("/api/milestones/:id", (req, res) => {
+  app.delete("/api/milestones/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM milestones WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('milestones').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error deleting milestone:", error);
-      res.status(500).json({ error: "Failed to delete milestone: " + error.message });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete milestone: " + e.message }); }
   });
 
-  app.get("/api/specifications", (req, res) => {
+  app.get("/api/specifications", async (req: any, res: any) => {
     try {
-      const specs = db.prepare("SELECT * FROM specifications ORDER BY last_updated DESC").all();
-      res.json(specs.map((s: any) => ({ ...s, is_template: !!s.is_template })));
-    } catch (error) {
-      console.error(error);
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('specifications').select('*').eq('tenant_id', tenantId).order('last_updated', { ascending: false });
+      if (error) throw error;
+      res.json((data || []).map((s: any) => ({ ...s, is_template: !!s.is_template })));
+    } catch (e: any) {
+      console.error(e);
       res.status(500).json({ error: "Failed to fetch specifications" });
     }
   });
 
-  app.post("/api/specifications", (req, res) => {
+  app.post("/api/specifications", async (req: any, res: any) => {
     try {
-      const { id, project_id, title, content, is_template } = req.body;
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, title, content, is_template } = req.body;
+      const id = bodyId || crypto.randomUUID();
       const last_updated = new Date().toISOString();
-      db.prepare(`
-        INSERT INTO specifications (id, project_id, title, content, last_updated, is_template)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, project_id, title, content, last_updated, is_template ? 1 : 0);
+      const { error } = await supabaseAdmin.from('specifications').insert({ id, tenant_id: tenantId, project_id, title, content, last_updated, is_template: !!is_template });
+      if (error) throw error;
       res.status(201).json({ id, last_updated });
-    } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to create specification: " + error.message });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create specification: " + e.message }); }
   });
 
-  app.put("/api/specifications/:id", (req, res) => {
+  app.put("/api/specifications/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, content, is_template } = req.body;
       const last_updated = new Date().toISOString();
-      db.prepare(`
-        UPDATE specifications 
-        SET title = ?, content = ?, last_updated = ?, is_template = ?
-        WHERE id = ?
-      `).run(title, content, last_updated, is_template ? 1 : 0, id);
+      const { error } = await supabaseAdmin.from('specifications').update({ title, content, last_updated, is_template: !!is_template }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true, last_updated });
-    } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to update specification: " + error.message });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update specification: " + e.message }); }
   });
 
-  app.delete("/api/specifications/:id", (req, res) => {
+  app.delete("/api/specifications/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM specifications WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('specifications').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to delete specification: " + error.message });
-    }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete specification: " + e.message }); }
   });
 
-  app.get("/api/contacts", (req, res) => {
+  app.get("/api/contacts", async (req: any, res: any) => {
     try {
-      const contacts = db.prepare("SELECT *, first_name || ' ' || last_name as name FROM contacts").all();
-      res.json(contacts);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch contacts" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json((data || []).map((c: any) => ({ ...c, name: `${c.first_name || ''} ${c.last_name || ''}`.trim() })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contacts" }); }
   });
 
-  app.post("/api/contacts", (req, res) => {
+  app.post("/api/contacts", async (req: any, res: any) => {
     console.log("POST /api/contacts hit");
     try {
+      const tenantId = await getTenantId(req.user.id);
       const contact = req.body;
-      console.log("Contact body:", JSON.stringify(contact));
-      const sanitize = (val: any) => val === undefined ? null : val;
-
-      const stmt = db.prepare(`
-        INSERT INTO contacts (
-          id, prefix, first_name, middle_name, last_name, suffix, nickname,
-          company_name, job_title, department,
-          email_work, email_home, email_other, email,
-          phone_mobile, phone_work, market_number, market_amount_base, market_amount_options, market_amount_avenants, phone_home, phone_main, phone_fax_work, phone_fax_home, phone_pager, phone_other, phone,
-          address_work_street, address_work_city, address_work_state, address_work_zip, address_work_country,
-          address_home_street, address_home_city, address_home_state, address_home_zip, address_home_country,
-          address, zip, city, state, country,
-          candidatures, affaires, logo, ca_amount, electronic_signature, contact_references, 
-          tags, category, notes, birthday, website, created_at, created_by, siret, vat_number
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
-      `);
-      
-      stmt.run(
-        sanitize(contact.id), 
-        sanitize(contact.prefix), 
-        sanitize(contact.first_name), 
-        sanitize(contact.middle_name), 
-        sanitize(contact.last_name), 
-        sanitize(contact.suffix), 
-        sanitize(contact.nickname), 
-        sanitize(contact.company_name), 
-        sanitize(contact.job_title), 
-        sanitize(contact.department), 
-        sanitize(contact.email_work), 
-        sanitize(contact.email_home), 
-        sanitize(contact.email_other), 
-        sanitize(contact.email), 
-        sanitize(contact.phone_mobile), 
-        sanitize(contact.phone_work), 
-        sanitize(contact.market_number),
-        sanitize(contact.market_amount_base),
-        sanitize(contact.market_amount_options),
-        sanitize(contact.market_amount_avenants),
-        sanitize(contact.phone_home), 
-        sanitize(contact.phone_main), 
-        sanitize(contact.phone_fax_work), 
-        sanitize(contact.phone_fax_home), 
-        sanitize(contact.phone_pager), 
-        sanitize(contact.phone_other), 
-        sanitize(contact.phone), 
-        sanitize(contact.address_work_street), 
-        sanitize(contact.address_work_city), 
-        sanitize(contact.address_work_state), 
-        sanitize(contact.address_work_zip), 
-        sanitize(contact.address_work_country), 
-        sanitize(contact.address_home_street), 
-        sanitize(contact.address_home_city), 
-        sanitize(contact.address_home_state), 
-        sanitize(contact.address_home_zip), 
-        sanitize(contact.address_home_country), 
-        sanitize(contact.address), 
-        sanitize(contact.zip), 
-        sanitize(contact.city), 
-        sanitize(contact.state), 
-        sanitize(contact.country), 
-        sanitize(contact.candidatures), 
-        sanitize(contact.affaires), 
-        sanitize(contact.logo), 
-        sanitize(contact.ca_amount), 
-        sanitize(contact.electronic_signature), 
-        sanitize(contact.contact_references), 
-        sanitize(contact.tags), 
-        sanitize(contact.category),
-        sanitize(contact.notes),
-        sanitize(contact.birthday),
-        sanitize(contact.website),
-        sanitize(contact.created_at), 
-        sanitize(contact.created_by),
-        sanitize(contact.siret),
-        sanitize(contact.vat_number)
-      );
-      
-      res.status(201).json({ id: contact.id });
-    } catch (error: any) {
-      console.error("Error creating contact:", error.message);
-      res.status(500).json({ error: "Failed to create contact: " + error.message });
+      const id = contact.id || crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('contacts').insert({ ...contact, id, tenant_id: tenantId });
+      if (error) throw error;
+      res.status(201).json({ id });
+    } catch (e: any) {
+      console.error("Error creating contact:", e.message);
+      res.status(500).json({ error: "Failed to create contact: " + e.message });
     }
   });
 
-  app.put("/api/contacts/:id", (req, res) => {
+  app.put("/api/contacts/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const contact = req.body;
-      const sanitize = (val: any) => val === undefined ? null : val;
-
-      const stmt = db.prepare(`
-        UPDATE contacts SET
-          prefix = ?, first_name = ?, middle_name = ?, last_name = ?, suffix = ?, nickname = ?,
-          company_name = ?, job_title = ?, department = ?,
-          email_work = ?, email_home = ?, email_other = ?, email = ?,
-          phone_mobile = ?, phone_work = ?, market_number = ?, market_amount_base = ?, market_amount_options = ?, market_amount_avenants = ?, phone_home = ?, phone_main = ?, phone_fax_work = ?, phone_fax_home = ?, phone_pager = ?, phone_other = ?, phone = ?,
-          address_work_street = ?, address_work_city = ?, address_work_state = ?, address_work_zip = ?, address_work_country = ?,
-          address_home_street = ?, address_home_city = ?, address_home_state = ?, address_home_zip = ?, address_home_country = ?,
-          address = ?, zip = ?, city = ?, state = ?, country = ?,
-          candidatures = ?, affaires = ?, logo = ?, ca_amount = ?, electronic_signature = ?,
-          contact_references = ?, tags = ?, category = ?, notes = ?, birthday = ?, website = ?, siret = ?, vat_number = ?
-        WHERE id = ?
-      `);
-
-      stmt.run(
-        sanitize(contact.prefix),
-        sanitize(contact.first_name),
-        sanitize(contact.middle_name),
-        sanitize(contact.last_name),
-        sanitize(contact.suffix),
-        sanitize(contact.nickname),
-        sanitize(contact.company_name),
-        sanitize(contact.job_title),
-        sanitize(contact.department),
-        sanitize(contact.email_work),
-        sanitize(contact.email_home),
-        sanitize(contact.email_other),
-        sanitize(contact.email),
-        sanitize(contact.phone_mobile),
-        sanitize(contact.phone_work),
-        sanitize(contact.market_number),
-        sanitize(contact.market_amount_base),
-        sanitize(contact.market_amount_options),
-        sanitize(contact.market_amount_avenants),
-        sanitize(contact.phone_home),
-        sanitize(contact.phone_main),
-        sanitize(contact.phone_fax_work),
-        sanitize(contact.phone_fax_home),
-        sanitize(contact.phone_pager),
-        sanitize(contact.phone_other),
-        sanitize(contact.phone),
-        sanitize(contact.address_work_street),
-        sanitize(contact.address_work_city),
-        sanitize(contact.address_work_state),
-        sanitize(contact.address_work_zip),
-        sanitize(contact.address_work_country),
-        sanitize(contact.address_home_street),
-        sanitize(contact.address_home_city),
-        sanitize(contact.address_home_state),
-        sanitize(contact.address_home_zip),
-        sanitize(contact.address_home_country),
-        sanitize(contact.address),
-        sanitize(contact.zip),
-        sanitize(contact.city),
-        sanitize(contact.state),
-        sanitize(contact.country),
-        sanitize(contact.candidatures),
-        sanitize(contact.affaires),
-        sanitize(contact.logo),
-        sanitize(contact.ca_amount),
-        sanitize(contact.electronic_signature),
-        sanitize(contact.contact_references),
-        sanitize(contact.tags),
-        sanitize(contact.category),
-        sanitize(contact.notes),
-        sanitize(contact.birthday),
-        sanitize(contact.website),
-        sanitize(contact.siret),
-        sanitize(contact.vat_number),
-        id
-      );
-      
+      // Remove id and tenant_id from the update payload
+      const { id: _id, tenant_id: _t, ...updateData } = contact;
+      const { error } = await supabaseAdmin.from('contacts').update(updateData).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error updating contact:", error.message);
-      res.status(500).json({ error: "Failed to update contact: " + error.message });
+    } catch (e: any) {
+      console.error("Error updating contact:", e.message);
+      res.status(500).json({ error: "Failed to update contact: " + e.message });
     }
   });
 
-  app.delete("/api/contacts/:id", (req, res) => {
+  app.delete("/api/contacts/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM contacts WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('contacts').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error deleting contact:", error.message);
+    } catch (e: any) {
+      console.error("Error deleting contact:", e.message);
       res.status(500).json({ error: "Failed to delete contact" });
     }
   });
 
-  app.get("/api/contact-categories", (req, res) => {
+  app.get("/api/contact-categories", async (req: any, res: any) => {
     console.log("GET /api/contact-categories called");
     try {
-      const categories = db.prepare("SELECT * FROM contact_categories ORDER BY name").all();
-      res.json(categories);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch contact categories" });
-    }
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('contact_categories').select('*').eq('tenant_id', tenantId).order('name');
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contact categories" }); }
   });
 
-  app.get("/api/proposals", (req, res) => {
+  app.get("/api/proposals", async (req: any, res: any) => {
     try {
-      const proposals = db.prepare(`
-        SELECT p.*, c.first_name || ' ' || c.last_name as client_name 
-        FROM proposals p
-        LEFT JOIN contacts c ON p.client_id = c.id
-        ORDER BY p.created_at DESC
-      `).all();
-      
-      const proposalsWithSpecialties = proposals.map((proposal: any) => {
-        const specialties = db.prepare(`
-          SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-          FROM proposal_specialties ps
-          LEFT JOIN contacts c ON ps.contact_id = c.id
-          WHERE ps.proposal_id = ?
-        `).all(proposal.id);
-        return { ...proposal, specialties_list: specialties };
+      const tenantId = await getTenantId(req.user.id);
+      const { data: proposals, error } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      if (error) throw error;
+      const result = (proposals || []).map((p: any) => {
+        const contact = p.contacts;
+        const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
+        const { contacts: _c, ...rest } = p;
+        return { ...rest, client_name, specialties_list: p.proposal_specialties || [] };
       });
-      
-      res.json(proposalsWithSpecialties);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch proposals" });
-    }
+      res.json(result);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch proposals" }); }
   });
 
-  app.post("/api/proposals", (req, res) => {
+  app.post("/api/proposals", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const p = req.body;
-      const id = `prop${Date.now()}`;
+      const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
-      
-      const insertProposal = db.transaction(() => {
-        const stmt = db.prepare(`
-          INSERT INTO proposals (
-            id, title, client_id, amount, status, description, created_at,
-            reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
-            adresse_client, cp_client, ville_client, telephone, portable, email_client,
-            adresse_terrain, cp_ville_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-            nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
-            categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-            surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-            project_code, project_number, project_status, keywords, notes,
-            site_name, site_description, site_id, site_address_1, site_address_2, site_address_3,
-            site_postbox, site_city, site_state, site_postcode, site_country, site_gross_perimeter, site_gross_area,
-            building_name, building_description, building_id,
-            contact_fullname, contact_prefixtitle, contact_givenname, contact_middlename, contact_familyname,
-            contact_suffixtitle, contact_nameorder, contact_id, contact_role, contact_department,
-            contact_company, contact_companycode, contact_fulladdress, contact_address_1, contact_address_2,
-            contact_address_3, contact_postbox, contact_city, contact_state, contact_postcode,
-            contact_country, contact_email, contact_phone, contact_fax, contact_web,
-            cad_technician_fullname, cad_technician_prefixtitle, cad_technician_givenname, cad_technician_middlename,
-            cad_technician_familyname, cad_technician_suffixtitle, cad_technician_nameorder,
-            client_fullname, client_prefixtitle, client_givenname, client_middlename, client_familyname,
-            client_suffixtitle, client_nameorder, client_company, client_fulladdress, client_address_1,
-            client_address_2, client_address_3, client_postbox, client_city, client_state,
-            client_postcode, client_country, client_email, client_phone, client_fax,
-            ed_report_header, custom_building, custom_architect, custom_client, fee_distribution
-          ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-          )
-        `);
-
-        stmt.run(
-          id, p.title, p.client_id || null, p.amount || 0, p.status || 'Draft', p.description || '', created_at,
-          p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, p.representant, p.qualite,
-          p.adresse_client, p.cp_client, p.ville_client, p.telephone, p.portable, p.email_client,
-          p.adresse_terrain, p.cp_ville_terrain, p.ref_cadastrale, p.zone_plu, p.surface_parcelle,
-          p.nom_etablissement, p.avant_trav, p.apres_trav, p.type_et_cat, p.type_projet,
-          p.categorie_projet, p.surface_plancher, p.surface_plancher_ext, p.surface_erp,
-          p.surface_ert, p.effectif_public, p.effectif_personnel, p.ind, p.date_modification,
-          p.project_code, p.project_number, p.project_status, p.keywords, p.notes,
-          p.site_name, p.site_description, p.site_id, p.site_address_1, p.site_address_2, p.site_address_3,
-          p.site_postbox, p.site_city, p.site_state, p.site_postcode, p.site_country, p.site_gross_perimeter, p.site_gross_area,
-          p.building_name, p.building_description, p.building_id,
-          p.contact_fullname, p.contact_prefixtitle, p.contact_givenname, p.contact_middlename, p.contact_familyname,
-          p.contact_suffixtitle, p.contact_nameorder, p.contact_id || null, p.contact_role, p.contact_department,
-          p.contact_company, p.contact_companycode, p.contact_fulladdress, p.contact_address_1, p.contact_address_2,
-          p.contact_address_3, p.contact_postbox, p.contact_city, p.contact_state, p.contact_postcode,
-          p.contact_country, p.contact_email, p.contact_phone, p.contact_fax, p.contact_web,
-          p.cad_technician_fullname, p.cad_technician_prefixtitle, p.cad_technician_givenname, p.cad_technician_middlename,
-          p.cad_technician_familyname, p.cad_technician_suffixtitle, p.cad_technician_nameorder,
-          p.client_fullname, p.client_prefixtitle, p.client_givenname, p.client_middlename, p.client_familyname,
-          p.client_suffixtitle, p.client_nameorder, p.client_company, p.client_fulladdress, p.client_address_1,
-          p.client_address_2, p.client_address_3, p.client_postbox, p.client_city, p.client_state,
-          p.client_postcode, p.client_country, p.client_email, p.client_phone, p.client_fax,
-          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client, p.fee_distribution
-        );
-
-        if (p.specialties_list && Array.isArray(p.specialties_list)) {
-          const specStmt = db.prepare(`
-            INSERT INTO proposal_specialties (id, proposal_id, specialty_name, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
-          }
-        }
-      });
-
-      insertProposal();
-      
-      const proposal = db.prepare(`
-        SELECT p.*, c.first_name || ' ' || c.last_name as client_name 
-        FROM proposals p
-        LEFT JOIN contacts c ON p.client_id = c.id
-        WHERE p.id = ?
-      `).get(id);
-      
-      const specialties = db.prepare(`
-        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM proposal_specialties ps
-        LEFT JOIN contacts c ON ps.contact_id = c.id
-        WHERE ps.proposal_id = ?
-      `).all(id);
-      
-      res.status(201).json({ ...proposal, specialties_list: specialties });
+      const { specialties_list, ...proposalData } = p;
+      const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
+      if (insErr) throw insErr;
+      if (specialties_list && Array.isArray(specialties_list)) {
+        const specs = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), proposal_id: id, tenant_id: tenantId, specialty_name: spec.specialty_name, contact_id: spec.contact_id || null }));
+        if (specs.length > 0) { const { error: specErr } = await supabaseAdmin.from('proposal_specialties').insert(specs); if (specErr) throw specErr; }
+      }
+      const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).single();
+      const contact = (proposal as any)?.contacts;
+      const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
+      const { contacts: _c, ...rest } = (proposal as any) || {};
+      res.status(201).json({ ...rest, client_name, specialties_list: (proposal as any)?.proposal_specialties || [] });
     } catch (error: any) {
       console.error("Error creating proposal:", error);
       res.status(500).json({ error: "Failed to create proposal: " + error.message });
     }
   });
 
-  app.put("/api/proposals/:id", (req, res) => {
+  app.put("/api/proposals/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const p = req.body;
-      
-      const oldProposal = db.prepare("SELECT * FROM proposals WHERE id = ?").get(id);
-      
-      const updateProposal = db.transaction(() => {
-        const stmt = db.prepare(`
-          UPDATE proposals 
-          SET title = ?, client_id = ?, amount = ?, description = ?, status = ?,
-              reference = ?, projet_detail = ?, is_entreprise = ?, nom_societe = ?, rcs = ?, 
-              representant = ?, qualite = ?, adresse_client = ?, cp_client = ?, ville_client = ?, 
-              telephone = ?, portable = ?, email_client = ?, adresse_terrain = ?, cp_ville_terrain = ?, 
-              ref_cadastrale = ?, zone_plu = ?, surface_parcelle = ?, nom_etablissement = ?, 
-              avant_trav = ?, apres_trav = ?, type_et_cat = ?, type_projet = ?, 
-              categorie_projet = ?, surface_plancher = ?, surface_plancher_ext = ?, 
-              surface_erp = ?, surface_ert = ?, effectif_public = ?, effectif_personnel = ?, 
-              ind = ?, date_modification = ?,
-              project_code = ?, project_number = ?, project_status = ?, keywords = ?, notes = ?,
-              site_name = ?, site_description = ?, site_id = ?, site_address_1 = ?, site_address_2 = ?, site_address_3 = ?,
-              site_postbox = ?, site_city = ?, site_state = ?, site_postcode = ?, site_country = ?, site_gross_perimeter = ?, site_gross_area = ?,
-              building_name = ?, building_description = ?, building_id = ?,
-              contact_fullname = ?, contact_prefixtitle = ?, contact_givenname = ?, contact_middlename = ?, contact_familyname = ?,
-              contact_suffixtitle = ?, contact_nameorder = ?, contact_id = ?, contact_role = ?, contact_department = ?,
-              contact_company = ?, contact_companycode = ?, contact_fulladdress = ?, contact_address_1 = ?, contact_address_2 = ?,
-              contact_address_3 = ?, contact_postbox = ?, contact_city = ?, contact_state = ?, contact_postcode = ?,
-              contact_country = ?, contact_email = ?, contact_phone = ?, contact_fax = ?, contact_web = ?,
-              cad_technician_fullname = ?, cad_technician_prefixtitle = ?, cad_technician_givenname = ?, cad_technician_middlename = ?,
-              cad_technician_familyname = ?, cad_technician_suffixtitle = ?, cad_technician_nameorder = ?,
-              client_fullname = ?, client_prefixtitle = ?, client_givenname = ?, client_middlename = ?, client_familyname = ?,
-              client_suffixtitle = ?, client_nameorder = ?, client_company = ?, client_fulladdress = ?, client_address_1 = ?,
-              client_address_2 = ?, client_address_3 = ?, client_postbox = ?, client_city = ?, client_state = ?,
-              client_postcode = ?, client_country = ?, client_email = ?, client_phone = ?, client_fax = ?,
-              ed_report_header = ?, custom_building = ?, custom_architect = ?, custom_client = ?, fee_distribution = ?
-          WHERE id = ?
-        `);
 
-        stmt.run(
-          p.title, p.client_id || null, p.amount, p.description, p.status,
-          p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, 
-          p.representant, p.qualite, p.adresse_client, p.cp_client, p.ville_client, 
-          p.telephone, p.portable, p.email_client, p.adresse_terrain, p.cp_ville_terrain, 
-          p.ref_cadastrale, p.zone_plu, p.surface_parcelle, p.nom_etablissement, 
-          p.avant_trav, p.apres_trav, p.type_et_cat, p.type_projet, 
-          p.categorie_projet, p.surface_plancher, p.surface_plancher_ext, 
-          p.surface_erp, p.surface_ert, p.effectif_public, p.effectif_personnel, 
-          p.ind, p.date_modification,
-          p.project_code, p.project_number, p.project_status, p.keywords, p.notes,
-          p.site_name, p.site_description, p.site_id, p.site_address_1, p.site_address_2, p.site_address_3,
-          p.site_postbox, p.site_city, p.site_state, p.site_postcode, p.site_country, p.site_gross_perimeter, p.site_gross_area,
-          p.building_name, p.building_description, p.building_id,
-          p.contact_fullname, p.contact_prefixtitle, p.contact_givenname, p.contact_middlename, p.contact_familyname,
-          p.contact_suffixtitle, p.contact_nameorder, p.contact_id || null, p.contact_role, p.contact_department,
-          p.contact_company, p.contact_companycode, p.contact_fulladdress, p.contact_address_1, p.contact_address_2,
-          p.contact_address_3, p.contact_postbox, p.contact_city, p.contact_state, p.contact_postcode,
-          p.contact_country, p.contact_email, p.contact_phone, p.contact_fax, p.contact_web,
-          p.cad_technician_fullname, p.cad_technician_prefixtitle, p.cad_technician_givenname, p.cad_technician_middlename,
-          p.cad_technician_familyname, p.cad_technician_suffixtitle, p.cad_technician_nameorder,
-          p.client_fullname, p.client_prefixtitle, p.client_givenname, p.client_middlename, p.client_familyname,
-          p.client_suffixtitle, p.client_nameorder, p.client_company, p.client_fulladdress, p.client_address_1,
-          p.client_address_2, p.client_address_3, p.client_postbox, p.client_city, p.client_state,
-          p.client_postcode, p.client_country, p.client_email, p.client_phone, p.client_fax,
-          p.ed_report_header, p.custom_building, p.custom_architect, p.custom_client, p.fee_distribution,
-          id
-        );
+      // Fetch old proposal to check status transition
+      const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
-        // Update specialties
-        db.prepare("DELETE FROM proposal_specialties WHERE proposal_id = ?").run(id);
-        if (p.specialties_list && Array.isArray(p.specialties_list)) {
-          const specStmt = db.prepare(`
-            INSERT INTO proposal_specialties (id, proposal_id, specialty_name, contact_id)
-            VALUES (?, ?, ?, ?)
-          `);
-          for (const spec of p.specialties_list) {
-            specStmt.run(`ps${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, spec.specialty_name, spec.contact_id || null);
-          }
+      const { specialties_list, id: _pid, tenant_id: _tid, created_at: _ca, ...updateData } = p;
+      const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
+      if (updErr) throw updErr;
+
+      // Update specialties: delete + reinsert
+      await supabaseAdmin.from('proposal_specialties').delete().eq('proposal_id', id).eq('tenant_id', tenantId);
+      if (specialties_list && Array.isArray(specialties_list) && specialties_list.length > 0) {
+        const specs = specialties_list.map((spec: any) => ({ id: spec.id || crypto.randomUUID(), proposal_id: id, tenant_id: tenantId, specialty_name: spec.specialty_name, contact_id: spec.contact_id || null }));
+        const { error: specErr } = await supabaseAdmin.from('proposal_specialties').insert(specs);
+        if (specErr) throw specErr;
+      }
+
+      // If status changed to Accepted, create a project
+      if (p.status === 'Accepted' && oldProposal?.status !== 'Accepted') {
+        const projectId = crypto.randomUUID();
+        let clientName = 'Unknown Client';
+        if (p.client_id) {
+          const { data: clientData } = await supabaseAdmin.from('contacts').select('first_name, last_name').eq('id', p.client_id).single();
+          if (clientData) clientName = `${clientData.first_name || ''} ${clientData.last_name || ''}`.trim();
         }
-
-        // If status changed to 'Accepted', create a project
-        if (p.status === 'Accepted' && oldProposal.status !== 'Accepted') {
-          const projectId = `p${Date.now()}`;
-          const client = db.prepare("SELECT first_name || ' ' || last_name as name FROM contacts WHERE id = ?").get(p.client_id);
-          
-          db.prepare(`
-            INSERT INTO projects (
-              id, name, client, status, budget, description, start_date, end_date, address,
-              reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite, 
-              adresse_client, cp_client, ville_client, telephone, portable, email_client, 
-              adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle, 
-              nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet, 
-              categorie_projet, surface_plancher, surface_plancher_ext, surface_erp, 
-              surface_ert, effectif_public, effectif_personnel, ind, date_modification
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            projectId, 
-            p.title, 
-            client ? client.name : 'Unknown Client', 
-            'Planning', 
-            p.amount, 
-            p.description,
-            new Date().toISOString().split('T')[0],
-            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Default 30 days
-            p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
-            p.reference, p.projet_detail, p.is_entreprise ? 1 : 0, p.nom_societe, p.rcs, 
-            p.representant, p.qualite, p.adresse_client, p.cp_client, p.ville_client, 
-            p.telephone, p.portable, p.email_client, p.adresse_terrain, p.cp_ville_terrain, 
-            p.ban_id_terrain, p.city_code_terrain, p.ref_cadastrale, p.zone_plu, p.surface_parcelle, 
-            p.nom_etablissement, p.avant_trav, p.apres_trav, p.type_et_cat, p.type_projet, 
-            p.categorie_projet, p.surface_plancher, p.surface_plancher_ext, p.surface_erp, 
-            p.surface_ert, p.effectif_public, p.effectif_personnel, p.ind, p.date_modification
-          );
-
-          // Copy specialties to project cotraitants
-          if (p.specialties_list && Array.isArray(p.specialties_list)) {
-            const cotStmt = db.prepare(`
-              INSERT INTO project_cotraitants (id, project_id, specialty, contact_id)
-              VALUES (?, ?, ?, ?)
-            `);
-            for (const spec of p.specialties_list) {
-              cotStmt.run(`pc${Date.now()}${Math.random().toString(36).substr(2, 5)}`, projectId, spec.specialty_name, spec.contact_id || null);
-            }
-          }
+        const { error: projErr } = await supabaseAdmin.from('projects').insert({
+          id: projectId, tenant_id: tenantId,
+          name: p.title, client: clientName, status: 'Planning', budget: p.amount, description: p.description,
+          start_date: new Date().toISOString().split('T')[0],
+          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          address: p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
+          reference: p.reference, projet_detail: p.projet_detail, is_entreprise: p.is_entreprise,
+          nom_societe: p.nom_societe, rcs: p.rcs, representant: p.representant, qualite: p.qualite,
+          adresse_client: p.adresse_client, cp_client: p.cp_client, ville_client: p.ville_client,
+          telephone: p.telephone, portable: p.portable, email_client: p.email_client,
+          adresse_terrain: p.adresse_terrain, cp_ville_terrain: p.cp_ville_terrain,
+          ban_id_terrain: p.ban_id_terrain, city_code_terrain: p.city_code_terrain,
+          ref_cadastrale: p.ref_cadastrale, zone_plu: p.zone_plu, surface_parcelle: p.surface_parcelle,
+          nom_etablissement: p.nom_etablissement, avant_trav: p.avant_trav, apres_trav: p.apres_trav,
+          type_et_cat: p.type_et_cat, type_projet: p.type_projet, categorie_projet: p.categorie_projet,
+          surface_plancher: p.surface_plancher, surface_plancher_ext: p.surface_plancher_ext,
+          surface_erp: p.surface_erp, surface_ert: p.surface_ert,
+          effectif_public: p.effectif_public, effectif_personnel: p.effectif_personnel,
+          ind: p.ind, date_modification: p.date_modification
+        });
+        if (projErr) throw projErr;
+        // Copy specialties to cotraitants
+        if (specialties_list && Array.isArray(specialties_list) && specialties_list.length > 0) {
+          const cots = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), project_id: projectId, tenant_id: tenantId, specialty: spec.specialty_name, contact_id: spec.contact_id || null }));
+          await supabaseAdmin.from('project_cotraitants').insert(cots);
         }
-      });
+      }
 
-      updateProposal();
-
-      const proposal = db.prepare(`
-        SELECT p.*, c.first_name || ' ' || c.last_name as client_name 
-        FROM proposals p
-        LEFT JOIN contacts c ON p.client_id = c.id
-        WHERE p.id = ?
-      `).get(id);
-      
-      const specialties = db.prepare(`
-        SELECT ps.*, c.first_name || ' ' || c.last_name as contact_name
-        FROM proposal_specialties ps
-        LEFT JOIN contacts c ON ps.contact_id = c.id
-        WHERE ps.proposal_id = ?
-      `).all(id);
-      
-      res.json({ ...proposal, specialties_list: specialties });
+      const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).single();
+      const contact = (proposal as any)?.contacts;
+      const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
+      const { contacts: _c, ...rest } = (proposal as any) || {};
+      res.json({ ...rest, client_name, specialties_list: (proposal as any)?.proposal_specialties || [] });
     } catch (error: any) {
       console.error("Error updating proposal:", error);
       res.status(500).json({ error: "Failed to update proposal: " + error.message });
     }
   });
 
-  app.get("/api/proposals/:id/export", (req, res) => {
-    const proposal = db.prepare("SELECT * FROM proposals WHERE id = ?").get(req.params.id) as any;
-    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
-    
-    const xml = proposalToXml(proposal);
-    res.setHeader("Content-Type", "application/xml");
-    res.setHeader("Content-Disposition", `attachment; filename=proposal_${proposal.id}.xml`);
-    res.send(xml);
+  app.get("/api/proposals/:id/export", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: proposal, error } = await supabaseAdmin.from('proposals').select('*').eq('id', req.params.id).eq('tenant_id', tenantId).single();
+      if (error || !proposal) return res.status(404).json({ error: "Proposal not found" });
+      const xml = proposalToXml(proposal);
+      res.setHeader("Content-Type", "application/xml");
+      res.setHeader("Content-Disposition", `attachment; filename=proposal_${(proposal as any).id}.xml`);
+      res.send(xml);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to export proposal" }); }
   });
 
-  app.post("/api/proposals/import", upload.single("file"), (req, res) => {
+  app.post("/api/proposals/import", upload.single("file"), async (req: any, res: any) => {
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-      
+      const tenantId = await getTenantId(req.user.id);
       const xml = req.file.buffer.toString();
       const proposalData = xmlToProposal(xml);
-      
-      const id = `prop${Date.now()}`;
+      const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      
-      // Basic insert, assuming proposalData has the fields
-      const stmt = db.prepare(`
-        INSERT INTO proposals (id, title, description, created_at, status)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(id, proposalData.title || 'Imported Proposal', proposalData.description || '', created_at, 'Draft');
-      
+      const { error } = await supabaseAdmin.from('proposals').insert({ id, tenant_id: tenantId, title: proposalData.title || 'Imported Proposal', description: proposalData.description || '', created_at, status: 'Draft' });
+      if (error) throw error;
       res.json({ success: true, id });
     } catch (error: any) {
       console.error("Error importing proposal:", error);
@@ -3258,39 +2436,36 @@ async function startServer() {
     }
   });
 
-  app.get("/api/invoices", (req, res) => {
+  app.get("/api/invoices", async (req: any, res: any) => {
     try {
-      const invoices = db.prepare(`
-        SELECT i.*, p.name as project_name 
-        FROM invoices i
-        LEFT JOIN projects p ON i.project_id = p.id
-        ORDER BY i.created_at DESC
-      `).all();
-      
-      const invoicesWithItems = invoices.map((inv: any) => {
-        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(inv.id);
-        return { ...inv, items };
+      const tenantId = await getTenantId(req.user.id);
+      const { data: invoices, error } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      if (error) throw error;
+      const result = (invoices || []).map((inv: any) => {
+        const project_name = inv.projects?.name || null;
+        const { projects: _p, invoice_items, ...rest } = inv;
+        return { ...rest, project_name, items: invoice_items || [] };
       });
-      
-      res.json(invoicesWithItems);
+      res.json(result);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch invoices" });
     }
   });
 
-  app.post("/api/invoices", (req, res) => {
+  app.post("/api/invoices", async (req: any, res: any) => {
     try {
-      const { 
-        project_id, amount, description, status, due_date, 
+      const tenantId = await getTenantId(req.user.id);
+      const {
+        project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
-        items 
+        items
       } = req.body;
-      
-      const id = `inv${Date.now()}`;
+
+      const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      
+
       // Fetch default seller info from settings if not provided
       let finalSellerName = seller_name;
       let finalSellerAddress = seller_address;
@@ -3300,117 +2475,89 @@ async function startServer() {
       let finalSellerBic = seller_bic;
 
       if (!finalSellerName || !finalSellerAddress || !finalSellerSiret) {
-        const settings = db.prepare("SELECT * FROM settings LIMIT 1").get() as any;
+        const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
         if (settings) {
-          finalSellerName = finalSellerName || settings.agencyName;
-          finalSellerAddress = finalSellerAddress || settings.address;
-          finalSellerSiret = finalSellerSiret || settings.siret;
-          finalSellerVatNumber = finalSellerVatNumber || settings.vatNumber;
-          finalSellerIban = finalSellerIban || settings.seller_iban;
-          finalSellerBic = finalSellerBic || settings.seller_bic;
+          finalSellerName = finalSellerName || (settings as any).agencyName;
+          finalSellerAddress = finalSellerAddress || (settings as any).address;
+          finalSellerSiret = finalSellerSiret || (settings as any).siret;
+          finalSellerVatNumber = finalSellerVatNumber || (settings as any).vatNumber;
+          finalSellerIban = finalSellerIban || (settings as any).seller_iban;
+          finalSellerBic = finalSellerBic || (settings as any).seller_bic;
         }
       }
 
-      const insertInvoice = db.transaction(() => {
-        db.prepare(`
-          INSERT INTO invoices (
-            id, invoice_number, project_id, amount, tax_amount, total_amount, 
-            status, due_date, issue_date, description, created_at,
-            seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id, invoice_number || null, project_id, amount || 0, tax_amount || 0, total_amount || 0,
-          status || 'Draft', due_date, issue_date || created_at.split('T')[0], 
-          description || '', created_at,
-          finalSellerName || null, finalSellerAddress || null, finalSellerSiret || null, finalSellerVatNumber || null, finalSellerIban || null, finalSellerBic || null, vat_rate || 20
-        );
-
-        if (items && Array.isArray(items)) {
-          const stmt = db.prepare(`
-            INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, vat_rate)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          for (const item of items) {
-            stmt.run(`ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
-          }
-        }
+      const { error: insErr } = await supabaseAdmin.from('invoices').insert({
+        id, tenant_id: tenantId, invoice_number: invoice_number || null, project_id,
+        amount: amount || 0, tax_amount: tax_amount || 0, total_amount: total_amount || 0,
+        status: status || 'Draft', due_date: due_date || null,
+        issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
+        seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
+        seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
+        seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20
       });
+      if (insErr) throw insErr;
 
-      insertInvoice();
-      
-      const invoice = db.prepare(`
-        SELECT i.*, p.name as project_name 
-        FROM invoices i
-        LEFT JOIN projects p ON i.project_id = p.id
-        WHERE i.id = ?
-      `).get(id);
-      
-      const savedItems = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(id);
-      res.status(201).json({ ...invoice, items: savedItems });
+      if (items && Array.isArray(items) && items.length > 0) {
+        const itemRows = items.map((item: any) => ({ id: crypto.randomUUID(), invoice_id: id, tenant_id: tenantId, description: item.description, quantity: item.quantity, unit_price: item.unit_price, vat_rate: item.vat_rate }));
+        const { error: itemErr } = await supabaseAdmin.from('invoice_items').insert(itemRows);
+        if (itemErr) throw itemErr;
+      }
+
+      const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).single();
+      const project_name = (invoice as any)?.projects?.name || null;
+      const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
+      res.status(201).json({ ...rest, project_name, items: invoice_items || [] });
     } catch (error: any) {
       console.error("Error creating invoice:", error);
       res.status(500).json({ error: "Failed to create invoice: " + error.message });
     }
   });
 
-  app.put("/api/invoices/:id", (req, res) => {
+  app.put("/api/invoices/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { 
+      const {
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         items
       } = req.body;
-      
-      const updateInvoice = db.transaction(() => {
-        db.prepare(`
-          UPDATE invoices 
-          SET amount = ?, description = ?, status = ?, due_date = ?,
-              invoice_number = ?, tax_amount = ?, total_amount = ?, issue_date = ?,
-              seller_name = ?, seller_address = ?, seller_siret = ?, seller_vat_number = ?, seller_iban = ?, seller_bic = ?, vat_rate = ?
-          WHERE id = ?
-        `).run(
-          amount || 0, description || '', status || 'Draft', due_date || null,
-          invoice_number || null, tax_amount || 0, total_amount || 0, issue_date || null,
-          seller_name || null, seller_address || null, seller_siret || null, seller_vat_number || null, seller_iban || null, seller_bic || null, vat_rate || 20,
-          id
-        );
 
-        if (items && Array.isArray(items)) {
-          // Simplified: delete and recreate items
-          db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(id);
-          const stmt = db.prepare(`
-            INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, vat_rate)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          for (const item of items) {
-            stmt.run(item.id || `ii${Date.now()}${Math.random().toString(36).substr(2, 5)}`, id, item.description, item.quantity, item.unit_price, item.vat_rate);
-          }
+      const { error: updErr } = await supabaseAdmin.from('invoices').update({
+        amount: amount || 0, description: description || '', status: status || 'Draft', due_date: due_date || null,
+        invoice_number: invoice_number || null, tax_amount: tax_amount || 0, total_amount: total_amount || 0, issue_date: issue_date || null,
+        seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
+        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (updErr) throw updErr;
+
+      if (items && Array.isArray(items)) {
+        await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id).eq('tenant_id', tenantId);
+        if (items.length > 0) {
+          const itemRows = items.map((item: any) => ({ id: item.id || crypto.randomUUID(), invoice_id: id, tenant_id: tenantId, description: item.description, quantity: item.quantity, unit_price: item.unit_price, vat_rate: item.vat_rate }));
+          const { error: itemErr } = await supabaseAdmin.from('invoice_items').insert(itemRows);
+          if (itemErr) throw itemErr;
         }
-      });
+      }
 
-      updateInvoice();
-      
-      const invoice = db.prepare(`
-        SELECT i.*, p.name as project_name 
-        FROM invoices i
-        LEFT JOIN projects p ON i.project_id = p.id
-        WHERE i.id = ?
-      `).get(id);
-      
-      const savedItems = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(id);
-      res.json({ ...invoice, items: savedItems });
+      const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).single();
+      const project_name = (invoice as any)?.projects?.name || null;
+      const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
+      res.json({ ...rest, project_name, items: invoice_items || [] });
     } catch (error: any) {
       console.error("Error updating invoice:", error);
       res.status(500).json({ error: "Failed to update invoice: " + error.message });
     }
   });
 
-  app.post("/api/contact-categories", (req, res) => {
+  app.post("/api/contact-categories", async (req: any, res: any) => {
     try {
-      const { id, name } = req.body;
-      db.prepare("INSERT INTO contact_categories (id, name) VALUES (?, ?)").run(id, name);
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, name } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('contact_categories').insert({ id, tenant_id: tenantId, name });
+      if (error) throw error;
       res.status(201).json({ id });
     } catch (error) {
       console.error(error);
@@ -3418,10 +2565,12 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/contact-categories/:id", (req, res) => {
+  app.delete("/api/contact-categories/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM contact_categories WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('contact_categories').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (error) {
       console.error(error);
@@ -3916,20 +3065,21 @@ async function startServer() {
     }
   });
 
-  app.post("/api/send-email", async (req, res) => {
+  app.post("/api/send-email", async (req: any, res: any) => {
     try {
       const { to, subject, text, html, attachments, userEmail } = req.body;
-      
-      // Get settings from DB
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
+
+      // Get settings from Supabase
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!settings) {
         return res.status(500).json({ error: "Settings not found" });
       }
 
-      const smtpHost = settings.smtpHost || process.env.SMTP_HOST;
-      const smtpPort = settings.smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = settings.smtpUser || process.env.SMTP_USER;
-      const smtpPass = settings.smtpPass || process.env.SMTP_PASS;
+      const smtpHost = (settings as any).smtpHost || process.env.SMTP_HOST;
+      const smtpPort = (settings as any).smtpPort || process.env.SMTP_PORT || '587';
+      const smtpUser = (settings as any).smtpUser || process.env.SMTP_USER;
+      const smtpPass = (settings as any).smtpPass || process.env.SMTP_PASS;
 
       if (!smtpHost || !smtpUser || !smtpPass) {
         return res.status(500).json({ error: "Configuration SMTP manquante" });
@@ -3945,8 +3095,8 @@ async function startServer() {
         },
       });
 
-      const from = settings.senderOption === 'personal' ? userEmail : settings.email;
-      const cc = settings.senderOption === 'personal' ? settings.email : undefined;
+      const from = (settings as any).senderOption === 'personal' ? userEmail : (settings as any).email;
+      const cc = (settings as any).senderOption === 'personal' ? (settings as any).email : undefined;
 
       await transporter.sendMail({
         from,
@@ -3965,17 +3115,17 @@ async function startServer() {
     }
   });
 
-  app.get("/api/projects/:projectId/reports", (req, res) => {
+  app.get("/api/projects/:projectId/reports", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const reports = db.prepare("SELECT * FROM site_reports WHERE project_id = ? ORDER BY date DESC").all(projectId);
-      const parsedReports = reports.map(report => {
-        let stakeholders = [];
-        try { stakeholders = report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) { console.error("Error parsing stakeholders:", e); }
-        let companies = [];
-        try { companies = report.companies ? JSON.parse(report.companies) : []; } catch (e) { console.error("Error parsing companies:", e); }
-        return { ...report, stakeholders, companies };
-      });
+      const { data: reports, error } = await supabaseAdmin.from('site_reports').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).order('date', { ascending: false });
+      if (error) throw error;
+      const parsedReports = (reports || []).map((report: any) => ({
+        ...report,
+        stakeholders: Array.isArray(report.stakeholders) ? report.stakeholders : (() => { try { return report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) { return []; } })(),
+        companies: Array.isArray(report.companies) ? report.companies : (() => { try { return report.companies ? JSON.parse(report.companies) : []; } catch (e) { return []; } })()
+      }));
       res.json(parsedReports);
     } catch (error) {
       console.error(error);
@@ -3983,111 +3133,110 @@ async function startServer() {
     }
   });
 
-  app.post("/api/projects/:projectId/reports", (req, res) => {
+  app.post("/api/projects/:projectId/reports", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { date, report_number } = req.body;
-      const id = `sr${Date.now()}`;
-      
-      const createReport = db.transaction(() => {
-        db.prepare("INSERT INTO site_reports (id, project_id, date, report_number) VALUES (?, ?, ?, ?)").run(id, projectId, date, report_number);
-        
-        // Copy open tasks from previous report
-        const previousReport = db.prepare("SELECT * FROM site_reports WHERE project_id = ? AND id != ? ORDER BY date DESC LIMIT 1").get(projectId, id);
-        if (previousReport) {
-            const openNotes = db.prepare("SELECT * FROM site_report_notes WHERE report_id = ? AND status = 'open'").all(previousReport.id);
-            const insertNote = db.prepare("INSERT INTO site_report_notes (id, report_id, category, note_number, responsible_company, issue_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            for (const note of openNotes) {
-                insertNote.run(`sn${Date.now()}${Math.random()}`, id, note.category, note.note_number, note.responsible_company, note.issue_date, note.due_date, 'open');
-            }
+      const id = crypto.randomUUID();
+      const { error: insErr } = await supabaseAdmin.from('site_reports').insert({ id, tenant_id: tenantId, project_id: projectId, date, report_number });
+      if (insErr) throw insErr;
+      // Copy open notes from previous report
+      const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
+      if (previousReports && previousReports.length > 0) {
+        const prevId = previousReports[0].id;
+        const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
+        if (openNotes && openNotes.length > 0) {
+          const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
+          await supabaseAdmin.from('site_report_notes').insert(newNotes);
         }
-      });
-      createReport();
+      }
       res.status(201).json({ id });
     } catch (error) {
       res.status(500).json({ error: "Failed to create report" });
     }
   });
 
-  app.get("/api/reports/:reportId/notes", (req, res) => {
+  app.get("/api/reports/:reportId/notes", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
-      const notes = db.prepare("SELECT * FROM site_report_notes WHERE report_id = ?").all(reportId);
+      const { data: notes, error } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', reportId).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json(notes);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch notes" });
     }
   });
 
-  app.post("/api/reports/:reportId/notes", (req, res) => {
+  app.post("/api/reports/:reportId/notes", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { category, note_number, responsible_company, issue_date, due_date } = req.body;
-      const id = `sn${Date.now()}`;
-      db.prepare("INSERT INTO site_report_notes (id, report_id, category, note_number, responsible_company, issue_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, reportId, category, note_number, responsible_company, issue_date, due_date);
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('site_report_notes').insert({ id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date });
+      if (error) throw error;
       res.status(201).json({ id });
     } catch (error) {
       res.status(500).json({ error: "Failed to create note" });
     }
   });
 
-  app.put("/api/reports/:reportId", (req, res) => {
+  app.put("/api/reports/:reportId", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting } = req.body;
-      
-      db.prepare(`
-        UPDATE site_reports 
-        SET pageFormat = ?, stakeholders = ?, companies = ?, meetingNotes = ?, nextMeeting = ?
-        WHERE id = ?
-      `).run(
-        pageFormat || null,
-        JSON.stringify(stakeholders || []),
-        JSON.stringify(companies || []),
-        meetingNotes || null,
-        nextMeeting || null,
-        reportId
-      );
-      
-      const updatedReport = db.prepare("SELECT * FROM site_reports WHERE id = ?").get(reportId);
-      res.json({
-        ...updatedReport,
-        stakeholders: (() => { try { return updatedReport.stakeholders ? JSON.parse(updatedReport.stakeholders) : []; } catch (e) { console.error("Error parsing stakeholders:", e); return []; } })(),
-        companies: (() => { try { return updatedReport.companies ? JSON.parse(updatedReport.companies) : []; } catch (e) { console.error("Error parsing companies:", e); return []; } })()
-      });
+      const { error } = await supabaseAdmin.from('site_reports').update({
+        pageFormat: pageFormat || null,
+        stakeholders: stakeholders || [],
+        companies: companies || [],
+        meetingNotes: meetingNotes || null,
+        nextMeeting: nextMeeting || null
+      }).eq('id', reportId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).single();
+      res.json({ ...(updatedReport as any), stakeholders: (updatedReport as any)?.stakeholders || [], companies: (updatedReport as any)?.companies || [] });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to update report" });
     }
   });
 
-  app.put("/api/notes/:noteId", (req, res) => {
+  app.put("/api/notes/:noteId", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { noteId } = req.params;
       const { category, responsible_company, text, status, due_date, realization_date } = req.body;
-      db.prepare("UPDATE site_report_notes SET category = ?, responsible_company = ?, text = ?, status = ?, due_date = ?, realization_date = ? WHERE id = ?").run(category, responsible_company, text, status, due_date, realization_date, noteId);
+      const { error } = await supabaseAdmin.from('site_report_notes').update({ category, responsible_company, text, status, due_date, realization_date }).eq('id', noteId).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to update note" });
     }
   });
 
-  app.delete("/api/notes/:noteId", (req, res) => {
+  app.delete("/api/notes/:noteId", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { noteId } = req.params;
-      db.prepare("DELETE FROM site_report_notes WHERE id = ?").run(noteId);
+      const { error } = await supabaseAdmin.from('site_report_notes').delete().eq('id', noteId).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete note" });
     }
   });
 
-  app.get("/api/projects/:projectId/cctp", (req, res) => {
+  app.get("/api/projects/:projectId/cctp", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const cctp = db.prepare("SELECT * FROM cctps WHERE project_id = ?").get(projectId) as any;
+      const { data: cctp, error } = await supabaseAdmin.from('cctps').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
+      if (error && error.code !== 'PGRST116') throw error;
       if (cctp) {
-        res.json(JSON.parse(cctp.data));
+        res.json(typeof (cctp as any).data === 'string' ? JSON.parse((cctp as any).data) : (cctp as any).data);
       } else {
         res.status(404).json({ error: "CCTP not found" });
       }
@@ -4096,18 +3245,18 @@ async function startServer() {
     }
   });
 
-  app.post("/api/projects/:projectId/cctp", (req, res) => {
+  app.post("/api/projects/:projectId/cctp", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const data = req.body;
-      const id = data.id === 'new' ? `cctp${Date.now()}` : data.id;
+      const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
       data.id = id;
-      
-      const existing = db.prepare("SELECT id FROM cctps WHERE project_id = ?").get(projectId);
+      const { data: existing } = await supabaseAdmin.from('cctps').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (existing) {
-        db.prepare("UPDATE cctps SET data = ? WHERE project_id = ?").run(JSON.stringify(data), projectId);
+        await supabaseAdmin.from('cctps').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
       } else {
-        db.prepare("INSERT INTO cctps (id, project_id, data) VALUES (?, ?, ?)").run(id, projectId, JSON.stringify(data));
+        await supabaseAdmin.from('cctps').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
       }
       res.json(data);
     } catch (error) {
@@ -4115,12 +3264,14 @@ async function startServer() {
     }
   });
 
-  app.get("/api/projects/:projectId/dpgf", (req, res) => {
+  app.get("/api/projects/:projectId/dpgf", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const dpgf = db.prepare("SELECT * FROM dpgfs WHERE project_id = ?").get(projectId) as any;
+      const { data: dpgf, error } = await supabaseAdmin.from('dpgfs').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
+      if (error && error.code !== 'PGRST116') throw error;
       if (dpgf) {
-        res.json(JSON.parse(dpgf.data));
+        res.json(typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data);
       } else {
         res.status(404).json({ error: "DPGF not found" });
       }
@@ -4129,18 +3280,18 @@ async function startServer() {
     }
   });
 
-  app.post("/api/projects/:projectId/dpgf", (req, res) => {
+  app.post("/api/projects/:projectId/dpgf", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const data = req.body;
-      const id = data.id === 'new' ? `dpgf${Date.now()}` : data.id;
+      const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
       data.id = id;
-      
-      const existing = db.prepare("SELECT id FROM dpgfs WHERE project_id = ?").get(projectId);
+      const { data: existing } = await supabaseAdmin.from('dpgfs').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (existing) {
-        db.prepare("UPDATE dpgfs SET data = ? WHERE project_id = ?").run(JSON.stringify(data), projectId);
+        await supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
       } else {
-        db.prepare("INSERT INTO dpgfs (id, project_id, data) VALUES (?, ?, ?)").run(id, projectId, JSON.stringify(data));
+        await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
       }
       res.json(data);
     } catch (error) {
@@ -4148,49 +3299,35 @@ async function startServer() {
     }
   });
 
-  app.get("/api/settings", (req, res) => {
+  app.get("/api/settings", async (req: any, res: any) => {
     try {
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
-      if (settings) {
-        res.json(settings);
-      } else {
-        res.json({ id: 'general' });
-      }
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      res.json(settings || { tenant_id: tenantId });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
 
-  app.put("/api/settings", (req, res) => {
+  app.put("/api/settings", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const data = req.body;
       const validColumns = ['agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber', 'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl', 'seller_iban', 'seller_bic', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center'];
-      const filteredData = Object.keys(data)
+      const filteredData: any = Object.keys(data)
         .filter(k => validColumns.includes(k))
-        .reduce((obj, key) => {
-          obj[key] = data[key];
-          return obj;
-        }, {} as any);
+        .reduce((obj: any, key) => { obj[key] = data[key]; return obj; }, {});
 
-      const existing = db.prepare("SELECT id FROM settings WHERE id = 'general'").get();
+      if (Object.keys(filteredData).length === 0) {
+        res.json({ success: true });
+        return;
+      }
+
+      const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
       if (existing) {
-        const columns = Object.keys(filteredData);
-        if (columns.length === 0) {
-          res.json({ success: true });
-          return;
-        }
-        const setClause = columns.map(c => `${c} = ?`).join(', ');
-        const values = columns.map(c => filteredData[c]);
-        db.prepare(`UPDATE settings SET ${setClause} WHERE id = 'general'`).run(...values);
+        await supabaseAdmin.from('settings').update(filteredData).eq('tenant_id', tenantId);
       } else {
-        const columns = Object.keys(filteredData);
-        if (!columns.includes('id')) {
-          columns.push('id');
-          filteredData.id = 'general';
-        }
-        const placeholders = columns.map(() => '?').join(', ');
-        const values = columns.map(c => filteredData[c]);
-        db.prepare(`INSERT INTO settings (${columns.join(', ')}) VALUES (${placeholders})`).run(...values);
+        await supabaseAdmin.from('settings').insert({ ...filteredData, tenant_id: tenantId });
       }
       res.json({ success: true });
     } catch (error) {
@@ -4232,32 +3369,38 @@ async function startServer() {
     }
   });
 
-  app.get("/api/projects/:projectId/lots", (req, res) => {
+  app.get("/api/projects/:projectId/lots", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const lots = db.prepare("SELECT * FROM project_lots WHERE project_id = ?").all(projectId);
+      const { data: lots, error } = await supabaseAdmin.from('project_lots').select('*').eq('project_id', projectId).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json(lots);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch lots" });
     }
   });
 
-  app.post("/api/projects/:projectId/lots", (req, res) => {
+  app.post("/api/projects/:projectId/lots", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { id, lot_number, lot_title } = req.body;
-      const lotId = id || `lot${Date.now()}`;
-      db.prepare("INSERT INTO project_lots (id, project_id, lot_number, lot_title) VALUES (?, ?, ?, ?)").run(lotId, projectId, lot_number, lot_title);
+      const { id: bodyId, lot_number, lot_title } = req.body;
+      const lotId = bodyId || crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('project_lots').insert({ id: lotId, tenant_id: tenantId, project_id: projectId, lot_number, lot_title });
+      if (error) throw error;
       res.status(201).json({ id: lotId });
     } catch (error) {
       res.status(500).json({ error: "Failed to create lot" });
     }
   });
 
-  app.delete("/api/lots/:id", (req, res) => {
+  app.delete("/api/lots/:id", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      db.prepare("DELETE FROM project_lots WHERE id = ?").run(id);
+      const { error } = await supabaseAdmin.from('project_lots').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete lot" });
@@ -4315,12 +3458,13 @@ async function startServer() {
   }
 
   // GET /api/zoho/status
-  app.get('/api/zoho/status', (req, res) => {
+  app.get('/api/zoho/status', async (req: any, res: any) => {
     try {
-      const settings = db.prepare("SELECT zoho_client_id, zoho_org_id, zoho_data_center, zoho_refresh_token FROM settings WHERE id = 'general'").get() as any;
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_org_id, zoho_data_center, zoho_refresh_token').eq('tenant_id', tenantId).single();
       res.json({
-        connected: !!(settings?.zoho_refresh_token),
-        has_credentials: !!(settings?.zoho_client_id && settings?.zoho_client_secret && settings?.zoho_org_id),
+        connected: !!(settings as any)?.zoho_refresh_token,
+        has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && (settings as any)?.zoho_org_id),
       });
     } catch (error) {
       res.status(500).json({ error: 'Failed to get Zoho status' });
@@ -4341,22 +3485,25 @@ async function startServer() {
   });
 
   // GET /api/zoho/auth  — redirects browser to Zoho OAuth consent screen
-  app.get('/api/zoho/auth', (req, res) => {
+  app.get('/api/zoho/auth', async (req: any, res: any) => {
     try {
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
-      if (!settings?.zoho_client_id || !settings?.zoho_client_secret || !settings?.zoho_org_id) {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      if (!(settings as any)?.zoho_client_id || !(settings as any)?.zoho_client_secret || !(settings as any)?.zoho_org_id) {
         return res.status(400).send('Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.');
       }
-      const dc = settings.zoho_data_center || 'com';
+      const dc = (settings as any).zoho_data_center || 'com';
       const redirectUri = getZohoRedirectUri(req);
       const scope = 'ZohoInvoice.invoices.READ,ZohoInvoice.invoices.CREATE,ZohoInvoice.invoices.UPDATE,ZohoInvoice.contacts.READ,ZohoInvoice.contacts.CREATE';
       const authUrl = new URL(`https://accounts.zoho.${dc}/oauth/v2/auth`);
-      authUrl.searchParams.set('client_id', settings.zoho_client_id);
+      authUrl.searchParams.set('client_id', (settings as any).zoho_client_id);
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('scope', scope);
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
+      // Store tenantId in state param for callback
+      authUrl.searchParams.set('state', tenantId);
       res.redirect(authUrl.toString());
     } catch (error) {
       res.status(500).send('Erreur lors de la connexion à Zoho');
@@ -4364,19 +3511,19 @@ async function startServer() {
   });
 
   // GET /api/zoho/callback  — Zoho redirects here after user grants access
-  app.get('/api/zoho/callback', async (req, res) => {
-    const { code, error: oauthError } = req.query as any;
-    if (oauthError || !code) {
+  app.get('/api/zoho/callback', async (req: any, res: any) => {
+    const { code, error: oauthError, state: tenantId } = req.query as any;
+    if (oauthError || !code || !tenantId) {
       return res.redirect('/settings?zoho_error=1');
     }
     try {
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
-      const dc = settings.zoho_data_center || 'com';
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      const dc = (settings as any)?.zoho_data_center || 'com';
       const redirectUri = getZohoRedirectUri(req);
       const params = new URLSearchParams({
         code,
-        client_id: settings.zoho_client_id,
-        client_secret: settings.zoho_client_secret,
+        client_id: (settings as any).zoho_client_id,
+        client_secret: (settings as any).zoho_client_secret,
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
       });
@@ -4388,7 +3535,7 @@ async function startServer() {
       const { refresh_token } = resp.data;
       if (!refresh_token) throw new Error('No refresh_token in response');
       zohoAccessTokenCache = null; // invalidate cache
-      db.prepare("UPDATE settings SET zoho_refresh_token = ? WHERE id = 'general'").run(refresh_token);
+      await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_connected=1');
     } catch (error: any) {
       console.error('[Zoho callback error]', error.message);
@@ -4397,10 +3544,11 @@ async function startServer() {
   });
 
   // DELETE /api/zoho/disconnect
-  app.delete('/api/zoho/disconnect', (req, res) => {
+  app.delete('/api/zoho/disconnect', async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       zohoAccessTokenCache = null;
-      db.prepare("UPDATE settings SET zoho_refresh_token = NULL WHERE id = 'general'").run();
+      await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Failed to disconnect Zoho' });
@@ -4408,19 +3556,20 @@ async function startServer() {
   });
 
   // POST /api/zoho/sync  — bidirectional sync
-  app.post('/api/zoho/sync', async (req, res) => {
+  app.post('/api/zoho/sync', async (req: any, res: any) => {
     try {
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 'general'").get() as any;
-      if (!settings?.zoho_refresh_token) {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      if (!(settings as any)?.zoho_refresh_token) {
         return res.status(400).json({ error: 'Zoho non connecté. Veuillez vous connecter dans les Paramètres.' });
       }
 
       const accessToken = await getZohoAccessToken(settings);
-      const dc = settings.zoho_data_center || 'com';
+      const dc = (settings as any).zoho_data_center || 'com';
       const apiBase = `https://invoice.zoho.${dc}/api/v3`;
       const headers = {
         Authorization: `Zoho-oauthtoken ${accessToken}`,
-        'X-com-zoho-invoice-organizationid': settings.zoho_org_id,
+        'X-com-zoho-invoice-organizationid': (settings as any).zoho_org_id,
         'Content-Type': 'application/json',
       };
 
@@ -4429,13 +3578,10 @@ async function startServer() {
       let pulled = 0;
 
       // 1. Push local invoices not yet in Zoho
-      const localInvoices = db.prepare(`
-        SELECT i.*, p.name as project_name
-        FROM invoices i LEFT JOIN projects p ON i.project_id = p.id
-        WHERE i.zoho_invoice_id IS NULL OR i.zoho_invoice_id = ''
-      `).all() as any[];
+      const { data: localInvoices } = await supabaseAdmin.from('invoices').select('*, projects(name)').eq('tenant_id', tenantId).or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
+      const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
 
-      for (const inv of localInvoices) {
+      for (const inv of invoicesArr) {
         try {
           const customerName = inv.project_name || inv.description || 'Client';
           const customerId = await getOrCreateZohoCustomer(apiBase, headers, customerName);
@@ -4465,7 +3611,7 @@ async function startServer() {
           const resp = await axios.post(`${apiBase}/invoices`, payload, { headers });
           const zohoId = resp.data?.invoice?.invoice_id;
           if (zohoId) {
-            db.prepare("UPDATE invoices SET zoho_invoice_id = ? WHERE id = ?").run(zohoId, inv.id);
+            await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', inv.id).eq('tenant_id', tenantId);
             pushed++;
           }
         } catch (err: any) {
@@ -4478,11 +3624,11 @@ async function startServer() {
         const resp = await axios.get(`${apiBase}/invoices`, { headers, params: { per_page: 200 } });
         const zohoInvoices: any[] = resp.data?.invoices || [];
         for (const zohoInv of zohoInvoices) {
-          const local = db.prepare("SELECT id, status FROM invoices WHERE zoho_invoice_id = ?").get(zohoInv.invoice_id) as any;
+          const { data: local } = await supabaseAdmin.from('invoices').select('id, status').eq('zoho_invoice_id', zohoInv.invoice_id).eq('tenant_id', tenantId).single();
           if (local) {
             const newStatus = mapZohoStatus(zohoInv.status);
-            if (newStatus && newStatus !== local.status) {
-              db.prepare("UPDATE invoices SET status = ? WHERE id = ?").run(newStatus, local.id);
+            if (newStatus && newStatus !== (local as any).status) {
+              await supabaseAdmin.from('invoices').update({ status: newStatus }).eq('id', (local as any).id).eq('tenant_id', tenantId);
               pulled++;
             }
           }
