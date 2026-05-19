@@ -1033,7 +1033,7 @@ async function startServer() {
   const AUTH_EXEMPT = ["/api/health"];
 
   app.use("/api", async (req: any, res: any, next: any) => {
-    if (AUTH_EXEMPT.some(p => req.path === p || req.path.startsWith(p + "/"))) {
+    if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
       return next();
     }
     const token = req.headers.authorization?.split(" ")[1];
