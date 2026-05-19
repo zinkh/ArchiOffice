@@ -39,6 +39,7 @@ import Settings from './pages/Settings';
 import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 import Login from './pages/Login';
+import Register from './pages/Register';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -285,6 +286,7 @@ export default function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />

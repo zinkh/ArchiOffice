@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { IconCommand } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
@@ -117,6 +117,13 @@ export default function Login() {
           >
             {loading ? 'Connexion...' : t('login_enter')}
           </button>
+
+          <p className="text-center text-sm text-zinc-500 dark:text-zinc-400 pt-2">
+            Pas encore de compte ?{' '}
+            <Link to="/register" className="text-blue-600 hover:underline font-medium">
+              Créer votre cabinet
+            </Link>
+          </p>
         </form>
       </div>
     </div>

@@ -1030,7 +1030,7 @@ async function startServer() {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  const AUTH_EXEMPT = ["/api/health"];
+  const AUTH_EXEMPT = ["/api/health", "/api/public"];
 
   app.use("/api", async (req: any, res: any, next: any) => {
     if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
@@ -1046,6 +1046,48 @@ async function startServer() {
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", environment: process.env.NODE_ENV });
+  });
+
+  // ---- Inscription SaaS (route publique) ----
+  app.post("/api/public/register", async (req, res) => {
+    const { cabinet_name, slug, admin_name, email, password } = req.body;
+    if (!cabinet_name || !slug || !admin_name || !email || !password) {
+      return res.status(400).json({ error: "Tous les champs sont requis." });
+    }
+    // Vérifier unicité du slug
+    const { data: existing } = await supabaseAdmin
+      .from("tenants")
+      .select("id")
+      .eq("slug", slug)
+      .single();
+    if (existing) {
+      return res.status(409).json({ error: "Cet identifiant est déjà pris." });
+    }
+    // Créer l'utilisateur Supabase Auth
+    const { data: authData, error: signUpError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      user_metadata: { name: admin_name },
+      email_confirm: true,
+    });
+    if (signUpError || !authData?.user) {
+      return res.status(400).json({ error: signUpError?.message || "Erreur création compte." });
+    }
+    // Créer le tenant
+    const { data: tenant, error: tenantError } = await supabaseAdmin
+      .from("tenants")
+      .insert({ slug, name: cabinet_name })
+      .select()
+      .single();
+    if (tenantError || !tenant) {
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+      return res.status(500).json({ error: "Erreur création cabinet." });
+    }
+    // Lier le profil au tenant
+    await supabaseAdmin
+      .from("profiles")
+      .upsert({ id: authData.user.id, tenant_id: tenant.id, name: admin_name, system_role: "admin", role: "admin" });
+    res.json({ success: true, tenant_id: tenant.id });
   });
 
   app.get("/api/rnb-buildings", async (req, res) => {
