@@ -27,7 +27,9 @@ import {
   IconCheck,
   IconX,
   IconMessageDots,
-  IconRefresh
+  IconRefresh,
+  IconSend,
+  IconClipboardList
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
@@ -180,17 +182,24 @@ export default function ProjectDetail() {
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [ordresDeService, setOrdresDeService] = useState<OrdreDeService[]>([]);
-  
+
   const [newOs, setNewOs] = useState({
     title: '',
     os_number: '',
     lot: '',
     entreprise: '',
     maitrise_oeuvre: '',
-    montant: ''
+    montant_devis_presente: ''
   });
-  
+
+  const [newOsMoe, setNewOsMoe] = useState({
+    title: '',
+    os_number: '',
+    montant_devis_presente: ''
+  });
+
   const [isAddingOs, setIsAddingOs] = useState(false);
+  const [isAddingOsMoe, setIsAddingOsMoe] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isAddingInvoice, setIsAddingInvoice] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
@@ -571,23 +580,21 @@ export default function ProjectDetail() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...newOs,
           project_id: id,
+          os_number: newOs.os_number,
+          title: newOs.title,
+          lot: newOs.lot,
+          entreprise: newOs.entreprise,
+          maitrise_oeuvre_adresse: newOs.maitrise_oeuvre,
+          montant_devis_presente: Number(newOs.montant_devis_presente) || null,
           date: new Date().toISOString(),
-          status: 'draft'
+          status: 'draft',
+          type: 'travaux'
         })
       });
       if (res.ok) {
-        const data = await res.json();
-        setOrdresDeService(prev => [...prev, data]);
-        setNewOs({
-          title: '',
-          os_number: '',
-          lot: '',
-          entreprise: '',
-          maitrise_oeuvre: project?.project_manager || '',
-          montant: ''
-        });
+        await fetchOrdresDeService();
+        setNewOs({ title: '', os_number: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '' });
         setIsAddingOs(false);
       }
     } catch (err) {
@@ -595,8 +602,55 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleCreateOsMoe = async () => {
+    if (!id || !newOsMoe.title || !newOsMoe.os_number) return;
+    try {
+      const res = await fetch('/api/ordres_de_service', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: id,
+          os_number: newOsMoe.os_number,
+          title: newOsMoe.title,
+          montant_devis_presente: Number(newOsMoe.montant_devis_presente) || null,
+          date: new Date().toISOString(),
+          status: 'draft',
+          type: 'contrat_moe'
+        })
+      });
+      if (res.ok) {
+        await fetchOrdresDeService();
+        setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '' });
+        setIsAddingOsMoe(false);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateOsStatus = async (osId: string, newStatus: OrdreDeService['status'], montantAccepte?: number) => {
+    try {
+      const os = ordresDeService.find(o => o.id === osId);
+      if (!os) return;
+      const body: Partial<OrdreDeService> = { ...os, status: newStatus };
+      if (montantAccepte !== undefined) body.montant_devis_accepte = montantAccepte;
+      const res = await fetch(`/api/ordres_de_service/${osId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        setOrdresDeService(prev => prev.map(o =>
+          o.id === osId ? { ...o, status: newStatus, ...(montantAccepte !== undefined ? { montant_devis_accepte: montantAccepte } : {}) } : o
+        ));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDeleteOs = async (osId: string) => {
-    if (!confirm('Are you sure you want to delete this OS?')) return;
+    if (!confirm('Supprimer cet ordre de service ?')) return;
     try {
       const res = await fetch(`/api/ordres_de_service/${osId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -605,6 +659,17 @@ export default function ProjectDetail() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const osStatusBadge = (status: OrdreDeService['status']) => {
+    const map: Record<OrdreDeService['status'], { label: string; cls: string }> = {
+      draft:     { label: 'Brouillon',  cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
+      submitted: { label: 'Soumis',     cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+      approved:  { label: 'Approuvé',   cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+      rejected:  { label: 'Rejeté',     cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+    };
+    const { label, cls } = map[status] ?? map.draft;
+    return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
   };
 
   const handleCreateInvoice = async () => {
@@ -1408,128 +1473,391 @@ export default function ProjectDetail() {
                   lots_list={project.lots_list || []} 
                 />
 
-                {/* Ordres de Service List - Manageable */}
+                {/* Ordres de Service Travaux */}
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Ordres de Service</h3>
-                      <button 
-                        onClick={() => setIsAddingOs(!isAddingOs)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                      >
-                        <IconPlus size={14} />
-                        Nouvel OS
-                      </button>
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Ordres de Service Travaux</h3>
+                      {(() => {
+                        const travauxApprouves = ordresDeService
+                          .filter(o => (o.type === 'travaux' || !o.type) && o.status === 'approved')
+                          .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                        if (travauxApprouves !== 0) return (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-0.5 font-semibold">
+                            +{formatCurrency(travauxApprouves)} approuvés sur marchés
+                          </p>
+                        );
+                      })()}
                     </div>
-                    {isAddingOs && (
-                      <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre</label>
-                            <input 
-                              type="text"
-                              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOs.title}
-                              onChange={e => setNewOs({...newOs, title: e.target.value})}
-                              placeholder="ex: Travaux supplémentaires"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Lot</label>
-                            <select 
-                              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOs.lot}
-                              onChange={e => handleLotChange(e.target.value)}
-                            >
-                              <option value="">Sélectionner un lot</option>
-                              {project.lots_list?.map(l => (
-                                <option key={l.id} value={l.lot_number}>{l.lot_number} - {l.lot_title}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Entreprise</label>
-                            <input 
-                              type="text"
-                              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOs.entreprise}
-                              onChange={e => handleEntrepriseChange(e.target.value)}
-                            />
-                          </div>
+                    <button
+                      onClick={() => setIsAddingOs(!isAddingOs)}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                    >
+                      <IconPlus size={14} />
+                      Nouvel OS
+                    </button>
+                  </div>
+                  {isAddingOs && (
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre</label>
+                          <input
+                            type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.title}
+                            onChange={e => setNewOs({...newOs, title: e.target.value})}
+                            placeholder="ex: Travaux supplémentaires"
+                          />
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase">N° OS</label>
-                            <input 
-                              type="text"
-                              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOs.os_number}
-                              onChange={e => setNewOs({...newOs, os_number: e.target.value})}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Montant HT</label>
-                            <input 
-                              type="number"
-                              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOs.montant}
-                              onChange={e => setNewOs({...newOs, montant: e.target.value})}
-                            />
-                          </div>
-                          <div className="flex items-end">
-                            <button 
-                              onClick={handleCreateOs}
-                              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                            >
-                              Créer l'OS
-                            </button>
-                          </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Lot</label>
+                          <select
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.lot}
+                            onChange={e => handleLotChange(e.target.value)}
+                          >
+                            <option value="">Sélectionner un lot</option>
+                            {project.lots_list?.map(l => (
+                              <option key={l.id} value={l.lot_number}>{l.lot_number} - {l.lot_title}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Entreprise</label>
+                          <input
+                            type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.entreprise}
+                            onChange={e => handleEntrepriseChange(e.target.value)}
+                          />
                         </div>
                       </div>
-                    )}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                          <tr>
-                            <th className="px-6 py-3 text-left">N°</th>
-                            <th className="px-6 py-3 text-left">Lot</th>
-                            <th className="px-6 py-3 text-left">Entreprise</th>
-                            <th className="px-6 py-3 text-right">Montant</th>
-                            <th className="px-6 py-3 text-right w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                          {ordresDeService.map((os) => (
-                            <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                              <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">OS {os.os_number}</td>
-                              <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{os.lot}</td>
-                              <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{os.entreprise}</td>
-                              <td className="px-6 py-4 text-right font-bold text-zinc-900 dark:text-white">{formatCurrency(Number(os.montant_marche_ht || 0))}</td>
-                              <td className="px-6 py-4 text-right">
-                                <button 
-                                  onClick={() => handleDeleteOs(os.id)}
-                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                                >
-                                  <IconTrash size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {ordresDeService.length === 0 && (
-                            <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 italic">Aucun ordre de service.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° OS</label>
+                          <input
+                            type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.os_number}
+                            onChange={e => setNewOs({...newOs, os_number: e.target.value})}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Montant présenté HT</label>
+                          <input
+                            type="number"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.montant_devis_presente}
+                            onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            onClick={handleCreateOs}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                          >
+                            Créer l'OS
+                          </button>
+                        </div>
+                      </div>
                     </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3 text-left">N°</th>
+                          <th className="px-4 py-3 text-left">Titre</th>
+                          <th className="px-4 py-3 text-left">Lot / Entreprise</th>
+                          <th className="px-4 py-3 text-right">Présenté HT</th>
+                          <th className="px-4 py-3 text-right">Accepté HT</th>
+                          <th className="px-4 py-3 text-center">Statut</th>
+                          <th className="px-4 py-3 text-center">Actions</th>
+                          <th className="px-4 py-3 w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {ordresDeService.filter(o => o.type === 'travaux' || !o.type).map((os) => (
+                          <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                            <td className="px-4 py-3 font-bold text-zinc-900 dark:text-white whitespace-nowrap">OS {os.os_number}</td>
+                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200">{os.title}</td>
+                            <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400 text-xs">
+                              {os.lot && <span className="font-semibold">{os.lot}</span>}
+                              {os.lot && os.entreprise && ' · '}
+                              {os.entreprise}
+                            </td>
+                            <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
+                              {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white">
+                              {os.status === 'approved'
+                                ? formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                {os.status === 'draft' && (
+                                  <button
+                                    onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
+                                    title="Soumettre"
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"
+                                  >
+                                    <IconSend size={11} /> Soumettre
+                                  </button>
+                                )}
+                                {os.status === 'submitted' && (
+                                  <>
+                                    <button
+                                      onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
+                                      title="Approuver"
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"
+                                    >
+                                      <IconCheck size={11} /> Approuver
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
+                                      title="Rejeter"
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"
+                                    >
+                                      <IconX size={11} /> Rejeter
+                                    </button>
+                                  </>
+                                )}
+                                {os.status === 'rejected' && (
+                                  <button
+                                    onClick={() => handleUpdateOsStatus(os.id, 'draft')}
+                                    title="Remettre en brouillon"
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"
+                                  >
+                                    <IconRefresh size={11} /> Rouvrir
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => handleDeleteOs(os.id)}
+                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
+                          <tr>
+                            <td colSpan={8} className="px-6 py-8 text-center text-zinc-500 italic">Aucun ordre de service travaux.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
+                </div>
 
-                {/* Site Reports - Removed as it is replaced by ConstructionReportModule above */}
+                {/* Avenants Contrat de Maîtrise d'Œuvre */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <IconClipboardList size={16} />
+                        Avenants Contrat MOE
+                      </h3>
+                      {(() => {
+                        const moeApprouves = ordresDeService
+                          .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
+                          .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                        const honorairesInitiaux = Number(project.remuneration) || 0;
+                        if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 font-semibold">
+                            Honoraires révisés : {formatCurrency(honorairesInitiaux + moeApprouves)}
+                            {moeApprouves !== 0 && <span className="text-green-600 dark:text-green-400"> ({moeApprouves >= 0 ? '+' : ''}{formatCurrency(moeApprouves)})</span>}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <button
+                      onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                    >
+                      <IconPlus size={14} />
+                      Nouvel avenant
+                    </button>
+                  </div>
+                  {isAddingOsMoe && (
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Objet de l'avenant</label>
+                          <input
+                            type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.title}
+                            onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
+                            placeholder="ex: Extension de mission OPC"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Avenant</label>
+                          <input
+                            type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.os_number}
+                            onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
+                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact honoraires HT</label>
+                          <input
+                            type="number"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.montant_devis_presente}
+                            onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
+                            placeholder="ex: 3500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-3">
+                        <button
+                          onClick={() => setIsAddingOsMoe(false)}
+                          className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          onClick={handleCreateOsMoe}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                        >
+                          Créer l'avenant
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3 text-left">N°</th>
+                          <th className="px-4 py-3 text-left">Objet</th>
+                          <th className="px-4 py-3 text-right">Honoraires présentés HT</th>
+                          <th className="px-4 py-3 text-right">Honoraires acceptés HT</th>
+                          <th className="px-4 py-3 text-center">Statut</th>
+                          <th className="px-4 py-3 text-center">Actions</th>
+                          <th className="px-4 py-3 w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {ordresDeService.filter(o => o.type === 'contrat_moe').map((os) => (
+                          <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                            <td className="px-4 py-3 font-bold text-zinc-900 dark:text-white whitespace-nowrap">Av. {os.os_number}</td>
+                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200">{os.title}</td>
+                            <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
+                              {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white">
+                              {os.status === 'approved'
+                                ? formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                {os.status === 'draft' && (
+                                  <button
+                                    onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"
+                                  >
+                                    <IconSend size={11} /> Soumettre
+                                  </button>
+                                )}
+                                {os.status === 'submitted' && (
+                                  <>
+                                    <button
+                                      onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"
+                                    >
+                                      <IconCheck size={11} /> Approuver
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"
+                                    >
+                                      <IconX size={11} /> Rejeter
+                                    </button>
+                                  </>
+                                )}
+                                {os.status === 'rejected' && (
+                                  <button
+                                    onClick={() => handleUpdateOsStatus(os.id, 'draft')}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"
+                                  >
+                                    <IconRefresh size={11} /> Rouvrir
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => handleDeleteOs(os.id)}
+                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {ordresDeService.filter(o => o.type === 'contrat_moe').length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-6 py-8 text-center text-zinc-500 italic">Aucun avenant au contrat MOE.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
             {activeTab === 'RDT' && (
               <div className="space-y-8">
                 {/* Financial Summary */}
+                {(() => {
+                  const marchesInitiaux = (project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0);
+                  const avenantsTravauxApprouves = ordresDeService
+                    .filter(o => (o.type === 'travaux' || !o.type) && o.status === 'approved')
+                    .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                  const marchesRevises = marchesInitiaux + avenantsTravauxApprouves;
+                  const honorairesInitiaux = Number(project.remuneration) || 0;
+                  const avenantsHonorairesApprouves = ordresDeService
+                    .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
+                    .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                  const honorairesRevises = honorairesInitiaux + avenantsHonorairesApprouves;
+                  return (
+                    <>
+                      {(avenantsTravauxApprouves !== 0 || avenantsHonorairesApprouves !== 0) && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 flex flex-wrap gap-6 items-center">
+                          <div>
+                            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Marchés révisés</p>
+                            <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(marchesRevises)}</p>
+                            {avenantsTravauxApprouves !== 0 && (
+                              <p className="text-xs text-blue-500">{formatCurrency(marchesInitiaux)} initial {avenantsTravauxApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsTravauxApprouves)} avenants</p>
+                            )}
+                          </div>
+                          {honorairesRevises !== 0 && (
+                            <div>
+                              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Honoraires MOE révisés</p>
+                              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(honorairesRevises)}</p>
+                              {avenantsHonorairesApprouves !== 0 && (
+                                <p className="text-xs text-blue-500">{formatCurrency(honorairesInitiaux)} initial {avenantsHonorairesApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsHonorairesApprouves)} avenants</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Total Marchés</p>

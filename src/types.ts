@@ -156,9 +156,8 @@ export interface OrdreDeService {
   date: string;
   description?: string;
   lot?: string;
-  status: 'draft' | 'issued' | 'signed';
-  
-  // New fields
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  type?: 'travaux' | 'contrat_moe';
   maitrise_oeuvre_adresse?: string;
   entreprise?: string;
   origine_demande?: 'maitrise_ouvrage' | 'maitrise_oeuvre' | 'aleas' | 'autres';

@@ -818,11 +818,12 @@ try {
       'construction_cost', 'complexity_rate', 'base_fee_percent', 'exe_fee_percent', 'comp_fee_percent', 'vat_rate', 'decimal_precision'
     ] },
     { table: 'ordres_de_service', columns: [
-      'march_number', 'lot', 'maitrise_oeuvre_adresse', 'entreprise', 'origine_demande', 
-      'montant_marche_ht', 'objet', 'date_fourniture', 'article_ccap', 'incidences_delais_type', 
-      'incidences_delais_details', 'incidences_couts_type', 'montant_devis_presente', 
+      'march_number', 'lot', 'maitrise_oeuvre_adresse', 'entreprise', 'origine_demande',
+      'montant_marche_ht', 'objet', 'date_fourniture', 'article_ccap', 'incidences_delais_type',
+      'incidences_delais_details', 'incidences_couts_type', 'montant_devis_presente',
       'montant_devis_accepte', 'date_signature'
     ] },
+    { table: 'ordres_de_service', columns: ['type'] },
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
     { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token'] },
@@ -844,6 +845,18 @@ try {
   } catch (e) {
     // Column likely already exists
   }
+
+  // Migrate OS type column with proper default
+  try {
+    db.prepare(`ALTER TABLE ordres_de_service ADD COLUMN type TEXT DEFAULT 'travaux'`).run();
+  } catch (e) {
+    // Column likely already exists
+  }
+  // Backfill type for existing rows
+  db.prepare(`UPDATE ordres_de_service SET type = 'travaux' WHERE type IS NULL`).run();
+  // Migrate legacy statuses to new workflow values
+  db.prepare(`UPDATE ordres_de_service SET status = 'submitted' WHERE status = 'issued'`).run();
+  db.prepare(`UPDATE ordres_de_service SET status = 'approved' WHERE status = 'signed'`).run();
 
   // Seed Data
   db.exec(`
@@ -1355,9 +1368,8 @@ async function startServer() {
 
   app.post("/api/ordres_de_service", (req, res) => {
     try {
-      console.log("Received POST request for OS. req.body:", req.body);
-      const { 
-        project_id, os_number, march_number, title, date, description, lot, status,
+      const {
+        project_id, os_number, march_number, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
@@ -1365,20 +1377,21 @@ async function startServer() {
       const id = `os-${Date.now()}`;
       db.prepare(`
         INSERT INTO ordres_de_service (
-          id, project_id, os_number, march_number, title, date, description, lot, status,
+          id, project_id, os_number, march_number, title, date, description, lot, status, type,
           maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
           date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
           incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, project_id, os_number, march_number, title, date, description, lot, status || 'draft',
+        id, project_id, os_number, march_number, title, date, description, lot,
+        status || 'draft', type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       );
-      console.log("OS created successfully with ID:", id);
-      res.status(201).json({ id });
+      const created = db.prepare("SELECT * FROM ordres_de_service WHERE id = ?").get(id);
+      res.status(201).json(created);
     } catch (error) {
       console.error("Error creating OS:", error);
       res.status(500).json({ error: "Failed to create OS", details: error instanceof Error ? error.message : String(error) });
@@ -1388,21 +1401,21 @@ async function startServer() {
   app.put("/api/ordres_de_service/:id", (req, res) => {
     try {
       const { id } = req.params;
-      const { 
-        os_number, march_number, title, date, description, lot, status,
+      const {
+        os_number, march_number, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       } = req.body;
       db.prepare(`
         UPDATE ordres_de_service
-        SET os_number = ?, march_number = ?, title = ?, date = ?, description = ?, lot = ?, status = ?,
+        SET os_number = ?, march_number = ?, title = ?, date = ?, description = ?, lot = ?, status = ?, type = ?,
             maitrise_oeuvre_adresse = ?, entreprise = ?, origine_demande = ?, montant_marche_ht = ?, objet = ?,
             date_fourniture = ?, article_ccap = ?, incidences_delais_type = ?, incidences_delais_details = ?,
             incidences_couts_type = ?, montant_devis_presente = ?, montant_devis_accepte = ?, date_signature = ?
         WHERE id = ?
       `).run(
-        os_number, march_number, title, date, description, lot, status,
+        os_number, march_number, title, date, description, lot, status, type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature, id
