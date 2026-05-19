@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
@@ -3679,11 +3678,12 @@ async function startServer() {
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
 
-  // Vite middleware for development
+  // Vite middleware for development (dynamic import so vite devDep is not needed in production)
   if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "custom", // Disable Vite's own SPA fallback
+      appType: "custom",
     });
     app.use(vite.middlewares);
 
