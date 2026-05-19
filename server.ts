@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
@@ -1458,27 +1457,6 @@ async function startServer() {
     } catch (e: any) {
       console.error("Error creating OS:", e);
       res.status(500).json({ error: "Failed to create OS", details: e.message });
-      const id = `os-${Date.now()}`;
-      db.prepare(`
-        INSERT INTO ordres_de_service (
-          id, project_id, os_number, march_number, title, date, description, lot, status, type,
-          maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
-          date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-          incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        id, project_id, os_number, march_number, title, date, description, lot,
-        status || 'draft', type || 'travaux',
-        maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
-        date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
-      );
-      const created = db.prepare("SELECT * FROM ordres_de_service WHERE id = ?").get(id);
-      res.status(201).json(created);
-    } catch (error) {
-      console.error("Error creating OS:", error);
-      res.status(500).json({ error: "Failed to create OS", details: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -1494,15 +1472,6 @@ async function startServer() {
       } = req.body;
       const { error } = await supabaseAdmin.from('ordres_de_service').update({
         os_number, march_number, title, date, description, lot, status, type: type || 'travaux',
-      db.prepare(`
-        UPDATE ordres_de_service
-        SET os_number = ?, march_number = ?, title = ?, date = ?, description = ?, lot = ?, status = ?, type = ?,
-            maitrise_oeuvre_adresse = ?, entreprise = ?, origine_demande = ?, montant_marche_ht = ?, objet = ?,
-            date_fourniture = ?, article_ccap = ?, incidences_delais_type = ?, incidences_delais_details = ?,
-            incidences_couts_type = ?, montant_devis_presente = ?, montant_devis_accepte = ?, date_signature = ?
-        WHERE id = ?
-      `).run(
-        os_number, march_number, title, date, description, lot, status, type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
@@ -3679,11 +3648,12 @@ async function startServer() {
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
 
-  // Vite middleware for development
+  // Vite middleware for development (dynamic import so vite devDep is not needed in production)
   if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "custom", // Disable Vite's own SPA fallback
+      appType: "custom",
     });
     app.use(vite.middlewares);
 
