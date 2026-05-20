@@ -3298,11 +3298,26 @@ async function startServer() {
     }
   });
 
+  // camelCase (frontend) ↔ snake_case (Supabase settings table)
+  const toSnake: Record<string, string> = {
+    agencyName: 'agency_name', vatNumber: 'vat_number',
+    senderOption: 'sender_option', defaultEmailTemplate: 'default_email_template',
+    logoUrl: 'logo_url', smtpHost: 'smtp_host', smtpPort: 'smtp_port',
+    smtpUser: 'smtp_user', smtpPass: 'smtp_pass',
+  };
+  const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
+
   app.get("/api/settings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      res.json(settings || { tenant_id: tenantId });
+      if (!settings) { res.json({ tenant_id: tenantId }); return; }
+      // Return camelCase keys expected by the frontend
+      const out: any = {};
+      for (const [k, v] of Object.entries(settings)) {
+        out[toCamel[k] ?? k] = v;
+      }
+      res.json(out);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch settings" });
     }
@@ -3312,26 +3327,30 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const data = req.body;
-      const validColumns = ['agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber', 'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl', 'seller_iban', 'seller_bic', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center'];
-      const filteredData: any = Object.keys(data)
-        .filter(k => validColumns.includes(k))
-        .reduce((obj: any, key) => { obj[key] = data[key]; return obj; }, {});
-
-      if (Object.keys(filteredData).length === 0) {
-        res.json({ success: true });
-        return;
+      // Convert camelCase → snake_case and keep already-snake fields
+      const snakeData: any = {};
+      for (const [k, v] of Object.entries(data)) {
+        const col = toSnake[k] ?? k;
+        snakeData[col] = v;
       }
+      // Only keep valid table columns
+      const validCols = new Set(['agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center']);
+      const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
+
+      if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
 
       const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
       if (existing) {
-        await supabaseAdmin.from('settings').update(filteredData).eq('tenant_id', tenantId);
+        const { error } = await supabaseAdmin.from('settings').update(filteredData).eq('tenant_id', tenantId);
+        if (error) throw error;
       } else {
-        await supabaseAdmin.from('settings').insert({ ...filteredData, tenant_id: tenantId });
+        const { error } = await supabaseAdmin.from('settings').insert({ ...filteredData, tenant_id: tenantId });
+        if (error) throw error;
       }
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating settings:", error);
-      res.status(500).json({ error: "Failed to update settings" });
+      res.status(500).json({ error: "Failed to update settings: " + error.message });
     }
   });
 
