@@ -2265,8 +2265,8 @@ async function startServer() {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const contact = req.body;
-      // Remove id and tenant_id from the update payload
-      const { id: _id, tenant_id: _t, ...updateData } = contact;
+      // Strip computed/non-column fields before sending to Supabase
+      const { id: _id, tenant_id: _t, name: _name, ...updateData } = contact;
       const { error } = await supabaseAdmin.from('contacts').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
