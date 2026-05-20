@@ -33,8 +33,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [headerTitle, setHeaderTitle] = useState('Dashboard');
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setCurrentUser(session?.user ? mapSupabaseUser(session.user) : null);
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        // Stale/invalid refresh token — clear local session so user gets redirected to login
+        supabase.auth.signOut();
+        setCurrentUser(null);
+      } else {
+        setCurrentUser(session?.user ? mapSupabaseUser(session.user) : null);
+      }
       setIsLoading(false);
     });
 

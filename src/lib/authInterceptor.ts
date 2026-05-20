@@ -8,8 +8,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     : (input as Request).url;
 
   if (url.startsWith('/api/')) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) {
+      // Stale refresh token — clear it so the auth state listener can redirect to login
+      supabase.auth.signOut();
+    } else if (session?.access_token) {
       const headers = new Headers(init?.headers);
       if (!headers.has('Authorization')) {
         headers.set('Authorization', `Bearer ${session.access_token}`);
