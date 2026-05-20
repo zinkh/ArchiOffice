@@ -11,9 +11,9 @@ export default defineConfig(({mode}) => {
       outDir: 'dist',
     },
     define: {
-      // Explicit injection so DigitalOcean OS env vars are baked into the bundle
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || ''),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || ''),
+      // Use process.env directly — guaranteed to read DigitalOcean OS env vars at build time
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
     },
     plugins: [react(), tailwindcss()],
     resolve: {
