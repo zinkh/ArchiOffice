@@ -40,6 +40,8 @@ import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfUse from './pages/TermsOfUse';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -287,6 +289,8 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfUse />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />

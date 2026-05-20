@@ -46,7 +46,7 @@ export default function Login() {
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: `${window.location.origin}/`,
       },
     });
 
@@ -125,6 +125,11 @@ export default function Login() {
             </Link>
           </p>
         </form>
+        <p className="text-center text-xs text-zinc-400 dark:text-zinc-600 mt-6">
+          <Link to="/privacy" className="hover:underline">Politique de confidentialité</Link>
+          {' · '}
+          <Link to="/terms" className="hover:underline">Conditions d'utilisation</Link>
+        </p>
       </div>
     </div>
   );

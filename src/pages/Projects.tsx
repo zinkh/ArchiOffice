@@ -825,7 +825,7 @@ export default function Projects() {
                     )}
                     {isEditing ? (
                       <ContactAutocomplete 
-                        contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                        contacts={contacts}
                         value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === editForm?.client)?.id || ''}
                         onChange={id => {
                           const contact = contacts.find(c => c.id === id);
