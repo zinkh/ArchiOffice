@@ -113,8 +113,20 @@ export default function Projects() {
   };
 
   const fetchTemplates = async () => {
-    const data = await db.projectTemplates.toArray();
-    setTemplates(data);
+    // Load from Dexie first
+    const local = await db.projectTemplates.toArray();
+    if (local.length > 0) setTemplates(local);
+    // Sync from API
+    if (navigator.onLine) {
+      try {
+        const data = await fetchJson('/api/project-templates');
+        await db.projectTemplates.clear();
+        await db.projectTemplates.bulkPut(data);
+        setTemplates(data);
+      } catch (err) {
+        console.error('Failed to sync templates:', err);
+      }
+    }
   };
 
   const fetchContacts = async () => {

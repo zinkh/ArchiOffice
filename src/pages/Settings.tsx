@@ -58,8 +58,10 @@ export default function Settings() {
     fetch('/api/settings')
       .then(res => res.json())
       .then(s => {
-        if (s) setSettings(prev => ({ ...prev, ...s }));
-        db.settings.put(s);
+        if (s) {
+          setSettings(prev => ({ ...prev, ...s }));
+          db.settings.put(s).catch(() => {});
+        }
       });
     if (currentUser?.system_role === 'admin') {
       fetch('/api/zoho/status')

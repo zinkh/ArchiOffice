@@ -3,9 +3,9 @@ import { useState, useEffect } from 'react';
 import { IconPlus, IconTrash, IconCalculator, IconCheck, IconAlertTriangle, IconDeviceFloppy, IconFileExport, IconSettings } from '@tabler/icons-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { db } from '../db';
+import { apiFetch } from '../lib/api';
 import { jsPDF } from 'jspdf';
 import { saveAs } from 'file-saver';
-import { useLiveQuery } from 'dexie-react-hooks';
 
 interface Company {
   id: string;
@@ -30,31 +30,67 @@ interface ACTData {
   weights: Record<string, number>;
 }
 
+const defaultData = (projectId: string): ACTData => ({
+  projectId,
+  companies: [],
+  lots: [
+    { id: 'lot1', name: 'Gros Œuvre' },
+    { id: 'lot2', name: 'Menuiserie' },
+  ],
+  scoringCriteria: ['methodology', 'planning', 'resources', 'qse', 'environment'],
+  weights: { methodology: 0.2, planning: 0.2, resources: 0.2, qse: 0.2, environment: 0.2 }
+});
+
 export default function ACT({ projectId }: { projectId: string }) {
   const [activeTab, setActiveTab] = useState<'saisie' | 'comparatif' | 'synthese' | 'configuration'>('saisie');
-  const actData = useLiveQuery(() => db.actData.get(projectId), [projectId]);
-  const [data, setData] = useState<ACTData>({
-    projectId,
-    companies: [],
-    lots: [
-      { id: 'lot1', name: 'Gros Œuvre' },
-      { id: 'lot2', name: 'Menuiserie' },
-    ],
-    scoringCriteria: ['methodology', 'planning', 'resources', 'qse', 'environment'],
-    weights: { methodology: 0.2, planning: 0.2, resources: 0.2, qse: 0.2, environment: 0.2 }
-  });
+  const [data, setData] = useState<ACTData>(defaultData(projectId));
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (actData) {
-      setData(actData);
-    }
-  }, [actData]);
+    const load = async () => {
+      // 1. Load from Dexie (instant)
+      const local = await db.actData.get(projectId);
+      if (local) setData(local);
+      // 2. Sync with API
+      if (navigator.onLine) {
+        try {
+          const remote = await apiFetch<any>(`/api/projects/${projectId}/act`);
+          if (remote) {
+            const mapped: ACTData = {
+              projectId,
+              companies: remote.companies || [],
+              lots: remote.lots || [],
+              scoringCriteria: remote.scoring_criteria || [],
+              weights: remote.weights || {},
+            };
+            setData(mapped);
+            await db.actData.put(mapped);
+          }
+        } catch (err) {
+          console.error('ACT sync failed, using local data', err);
+        }
+      }
+    };
+    load();
+  }, [projectId]);
 
   const saveData = async (newData: ACTData) => {
     setIsSaving(true);
     try {
+      // 1. Save locally first
       await db.actData.put(newData);
+      // 2. Sync to API if online
+      if (navigator.onLine) {
+        await apiFetch(`/api/projects/${projectId}/act`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            companies: newData.companies,
+            lots: newData.lots,
+            scoring_criteria: newData.scoringCriteria,
+            weights: newData.weights,
+          }),
+        });
+      }
     } catch (err) {
       console.error(err);
     } finally {

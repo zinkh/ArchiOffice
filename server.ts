@@ -3668,6 +3668,258 @@ async function startServer() {
 
   // ─── End Zoho Invoice Integration ──────────────────────────────────────────
 
+  // ─── Project Templates ─────────────────────────────────────────────────────
+  app.get("/api/project-templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('project_templates').select('*').eq('tenant_id', tenantId).order('name');
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch project templates" }); }
+  });
+
+  app.post("/api/project-templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, name, description, default_status, default_budget, default_description } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('project_templates').insert({ id, tenant_id: tenantId, name, description, default_status: default_status || 'Planning', default_budget: default_budget || 0, default_description }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create project template: " + e.message }); }
+  });
+
+  app.put("/api/project-templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, description, default_status, default_budget, default_description } = req.body;
+      const { data, error } = await supabaseAdmin.from('project_templates').update({ name, description, default_status, default_budget, default_description }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update project template: " + e.message }); }
+  });
+
+  app.delete("/api/project-templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('project_templates').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete project template" }); }
+  });
+
+  // ─── ACT Data (Analyse Comparative des Offres) ────────────────────────────
+  app.get("/api/projects/:projectId/act", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('act_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      res.json(data || null);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch ACT data" }); }
+  });
+
+  app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { companies, lots, scoring_criteria, weights } = req.body;
+      const { data: existing } = await supabaseAdmin.from('act_data').select('id').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      if (existing) {
+        const { data, error } = await supabaseAdmin.from('act_data').update({ companies, lots, scoring_criteria, weights }).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
+        if (error) throw error;
+        res.json(data);
+      } else {
+        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, companies, lots, scoring_criteria, weights }).select().single();
+        if (error) throw error;
+        res.status(201).json(data);
+      }
+    } catch (e: any) { res.status(500).json({ error: "Failed to save ACT data: " + e.message }); }
+  });
+
+  // ─── DET Data (Comptes Rendus de Réunions) ────────────────────────────────
+  app.get("/api/projects/:projectId/det", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('det_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).order('created_at');
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch DET data" }); }
+  });
+
+  app.post("/api/projects/:projectId/det", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, info, observations, intervenants } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('det_data').insert({ id, tenant_id: tenantId, project_id: req.params.projectId, info, observations, intervenants }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create CR: " + e.message }); }
+  });
+
+  app.put("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { info, observations, intervenants } = req.body;
+      const { data, error } = await supabaseAdmin.from('det_data').update({ info, observations, intervenants }).eq('id', req.params.crId).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update CR: " + e.message }); }
+  });
+
+  app.delete("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('det_data').delete().eq('id', req.params.crId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete CR" }); }
+  });
+
+  // ─── DPGF Items CRUD (missing write operations) ───────────────────────────
+  app.post("/api/dpgf", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('dpgf_items').insert({ id, tenant_id: tenantId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF item: " + e.message }); }
+  });
+
+  app.put("/api/dpgf/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      const { data, error } = await supabaseAdmin.from('dpgf_items').update({ lot_number, lot_title, item_number, description, unit, quantity, unit_price }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF item: " + e.message }); }
+  });
+
+  app.delete("/api/dpgf/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('dpgf_items').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF item" }); }
+  });
+
+  // ─── DPGFs CRUD (missing write + update/delete) ───────────────────────────
+  app.post("/api/dpgfs", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, title, version } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id, title, version }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF: " + e.message }); }
+  });
+
+  app.put("/api/dpgfs/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, version } = req.body;
+      const { data, error } = await supabaseAdmin.from('dpgfs').update({ title, version }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF: " + e.message }); }
+  });
+
+  app.delete("/api/dpgfs/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('dpgfs').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF" }); }
+  });
+
+  // ─── Situations CRUD (missing write operations) ───────────────────────────
+  app.post("/api/situations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, numero, date_situation, statut } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('situations').insert({ id, tenant_id: tenantId, project_id, numero, date_situation, statut }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create situation: " + e.message }); }
+  });
+
+  app.put("/api/situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { numero, date_situation, statut } = req.body;
+      const { data, error } = await supabaseAdmin.from('situations').update({ numero, date_situation, statut }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update situation: " + e.message }); }
+  });
+
+  app.delete("/api/situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete situation" }); }
+  });
+
+  // ─── Detail Situations CRUD (missing write operations) ────────────────────
+  app.post("/api/detail-situations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, situation_id, dpgf_item_id, quantite_realisee, montant_situation } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('detail_situations').insert({ id, tenant_id: tenantId, situation_id, dpgf_item_id, quantite_realisee, montant_situation }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create detail situation: " + e.message }); }
+  });
+
+  app.put("/api/detail-situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { quantite_realisee, montant_situation } = req.body;
+      const { data, error } = await supabaseAdmin.from('detail_situations').update({ quantite_realisee, montant_situation }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update detail situation: " + e.message }); }
+  });
+
+  app.delete("/api/detail-situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('detail_situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete detail situation" }); }
+  });
+
+  // ─── CCTPs CRUD (missing update/delete) ──────────────────────────────────
+  app.put("/api/cctps/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, content, lot, is_template } = req.body;
+      const last_updated = new Date().toISOString();
+      const { data, error } = await supabaseAdmin.from('cctps').update({ title, content, lot, is_template: !!is_template, last_updated }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update CCTP: " + e.message }); }
+  });
+
+  app.delete("/api/cctps/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('cctps').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete CCTP" }); }
+  });
+
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
 

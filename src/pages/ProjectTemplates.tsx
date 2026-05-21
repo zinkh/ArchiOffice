@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { IconPlus, IconTrash, IconEdit, IconFileText } from '@tabler/icons-react';
 import { db } from '../db';
+import { apiFetch } from '../lib/api';
 import { ProjectTemplate } from '../types';
 import { useTranslation } from 'react-i18next';
 
@@ -15,13 +16,39 @@ export default function ProjectTemplates() {
   }, []);
 
   const fetchTemplates = async () => {
-    const data = await db.projectTemplates.toArray();
-    setTemplates(data);
+    // 1. Load from Dexie (offline support)
+    const local = await db.projectTemplates.toArray();
+    if (local.length > 0) setTemplates(local);
+    // 2. Sync from API
+    if (navigator.onLine) {
+      try {
+        const data = await apiFetch<ProjectTemplate[]>('/api/project-templates');
+        await db.projectTemplates.clear();
+        await db.projectTemplates.bulkPut(data);
+        setTemplates(data);
+      } catch (err) {
+        console.error('Failed to sync templates:', err);
+      }
+    }
   };
 
   const handleSave = async () => {
     if (!editForm) return;
+    const isNew = !templates.some(t => t.id === editForm.id);
+    // 1. Save locally
     await db.projectTemplates.put(editForm);
+    // 2. Sync to API
+    if (navigator.onLine) {
+      try {
+        if (isNew) {
+          await apiFetch('/api/project-templates', { method: 'POST', body: JSON.stringify(editForm) });
+        } else {
+          await apiFetch(`/api/project-templates/${editForm.id}`, { method: 'PUT', body: JSON.stringify(editForm) });
+        }
+      } catch (err) {
+        console.error('Failed to sync template:', err);
+      }
+    }
     setIsModalOpen(false);
     setEditForm(null);
     fetchTemplates();
@@ -29,7 +56,16 @@ export default function ProjectTemplates() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this template?')) return;
+    // 1. Delete locally
     await db.projectTemplates.delete(id);
+    // 2. Sync to API
+    if (navigator.onLine) {
+      try {
+        await apiFetch(`/api/project-templates/${id}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error('Failed to delete template from API:', err);
+      }
+    }
     fetchTemplates();
   };
 
