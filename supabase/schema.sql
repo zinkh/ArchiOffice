@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   sender_option TEXT,
   default_email_template TEXT,
   phone       TEXT,
+  address     TEXT,
   job_title   TEXT,
+  department  TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

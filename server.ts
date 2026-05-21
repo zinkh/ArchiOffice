@@ -1983,10 +1983,47 @@ async function startServer() {
   app.get("/api/team", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar').eq('tenant_id', tenantId);
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json((data || []).map((p: any) => ({
+        ...p,
+        senderOption: p.sender_option,
+        defaultEmailTemplate: p.default_email_template,
+        jobTitle: p.job_title,
+      })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch team" }); }
+  });
+
+  app.get("/api/me", async (req: any, res: any) => {
+    try {
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      if (!data) return res.json(null);
+      res.json({
+        ...data,
+        senderOption: data.sender_option,
+        defaultEmailTemplate: data.default_email_template,
+        jobTitle: data.job_title,
+      });
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch profile" }); }
+  });
+
+  app.put("/api/team/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar } = req.body;
+      const { data, error } = await supabaseAdmin.from('profiles').update({
+        sender_option: senderOption,
+        default_email_template: defaultEmailTemplate,
+        phone: phone || null,
+        address: address || null,
+        job_title: jobTitle || null,
+        department: department || null,
+        ...(avatar !== undefined ? { avatar: avatar || null } : {}),
+      }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch team" }); }
+    } catch (e: any) { res.status(500).json({ error: "Failed to update profile: " + e.message }); }
   });
 
   app.post("/api/team", async (req: any, res: any) => {

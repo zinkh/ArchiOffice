@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
-import type { User } from '@supabase/supabase-js';
+import type { Session, User } from '@supabase/supabase-js';
 import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
 
@@ -27,19 +27,54 @@ function mapSupabaseUser(user: User): UserProfile {
   };
 }
 
+async function loadFullProfile(session: Session): Promise<UserProfile> {
+  const base = mapSupabaseUser(session.user);
+  try {
+    const res = await fetch('/api/me', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!res.ok) return base;
+    const profile = await res.json();
+    if (!profile) return base;
+    return {
+      ...base,
+      // Custom avatar overrides OAuth avatar if set
+      avatar: profile.avatar || base.avatar,
+      phone: profile.phone ?? undefined,
+      address: profile.address ?? undefined,
+      jobTitle: profile.jobTitle ?? undefined,
+      department: profile.department ?? undefined,
+      senderOption: profile.senderOption ?? undefined,
+      defaultEmailTemplate: profile.defaultEmailTemplate ?? undefined,
+    };
+  } catch {
+    return base;
+  }
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [headerTitle, setHeaderTitle] = useState('Dashboard');
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setCurrentUser(session?.user ? mapSupabaseUser(session.user) : null);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        const user = await loadFullProfile(session);
+        setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+      }
       setIsLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCurrentUser(session?.user ? mapSupabaseUser(session.user) : null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session) {
+        const user = await loadFullProfile(session);
+        setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+      }
     });
 
     return () => subscription.unsubscribe();

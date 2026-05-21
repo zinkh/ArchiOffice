@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
-import { IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX, IconExternalLink, IconPuzzle } from '@tabler/icons-react';
+import { IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX, IconExternalLink, IconPuzzle, IconCamera } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 
@@ -51,8 +51,32 @@ export default function Settings() {
     phone: '',
     address: '',
     jobTitle: '',
-    department: ''
+    department: '',
+    avatar: '',
   });
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = Math.min(img.width, img.height, 256);
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        const sx = (img.width - size) / 2;
+        const sy = (img.height - size) / 2;
+        ctx.drawImage(img, sx, sy, size, size, 0, 0, size, size);
+        setUserSettings(prev => ({ ...prev, avatar: canvas.toDataURL('image/jpeg', 0.85) }));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     fetch('/api/settings')
@@ -80,7 +104,8 @@ export default function Settings() {
         phone: currentUser.phone || '',
         address: currentUser.address || '',
         jobTitle: currentUser.jobTitle || '',
-        department: currentUser.department || ''
+        department: currentUser.department || '',
+        avatar: currentUser.avatar || '',
       });
     }
   }, [currentUser]);
@@ -416,11 +441,50 @@ export default function Settings() {
       )}
       
       <h2 className="text-xl font-bold mt-8">{t('user_information')}</h2>
+
+      {/* Avatar upload */}
+      <div className="flex items-center gap-5 mb-6">
+        <button
+          type="button"
+          onClick={() => avatarInputRef.current?.click()}
+          className="relative group w-20 h-20 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-700 border-2 border-zinc-300 dark:border-zinc-600 hover:border-blue-500 transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <img
+            src={userSettings.avatar || currentUser?.avatar || `https://picsum.photos/seed/${currentUser?.id || 'user'}/80/80`}
+            alt={currentUser?.name}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+            <IconCamera size={18} className="text-white" />
+            <span className="text-white text-[10px] font-medium">Modifier</span>
+          </div>
+        </button>
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleAvatarChange}
+        />
+        <div>
+          <p className="font-medium text-zinc-900 dark:text-white">{currentUser?.name}</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{currentUser?.email}</p>
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            className="mt-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline"
+          >
+            {t('change_photo') || 'Changer la photo de profil'}
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <input className="p-2 border rounded" placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
-        <input className="p-2 border rounded" placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
-        <input className="p-2 border rounded" placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
-        <input className="p-2 border rounded" placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
+        <input className="p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700 dark:text-white" placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
+        <input className="p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700 dark:text-white" placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
+        <input className="p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700 dark:text-white" placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
+        <input className="p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700 dark:text-white" placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
       </div>
 
       <div className="mt-6">

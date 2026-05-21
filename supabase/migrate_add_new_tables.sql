@@ -1,4 +1,9 @@
--- Migration: Add project_templates, act_data, det_data tables
+-- Migration: Add address/department to profiles + project_templates, act_data, det_data tables
+
+-- Add missing columns to profiles
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS department TEXT;
+
 -- Run this in the Supabase SQL editor on an existing database
 
 -- Project Templates
