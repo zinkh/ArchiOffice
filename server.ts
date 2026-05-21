@@ -1027,8 +1027,32 @@ async function startServer() {
       .select('tenant_id')
       .eq('id', userId)
       .single();
-    if (!data?.tenant_id) throw new Error('Tenant not found for user ' + userId);
-    return data.tenant_id;
+
+    if (data?.tenant_id) return data.tenant_id;
+
+    // Auto-provision tenant for OAuth users who have no tenant yet
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (!authData?.user) throw new Error('User not found: ' + userId);
+
+    const email = authData.user.email ?? '';
+    const displayName = authData.user.user_metadata?.name ?? email.split('@')[0] ?? 'Cabinet';
+    const base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 24);
+    const slug = base + '-' + Date.now().toString(36);
+
+    const { data: tenant, error: tenantErr } = await supabaseAdmin
+      .from('tenants')
+      .insert({ slug, name: displayName })
+      .select()
+      .single();
+
+    if (tenantErr || !tenant) throw new Error('Failed to auto-create tenant: ' + (tenantErr?.message ?? 'unknown'));
+
+    await supabaseAdmin
+      .from('profiles')
+      .upsert({ id: userId, tenant_id: tenant.id, name: displayName, system_role: 'admin', role: 'admin' });
+
+    console.log(`[getTenantId] Auto-provisioned tenant ${tenant.id} for user ${userId}`);
+    return tenant.id;
   }
 
   const AUTH_EXEMPT = ["/api/health", "/api/public"];
