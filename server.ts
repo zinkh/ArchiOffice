@@ -146,21 +146,17 @@ async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000)
   }
 }
 
+// Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max
+});
+
+// Keep /tmp/uploads only as a static fallback for legacy URLs already in the DB
 const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({ storage: storage });
 
 dotenv.config();
 
@@ -998,14 +994,22 @@ if (false as any) {
 
 }
 
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+}
+
 async function startServer() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
+  // Serve legacy /uploads/ files (existing DB rows that still point to /tmp paths)
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+  // Ensure Supabase Storage buckets exist at startup
+  await ensureStorageBuckets();
 
   // Debug middleware for API routes
   app.use("/api/*", (req, res, next) => {
@@ -1054,6 +1058,39 @@ async function startServer() {
     console.log(`[getTenantId] Auto-provisioned tenant ${tenant.id} for user ${userId}`);
     return tenant.id;
   }
+
+  // ─── Supabase Storage helpers ───────────────────────────────────────────────
+
+  async function ensureStorageBuckets() {
+    for (const bucket of ['documents']) {
+      const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
+      if (!existing) {
+        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
+        if (error && !error.message.includes('already exists')) {
+          console.error(`[storage] Failed to create bucket "${bucket}":`, error.message);
+        } else {
+          console.log(`[storage] Created bucket "${bucket}"`);
+        }
+      }
+    }
+  }
+
+  async function uploadToStorage(bucket: string, storagePath: string, buffer: Buffer, mimetype: string): Promise<string> {
+    const { error } = await supabaseAdmin.storage
+      .from(bucket)
+      .upload(storagePath, buffer, { contentType: mimetype, upsert: false });
+    if (error) throw new Error(`Storage upload failed: ${error.message}`);
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+    return data.publicUrl;
+  }
+
+  async function deleteFromStorage(bucket: string, fileUrl: string) {
+    const marker = `/object/public/${bucket}/`;
+    const path = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
+    await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
 
   const AUTH_EXEMPT = ["/api/health", "/api/public"];
 
@@ -1676,22 +1713,33 @@ async function startServer() {
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
       const id = crypto.randomUUID();
-      const file_url = `/uploads/${file.filename}`;
+      const storagePath = `${tenantId}/${id}/${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, version: 1, file_url, uploaded_by, uploaded_at, description });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document" }); }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document: " + e.message }); }
   });
 
   app.delete("/api/documents/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      // Fetch all version URLs before deleting DB rows
+      const { data: versions } = await supabaseAdmin.from('document_versions').select('file_url').eq('document_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      // Delete storage files (best-effort, don't fail if storage cleanup fails)
+      if (versions?.length) {
+        for (const v of versions) {
+          if (v.file_url?.includes('/object/public/documents/')) {
+            deleteFromStorage('documents', v.file_url).catch(() => {});
+          }
+        }
+      }
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
@@ -1705,7 +1753,8 @@ async function startServer() {
       if (file) {
         const { data: doc } = await supabaseAdmin.from('documents').select('version').eq('id', id).eq('tenant_id', tenantId).single();
         const newVersion = ((doc as any)?.version || 1) + 1;
-        const file_url = `/uploads/${file.filename}`;
+        const storagePath = `${tenantId}/${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`;
+        const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
         const uploaded_at = new Date().toISOString();
         const { error } = await supabaseAdmin.from('documents').update({ name, category, description, version: newVersion, file_url, uploaded_at }).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
@@ -1715,7 +1764,7 @@ async function startServer() {
         if (error) throw error;
       }
       res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document" }); }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document: " + e.message }); }
   });
 
   app.get("/api/documents/:id/versions", async (req: any, res: any) => {
@@ -2483,7 +2532,7 @@ async function startServer() {
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const tenantId = await getTenantId(req.user.id);
-      const xml = req.file.buffer.toString();
+      const xml = req.file.buffer.toString('utf-8');
       const proposalData = xmlToProposal(xml);
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
