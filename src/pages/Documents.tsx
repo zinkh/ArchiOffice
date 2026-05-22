@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUpload } from '@tabler/icons-react';
+import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUpload, IconCloudOff } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Document, Project } from '../types';
 import { useUser } from '../UserContext';
@@ -24,6 +24,15 @@ export default function Documents() {
   const [editFile, setEditFile] = useState<File | null>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const [docToDelete, setDocToDelete] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
   const refreshDocuments = () => {
     fetch('/api/documents').then(res => res.json()).then(setDocuments);
@@ -130,12 +139,22 @@ export default function Documents() {
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('documents')}</h1>
         <div className="flex flex-col items-end gap-1">
           <p className="text-xs text-zinc-500">{t('documents_subtitle')}</p>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700"
-          >
-            <IconPlus size={18} /> {t('documents_upload_btn')}
-          </button>
+          <div className="flex items-center gap-2">
+            {!isOnline && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 rounded-lg text-xs font-medium">
+                <IconCloudOff size={13} />
+                Upload indisponible hors-ligne
+              </span>
+            )}
+            <button
+              onClick={() => setIsModalOpen(true)}
+              disabled={!isOnline}
+              title={!isOnline ? 'Connexion requise pour uploader des documents' : undefined}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <IconPlus size={18} /> {t('documents_upload_btn')}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -154,6 +173,13 @@ export default function Documents() {
                   <IconX size={20} />
                 </button>
               </div>
+
+              {!isOnline && (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl text-sm text-amber-700 dark:text-amber-400">
+                  <IconCloudOff size={16} className="shrink-0" />
+                  <span>Upload impossible hors-ligne. Reconnectez-vous pour envoyer des documents.</span>
+                </div>
+              )}
               <div className="space-y-3">
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('documents_project_label')}</label>
                 <select className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" onChange={(e) => setSelectedProject(e.target.value)} value={selectedProject}>
@@ -186,9 +212,9 @@ export default function Documents() {
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} 
                 />
               </div>
-              <button 
-                onClick={handleFileUpload} 
-                disabled={isUploading || !selectedFile}
+              <button
+                onClick={handleFileUpload}
+                disabled={isUploading || !selectedFile || !isOnline}
                 className={`w-full py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-blue-500/20 ${
                   isUploading || !selectedFile 
                     ? 'bg-zinc-400 cursor-not-allowed' 
