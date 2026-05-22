@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, name TEXT NOT NULL, category TEXT NOT NULL,
+  phase TEXT,
   version INTEGER DEFAULT 1, file_url TEXT NOT NULL,
   uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT
 );

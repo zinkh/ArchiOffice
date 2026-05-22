@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Project, SiteReport, SiteReportNote, ProjectLot } from '../types';
+import { autoSaveDocument } from '../lib/autoSaveDocument';
 import { 
   IconPlus, 
   IconHome, 
@@ -352,7 +353,16 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`CR_${selectedReport.report_number}_${project.name}.pdf`);
+      const filename = `CR_${selectedReport.report_number}_${project.name}.pdf`;
+      pdf.save(filename);
+      autoSaveDocument({
+        blob: pdf.output('blob'),
+        filename,
+        name: `CR Chantier N°${selectedReport.report_number} - ${project.name}`,
+        projectId: project.id,
+        phase: 'DET',
+        category: 'Report',
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {

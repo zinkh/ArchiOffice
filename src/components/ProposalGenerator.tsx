@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { IconFileExport, IconDownload, IconX, IconPlus, IconTrash, IconEye, IconEdit } from '@tabler/icons-react';
 import jsPDF from 'jspdf';
+import { autoSaveDocument } from '../lib/autoSaveDocument';
 
 interface Stakeholder {
   name: string;
@@ -218,7 +219,15 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
         });
       }
       
-      pdf.save(`Proposition_Honoraires_${data.client.name.replace(/\s+/g, '_') || 'Client'}.pdf`);
+      const filename = `Proposition_Honoraires_${data.client.name.replace(/\s+/g, '_') || 'Client'}.pdf`;
+      pdf.save(filename);
+      autoSaveDocument({
+        blob: pdf.output('blob'),
+        filename,
+        name: `Proposition Honoraires - ${data.client.name || 'Client'}`,
+        phase: 'ESQ',
+        category: 'Contract',
+      });
     } catch (err) {
       console.error('PDF Generation Error:', err);
       alert('Erreur lors de la génération du PDF. Veuillez réessayer.');

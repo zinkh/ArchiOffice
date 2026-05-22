@@ -4,6 +4,9 @@
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS department TEXT;
 
+-- Add phase column to documents for auto-save by phase
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS phase TEXT;
+
 -- Run this in the Supabase SQL editor on an existing database
 
 -- Project Templates
