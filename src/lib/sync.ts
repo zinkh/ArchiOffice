@@ -8,7 +8,7 @@ interface PendingChange {
   timestamp: number;
 }
 
-const STORAGE_KEY = 'archimanager_pending_changes';
+const STORAGE_KEY = 'archioffice_pending_changes';
 
 class SyncManager {
   private pendingChanges: PendingChange[] = [];

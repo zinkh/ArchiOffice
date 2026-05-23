@@ -2150,21 +2150,21 @@ async function startServer() {
           const appUrl = process.env.APP_URL || 'http://localhost:3000';
           
           await transporter.sendMail({
-            from: `"ArchiManager" <${smtpUser}>`,
+            from: `"ArchiOffice" <${smtpUser}>`,
             to: email,
-            subject: "Your ArchiManager Credentials",
+            subject: "Your ArchiOffice Credentials",
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-                <h2 style="color: #2563eb;">Welcome to ArchiManager</h2>
+                <h2 style="color: #2563eb;">Welcome to ArchiOffice</h2>
                 <p>Hello ${name},</p>
-                <p>An account has been created for you on ArchiManager. Here are your credentials to access the application:</p>
+                <p>An account has been created for you on ArchiOffice. Here are your credentials to access the application:</p>
                 <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
                   <p style="margin: 0;"><strong>Login URL:</strong> <a href="${appUrl}">${appUrl}</a></p>
                   <p style="margin: 10px 0 0 0;"><strong>Email:</strong> ${email}</p>
                   <p style="margin: 5px 0 0 0;"><strong>Temporary Password:</strong> ${password}</p>
                 </div>
                 <p>Please change your password after your first login.</p>
-                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiManager Team</p>
+                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiOffice Team</p>
               </div>
             `
           });
@@ -3498,11 +3498,11 @@ async function startServer() {
       });
 
       await transporter.sendMail({
-        from: `"ArchiManager Test" <${smtpUser}>`,
+        from: `"ArchiOffice Test" <${smtpUser}>`,
         to: smtpUser,
-        subject: "ArchiManager SMTP Test",
-        text: "This is a test email from ArchiManager to verify your SMTP configuration.",
-        html: "<b>This is a test email from ArchiManager to verify your SMTP configuration.</b>"
+        subject: "ArchiOffice SMTP Test",
+        text: "This is a test email from ArchiOffice to verify your SMTP configuration.",
+        html: "<b>This is a test email from ArchiOffice to verify your SMTP configuration.</b>"
       });
 
       res.json({ success: true });

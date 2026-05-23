@@ -6,7 +6,7 @@ const resources = {
   en: {
     translation: {
       // Core / Nav
-      "app_name": "ArchiManager",
+      "app_name": "ArchiOffice",
       "dashboard": "Dashboard",
       "projects": "Projects",
       "references": "References",
@@ -126,12 +126,12 @@ const resources = {
       "sync_online": "Online (Local)",
       "account_settings": "Account Settings",
       "switch_user_demo": "Switch User (Demo)",
-      "footer_rights": "© 2026 ArchiManager. All rights reserved.",
+      "footer_rights": "© 2026 ArchiOffice. All rights reserved.",
       "footer_privacy": "Privacy Policy",
       "footer_terms": "Terms of Service",
 
       // Login
-      "login_welcome": "Welcome to ArchiManager",
+      "login_welcome": "Welcome to ArchiOffice",
       "login_enter": "Enter Application",
       "login_local_info": "This is a local-first application. Your data is stored in your browser.",
 
@@ -525,7 +525,7 @@ const resources = {
   fr: {
     translation: {
       // Core / Nav
-      "app_name": "ArchiManager",
+      "app_name": "ArchiOffice",
       "dashboard": "Tableau de bord",
       "projects": "Projets",
       "references": "Références",
@@ -645,12 +645,12 @@ const resources = {
       "sync_online": "En ligne (Local)",
       "account_settings": "Paramètres du compte",
       "switch_user_demo": "Changer d'utilisateur (Demo)",
-      "footer_rights": "© 2026 ArchiManager. Tous droits réservés.",
+      "footer_rights": "© 2026 ArchiOffice. Tous droits réservés.",
       "footer_privacy": "Politique de confidentialité",
       "footer_terms": "Conditions d'utilisation",
 
       // Login
-      "login_welcome": "Bienvenue sur ArchiManager",
+      "login_welcome": "Bienvenue sur ArchiOffice",
       "login_enter": "Accéder à l'application",
       "login_local_info": "Cette application fonctionne hors ligne. Vos données sont stockées dans votre navigateur.",
 
