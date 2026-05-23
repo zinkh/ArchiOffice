@@ -1381,7 +1381,7 @@ async function startServer() {
           
           if (relResponse.ok) {
             const relData = await relResponse.json();
-            const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+            const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
             
             if (ids.length > 0) {
               // Step 2: Fetch full details for these specific building IDs
@@ -1430,7 +1430,7 @@ async function startServer() {
               
               if (relResponse.ok) {
                 const relData = await relResponse.json();
-                const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+                const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
                 
                 if (ids.length > 0) {
                   const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;

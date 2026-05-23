@@ -377,7 +377,7 @@ export default function ProjectDetail() {
         const text = await res.text();
         try {
           const data = JSON.parse(text);
-          setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
+          if (Array.isArray(data)) setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
         } catch (e) {
           console.error("Failed to parse milestones JSON:", text);
         }
