@@ -58,8 +58,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [headerTitle, setHeaderTitle] = useState('Dashboard');
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+      if (error) {
+        // Stale/invalid refresh token — clear local session so user gets redirected to login
+        supabase.auth.signOut();
+        setCurrentUser(null);
+      } else if (session) {
         const user = await loadFullProfile(session);
         setCurrentUser(user);
       } else {
