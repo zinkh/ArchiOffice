@@ -80,20 +80,21 @@ export default function Settings() {
 
   useEffect(() => {
     fetch('/api/settings')
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
       .then(s => {
-        if (s) {
+        if (s && !s.error) {
           setSettings(prev => ({ ...prev, ...s }));
           db.settings.put(s).catch(() => {});
         }
-      });
+      })
+      .catch(() => {});
     if (currentUser?.system_role === 'admin') {
       fetch('/api/zoho/status')
-        .then(res => res.json())
+        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
         .then(s => setZohoStatus(s))
         .catch(() => {});
       fetch('/api/zoho/callback-url')
-        .then(res => res.json())
+        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
         .then(d => setZohoCallbackUrl(d.url))
         .catch(() => {});
     }

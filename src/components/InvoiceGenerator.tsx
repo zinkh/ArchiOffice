@@ -36,9 +36,9 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   useEffect(() => {
     // Fetch global settings for seller info
     fetch('/api/settings')
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
       .then(settings => {
-        if (settings) {
+        if (settings && !settings.error) {
           setData(prev => ({
             ...prev,
             seller_name: settings.agencyName || prev.seller_name,
@@ -50,7 +50,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             currency: settings.currency || prev.currency
           }));
         }
-      });
+      })
+      .catch(() => {});
   }, []);
 
   const [view, setView] = useState<'edit' | 'preview'>('edit');
