@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
+import { apiFetch } from '../lib/api';
 import { 
   IconChevronRight, 
   IconChevronDown, 
@@ -37,8 +38,19 @@ export default function References() {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const data = await db.projects.toArray();
-        setProjects(data);
+        // Load from IndexedDB first (fast local response)
+        const localData = await db.projects.toArray();
+        if (localData.length > 0) {
+          setProjects(localData);
+          setIsLoading(false);
+        }
+        // Sync with API (authoritative, multi-tenant)
+        if (navigator.onLine) {
+          const data = await apiFetch<Project[]>('/api/projects');
+          await db.projects.clear();
+          await db.projects.bulkPut(data);
+          setProjects(data);
+        }
       } catch (err) {
         console.error('Failed to fetch projects:', err);
       } finally {

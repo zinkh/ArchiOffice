@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import jsPDF from 'jspdf';
 import { formatCurrency } from '../lib/utils';
 import type { Invoice, Project, InvoiceItem } from '../types';
+import { autoSaveDocument } from '../lib/autoSaveDocument';
 
 interface InvoiceGeneratorProps {
   onClose: () => void;
@@ -218,7 +219,19 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       
       // Note: Full Factur-X PDF/A-3 embedding is complex in browser.
       // We provide the XML as a separate download for now to ensure compliance with structured data requirement.
-      pdf.save(`Facture_${data.invoice_number}.pdf`);
+      const filename = `Facture_${data.invoice_number}.pdf`;
+      pdf.save(filename);
+
+      // Auto-save to Documents module
+      const pdfBlob = pdf.output('blob');
+      autoSaveDocument({
+        blob: pdfBlob,
+        filename,
+        name: `Facture ${data.invoice_number}`,
+        projectId: project?.id,
+        phase: 'Général',
+        category: 'Contract',
+      });
 
       // Also download the XML
       const xml = generateFacturXXML();

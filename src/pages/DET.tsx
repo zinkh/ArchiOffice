@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { IconPlus, IconEdit, IconTrash, IconCalculator, IconCheck, IconAlertTriangle, IconDeviceFloppy, IconFileExport, IconSettings } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { db } from '../db';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { apiFetch } from '../lib/api';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,27 +55,59 @@ interface CompteRendu {
 }
 
 export default function DET({ projectId }: { projectId: string }) {
-  const detData = useLiveQuery(() => db.detData.where('projectId').equals(projectId).toArray(), [projectId]);
   const [crs, setCrs] = useState<CompteRendu[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedCR, setSelectedCR] = useState<CompteRendu | null>(null);
 
   useEffect(() => {
-    if (detData) {
-      setCrs(detData);
-    }
-  }, [detData]);
+    const load = async () => {
+      // 1. Load from Dexie (instant offline support)
+      const local = await db.detData.where('projectId').equals(projectId).toArray();
+      if (local.length > 0) setCrs(local);
+      // 2. Sync with API
+      if (navigator.onLine) {
+        try {
+          const remote = await apiFetch<CompteRendu[]>(`/api/projects/${projectId}/det`);
+          if (remote && remote.length > 0) {
+            // Merge remote into Dexie
+            for (const cr of remote) {
+              await db.detData.put({ ...cr, projectId });
+            }
+            setCrs(remote);
+          }
+        } catch (err) {
+          console.error('DET sync failed, using local data', err);
+        }
+      }
+    };
+    load();
+  }, [projectId]);
 
-  const addCR = () => {
+  const addCR = async () => {
     const newCR: CompteRendu = {
       id: Date.now().toString(),
       info: { numero: `CR-${crs.length + 1}`, projet: projectId, adresse: '', date: '', heure: '', type: '', maitriseOuvrage: '', maitreOeuvre: '', objet: '' },
       observations: [],
       intervenants: []
     };
+    // Save locally first
+    await db.detData.put({ ...newCR, projectId });
     const newCrs = [...crs, newCR];
     setCrs(newCrs);
-    saveData(newCrs);
+    // Sync to API
+    if (navigator.onLine) {
+      setIsSaving(true);
+      try {
+        await apiFetch(`/api/projects/${projectId}/det`, {
+          method: 'POST',
+          body: JSON.stringify(newCR),
+        });
+      } catch (err) {
+        console.error('Failed to sync new CR:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
   };
 
   const saveData = async (newCrs: CompteRendu[]) => {
@@ -83,9 +115,15 @@ export default function DET({ projectId }: { projectId: string }) {
     try {
       for (const cr of newCrs) {
         await db.detData.put({ ...cr, projectId });
+        if (navigator.onLine) {
+          await apiFetch(`/api/projects/${projectId}/det/${cr.id}`, {
+            method: 'PUT',
+            body: JSON.stringify(cr),
+          });
+        }
       }
     } catch (err) {
-      console.error('Dexie Error:', err);
+      console.error('Save error:', err);
     } finally {
       setIsSaving(false);
     }

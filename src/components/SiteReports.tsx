@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { SiteReport, SiteReportNote, ProjectLot, Project } from '../types';
 import { IconPlus, IconFileText, IconCheck, IconEdit, IconFileDownload, IconTrash, IconCalendar, IconGripVertical } from '@tabler/icons-react';
 import jsPDF from 'jspdf';
+import { autoSaveDocument } from '../lib/autoSaveDocument';
 
 interface SiteReportsProps {
   project: Project;
@@ -91,7 +92,16 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
         autoPaging: true
       });
       
-      pdf.save(`Compte_Rendu_Chantier_${selectedReport?.report_number || 'export'}.pdf`);
+      const filename = `Compte_Rendu_Chantier_${selectedReport?.report_number || 'export'}.pdf`;
+      pdf.save(filename);
+      autoSaveDocument({
+        blob: pdf.output('blob'),
+        filename,
+        name: `CR Chantier N°${selectedReport?.report_number || 'export'} - ${project.name}`,
+        projectId: project.id,
+        phase: 'DET',
+        category: 'Report',
+      });
     } catch (err) {
       console.error('PDF Generation Error:', err);
       alert('Erreur lors de la génération du PDF.');

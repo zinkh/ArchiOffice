@@ -1,8 +1,11 @@
+export type DocumentPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE' | 'ACT' | 'VISA' | 'DET' | 'AOR' | 'Général';
+
 export interface Document {
   id: string;
   project_id: string;
   name: string;
   category: 'Architectural Drawing' | 'Contract' | 'Report' | 'Other';
+  phase?: DocumentPhase;
   version: number;
   file_url: string;
   uploaded_by: string; // TeamMember ID

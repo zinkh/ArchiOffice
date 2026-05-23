@@ -146,21 +146,17 @@ async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000)
   }
 }
 
+// Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max
+});
+
+// Keep /tmp/uploads only as a static fallback for legacy URLs already in the DB
 const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({ storage: storage });
 
 dotenv.config();
 
@@ -627,6 +623,7 @@ if (false as any) {
       project_id TEXT,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
+      phase TEXT,
       version INTEGER DEFAULT 1,
       file_url TEXT NOT NULL,
       uploaded_by TEXT,
@@ -998,14 +995,22 @@ if (false as any) {
 
 }
 
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+}
+
 async function startServer() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
+  // Serve legacy /uploads/ files (existing DB rows that still point to /tmp paths)
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+  // Ensure Supabase Storage buckets exist at startup
+  await ensureStorageBuckets();
 
   // Debug middleware for API routes
   app.use("/api/*", (req, res, next) => {
@@ -1027,9 +1032,66 @@ async function startServer() {
       .select('tenant_id')
       .eq('id', userId)
       .single();
-    if (!data?.tenant_id) throw new Error('Tenant not found for user ' + userId);
-    return data.tenant_id;
+
+    if (data?.tenant_id) return data.tenant_id;
+
+    // Auto-provision tenant for OAuth users who have no tenant yet
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (!authData?.user) throw new Error('User not found: ' + userId);
+
+    const email = authData.user.email ?? '';
+    const displayName = authData.user.user_metadata?.name ?? email.split('@')[0] ?? 'Cabinet';
+    const base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 24);
+    const slug = base + '-' + Date.now().toString(36);
+
+    const { data: tenant, error: tenantErr } = await supabaseAdmin
+      .from('tenants')
+      .insert({ slug, name: displayName })
+      .select()
+      .single();
+
+    if (tenantErr || !tenant) throw new Error('Failed to auto-create tenant: ' + (tenantErr?.message ?? 'unknown'));
+
+    await supabaseAdmin
+      .from('profiles')
+      .upsert({ id: userId, tenant_id: tenant.id, name: displayName, system_role: 'admin', role: 'admin' });
+
+    console.log(`[getTenantId] Auto-provisioned tenant ${tenant.id} for user ${userId}`);
+    return tenant.id;
   }
+
+  // ─── Supabase Storage helpers ───────────────────────────────────────────────
+
+  async function ensureStorageBuckets() {
+    for (const bucket of ['documents']) {
+      const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
+      if (!existing) {
+        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
+        if (error && !error.message.includes('already exists')) {
+          console.error(`[storage] Failed to create bucket "${bucket}":`, error.message);
+        } else {
+          console.log(`[storage] Created bucket "${bucket}"`);
+        }
+      }
+    }
+  }
+
+  async function uploadToStorage(bucket: string, storagePath: string, buffer: Buffer, mimetype: string): Promise<string> {
+    const { error } = await supabaseAdmin.storage
+      .from(bucket)
+      .upload(storagePath, buffer, { contentType: mimetype, upsert: false });
+    if (error) throw new Error(`Storage upload failed: ${error.message}`);
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+    return data.publicUrl;
+  }
+
+  async function deleteFromStorage(bucket: string, fileUrl: string) {
+    const marker = `/object/public/${bucket}/`;
+    const path = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
+    await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
 
   const AUTH_EXEMPT = ["/api/health", "/api/public"];
 
@@ -1647,27 +1709,40 @@ async function startServer() {
   app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, name, category, description, uploaded_by } = req.body;
+      const { project_id, name, category, phase, description, uploaded_by } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
+      const phaseVal = phase || null;
       const id = crypto.randomUUID();
-      const file_url = `/uploads/${file.filename}`;
+      const phaseSegment = phaseVal ? `${phaseVal}/` : '';
+      const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, version: 1, file_url, uploaded_by, uploaded_at, description });
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document" }); }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document: " + e.message }); }
   });
 
   app.delete("/api/documents/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      // Fetch all version URLs before deleting DB rows
+      const { data: versions } = await supabaseAdmin.from('document_versions').select('file_url').eq('document_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      // Delete storage files (best-effort, don't fail if storage cleanup fails)
+      if (versions?.length) {
+        for (const v of versions) {
+          if (v.file_url?.includes('/object/public/documents/')) {
+            deleteFromStorage('documents', v.file_url).catch(() => {});
+          }
+        }
+      }
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
@@ -1676,22 +1751,31 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, category, description, uploaded_by } = req.body;
+      const { name, category, phase, description, uploaded_by } = req.body;
       const file = req.file;
+      const phaseVal = phase || null;
       if (file) {
-        const { data: doc } = await supabaseAdmin.from('documents').select('version').eq('id', id).eq('tenant_id', tenantId).single();
+        const { data: doc } = await supabaseAdmin.from('documents').select('version, project_id, phase').eq('id', id).eq('tenant_id', tenantId).single();
         const newVersion = ((doc as any)?.version || 1) + 1;
-        const file_url = `/uploads/${file.filename}`;
+        const existingPhase = phaseVal || (doc as any)?.phase || null;
+        const projectId = (doc as any)?.project_id || 'general';
+        const phaseSegment = existingPhase ? `${existingPhase}/` : '';
+        const storagePath = `${tenantId}/${projectId}/${phaseSegment}${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`;
+        const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
         const uploaded_at = new Date().toISOString();
-        const { error } = await supabaseAdmin.from('documents').update({ name, category, description, version: newVersion, file_url, uploaded_at }).eq('id', id).eq('tenant_id', tenantId);
+        const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at };
+        if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
         await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
       } else {
-        const { error } = await supabaseAdmin.from('documents').update({ name, category, description }).eq('id', id).eq('tenant_id', tenantId);
+        const updateFields: any = { name, category, description };
+        if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
       }
       res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document" }); }
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document: " + e.message }); }
   });
 
   app.get("/api/documents/:id/versions", async (req: any, res: any) => {
@@ -1983,10 +2067,47 @@ async function startServer() {
   app.get("/api/team", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar').eq('tenant_id', tenantId);
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json((data || []).map((p: any) => ({
+        ...p,
+        senderOption: p.sender_option,
+        defaultEmailTemplate: p.default_email_template,
+        jobTitle: p.job_title,
+      })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch team" }); }
+  });
+
+  app.get("/api/me", async (req: any, res: any) => {
+    try {
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      if (!data) return res.json(null);
+      res.json({
+        ...data,
+        senderOption: data.sender_option,
+        defaultEmailTemplate: data.default_email_template,
+        jobTitle: data.job_title,
+      });
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch profile" }); }
+  });
+
+  app.put("/api/team/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar } = req.body;
+      const { data, error } = await supabaseAdmin.from('profiles').update({
+        sender_option: senderOption,
+        default_email_template: defaultEmailTemplate,
+        phone: phone || null,
+        address: address || null,
+        job_title: jobTitle || null,
+        department: department || null,
+        ...(avatar !== undefined ? { avatar: avatar || null } : {}),
+      }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch team" }); }
+    } catch (e: any) { res.status(500).json({ error: "Failed to update profile: " + e.message }); }
   });
 
   app.post("/api/team", async (req: any, res: any) => {
@@ -2422,7 +2543,7 @@ async function startServer() {
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const tenantId = await getTenantId(req.user.id);
-      const xml = req.file.buffer.toString();
+      const xml = req.file.buffer.toString('utf-8');
       const proposalData = xmlToProposal(xml);
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
@@ -3667,6 +3788,258 @@ async function startServer() {
   });
 
   // ─── End Zoho Invoice Integration ──────────────────────────────────────────
+
+  // ─── Project Templates ─────────────────────────────────────────────────────
+  app.get("/api/project-templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('project_templates').select('*').eq('tenant_id', tenantId).order('name');
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch project templates" }); }
+  });
+
+  app.post("/api/project-templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, name, description, default_status, default_budget, default_description } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('project_templates').insert({ id, tenant_id: tenantId, name, description, default_status: default_status || 'Planning', default_budget: default_budget || 0, default_description }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create project template: " + e.message }); }
+  });
+
+  app.put("/api/project-templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, description, default_status, default_budget, default_description } = req.body;
+      const { data, error } = await supabaseAdmin.from('project_templates').update({ name, description, default_status, default_budget, default_description }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update project template: " + e.message }); }
+  });
+
+  app.delete("/api/project-templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('project_templates').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete project template" }); }
+  });
+
+  // ─── ACT Data (Analyse Comparative des Offres) ────────────────────────────
+  app.get("/api/projects/:projectId/act", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('act_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      res.json(data || null);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch ACT data" }); }
+  });
+
+  app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { companies, lots, scoring_criteria, weights } = req.body;
+      const { data: existing } = await supabaseAdmin.from('act_data').select('id').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      if (existing) {
+        const { data, error } = await supabaseAdmin.from('act_data').update({ companies, lots, scoring_criteria, weights }).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
+        if (error) throw error;
+        res.json(data);
+      } else {
+        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, companies, lots, scoring_criteria, weights }).select().single();
+        if (error) throw error;
+        res.status(201).json(data);
+      }
+    } catch (e: any) { res.status(500).json({ error: "Failed to save ACT data: " + e.message }); }
+  });
+
+  // ─── DET Data (Comptes Rendus de Réunions) ────────────────────────────────
+  app.get("/api/projects/:projectId/det", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('det_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).order('created_at');
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: "Failed to fetch DET data" }); }
+  });
+
+  app.post("/api/projects/:projectId/det", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, info, observations, intervenants } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('det_data').insert({ id, tenant_id: tenantId, project_id: req.params.projectId, info, observations, intervenants }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create CR: " + e.message }); }
+  });
+
+  app.put("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { info, observations, intervenants } = req.body;
+      const { data, error } = await supabaseAdmin.from('det_data').update({ info, observations, intervenants }).eq('id', req.params.crId).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update CR: " + e.message }); }
+  });
+
+  app.delete("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('det_data').delete().eq('id', req.params.crId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete CR" }); }
+  });
+
+  // ─── DPGF Items CRUD (missing write operations) ───────────────────────────
+  app.post("/api/dpgf", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('dpgf_items').insert({ id, tenant_id: tenantId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF item: " + e.message }); }
+  });
+
+  app.put("/api/dpgf/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      const { data, error } = await supabaseAdmin.from('dpgf_items').update({ lot_number, lot_title, item_number, description, unit, quantity, unit_price }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF item: " + e.message }); }
+  });
+
+  app.delete("/api/dpgf/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('dpgf_items').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF item" }); }
+  });
+
+  // ─── DPGFs CRUD (missing write + update/delete) ───────────────────────────
+  app.post("/api/dpgfs", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, title, version } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id, title, version }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF: " + e.message }); }
+  });
+
+  app.put("/api/dpgfs/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, version } = req.body;
+      const { data, error } = await supabaseAdmin.from('dpgfs').update({ title, version }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF: " + e.message }); }
+  });
+
+  app.delete("/api/dpgfs/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('dpgfs').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF" }); }
+  });
+
+  // ─── Situations CRUD (missing write operations) ───────────────────────────
+  app.post("/api/situations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, numero, date_situation, statut } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('situations').insert({ id, tenant_id: tenantId, project_id, numero, date_situation, statut }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create situation: " + e.message }); }
+  });
+
+  app.put("/api/situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { numero, date_situation, statut } = req.body;
+      const { data, error } = await supabaseAdmin.from('situations').update({ numero, date_situation, statut }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update situation: " + e.message }); }
+  });
+
+  app.delete("/api/situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete situation" }); }
+  });
+
+  // ─── Detail Situations CRUD (missing write operations) ────────────────────
+  app.post("/api/detail-situations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, situation_id, dpgf_item_id, quantite_realisee, montant_situation } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('detail_situations').insert({ id, tenant_id: tenantId, situation_id, dpgf_item_id, quantite_realisee, montant_situation }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to create detail situation: " + e.message }); }
+  });
+
+  app.put("/api/detail-situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { quantite_realisee, montant_situation } = req.body;
+      const { data, error } = await supabaseAdmin.from('detail_situations').update({ quantite_realisee, montant_situation }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update detail situation: " + e.message }); }
+  });
+
+  app.delete("/api/detail-situations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('detail_situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete detail situation" }); }
+  });
+
+  // ─── CCTPs CRUD (missing update/delete) ──────────────────────────────────
+  app.put("/api/cctps/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, content, lot, is_template } = req.body;
+      const last_updated = new Date().toISOString();
+      const { data, error } = await supabaseAdmin.from('cctps').update({ title, content, lot, is_template: !!is_template, last_updated }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: "Failed to update CCTP: " + e.message }); }
+  });
+
+  app.delete("/api/cctps/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('cctps').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: "Failed to delete CCTP" }); }
+  });
 
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));

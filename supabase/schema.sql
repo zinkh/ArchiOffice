@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   sender_option TEXT,
   default_email_template TEXT,
   phone       TEXT,
+  address     TEXT,
   job_title   TEXT,
+  department  TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -300,6 +302,7 @@ CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, name TEXT NOT NULL, category TEXT NOT NULL,
+  phase TEXT,
   version INTEGER DEFAULT 1, file_url TEXT NOT NULL,
   uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT
 );
@@ -388,6 +391,41 @@ CREATE TABLE IF NOT EXISTS settings (
   zoho_data_center TEXT, zoho_refresh_token TEXT
 );
 
+-- Project Templates
+CREATE TABLE IF NOT EXISTS project_templates (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  default_status TEXT DEFAULT 'Planning',
+  default_budget NUMERIC DEFAULT 0,
+  default_description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ACT Data (Analyse Comparative des Offres)
+CREATE TABLE IF NOT EXISTS act_data (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT NOT NULL,
+  companies JSONB DEFAULT '[]',
+  lots JSONB DEFAULT '[]',
+  scoring_criteria JSONB DEFAULT '[]',
+  weights JSONB DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- DET Data (Comptes Rendus de Réunions)
+CREATE TABLE IF NOT EXISTS det_data (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT NOT NULL,
+  info JSONB DEFAULT '{}',
+  observations JSONB DEFAULT '[]',
+  intervenants JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Tables complémentaires DPGF/CCTP
 CREATE TABLE IF NOT EXISTS lignes_ouvrages (
   id TEXT PRIMARY KEY,
@@ -445,6 +483,9 @@ ALTER TABLE dpgfs                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lignes_ouvrages      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE articles_type        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_templates    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE act_data             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE det_data             ENABLE ROW LEVEL SECURITY;
 
 -- Helper function : tenant_id du user connecté
 CREATE OR REPLACE FUNCTION my_tenant_id()
@@ -522,6 +563,12 @@ CREATE POLICY "tenant_isolation" ON settings
 CREATE POLICY "tenant_isolation" ON lignes_ouvrages
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON articles_type
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON project_templates
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON act_data
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON det_data
   USING (tenant_id = my_tenant_id());
 
 -- Jonctions : visibles si le projet parent l'est
