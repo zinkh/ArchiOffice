@@ -4,7 +4,6 @@ import {
   IconBell,
   IconSettings,
   IconMenu2,
-  IconCommand,
   IconSun,
   IconMoon,
   IconCloudOff,
@@ -12,6 +11,7 @@ import {
   IconCheck,
   IconLogout,
 } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -104,9 +104,7 @@ function Header() {
             <IconMenu2 size={24} />
           </button>
           <Link to="/" className="flex items-center gap-2 text-zinc-900 dark:text-white font-bold text-xl tracking-tight">
-            <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white">
-              <IconCommand size={20} />
-            </div>
+            <ArchiOfficeLogo size={32} />
             {t('app_name')}
           </Link>
         </div>

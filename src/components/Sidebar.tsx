@@ -1,22 +1,21 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
-import { 
-  IconLayoutDashboard, 
-  IconBriefcase, 
-  IconFileText, 
-  IconUsers, 
-  IconChartBar, 
+import {
+  IconLayoutDashboard,
+  IconBriefcase,
+  IconFileText,
+  IconUsers,
+  IconChartBar,
   IconClipboardCheck,
   IconAddressBook,
   IconFileInvoice,
   IconFileSpreadsheet,
   IconFiles,
   IconSettings,
-  IconCommand,
-  IconCalculator,
   IconArchive
 } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 
 export const NAV_ITEMS = [
   { name: 'dashboard', path: '/', icon: IconLayoutDashboard },
@@ -42,9 +41,7 @@ export function Sidebar() {
     <div className="hidden md:flex flex-col w-64 border-r border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl">
       <div className="p-6">
         <Link to="/" className="flex items-center gap-2 text-zinc-900 dark:text-white font-bold text-xl tracking-tight">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white">
-            <IconCommand size={20} />
-          </div>
+          <ArchiOfficeLogo size={32} />
           {t('app_name')}
         </Link>
       </div>
