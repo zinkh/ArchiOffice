@@ -15,10 +15,9 @@ export default function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
-    // Assuming current user ID is 't1' for demo purposes
     fetch('/api/notifications/t1')
-      .then(res => res.json())
-      .then(setNotifications)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { if (Array.isArray(data)) setNotifications(data); })
       .catch(err => console.error(err));
   }, []);
 

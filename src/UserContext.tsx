@@ -12,6 +12,10 @@ interface UserContextType {
   headerTitle: string;
   setHeaderTitle: (title: string) => void;
   signOut: () => Promise<void>;
+  tenantPlan: string;
+  trialEndsAt: string | null;
+  isTrialExpired: boolean;
+  refreshBillingStatus: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -52,20 +56,52 @@ async function loadFullProfile(session: Session): Promise<UserProfile> {
   }
 }
 
+async function loadBillingStatus(session: Session): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
+  try {
+    const res = await fetch('/api/billing/status', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!res.ok) return { plan: 'trial', trial_ends_at: null, is_expired: false };
+    const data = await res.json();
+    return {
+      plan: data.plan || 'trial',
+      trial_ends_at: data.trial_ends_at ?? null,
+      is_expired: !!data.is_expired,
+    };
+  } catch {
+    return { plan: 'trial', trial_ends_at: null, is_expired: false };
+  }
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [headerTitle, setHeaderTitle] = useState('Dashboard');
+  const [tenantPlan, setTenantPlan] = useState('trial');
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
+  const [isTrialExpired, setIsTrialExpired] = useState(false);
+  const sessionRef = React.useRef<Session | null>(null);
+
+  const refreshBillingStatus = React.useCallback(async () => {
+    if (!sessionRef.current) return;
+    const billing = await loadBillingStatus(sessionRef.current);
+    setTenantPlan(billing.plan);
+    setTrialEndsAt(billing.trial_ends_at);
+    setIsTrialExpired(billing.is_expired);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (error) {
-        // Stale/invalid refresh token — clear local session so user gets redirected to login
         supabase.auth.signOut();
         setCurrentUser(null);
       } else if (session) {
-        const user = await loadFullProfile(session);
+        sessionRef.current = session;
+        const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
         setCurrentUser(user);
+        setTenantPlan(billing.plan);
+        setTrialEndsAt(billing.trial_ends_at);
+        setIsTrialExpired(billing.is_expired);
       } else {
         setCurrentUser(null);
       }
@@ -73,9 +109,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      sessionRef.current = session;
       if (session) {
-        const user = await loadFullProfile(session);
+        const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
         setCurrentUser(user);
+        setTenantPlan(billing.plan);
+        setTrialEndsAt(billing.trial_ends_at);
+        setIsTrialExpired(billing.is_expired);
       } else {
         setCurrentUser(null);
       }
@@ -98,6 +138,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       headerTitle,
       setHeaderTitle,
       signOut,
+      tenantPlan,
+      trialEndsAt,
+      isTrialExpired,
+      refreshBillingStatus,
     }}>
       {children}
     </UserContext.Provider>

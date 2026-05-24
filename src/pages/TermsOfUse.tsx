@@ -9,13 +9,13 @@ const content = {
     sections: [
       {
         heading: '1. Acceptance of Terms',
-        body: `By accessing or using ArchiManager (the "Service"), you agree to be bound by these Terms of Use ("Terms"). If you do not agree to these Terms, do not use the Service.
+        body: `By accessing or using ArchiOffice (the "Service"), you agree to be bound by these Terms of Use ("Terms"). If you do not agree to these Terms, do not use the Service.
 
 These Terms apply to all users, including individual subscribers and organizations. Use of the Service by your employees or agents constitutes your acceptance on their behalf.`,
       },
       {
         heading: '2. Description of Service',
-        body: `ArchiManager is a cloud-based SaaS platform designed for architecture firms and professionals. The Service includes tools for project management, client tracking, proposal generation, invoicing, site report management, document storage, and team collaboration.
+        body: `ArchiOffice is a cloud-based SaaS platform designed for architecture firms and professionals. The Service includes tools for project management, client tracking, proposal generation, invoicing, site report management, document storage, and team collaboration.
 
 We reserve the right to modify, suspend, or discontinue any feature of the Service at any time, with reasonable notice to subscribers.`,
       },
@@ -25,7 +25,7 @@ We reserve the right to modify, suspend, or discontinue any feature of the Servi
 
 • Maintaining the confidentiality of your account credentials.
 • All activities that occur under your account.
-• Promptly notifying us of any unauthorized use at support@archimanager.fr.
+• Promptly notifying us of any unauthorized use at support@archioffice.fr.
 
 You may not share your account with third parties or create accounts on behalf of others without authorization. Each organization ("tenant") receives an isolated data environment.`,
       },
@@ -57,7 +57,7 @@ We reserve the right to suspend or terminate accounts that violate these rules.`
       },
       {
         heading: '6. Intellectual Property',
-        body: `**Our IP**: The Service, including its design, code, features, and content (excluding user data), is owned by ArchiManager and protected by copyright, trademark, and other intellectual property laws. You receive a limited, non-exclusive, non-transferable license to use the Service during your subscription.
+        body: `**Our IP**: The Service, including its design, code, features, and content (excluding user data), is owned by ArchiOffice and protected by copyright, trademark, and other intellectual property laws. You receive a limited, non-exclusive, non-transferable license to use the Service during your subscription.
 
 **Your data**: You retain all rights to the data, documents, and content you upload or create within the Service ("User Content"). You grant us a limited license to process, store, and display your User Content solely to provide the Service.
 
@@ -65,7 +65,7 @@ We reserve the right to suspend or terminate accounts that violate these rules.`
       },
       {
         heading: '7. Data and Privacy',
-        body: `Our collection and use of personal data is governed by our Privacy Policy, available at archimanager.fr/privacy. By using the Service, you consent to our data practices as described therein.
+        body: `Our collection and use of personal data is governed by our Privacy Policy, available at archioffice.fr/privacy. By using the Service, you consent to our data practices as described therein.
 
 For customers subject to the GDPR, we act as a data processor for the User Content you store in the Service, and you act as the data controller. A Data Processing Agreement (DPA) is available upon request.`,
       },
@@ -92,7 +92,7 @@ We do not warrant that the Service will be uninterrupted, error-free, or that de
       },
       {
         heading: '11. Limitation of Liability',
-        body: `TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ARCHIMANAGER SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS, DATA, OR BUSINESS OPPORTUNITIES, ARISING FROM YOUR USE OF THE SERVICE.
+        body: `TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ARCHIOFFICE SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS, DATA, OR BUSINESS OPPORTUNITIES, ARISING FROM YOUR USE OF THE SERVICE.
 
 OUR TOTAL LIABILITY FOR ANY CLAIM RELATED TO THE SERVICE SHALL NOT EXCEED THE AMOUNT YOU PAID TO US IN THE 12 MONTHS PRECEDING THE CLAIM.
 
@@ -100,7 +100,7 @@ These limitations apply regardless of the form of action, whether in contract, t
       },
       {
         heading: '12. Indemnification',
-        body: `You agree to indemnify, defend, and hold harmless ArchiManager and its officers, directors, employees, and agents from any claims, damages, losses, liabilities, and expenses (including legal fees) arising from:
+        body: `You agree to indemnify, defend, and hold harmless ArchiOffice and its officers, directors, employees, and agents from any claims, damages, losses, liabilities, and expenses (including legal fees) arising from:
 
 • Your use of the Service.
 • Your violation of these Terms.
@@ -133,9 +133,9 @@ If you do not agree to the updated Terms, you must stop using the Service and ma
         heading: '16. Contact',
         body: `For any questions regarding these Terms:
 
-ArchiManager
-Email: legal@archimanager.fr
-Website: archimanager.fr`,
+ArchiOffice
+Email: legal@archioffice.fr
+Website: archioffice.fr`,
       },
     ],
   },
@@ -145,13 +145,13 @@ Website: archimanager.fr`,
     sections: [
       {
         heading: '1. Acceptation des Conditions',
-        body: `En accédant ou en utilisant ArchiManager (le "Service"), vous acceptez d'être lié par ces Conditions d'Utilisation ("Conditions"). Si vous n'acceptez pas ces Conditions, n'utilisez pas le Service.
+        body: `En accédant ou en utilisant ArchiOffice (le "Service"), vous acceptez d'être lié par ces Conditions d'Utilisation ("Conditions"). Si vous n'acceptez pas ces Conditions, n'utilisez pas le Service.
 
 Ces Conditions s'appliquent à tous les utilisateurs, y compris les abonnés individuels et les organisations. L'utilisation du Service par vos employés ou agents constitue votre acceptation en leur nom.`,
       },
       {
         heading: '2. Description du Service',
-        body: `ArchiManager est une plateforme SaaS cloud conçue pour les cabinets d'architecture et les professionnels. Le Service comprend des outils de gestion de projets, suivi clients, génération de propositions, facturation, gestion de comptes rendus de chantier, stockage de documents et collaboration d'équipe.
+        body: `ArchiOffice est une plateforme SaaS cloud conçue pour les cabinets d'architecture et les professionnels. Le Service comprend des outils de gestion de projets, suivi clients, génération de propositions, facturation, gestion de comptes rendus de chantier, stockage de documents et collaboration d'équipe.
 
 Nous nous réservons le droit de modifier, suspendre ou interrompre toute fonctionnalité du Service à tout moment, avec un préavis raisonnable aux abonnés.`,
       },
@@ -161,7 +161,7 @@ Nous nous réservons le droit de modifier, suspendre ou interrompre toute foncti
 
 • La confidentialité de vos identifiants de compte.
 • Toutes les activités effectuées sous votre compte.
-• Nous notifier rapidement de toute utilisation non autorisée à support@archimanager.fr.
+• Nous notifier rapidement de toute utilisation non autorisée à support@archioffice.fr.
 
 Vous ne pouvez pas partager votre compte avec des tiers ni créer des comptes au nom d'autrui sans autorisation. Chaque organisation ("tenant") bénéficie d'un environnement de données isolé.`,
       },
@@ -193,7 +193,7 @@ Nous nous réservons le droit de suspendre ou de résilier les comptes qui enfre
       },
       {
         heading: '6. Propriété Intellectuelle',
-        body: `**Notre propriété intellectuelle** : Le Service, y compris sa conception, son code, ses fonctionnalités et son contenu (à l'exclusion des données utilisateur), appartient à ArchiManager et est protégé par le droit d'auteur, les marques et d'autres lois sur la propriété intellectuelle. Vous recevez une licence limitée, non exclusive et non transférable pour utiliser le Service pendant votre abonnement.
+        body: `**Notre propriété intellectuelle** : Le Service, y compris sa conception, son code, ses fonctionnalités et son contenu (à l'exclusion des données utilisateur), appartient à ArchiOffice et est protégé par le droit d'auteur, les marques et d'autres lois sur la propriété intellectuelle. Vous recevez une licence limitée, non exclusive et non transférable pour utiliser le Service pendant votre abonnement.
 
 **Vos données** : Vous conservez tous les droits sur les données, documents et contenus que vous téléchargez ou créez dans le Service ("Contenu Utilisateur"). Vous nous accordez une licence limitée pour traiter, stocker et afficher votre Contenu Utilisateur uniquement pour fournir le Service.
 
@@ -201,7 +201,7 @@ Nous nous réservons le droit de suspendre ou de résilier les comptes qui enfre
       },
       {
         heading: '7. Données et Confidentialité',
-        body: `Notre collecte et utilisation des données personnelles est régie par notre Politique de Confidentialité, disponible sur archimanager.fr/privacy. En utilisant le Service, vous consentez à nos pratiques en matière de données telles que décrites.
+        body: `Notre collecte et utilisation des données personnelles est régie par notre Politique de Confidentialité, disponible sur archioffice.fr/privacy. En utilisant le Service, vous consentez à nos pratiques en matière de données telles que décrites.
 
 Pour les clients soumis au RGPD, nous agissons en tant que sous-traitant pour le Contenu Utilisateur que vous stockez dans le Service, et vous agissez en tant que responsable du traitement. Un Accord de Traitement des Données (DPA) est disponible sur demande.`,
       },
@@ -228,7 +228,7 @@ Nous ne garantissons pas que le Service sera ininterrompu, sans erreur ou que le
       },
       {
         heading: '11. Limitation de Responsabilité',
-        body: `DANS LA MESURE MAXIMALE PERMISE PAR LA LOI APPLICABLE, ARCHIMANAGER NE SERA PAS RESPONSABLE DES DOMMAGES INDIRECTS, ACCESSOIRES, SPÉCIAUX, CONSÉCUTIFS OU PUNITIFS, Y COMPRIS LA PERTE DE PROFITS, DE DONNÉES OU D'OPPORTUNITÉS COMMERCIALES, DÉCOULANT DE VOTRE UTILISATION DU SERVICE.
+        body: `DANS LA MESURE MAXIMALE PERMISE PAR LA LOI APPLICABLE, ARCHIOFFICE NE SERA PAS RESPONSABLE DES DOMMAGES INDIRECTS, ACCESSOIRES, SPÉCIAUX, CONSÉCUTIFS OU PUNITIFS, Y COMPRIS LA PERTE DE PROFITS, DE DONNÉES OU D'OPPORTUNITÉS COMMERCIALES, DÉCOULANT DE VOTRE UTILISATION DU SERVICE.
 
 NOTRE RESPONSABILITÉ TOTALE POUR TOUTE RÉCLAMATION LIÉE AU SERVICE NE DÉPASSERA PAS LE MONTANT QUE VOUS NOUS AVEZ PAYÉ AU COURS DES 12 MOIS PRÉCÉDANT LA RÉCLAMATION.
 
@@ -236,7 +236,7 @@ Ces limitations s'appliquent quelle que soit la forme d'action, en contrat, dél
       },
       {
         heading: '12. Indemnisation',
-        body: `Vous acceptez d'indemniser, de défendre et de tenir indemnes ArchiManager et ses dirigeants, directeurs, employés et agents contre toute réclamation, dommage, perte, responsabilité et dépense (y compris les honoraires d'avocat) découlant de :
+        body: `Vous acceptez d'indemniser, de défendre et de tenir indemnes ArchiOffice et ses dirigeants, directeurs, employés et agents contre toute réclamation, dommage, perte, responsabilité et dépense (y compris les honoraires d'avocat) découlant de :
 
 • Votre utilisation du Service.
 • Votre violation des présentes Conditions.
@@ -269,9 +269,9 @@ Si vous n'acceptez pas les Conditions mises à jour, vous devez cesser d'utilise
         heading: '16. Contact',
         body: `Pour toute question concernant ces Conditions :
 
-ArchiManager
-E-mail : legal@archimanager.fr
-Site web : archimanager.fr`,
+ArchiOffice
+E-mail : legal@archioffice.fr
+Site web : archioffice.fr`,
       },
     ],
   },
@@ -299,7 +299,7 @@ export default function TermsOfUse() {
               <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
                 <IconCommand size={14} className="text-white" />
               </div>
-              <span className="font-semibold text-gray-900 text-sm">ArchiManager</span>
+              <span className="font-semibold text-gray-900 text-sm">ArchiOffice</span>
             </div>
           </div>
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
@@ -357,7 +357,7 @@ export default function TermsOfUse() {
           </div>
 
           <div className="mt-12 pt-8 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <p className="text-xs text-gray-400">© 2026 ArchiManager. All rights reserved.</p>
+            <p className="text-xs text-gray-400">© 2026 ArchiOffice. All rights reserved.</p>
             <div className="flex gap-4 text-xs">
               <Link to="/privacy" className="text-gray-500 hover:text-gray-800 transition-colors">
                 {lang === 'fr' ? 'Politique de Confidentialité' : 'Privacy Policy'}

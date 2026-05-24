@@ -208,7 +208,9 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
 
   const fetchReports = useCallback(async () => {
     const res = await fetch(`/api/projects/${project.id}/reports`);
+    if (!res.ok) return;
     const data = await res.json();
+    if (!Array.isArray(data)) return;
     setReports(data);
     if (data.length > 0 && !selectedReportId) {
       setSelectedReportId(data[0].id);
@@ -218,8 +220,9 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
   const fetchNotes = useCallback(async () => {
     if (!selectedReportId) return;
     const res = await fetch(`/api/reports/${selectedReportId}/notes`);
+    if (!res.ok) return;
     const data = await res.json();
-    setNotes(data);
+    if (Array.isArray(data)) setNotes(data);
   }, [selectedReportId]);
 
   useEffect(() => {

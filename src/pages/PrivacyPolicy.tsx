@@ -9,13 +9,13 @@ const content = {
     sections: [
       {
         heading: '1. Introduction',
-        body: `ArchiManager ("we", "our", or "us") is committed to protecting your personal data. This Privacy Policy explains how we collect, use, store, and protect information about you when you use our SaaS platform for architecture project management (the "Service").
+        body: `ArchiOffice ("we", "our", or "us") is committed to protecting your personal data. This Privacy Policy explains how we collect, use, store, and protect information about you when you use our SaaS platform for architecture project management (the "Service").
 
 By using the Service, you agree to the collection and use of information in accordance with this policy.`,
       },
       {
         heading: '2. Data Controller',
-        body: `The data controller responsible for your personal data is ArchiManager, accessible at archimanager.fr. For any privacy-related questions, contact us at: privacy@archimanager.fr`,
+        body: `The data controller responsible for your personal data is ArchiOffice, accessible at archioffice.fr. For any privacy-related questions, contact us at: privacy@archioffice.fr`,
       },
       {
         heading: '3. Data We Collect',
@@ -88,7 +88,7 @@ All sub-processors are contractually required to maintain the same level of data
 • **Right to object**: object to processing based on legitimate interests.
 • **Right to withdraw consent**: at any time, for consent-based processing.
 
-To exercise these rights, contact us at privacy@archimanager.fr. We will respond within 30 days.`,
+To exercise these rights, contact us at privacy@archioffice.fr. We will respond within 30 days.`,
       },
       {
         heading: '10. Cookies',
@@ -108,7 +108,7 @@ To exercise these rights, contact us at privacy@archimanager.fr. We will respond
       },
       {
         heading: '14. Contact & Complaints',
-        body: `For privacy inquiries: privacy@archimanager.fr
+        body: `For privacy inquiries: privacy@archioffice.fr
 
 If you believe we have not addressed your concern adequately, you have the right to lodge a complaint with your local data protection authority. In France: Commission Nationale de l'Informatique et des Libertés (CNIL) — www.cnil.fr`,
       },
@@ -120,13 +120,13 @@ If you believe we have not addressed your concern adequately, you have the right
     sections: [
       {
         heading: '1. Introduction',
-        body: `ArchiManager ("nous", "notre", "nos") s'engage à protéger vos données personnelles. Cette Politique de Confidentialité explique comment nous collectons, utilisons, stockons et protégeons les informations vous concernant lorsque vous utilisez notre plateforme SaaS de gestion de projets d'architecture (le "Service").
+        body: `ArchiOffice ("nous", "notre", "nos") s'engage à protéger vos données personnelles. Cette Politique de Confidentialité explique comment nous collectons, utilisons, stockons et protégeons les informations vous concernant lorsque vous utilisez notre plateforme SaaS de gestion de projets d'architecture (le "Service").
 
 En utilisant le Service, vous acceptez la collecte et l'utilisation des informations conformément à cette politique.`,
       },
       {
         heading: '2. Responsable du Traitement',
-        body: `Le responsable du traitement de vos données personnelles est ArchiManager, accessible sur archimanager.fr. Pour toute question relative à la vie privée, contactez-nous à : privacy@archimanager.fr`,
+        body: `Le responsable du traitement de vos données personnelles est ArchiOffice, accessible sur archioffice.fr. Pour toute question relative à la vie privée, contactez-nous à : privacy@archioffice.fr`,
       },
       {
         heading: '3. Données Collectées',
@@ -199,7 +199,7 @@ Tous les sous-traitants sont contractuellement tenus de maintenir le même nivea
 • **Droit d'opposition** : vous opposer au traitement fondé sur des intérêts légitimes.
 • **Droit de retrait du consentement** : à tout moment, pour les traitements fondés sur le consentement.
 
-Pour exercer ces droits, contactez-nous à privacy@archimanager.fr. Nous répondrons dans les 30 jours.`,
+Pour exercer ces droits, contactez-nous à privacy@archioffice.fr. Nous répondrons dans les 30 jours.`,
       },
       {
         heading: '10. Cookies',
@@ -219,7 +219,7 @@ Pour exercer ces droits, contactez-nous à privacy@archimanager.fr. Nous répond
       },
       {
         heading: '14. Contact & Réclamations',
-        body: `Pour toute question relative à la confidentialité : privacy@archimanager.fr
+        body: `Pour toute question relative à la confidentialité : privacy@archioffice.fr
 
 Si vous estimez que nous n'avons pas répondu à votre préoccupation de manière satisfaisante, vous avez le droit de déposer une plainte auprès de votre autorité de protection des données locale. En France : Commission Nationale de l'Informatique et des Libertés (CNIL) — www.cnil.fr`,
       },
@@ -249,7 +249,7 @@ export default function PrivacyPolicy() {
               <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
                 <IconCommand size={14} className="text-white" />
               </div>
-              <span className="font-semibold text-gray-900 text-sm">ArchiManager</span>
+              <span className="font-semibold text-gray-900 text-sm">ArchiOffice</span>
             </div>
           </div>
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
@@ -307,7 +307,7 @@ export default function PrivacyPolicy() {
           </div>
 
           <div className="mt-12 pt-8 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <p className="text-xs text-gray-400">© 2026 ArchiManager. All rights reserved.</p>
+            <p className="text-xs text-gray-400">© 2026 ArchiOffice. All rights reserved.</p>
             <div className="flex gap-4 text-xs">
               <Link to="/terms" className="text-gray-500 hover:text-gray-800 transition-colors">
                 {lang === 'fr' ? 'Conditions d\'utilisation' : 'Terms of Use'}

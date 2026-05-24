@@ -228,7 +228,7 @@ export default function Projects() {
         await db.projects.bulkPut(data);
         
         // 4. Update UI
-        setProjects(data.map((p: any) => ({ ...p, is_complete_mission: !!p.is_complete_mission })));
+        if (Array.isArray(data)) setProjects(data.map((p: any) => ({ ...p, is_complete_mission: !!p.is_complete_mission })));
       } catch (err) {
         console.error(err);
       }
@@ -282,8 +282,7 @@ export default function Projects() {
       const res = await fetch(`/api/milestones?project_id=${projectId}`);
       if (res.ok) {
         const data = await res.json();
-        // Convert SQLite 0/1 to boolean
-        setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
+        if (Array.isArray(data)) setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
       }
     } catch (err) {
       console.error('Failed to fetch milestones:', err);

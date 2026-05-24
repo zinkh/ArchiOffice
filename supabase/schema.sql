@@ -17,7 +17,21 @@ CREATE TABLE IF NOT EXISTS tenants (
   trial_ends_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
   stripe_customer_id TEXT,
   stripe_subscription_id TEXT,
+  stancer_customer_id TEXT,
+  stancer_subscription_id TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Billing events (payment history)
+CREATE TABLE IF NOT EXISTS billing_events (
+  id                 UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id          UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  event_type         TEXT NOT NULL,
+  stancer_payment_id TEXT,
+  plan_id            TEXT,
+  amount             INTEGER,
+  status             TEXT DEFAULT 'pending',
+  created_at         TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
@@ -388,7 +402,8 @@ CREATE TABLE IF NOT EXISTS settings (
   seller_iban TEXT, seller_bic TEXT,
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
   zoho_client_id TEXT, zoho_client_secret TEXT, zoho_org_id TEXT,
-  zoho_data_center TEXT, zoho_refresh_token TEXT
+  zoho_data_center TEXT, zoho_refresh_token TEXT,
+  zoho_books_org_id TEXT
 );
 
 -- Project Templates

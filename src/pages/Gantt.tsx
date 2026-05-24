@@ -51,18 +51,18 @@ export default function Gantt() {
 
   useEffect(() => {
     fetch('/api/projects')
-      .then(res => res.json())
-      .then(setProjects)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { if (Array.isArray(data)) setProjects(data); })
       .catch(err => console.error(err));
 
     fetch('/api/milestones')
-      .then(res => res.json())
-      .then(setMilestones)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { if (Array.isArray(data)) setMilestones(data); })
       .catch(err => console.error(err));
 
     fetch('/api/tasks')
-      .then(res => res.json())
-      .then(setTasks)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { if (Array.isArray(data)) setTasks(data); })
       .catch(err => console.error(err));
   }, []);
 

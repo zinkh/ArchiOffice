@@ -1240,7 +1240,7 @@ const mapProposalToProposalData = (p: Proposal): ProposalData => {
   let missions: MissionLine[] = [];
   try {
     const feeData = JSON.parse(p.fee_distribution || '{}');
-    if (feeData.missions) {
+    if (Array.isArray(feeData.missions)) {
       missions = feeData.missions.map((m: any) => ({
         id: m.id,
         designation: m.name,

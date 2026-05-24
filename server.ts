@@ -821,7 +821,7 @@ if (false as any) {
     { table: 'ordres_de_service', columns: ['type'] },
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
-    { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token'] },
+    { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
     { table: 'invoices', columns: ['zoho_invoice_id'] }
   ];
 
@@ -1060,6 +1060,56 @@ async function startServer() {
     return tenant.id;
   }
 
+  // ─── Billing / Plan quota ──────────────────────────────────────────────────
+
+  const PLAN_LIMITS: Record<string, { projects: number; users: number; documents: number }> = {
+    trial:      { projects: 3,   users: 1,   documents: 10  },
+    starter:    { projects: 10,  users: 2,   documents: 100 },
+    pro:        { projects: 999, users: 10,  documents: 999 },
+    enterprise: { projects: 999, users: 999, documents: 999 },
+    expired:    { projects: 0,   users: 0,   documents: 0   },
+  };
+
+  async function getTenantPlan(tenantId: string): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
+    const { data } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at').eq('id', tenantId).single();
+    if (!data) return { plan: 'trial', trial_ends_at: null, is_expired: false };
+    const isTrial = (data as any).plan === 'trial';
+    const isExpired = isTrial && (data as any).trial_ends_at && new Date((data as any).trial_ends_at) < new Date();
+    return {
+      plan: isExpired ? 'expired' : (data as any).plan,
+      trial_ends_at: (data as any).trial_ends_at ?? null,
+      is_expired: !!isExpired,
+    };
+  }
+
+  async function checkQuota(tenantId: string, resource: 'projects' | 'users' | 'documents'): Promise<void> {
+    const { plan, is_expired } = await getTenantPlan(tenantId);
+    if (is_expired) {
+      const err: any = new Error("Votre période d'essai a expiré. Veuillez souscrire à un abonnement.");
+      err.status = 402;
+      throw err;
+    }
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
+    const limit = limits[resource];
+    if (limit >= 999) return;
+    let count = 0;
+    if (resource === 'projects') {
+      const { count: c } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    } else if (resource === 'users') {
+      const { count: c } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    } else if (resource === 'documents') {
+      const { count: c } = await supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    }
+    if (count >= limit) {
+      const err: any = new Error(`Limite du plan atteinte : ${limit} ${resource}. Passez à un plan supérieur.`);
+      err.status = 402;
+      throw err;
+    }
+  }
+
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
   async function ensureStorageBuckets() {
@@ -1093,7 +1143,7 @@ async function startServer() {
 
   // ───────────────────────────────────────────────────────────────────────────
 
-  const AUTH_EXEMPT = ["/api/health", "/api/public"];
+  const AUTH_EXEMPT = ["/api/health", "/api/public", "/api/billing/webhook"];
 
   app.use("/api", async (req: any, res: any, next: any) => {
     if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
@@ -1381,7 +1431,7 @@ async function startServer() {
           
           if (relResponse.ok) {
             const relData = await relResponse.json();
-            const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+            const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
             
             if (ids.length > 0) {
               // Step 2: Fetch full details for these specific building IDs
@@ -1430,7 +1480,7 @@ async function startServer() {
               
               if (relResponse.ok) {
                 const relData = await relResponse.json();
-                const ids = relData.map((item: any) => item.batiment_groupe_id).filter(Boolean);
+                const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
                 
                 if (ids.length > 0) {
                   const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;
@@ -1709,6 +1759,7 @@ async function startServer() {
   app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'documents');
       const { project_id, name, category, phase, description, uploaded_by } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
@@ -1723,7 +1774,7 @@ async function startServer() {
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document: " + e.message }); }
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
 
   app.delete("/api/documents/:id", async (req: any, res: any) => {
@@ -1866,6 +1917,7 @@ async function startServer() {
   app.post("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'projects');
       const {
         id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
@@ -1914,7 +1966,7 @@ async function startServer() {
       res.status(201).json({ id, project_code });
     } catch (error: any) {
       console.error("Error creating project:", error);
-      res.status(500).json({ error: "Failed to create project: " + error.message });
+      res.status(error.status || 500).json({ error: error.message || "Failed to create project" });
     }
   });
 
@@ -2113,6 +2165,7 @@ async function startServer() {
   app.post("/api/team", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'users');
       const { name, email, role, system_role } = req.body;
       if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
       // Check if user already exists in this tenant
@@ -2150,21 +2203,21 @@ async function startServer() {
           const appUrl = process.env.APP_URL || 'http://localhost:3000';
           
           await transporter.sendMail({
-            from: `"ArchiManager" <${smtpUser}>`,
+            from: `"ArchiOffice" <${smtpUser}>`,
             to: email,
-            subject: "Your ArchiManager Credentials",
+            subject: "Your ArchiOffice Credentials",
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-                <h2 style="color: #2563eb;">Welcome to ArchiManager</h2>
+                <h2 style="color: #2563eb;">Welcome to ArchiOffice</h2>
                 <p>Hello ${name},</p>
-                <p>An account has been created for you on ArchiManager. Here are your credentials to access the application:</p>
+                <p>An account has been created for you on ArchiOffice. Here are your credentials to access the application:</p>
                 <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
                   <p style="margin: 0;"><strong>Login URL:</strong> <a href="${appUrl}">${appUrl}</a></p>
                   <p style="margin: 10px 0 0 0;"><strong>Email:</strong> ${email}</p>
                   <p style="margin: 5px 0 0 0;"><strong>Temporary Password:</strong> ${password}</p>
                 </div>
                 <p>Please change your password after your first login.</p>
-                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiManager Team</p>
+                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiOffice Team</p>
               </div>
             `
           });
@@ -2186,7 +2239,7 @@ async function startServer() {
       res.status(201).json({ id, name, email, role, system_role, emailSent, emailError });
     } catch (error: any) {
       console.error("Error creating team member:", error);
-      res.status(500).json({ error: "Failed to create team member: " + error.message });
+      res.status(error.status || 500).json({ error: error.message || "Failed to create team member" });
     }
   });
 
@@ -3455,7 +3508,7 @@ async function startServer() {
         snakeData[col] = v;
       }
       // Only keep valid table columns (include id for PRIMARY KEY on insert)
-      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center']);
+      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_books_org_id']);
       const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
@@ -3498,11 +3551,11 @@ async function startServer() {
       });
 
       await transporter.sendMail({
-        from: `"ArchiManager Test" <${smtpUser}>`,
+        from: `"ArchiOffice Test" <${smtpUser}>`,
         to: smtpUser,
-        subject: "ArchiManager SMTP Test",
-        text: "This is a test email from ArchiManager to verify your SMTP configuration.",
-        html: "<b>This is a test email from ArchiManager to verify your SMTP configuration.</b>"
+        subject: "ArchiOffice SMTP Test",
+        text: "This is a test email from ArchiOffice to verify your SMTP configuration.",
+        html: "<b>This is a test email from ArchiOffice to verify your SMTP configuration.</b>"
       });
 
       res.json({ success: true });
@@ -3789,6 +3842,194 @@ async function startServer() {
 
   // ─── End Zoho Invoice Integration ──────────────────────────────────────────
 
+  // ─── Zoho Books Integration ────────────────────────────────────────────────
+
+  let zohoBooksAccessTokenCache: { token: string; expiresAt: number } | null = null;
+
+  async function getZohoBooksAccessToken(settings: any): Promise<string> {
+    const now = Date.now();
+    if (zohoBooksAccessTokenCache && zohoBooksAccessTokenCache.expiresAt > now + 60000) {
+      return zohoBooksAccessTokenCache.token;
+    }
+    const dc = settings.zoho_data_center || 'com';
+    const params = new URLSearchParams({
+      refresh_token: settings.zoho_refresh_token,
+      client_id: settings.zoho_client_id,
+      client_secret: settings.zoho_client_secret,
+      grant_type: 'refresh_token',
+    });
+    const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
+    const { access_token, expires_in } = await tokenRes.json() as any;
+    if (!access_token) throw new Error('Failed to refresh Zoho Books access token');
+    zohoBooksAccessTokenCache = { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 };
+    return access_token;
+  }
+
+  function getZohoBooksCallbackUrl(req: any): string {
+    const proto = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    return `${proto}://${host}/api/zoho-books/callback`;
+  }
+
+  // GET /api/zoho-books/status
+  app.get('/api/zoho-books/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_org_id, zoho_books_org_id, zoho_data_center, zoho_refresh_token').eq('tenant_id', tenantId).single();
+      res.json({
+        connected: !!(settings as any)?.zoho_refresh_token,
+        has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && ((settings as any)?.zoho_books_org_id || (settings as any)?.zoho_org_id)),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET /api/zoho-books/auth  — redirects browser to Zoho OAuth consent screen (Books scope)
+  app.get('/api/zoho-books/auth', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_data_center').eq('tenant_id', tenantId).single();
+      if (!(settings as any)?.zoho_client_id) {
+        return res.status(400).json({ error: 'Zoho credentials not configured' });
+      }
+      const dc = (settings as any).zoho_data_center || 'com';
+      const redirectUri = getZohoBooksCallbackUrl(req);
+      const authUrl = new URL(`https://accounts.zoho.${dc}/oauth/v2/auth`);
+      authUrl.searchParams.set('client_id', (settings as any).zoho_client_id);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('scope', 'ZohoBooks.fullaccess.all');
+      authUrl.searchParams.set('access_type', 'offline');
+      authUrl.searchParams.set('prompt', 'consent');
+      res.redirect(authUrl.toString());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET /api/zoho-books/callback  — Zoho redirects here after user grants access
+  app.get('/api/zoho-books/callback', async (req: any, res: any) => {
+    const { code, error: oauthError } = req.query as any;
+    if (oauthError || !code) return res.redirect('/settings?zoho_books_error=1');
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_data_center').eq('tenant_id', tenantId).single();
+      const dc = (settings as any)?.zoho_data_center || 'com';
+      const redirectUri = getZohoBooksCallbackUrl(req);
+      const params = new URLSearchParams({
+        code, client_id: (settings as any).zoho_client_id,
+        client_secret: (settings as any).zoho_client_secret,
+        redirect_uri: redirectUri, grant_type: 'authorization_code',
+      });
+      const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
+      const { refresh_token } = await tokenRes.json() as any;
+      if (!refresh_token) return res.redirect('/settings?zoho_books_error=1');
+      zohoBooksAccessTokenCache = null;
+      await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
+      res.redirect('/settings?zoho_books_connected=1');
+    } catch {
+      res.redirect('/settings?zoho_books_error=1');
+    }
+  });
+
+  // DELETE /api/zoho-books/disconnect
+  app.delete('/api/zoho-books/disconnect', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      zohoBooksAccessTokenCache = null;
+      await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST /api/zoho-books/sync  — sync invoices/estimates with Zoho Books
+  app.post('/api/zoho-books/sync', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+      if (!(settings as any)?.zoho_refresh_token) {
+        return res.status(400).json({ error: 'Zoho Books non connecté' });
+      }
+      const dc = (settings as any).zoho_data_center || 'com';
+      const orgId = (settings as any).zoho_books_org_id || (settings as any).zoho_org_id;
+      const apiBase = `https://books.zoho.${dc}/api/v3`;
+      const accessToken = await getZohoBooksAccessToken(settings as any);
+      const headers = {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        'Content-Type': 'application/json',
+      };
+
+      let pushed = 0, pulled = 0;
+      const errors: string[] = [];
+
+      // Push local invoices not yet in Zoho Books
+      try {
+        const { data: localInvoices } = await supabaseAdmin
+          .from('invoices')
+          .select('*, projects(name)')
+          .eq('tenant_id', tenantId)
+          .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
+
+        for (const inv of (localInvoices || [])) {
+          try {
+            const payload = {
+              customer_name: (inv as any).client_name || 'Client',
+              invoice_number: (inv as any).number || (inv as any).id,
+              date: (inv as any).date || new Date().toISOString().split('T')[0],
+              due_date: (inv as any).due_date,
+              line_items: [{ name: `Facture ${(inv as any).number || (inv as any).id}`, rate: (inv as any).amount || 0, quantity: 1 }],
+            };
+            const resp = await fetch(`${apiBase}/invoices?organization_id=${orgId}`, {
+              method: 'POST', headers, body: JSON.stringify(payload),
+            });
+            const respData = await resp.json() as any;
+            const zohoId = respData?.invoice?.invoice_id;
+            if (zohoId) {
+              await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', (inv as any).id).eq('tenant_id', tenantId);
+              pushed++;
+            } else if (respData?.message) {
+              errors.push(`Push ${(inv as any).id}: ${respData.message}`);
+            }
+          } catch (err: any) {
+            errors.push(`Push ${(inv as any).id}: ${err.message}`);
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Envoi échoué: ${err.message}`);
+      }
+
+      // Pull status updates from Zoho Books
+      try {
+        const resp = await fetch(`${apiBase}/invoices?organization_id=${orgId}&status=all`, { headers });
+        const respData = await resp.json() as any;
+        const zohoInvoices: any[] = respData?.invoices || [];
+        for (const zohoInv of zohoInvoices) {
+          const { data: local } = await supabaseAdmin.from('invoices').select('id, status').eq('zoho_invoice_id', zohoInv.invoice_id).eq('tenant_id', tenantId).single();
+          if (local) {
+            const statusMap: Record<string, string> = { paid: 'paid', sent: 'sent', draft: 'draft', overdue: 'overdue', void: 'cancelled' };
+            const newStatus = statusMap[zohoInv.status] ?? null;
+            if (newStatus && newStatus !== (local as any).status) {
+              await supabaseAdmin.from('invoices').update({ status: newStatus }).eq('id', (local as any).id).eq('tenant_id', tenantId);
+              pulled++;
+            }
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Récupération échouée: ${err.message}`);
+      }
+
+      res.json({ pushed, pulled, errors });
+    } catch (error: any) {
+      console.error('[Zoho Books sync error]', error.message);
+      res.status(500).json({ error: error.message || 'Sync échouée' });
+    }
+  });
+
+  // ─── End Zoho Books Integration ────────────────────────────────────────────
+
   // ─── Project Templates ─────────────────────────────────────────────────────
   app.get("/api/project-templates", async (req: any, res: any) => {
     try {
@@ -4040,6 +4281,187 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: "Failed to delete CCTP" }); }
   });
+
+  // ─── Stancer Billing ──────────────────────────────────────────────────────
+
+  const STANCER_API_BASE = 'https://api.stancer.com/v2';
+
+  function stancerAuthHeader(): string {
+    const key = process.env.STANCER_SECRET_KEY || '';
+    return 'Basic ' + Buffer.from(key + ':').toString('base64');
+  }
+
+  async function stancerFetch(path: string, opts: { method?: string; body?: any } = {}): Promise<any> {
+    const res = await fetch(`${STANCER_API_BASE}${path}`, {
+      method: opts.method || 'GET',
+      headers: {
+        Authorization: stancerAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
+    });
+    return res.json();
+  }
+
+  // GET /api/billing/status
+  app.get('/api/billing/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at, stancer_customer_id').eq('id', tenantId).single();
+      const [{ count: pc }, { count: uc }, { count: dc }] = await Promise.all([
+        supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      ]);
+      const plan = (tenant as any)?.plan || 'trial';
+      const trial_ends_at = (tenant as any)?.trial_ends_at ?? null;
+      const isTrial = plan === 'trial';
+      const is_expired = isTrial && trial_ends_at && new Date(trial_ends_at) < new Date();
+      const effectivePlan = is_expired ? 'expired' : plan;
+      const limits = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.trial;
+      res.json({
+        plan: effectivePlan,
+        trial_ends_at,
+        is_expired: !!is_expired,
+        usage: {
+          projects:  { used: pc ?? 0, limit: limits.projects },
+          users:     { used: uc ?? 0, limit: limits.users },
+          documents: { used: dc ?? 0, limit: limits.documents },
+        },
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/billing/checkout — create Stancer payment, return redirect URL
+  app.post('/api/billing/checkout', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { plan_id } = req.body;
+      const PLAN_PRICES: Record<string, number> = { starter: 2900, pro: 5900 };
+      const PLAN_NAMES: Record<string, string> = { starter: 'Starter', pro: 'Pro' };
+      const amount = PLAN_PRICES[plan_id];
+      if (!amount) return res.status(400).json({ error: 'Plan invalide ou contact commercial requis' });
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, stancer_customer_id').eq('id', tenantId).single();
+
+      // Create or reuse Stancer customer
+      let customerId = (tenant as any)?.stancer_customer_id;
+      if (!customerId) {
+        const customer = await stancerFetch('/customers', {
+          method: 'POST',
+          body: { name: (tenant as any)?.name || 'Client', email: req.user.email },
+        });
+        customerId = customer.id;
+        if (customerId) {
+          await supabaseAdmin.from('tenants').update({ stancer_customer_id: customerId }).eq('id', tenantId);
+        }
+      }
+
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const returnUrl = `${proto}://${host}/billing?payment_status=success&plan=${plan_id}`;
+
+      // Create payment
+      const paymentBody: any = {
+        amount,
+        currency: 'eur',
+        description: `ArchiOffice ${PLAN_NAMES[plan_id]} — Mensuel`,
+        return_url: returnUrl,
+      };
+      if (customerId) paymentBody.customer = customerId;
+
+      const payment = await stancerFetch('/payments', { method: 'POST', body: paymentBody });
+      if (!payment.id) {
+        console.error('[Stancer checkout]', payment);
+        return res.status(502).json({ error: 'Erreur Stancer lors de la création du paiement' });
+      }
+
+      // Record pending payment
+      await supabaseAdmin.from('billing_events').insert({
+        tenant_id: tenantId,
+        event_type: 'checkout_created',
+        stancer_payment_id: payment.id,
+        plan_id,
+        amount,
+        status: 'pending',
+      });
+
+      const pubKey = process.env.STANCER_PUBLIC_KEY || '';
+      const paymentUrl = `https://payment.stancer.com/${pubKey}/${payment.id}`;
+
+      res.json({ payment_id: payment.id, payment_url: paymentUrl });
+    } catch (e: any) {
+      console.error('[Billing checkout error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/webhook — Stancer event delivery (no JWT auth)
+  app.post('/api/billing/webhook', express.json(), async (req: any, res: any) => {
+    try {
+      const event = req.body;
+      const paymentId = event.id || event.payment?.id;
+      if (!paymentId) return res.json({ received: true });
+
+      console.log('[Stancer webhook] event received, payment:', paymentId);
+
+      // Verify by re-fetching from Stancer API
+      const payment = await stancerFetch(`/payments/${paymentId}`);
+      const status = payment?.status;
+
+      if (status === 'captured' || status === 'authorized') {
+        const { data: billingEvent } = await supabaseAdmin
+          .from('billing_events')
+          .select('*')
+          .eq('stancer_payment_id', paymentId)
+          .maybeSingle();
+
+        if (billingEvent) {
+          const { tenant_id, plan_id } = billingEvent as any;
+          const renewalDate = new Date();
+          renewalDate.setMonth(renewalDate.getMonth() + 1);
+          await supabaseAdmin.from('tenants').update({
+            plan: plan_id,
+            trial_ends_at: renewalDate.toISOString(),
+          }).eq('id', tenant_id);
+          await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
+          console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+        }
+      }
+
+      if (status === 'failed' || status === 'refused') {
+        const { data: billingEvent } = await supabaseAdmin
+          .from('billing_events')
+          .select('id')
+          .eq('stancer_payment_id', paymentId)
+          .maybeSingle();
+        if (billingEvent) {
+          await supabaseAdmin.from('billing_events').update({ status: 'failed' }).eq('id', (billingEvent as any).id);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (e: any) {
+      console.error('[Stancer webhook error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/billing/history — payment history for current tenant
+  app.get('/api/billing/history', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data } = await supabaseAdmin
+        .from('billing_events')
+        .select('id, event_type, plan_id, amount, status, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Stancer Billing ───────────────────────────────────────────────────
 
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));

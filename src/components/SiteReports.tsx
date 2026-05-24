@@ -114,18 +114,18 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
 
   useEffect(() => {
     fetch(`/api/projects/${project.id}/reports`)
-      .then(res => res.json())
-      .then(setReports);
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { if (Array.isArray(data)) setReports(data); })
+      .catch(err => console.error(err));
   }, [project.id]);
 
   useEffect(() => {
     let active = true;
     if (selectedReport) {
       fetch(`/api/reports/${selectedReport.id}/notes`)
-        .then(res => res.json())
-        .then(notes => {
-          if (active) setNotes(notes);
-        });
+        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+        .then(data => { if (active && Array.isArray(data)) setNotes(data); })
+        .catch(err => console.error(err));
     }
     return () => { active = false; };
   }, [selectedReport]);

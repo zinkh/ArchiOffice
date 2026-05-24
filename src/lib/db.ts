@@ -30,12 +30,12 @@ export interface Contact {
   // Add other fields as needed
 }
 
-export class ArchiManagerDatabase extends Dexie {
+export class ArchiOfficeDatabase extends Dexie {
   projects!: Table<Project>;
   contacts!: Table<Contact>;
 
   constructor() {
-    super('ArchiManagerDatabase');
+    super('ArchiOfficeDatabase');
     this.version(1).stores({
       projects: 'id, name, client, status',
       contacts: 'id, first_name, last_name, email, company_name'
@@ -43,4 +43,4 @@ export class ArchiManagerDatabase extends Dexie {
   }
 }
 
-export const db = new ArchiManagerDatabase();
+export const db = new ArchiOfficeDatabase();
