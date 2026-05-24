@@ -1060,6 +1060,56 @@ async function startServer() {
     return tenant.id;
   }
 
+  // ─── Billing / Plan quota ──────────────────────────────────────────────────
+
+  const PLAN_LIMITS: Record<string, { projects: number; users: number; documents: number }> = {
+    trial:      { projects: 3,   users: 1,   documents: 10  },
+    starter:    { projects: 10,  users: 2,   documents: 100 },
+    pro:        { projects: 999, users: 10,  documents: 999 },
+    enterprise: { projects: 999, users: 999, documents: 999 },
+    expired:    { projects: 0,   users: 0,   documents: 0   },
+  };
+
+  async function getTenantPlan(tenantId: string): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
+    const { data } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at').eq('id', tenantId).single();
+    if (!data) return { plan: 'trial', trial_ends_at: null, is_expired: false };
+    const isTrial = (data as any).plan === 'trial';
+    const isExpired = isTrial && (data as any).trial_ends_at && new Date((data as any).trial_ends_at) < new Date();
+    return {
+      plan: isExpired ? 'expired' : (data as any).plan,
+      trial_ends_at: (data as any).trial_ends_at ?? null,
+      is_expired: !!isExpired,
+    };
+  }
+
+  async function checkQuota(tenantId: string, resource: 'projects' | 'users' | 'documents'): Promise<void> {
+    const { plan, is_expired } = await getTenantPlan(tenantId);
+    if (is_expired) {
+      const err: any = new Error("Votre période d'essai a expiré. Veuillez souscrire à un abonnement.");
+      err.status = 402;
+      throw err;
+    }
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
+    const limit = limits[resource];
+    if (limit >= 999) return;
+    let count = 0;
+    if (resource === 'projects') {
+      const { count: c } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    } else if (resource === 'users') {
+      const { count: c } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    } else if (resource === 'documents') {
+      const { count: c } = await supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      count = c ?? 0;
+    }
+    if (count >= limit) {
+      const err: any = new Error(`Limite du plan atteinte : ${limit} ${resource}. Passez à un plan supérieur.`);
+      err.status = 402;
+      throw err;
+    }
+  }
+
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
   async function ensureStorageBuckets() {
@@ -1093,7 +1143,7 @@ async function startServer() {
 
   // ───────────────────────────────────────────────────────────────────────────
 
-  const AUTH_EXEMPT = ["/api/health", "/api/public"];
+  const AUTH_EXEMPT = ["/api/health", "/api/public", "/api/billing/webhook"];
 
   app.use("/api", async (req: any, res: any, next: any) => {
     if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
@@ -1709,6 +1759,7 @@ async function startServer() {
   app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'documents');
       const { project_id, name, category, phase, description, uploaded_by } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
@@ -1723,7 +1774,7 @@ async function startServer() {
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to upload document: " + e.message }); }
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
 
   app.delete("/api/documents/:id", async (req: any, res: any) => {
@@ -1866,6 +1917,7 @@ async function startServer() {
   app.post("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'projects');
       const {
         id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client,
@@ -1914,7 +1966,7 @@ async function startServer() {
       res.status(201).json({ id, project_code });
     } catch (error: any) {
       console.error("Error creating project:", error);
-      res.status(500).json({ error: "Failed to create project: " + error.message });
+      res.status(error.status || 500).json({ error: error.message || "Failed to create project" });
     }
   });
 
@@ -2113,6 +2165,7 @@ async function startServer() {
   app.post("/api/team", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      await checkQuota(tenantId, 'users');
       const { name, email, role, system_role } = req.body;
       if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
       // Check if user already exists in this tenant
@@ -2186,7 +2239,7 @@ async function startServer() {
       res.status(201).json({ id, name, email, role, system_role, emailSent, emailError });
     } catch (error: any) {
       console.error("Error creating team member:", error);
-      res.status(500).json({ error: "Failed to create team member: " + error.message });
+      res.status(error.status || 500).json({ error: error.message || "Failed to create team member" });
     }
   });
 
@@ -4228,6 +4281,187 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: "Failed to delete CCTP" }); }
   });
+
+  // ─── Stancer Billing ──────────────────────────────────────────────────────
+
+  const STANCER_API_BASE = 'https://api.stancer.com/v2';
+
+  function stancerAuthHeader(): string {
+    const key = process.env.STANCER_SECRET_KEY || '';
+    return 'Basic ' + Buffer.from(key + ':').toString('base64');
+  }
+
+  async function stancerFetch(path: string, opts: { method?: string; body?: any } = {}): Promise<any> {
+    const res = await fetch(`${STANCER_API_BASE}${path}`, {
+      method: opts.method || 'GET',
+      headers: {
+        Authorization: stancerAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
+    });
+    return res.json();
+  }
+
+  // GET /api/billing/status
+  app.get('/api/billing/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at, stancer_customer_id').eq('id', tenantId).single();
+      const [{ count: pc }, { count: uc }, { count: dc }] = await Promise.all([
+        supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      ]);
+      const plan = (tenant as any)?.plan || 'trial';
+      const trial_ends_at = (tenant as any)?.trial_ends_at ?? null;
+      const isTrial = plan === 'trial';
+      const is_expired = isTrial && trial_ends_at && new Date(trial_ends_at) < new Date();
+      const effectivePlan = is_expired ? 'expired' : plan;
+      const limits = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.trial;
+      res.json({
+        plan: effectivePlan,
+        trial_ends_at,
+        is_expired: !!is_expired,
+        usage: {
+          projects:  { used: pc ?? 0, limit: limits.projects },
+          users:     { used: uc ?? 0, limit: limits.users },
+          documents: { used: dc ?? 0, limit: limits.documents },
+        },
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/billing/checkout — create Stancer payment, return redirect URL
+  app.post('/api/billing/checkout', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { plan_id } = req.body;
+      const PLAN_PRICES: Record<string, number> = { starter: 2900, pro: 5900 };
+      const PLAN_NAMES: Record<string, string> = { starter: 'Starter', pro: 'Pro' };
+      const amount = PLAN_PRICES[plan_id];
+      if (!amount) return res.status(400).json({ error: 'Plan invalide ou contact commercial requis' });
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, stancer_customer_id').eq('id', tenantId).single();
+
+      // Create or reuse Stancer customer
+      let customerId = (tenant as any)?.stancer_customer_id;
+      if (!customerId) {
+        const customer = await stancerFetch('/customers', {
+          method: 'POST',
+          body: { name: (tenant as any)?.name || 'Client', email: req.user.email },
+        });
+        customerId = customer.id;
+        if (customerId) {
+          await supabaseAdmin.from('tenants').update({ stancer_customer_id: customerId }).eq('id', tenantId);
+        }
+      }
+
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const returnUrl = `${proto}://${host}/billing?payment_status=success&plan=${plan_id}`;
+
+      // Create payment
+      const paymentBody: any = {
+        amount,
+        currency: 'eur',
+        description: `ArchiOffice ${PLAN_NAMES[plan_id]} — Mensuel`,
+        return_url: returnUrl,
+      };
+      if (customerId) paymentBody.customer = customerId;
+
+      const payment = await stancerFetch('/payments', { method: 'POST', body: paymentBody });
+      if (!payment.id) {
+        console.error('[Stancer checkout]', payment);
+        return res.status(502).json({ error: 'Erreur Stancer lors de la création du paiement' });
+      }
+
+      // Record pending payment
+      await supabaseAdmin.from('billing_events').insert({
+        tenant_id: tenantId,
+        event_type: 'checkout_created',
+        stancer_payment_id: payment.id,
+        plan_id,
+        amount,
+        status: 'pending',
+      });
+
+      const pubKey = process.env.STANCER_PUBLIC_KEY || '';
+      const paymentUrl = `https://payment.stancer.com/${pubKey}/${payment.id}`;
+
+      res.json({ payment_id: payment.id, payment_url: paymentUrl });
+    } catch (e: any) {
+      console.error('[Billing checkout error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/webhook — Stancer event delivery (no JWT auth)
+  app.post('/api/billing/webhook', express.json(), async (req: any, res: any) => {
+    try {
+      const event = req.body;
+      const paymentId = event.id || event.payment?.id;
+      if (!paymentId) return res.json({ received: true });
+
+      console.log('[Stancer webhook] event received, payment:', paymentId);
+
+      // Verify by re-fetching from Stancer API
+      const payment = await stancerFetch(`/payments/${paymentId}`);
+      const status = payment?.status;
+
+      if (status === 'captured' || status === 'authorized') {
+        const { data: billingEvent } = await supabaseAdmin
+          .from('billing_events')
+          .select('*')
+          .eq('stancer_payment_id', paymentId)
+          .maybeSingle();
+
+        if (billingEvent) {
+          const { tenant_id, plan_id } = billingEvent as any;
+          const renewalDate = new Date();
+          renewalDate.setMonth(renewalDate.getMonth() + 1);
+          await supabaseAdmin.from('tenants').update({
+            plan: plan_id,
+            trial_ends_at: renewalDate.toISOString(),
+          }).eq('id', tenant_id);
+          await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
+          console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+        }
+      }
+
+      if (status === 'failed' || status === 'refused') {
+        const { data: billingEvent } = await supabaseAdmin
+          .from('billing_events')
+          .select('id')
+          .eq('stancer_payment_id', paymentId)
+          .maybeSingle();
+        if (billingEvent) {
+          await supabaseAdmin.from('billing_events').update({ status: 'failed' }).eq('id', (billingEvent as any).id);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (e: any) {
+      console.error('[Stancer webhook error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/billing/history — payment history for current tenant
+  app.get('/api/billing/history', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data } = await supabaseAdmin
+        .from('billing_events')
+        .select('id, event_type, plan_id, amount, status, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Stancer Billing ───────────────────────────────────────────────────
 
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));

@@ -36,6 +36,7 @@ import ProjectDetail from './pages/ProjectDetail';
 import References from './pages/References';
 import Documents from './pages/Documents';
 import Settings from './pages/Settings';
+import Billing from './pages/Billing';
 import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 import Login from './pages/Login';
@@ -307,6 +308,7 @@ export default function App() {
               <Route path="/templates" element={<ProjectTemplates />} />
               <Route path="/proposal-generator" element={<ProposalModule />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/billing" element={<Billing />} />
             </Route>
           </Routes>
         </Router>
