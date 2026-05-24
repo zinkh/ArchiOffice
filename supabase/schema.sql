@@ -388,7 +388,8 @@ CREATE TABLE IF NOT EXISTS settings (
   seller_iban TEXT, seller_bic TEXT,
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
   zoho_client_id TEXT, zoho_client_secret TEXT, zoho_org_id TEXT,
-  zoho_data_center TEXT, zoho_refresh_token TEXT
+  zoho_data_center TEXT, zoho_refresh_token TEXT,
+  zoho_books_org_id TEXT
 );
 
 -- Project Templates
