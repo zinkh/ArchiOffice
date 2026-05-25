@@ -1,199 +1,381 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconMessageCircle, IconHeart, IconChecklist, IconPencil, IconUser, IconFileText } from '@tabler/icons-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
-import { fetchJson } from '../lib/api';
+import { apiFetch } from '../lib/api';
+import { cn } from '../lib/utils';
 
-interface ActivityItem {
+interface FeedComment {
   id: string;
-  user_id: string;
-  user?: { name: string; avatar: string };
-  action: string;
-  target: string;
-  timestamp: string;
-  category: string;
-  type: 'edit' | 'comment' | 'task' | 'action' | 'message';
-  attachments?: string[];
+  user_name: string;
+  content: string;
+  created_at: string;
+}
+
+interface FeedItem {
+  id: string;
+  kind: 'activity' | 'post';
+  user_name: string;
+  user_id?: string;
   content?: string;
+  action?: string;
+  target?: string;
+  target_id?: string;
+  target_type?: string;
+  category?: string;
+  created_at: string;
+  likes_count: number;
+  liked: boolean;
+  comments: FeedComment[];
+  comments_count: number;
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "à l'instant";
+  if (mins < 60) return `il y a ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `il y a ${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'hier';
+  if (days < 7) return `il y a ${days} jours`;
+  return new Date(dateStr).toLocaleDateString('fr-FR');
+}
+
+function initials(name: string) {
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'Projets': 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400',
+  'Factures': 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400',
+  'Appels d\'offres': 'text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400',
+  'Messages': 'text-violet-600 bg-violet-50 dark:bg-violet-900/20 dark:text-violet-400',
+};
+
+const TYPE_ICONS: Record<string, React.ElementType> = {
+  project: IconBriefcase,
+  invoice: IconFileInvoice,
+  tender: IconClipboardList,
+  post: IconFileText,
+};
+
+function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+  const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500'];
+  const color = colors[name.charCodeAt(0) % colors.length];
+  return (
+    <div
+      className={cn('rounded-full flex items-center justify-center text-white font-bold shrink-0', color)}
+      style={{ width: size, height: size, fontSize: size * 0.35 }}
+    >
+      {initials(name)}
+    </div>
+  );
 }
 
 export default function ActivityFeed() {
-  const { currentUser, allUsers } = useUser();
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const { currentUser } = useUser();
+  const [items, setItems] = useState<FeedItem[]>([]);
   const [message, setMessage] = useState('');
+  const [isPosting, setIsPosting] = useState(false);
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
+  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  const [showHiddenMenu, setShowHiddenMenu] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hiddenMenuRef = useRef<HTMLDivElement>(null);
 
-  const fetchFeed = async () => {
+  const fetchFeed = useCallback(async () => {
     try {
-      const [acts, msgs] = await Promise.all([
-        fetchJson<any[]>('/api/activities'),
-        fetchJson<any[]>('/api/messages')
-      ]);
-
-      const formattedMessages: ActivityItem[] = msgs.map((m: any) => ({
-        id: m.id,
-        user_id: m.sender_id,
-        action: 'a envoyé un message',
-        target: '',
-        timestamp: m.timestamp,
-        category: 'Messages',
-        type: 'message',
-        content: m.content,
-        attachments: m.file_url ? [m.file_url] : []
-      }));
-      
-      const allItems = [...acts, ...formattedMessages].map(item => {
-        const user = allUsers.find(u => u.id === item.user_id);
-        return {
-          ...item,
-          user: user ? { name: user.name, avatar: user.avatar || '' } : item.user
-        };
-      });
-
-      setActivities(allItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+      const data = await apiFetch<FeedItem[]>('/api/feed');
+      setItems(data);
     } catch (err) {
-      console.error('Activity feed fetch failed:', err);
+      console.error('Feed fetch failed:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (allUsers.length > 0) {
-      fetchFeed();
-    }
-  }, [allUsers]);
+    fetchFeed();
+    const interval = setInterval(fetchFeed, 30000);
+    return () => clearInterval(interval);
+  }, [fetchFeed]);
 
-  const handleSendMessage = async (fileUrl?: string) => {
-    if (!message.trim() && !fileUrl) return;
-    if (!currentUser) return;
-    
-    const timestamp = new Date().toISOString();
-    const newMessage = {
-      id: `msg-${Date.now()}`,
-      sender_id: currentUser.id,
-      content: message,
-      type: fileUrl ? 'file' : 'text',
-      file_url: fileUrl,
-      timestamp
-    };
-
-    // Optimistic update
-    const optimisticActivity: ActivityItem = {
-      id: newMessage.id,
-      user_id: currentUser.id,
-      user: { name: currentUser.name, avatar: currentUser.avatar || '' },
-      action: 'a envoyé un message',
-      target: '',
-      timestamp,
-      category: 'Messages',
-      type: 'message',
-      content: message,
-      attachments: fileUrl ? [fileUrl] : []
-    };
-
-    setActivities(prev => [optimisticActivity, ...prev]);
-    setMessage('');
-
-    try {
-      await fetchJson('/api/messages', {
-        method: 'POST',
-        body: JSON.stringify(newMessage)
-      });
-      
-      const mentions = message.match(/@(\w+)/g);
-      if (mentions) {
-        for (const mention of mentions) {
-          const userId = mention.substring(1);
-          await fetch('/api/notifications', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: `notif-${Date.now()}`,
-              user_id: userId,
-              content: `Vous avez été mentionné par ${currentUser.name}: ${message}`,
-              timestamp: new Date().toISOString()
-            })
-          });
-        }
+  // Close hidden menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (hiddenMenuRef.current && !hiddenMenuRef.current.contains(e.target as Node)) {
+        setShowHiddenMenu(false);
       }
-      
-      // Re-fetch to sync with server (optional, but good for consistency)
-      // fetchFeed();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handlePost = async () => {
+    if (!message.trim() || isPosting) return;
+    setIsPosting(true);
+    const content = message.trim();
+    setMessage('');
+    try {
+      const newItem = await apiFetch<FeedItem>('/api/feed/posts', {
+        method: 'POST',
+        body: JSON.stringify({ content })
+      });
+      setItems(prev => [newItem, ...prev]);
     } catch (err) {
       console.error(err);
-      // Rollback optimistic update if needed
-      fetchFeed();
+      setMessage(content);
+    } finally {
+      setIsPosting(false);
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost();
+  };
+
+  const handleLike = async (item: FeedItem) => {
+    const endpoint = item.kind === 'post'
+      ? `/api/feed/posts/${item.id}/like`
+      : `/api/feed/activities/${item.id}/like`;
+    // Optimistic update
+    setItems(prev => prev.map(i => i.id === item.id
+      ? { ...i, liked: !i.liked, likes_count: i.liked ? i.likes_count - 1 : i.likes_count + 1 }
+      : i
+    ));
     try {
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      const { file_url } = await res.json();
-      handleSendMessage(file_url);
+      await apiFetch(endpoint, { method: 'POST' });
+    } catch {
+      // Revert on error
+      setItems(prev => prev.map(i => i.id === item.id
+        ? { ...i, liked: item.liked, likes_count: item.likes_count }
+        : i
+      ));
+    }
+  };
+
+  const handleComment = async (itemId: string) => {
+    const content = commentDraft[itemId]?.trim();
+    if (!content) return;
+    setCommentDraft(d => ({ ...d, [itemId]: '' }));
+    try {
+      const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ content })
+      });
+      setItems(prev => prev.map(i => i.id === itemId
+        ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
+        : i
+      ));
     } catch (err) {
       console.error(err);
     }
   };
+
+  const toggleComments = (id: string) => {
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleHiddenType = (type: string) => {
+    setHiddenTypes(prev => {
+      const next = new Set(prev);
+      next.has(type) ? next.delete(type) : next.add(type);
+      return next;
+    });
+  };
+
+  const allCategories = [...new Set(items.map(i => i.category || (i.kind === 'post' ? 'Messages' : '')).filter(Boolean))];
+  const visibleItems = items.filter(i => !hiddenTypes.has(i.category || (i.kind === 'post' ? 'Messages' : '')));
 
   return (
-    <div className="card h-full">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-zinc-900 dark:text-zinc-100 text-2xl font-bold leading-none tracking-tight">Flux d'activité</h2>
-        <button className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200">Activités masquées</button>
-      </div>
-
-      <div className="mb-6 p-4 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-        <textarea 
-          placeholder="Partagez quelque chose. Utilisez @ pour mentionner des personnes."
-          className="w-full bg-transparent border-none outline-none text-sm resize-none"
-          rows={2}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-        />
-        <div className="flex justify-between items-center mt-2">
-          <div className="flex gap-2 text-zinc-500">
-            <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-            <IconPaperclip size={18} className="cursor-pointer" onClick={() => fileInputRef.current?.click()} />
-            <IconLink size={18} />
-            <IconAlignLeft size={18} />
-          </div>
-          <button 
-            onClick={() => handleSendMessage()}
-            className="flex items-center gap-1 bg-blue-900 text-white px-4 py-1.5 rounded-full text-sm font-medium"
+    <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      {/* Header */}
+      <div className="flex justify-between items-center p-6 border-b border-zinc-100 dark:border-zinc-700/50">
+        <h2 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">Flux d'activité</h2>
+        <div className="relative" ref={hiddenMenuRef}>
+          <button
+            onClick={() => setShowHiddenMenu(v => !v)}
+            className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors flex items-center gap-1"
           >
-            Partagez <IconChevronDown size={16} />
+            {hiddenTypes.size > 0 && (
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+            )}
+            Activités masquées
+            <IconChevronDown size={14} />
           </button>
+          {showHiddenMenu && (
+            <div className="absolute right-0 top-8 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg z-20 p-2 min-w-[180px]">
+              {allCategories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => toggleHiddenType(cat)}
+                  className={cn(
+                    "flex items-center justify-between gap-2 w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors",
+                    hiddenTypes.has(cat)
+                      ? "text-zinc-400 dark:text-zinc-500"
+                      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  )}
+                >
+                  {cat}
+                  {hiddenTypes.has(cat) && <span className="text-[10px] text-zinc-400">masqué</span>}
+                </button>
+              ))}
+              {allCategories.length === 0 && <p className="text-xs text-zinc-400 px-3 py-2">Aucune catégorie</p>}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="space-y-6">
-        {activities.map(activity => (
-          <div key={activity.id} className="flex gap-3">
-            <img src={activity.user?.avatar || "https://picsum.photos/seed/default/32/32"} alt={activity.user?.name || 'User'} className="w-10 h-10 rounded-full" />
-            <div className="flex-1">
-              <p className="text-sm">
-                <span className="font-bold text-blue-600">{activity.user?.name || 'Unknown'}</span> {activity.action}
-              </p>
-              {activity.target && <p className="font-bold text-zinc-900 dark:text-zinc-100">{activity.target}</p>}
-              {activity.content && <p className="text-sm text-zinc-700 dark:text-zinc-300 mt-1">{activity.content}</p>}
-              <p className="text-xs text-zinc-500 mt-1">{new Date(activity.timestamp).toLocaleDateString()} · <span className="text-green-600">{activity.category}</span></p>
-              {activity.attachments && activity.attachments.length > 0 && (
-                <div className="mt-2">
-                  {activity.attachments.map(url => (
-                    <a key={url} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-600 hover:underline text-sm">
-                      <IconFileText size={16} /> {url.split('/').pop()}
-                    </a>
-                  ))}
-                </div>
-              )}
+      {/* Compose area */}
+      <div className="p-4 border-b border-zinc-100 dark:border-zinc-700/50">
+        <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+          <textarea
+            ref={textareaRef}
+            placeholder="Partagez quelque chose. Utilisez @ pour mentionner des personnes."
+            className="w-full bg-transparent px-4 pt-3 pb-1 outline-none text-sm resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400"
+            rows={2}
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <div className="flex justify-between items-center px-4 py-2 bg-zinc-50 dark:bg-zinc-900/50">
+            <div className="flex gap-3 text-zinc-400">
+              <input type="file" ref={fileInputRef} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Joindre un fichier">
+                <IconPaperclip size={16} />
+              </button>
+              <button className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Insérer un lien">
+                <IconLink size={16} />
+              </button>
+              <button className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Formater">
+                <IconAlignLeft size={16} />
+              </button>
             </div>
+            <button
+              onClick={handlePost}
+              disabled={!message.trim() || isPosting}
+              className="flex items-center gap-1.5 bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
+            >
+              {isPosting ? '...' : 'Partagez'}
+              <IconChevronDown size={14} />
+            </button>
           </div>
-        ))}
+        </div>
+        <p className="text-[10px] text-zinc-400 mt-1.5 pl-1">Ctrl+Entrée pour publier</p>
+      </div>
+
+      {/* Feed */}
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-700/50 max-h-[600px] overflow-y-auto">
+        {visibleItems.length === 0 && (
+          <div className="px-6 py-10 text-center text-zinc-400 text-sm">
+            <IconMessageCircle size={32} className="mx-auto mb-2 opacity-30" />
+            Aucune activité récente
+          </div>
+        )}
+        {visibleItems.map(item => {
+          const isCommentsOpen = expandedComments.has(item.id);
+          const CategoryIcon = TYPE_ICONS[item.target_type || (item.kind === 'post' ? 'post' : 'project')] || IconFileText;
+          const catColor = CATEGORY_COLORS[item.category || 'Messages'] || 'text-zinc-500 bg-zinc-100 dark:bg-zinc-700';
+
+          return (
+            <div key={item.id} className="px-6 py-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-700/20 transition-colors">
+              <div className="flex gap-3">
+                <Avatar name={item.user_name || 'U'} size={36} />
+                <div className="flex-1 min-w-0">
+                  {/* Activity title */}
+                  {item.kind === 'activity' ? (
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-white leading-snug">
+                      {item.action}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                  )}
+
+                  {/* Meta line */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    <CategoryIcon size={12} className="shrink-0" />
+                    <span>par <span className="font-medium text-zinc-700 dark:text-zinc-300">{item.user_name}</span></span>
+                    <span>·</span>
+                    <span>{timeAgo(item.created_at)}</span>
+                    {item.category && (
+                      <>
+                        <span>·</span>
+                        <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold", catColor)}>
+                          {item.category}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-4 mt-2">
+                    <button
+                      onClick={() => toggleComments(item.id)}
+                      className="flex items-center gap-1 text-xs text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                    >
+                      <IconMessageCircle size={13} />
+                      Commentaire{item.comments_count > 0 ? ` (${item.comments_count})` : ''}
+                    </button>
+                    <button
+                      onClick={() => handleLike(item)}
+                      className={cn(
+                        "flex items-center gap-1 text-xs transition-colors",
+                        item.liked
+                          ? "text-rose-500 dark:text-rose-400"
+                          : "text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400"
+                      )}
+                    >
+                      <IconHeart size={13} className={item.liked ? "fill-current" : ''} />
+                      {item.likes_count > 0 ? item.likes_count : 'Aimer'}
+                    </button>
+                  </div>
+
+                  {/* Comments section */}
+                  {isCommentsOpen && (
+                    <div className="mt-3 space-y-2">
+                      {item.comments.map(c => (
+                        <div key={c.id} className="flex gap-2">
+                          <Avatar name={c.user_name || 'U'} size={24} />
+                          <div className="flex-1 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
+                            <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{c.content}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {item.kind === 'post' && (
+                        <div className="flex gap-2 items-center">
+                          <Avatar name={currentUser?.name || 'U'} size={24} />
+                          <div className="flex-1 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-1.5">
+                            <input
+                              type="text"
+                              placeholder="Ajouter un commentaire..."
+                              className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+                              value={commentDraft[item.id] || ''}
+                              onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
+                              onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
+                            />
+                            <button
+                              onClick={() => handleComment(item.id)}
+                              disabled={!commentDraft[item.id]?.trim()}
+                              className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors"
+                            >
+                              <IconSend size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

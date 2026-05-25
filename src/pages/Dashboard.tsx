@@ -12,6 +12,7 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
+import ActivityFeed from '../components/ActivityFeed';
 import { 
   ResponsiveContainer, 
   PieChart, 
@@ -193,8 +194,8 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {projects?.slice(0, 4).map((project) => (
-            <div 
-              key={project.id} 
+            <div
+              key={project.id}
               className="flex items-center gap-4 p-4 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
               onClick={() => navigate(`/projects/${project.id}`)}
             >
@@ -218,6 +219,10 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="md:col-span-4">
+        <ActivityFeed />
       </div>
     </div>
   );
