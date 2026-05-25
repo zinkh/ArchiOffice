@@ -1009,9 +1009,6 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Ensure Supabase Storage buckets exist at startup
-  await ensureStorageBuckets();
-
   // Debug middleware for API routes
   app.use("/api/*", (req, res, next) => {
     console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
@@ -1024,6 +1021,9 @@ async function startServer() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized)
+  await ensureStorageBuckets();
 
   // Résolution tenant_id depuis profiles (mis en cache par request)
   async function getTenantId(userId: string): Promise<string> {
