@@ -823,7 +823,8 @@ if (false as any) {
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
     { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
     { table: 'invoices', columns: ['zoho_invoice_id'] },
-    { table: 'invoices', columns: ['invoice_type'] }
+    { table: 'invoices', columns: ['invoice_type'] },
+    { table: 'invoices', columns: ['mission_id', 'mission_name'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -834,6 +835,12 @@ if (false as any) {
         // Column likely already exists
       }
     }
+  }
+
+  try {
+    db.prepare(`ALTER TABLE invoices ADD COLUMN advancement_pct NUMERIC DEFAULT 0`).run();
+  } catch (e) {
+    // Column likely already exists
   }
 
   try {
@@ -2634,7 +2641,7 @@ async function startServer() {
         project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
-        invoice_type,
+        invoice_type, mission_id, mission_name, advancement_pct,
         items
       } = req.body;
 
@@ -2669,7 +2676,8 @@ async function startServer() {
         seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
         seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20,
-        invoice_type: invoice_type || 'standard'
+        invoice_type: invoice_type || 'standard',
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
       });
       if (insErr) throw insErr;
 
@@ -2697,7 +2705,7 @@ async function startServer() {
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
-        invoice_type,
+        invoice_type, mission_id, mission_name, advancement_pct,
         items
       } = req.body;
 
@@ -2706,7 +2714,8 @@ async function startServer() {
         invoice_number: invoice_number || null, tax_amount: tax_amount || 0, total_amount: total_amount || 0, issue_date: issue_date || null,
         seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
         seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20,
-        invoice_type: invoice_type || 'standard'
+        invoice_type: invoice_type || 'standard',
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

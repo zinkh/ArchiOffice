@@ -381,6 +381,19 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                   </div>
                 </div>
 
+                {/* Acompte reference block */}
+                {data.invoice_type === 'acompte' && data.mission_name && (
+                  <div className="mb-6 p-3 border border-amber-200 bg-amber-50 rounded-lg text-[9pt]">
+                    <p className="font-bold text-amber-800 mb-1">Référence de mission</p>
+                    <div className="grid grid-cols-[120px_1fr] gap-y-0.5 text-zinc-700">
+                      <span className="text-zinc-500">Phase :</span>
+                      <span className="font-medium">{data.mission_name}</span>
+                      <span className="text-zinc-500">Avancement :</span>
+                      <span className="font-medium">{data.advancement_pct ?? 0}%</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Items Table */}
                 <div className="flex-1">
                   <table className="w-full text-left border-collapse">

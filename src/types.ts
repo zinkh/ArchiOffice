@@ -546,6 +546,9 @@ export interface Invoice {
   total_amount?: number;
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue';
   invoice_type?: 'standard' | 'acompte';
+  mission_id?: string;
+  mission_name?: string;
+  advancement_pct?: number;
   due_date: string;
   issue_date: string;
   description: string;
