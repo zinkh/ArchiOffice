@@ -281,6 +281,10 @@ const resources = {
       "invoices_amount_label": "Amount",
       "invoices_due_date_label": "Due Date",
       "invoices_description_label": "Description",
+      "invoices_type_label": "Invoice Type",
+      "invoices_type_standard": "Standard Invoice",
+      "invoices_type_acompte": "Advance Payment Invoice",
+      "invoices_badge_acompte": "Advance",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",
@@ -801,6 +805,10 @@ const resources = {
       "invoices_amount_label": "Montant",
       "invoices_due_date_label": "Date d'échéance",
       "invoices_description_label": "Description",
+      "invoices_type_label": "Type de facture",
+      "invoices_type_standard": "Facture standard",
+      "invoices_type_acompte": "Facture d'acompte",
+      "invoices_badge_acompte": "Acompte",
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",

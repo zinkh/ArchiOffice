@@ -545,6 +545,7 @@ export interface Invoice {
   tax_amount?: number;
   total_amount?: number;
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue';
+  invoice_type?: 'standard' | 'acompte';
   due_date: string;
   issue_date: string;
   description: string;

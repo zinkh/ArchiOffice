@@ -822,7 +822,8 @@ if (false as any) {
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
     { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
-    { table: 'invoices', columns: ['zoho_invoice_id'] }
+    { table: 'invoices', columns: ['zoho_invoice_id'] },
+    { table: 'invoices', columns: ['invoice_type'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -2633,6 +2634,7 @@ async function startServer() {
         project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        invoice_type,
         items
       } = req.body;
 
@@ -2666,7 +2668,8 @@ async function startServer() {
         issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
         seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
-        seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20
+        seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20,
+        invoice_type: invoice_type || 'standard'
       });
       if (insErr) throw insErr;
 
@@ -2694,6 +2697,7 @@ async function startServer() {
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        invoice_type,
         items
       } = req.body;
 
@@ -2701,7 +2705,8 @@ async function startServer() {
         amount: amount || 0, description: description || '', status: status || 'Draft', due_date: due_date || null,
         invoice_number: invoice_number || null, tax_amount: tax_amount || 0, total_amount: total_amount || 0, issue_date: issue_date || null,
         seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
-        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20
+        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20,
+        invoice_type: invoice_type || 'standard'
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

@@ -28,6 +28,7 @@ export default function Invoices() {
     amount: 0,
     description: '',
     status: 'Draft',
+    invoice_type: 'standard',
     due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
@@ -105,12 +106,13 @@ export default function Invoices() {
       };
       setInvoices([enrichedSaved, ...invoices]);
       setIsModalOpen(false);
-      setNewInvoice({ 
-        project_id: '', 
-        amount: 0, 
-        description: '', 
-        status: 'Draft', 
-        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] 
+      setNewInvoice({
+        project_id: '',
+        amount: 0,
+        description: '',
+        status: 'Draft',
+        invoice_type: 'standard',
+        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       });
     } catch (err) {
       console.error('Create invoice failed:', err);
@@ -344,11 +346,21 @@ export default function Invoices() {
                         <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-l-4 border-emerald-500/30">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3 pl-4">
-                              <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                              <div className={cn(
+                                "p-2 rounded-lg",
+                                invoice.invoice_type === 'acompte'
+                                  ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
+                                  : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                              )}>
                                 <IconFileInvoice size={20} />
                               </div>
                               <div>
-                                <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                                  {invoice.invoice_type === 'acompte' && (
+                                    <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[9px] font-bold uppercase tracking-wider">{t('invoices_badge_acompte')}</span>
+                                  )}
+                                </div>
                                 <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
                               </div>
                             </div>
@@ -402,12 +414,20 @@ export default function Invoices() {
                   <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                        <div className={cn(
+                          "p-2 rounded-lg",
+                          invoice.invoice_type === 'acompte'
+                            ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
+                            : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                        )}>
                           <IconFileInvoice size={20} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                            {invoice.invoice_type === 'acompte' && (
+                              <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[9px] font-bold uppercase tracking-wider">{t('invoices_badge_acompte')}</span>
+                            )}
                             <span className="text-[10px] text-zinc-400 font-mono">/</span>
                             <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{invoice.project_name || 'General'}</p>
                           </div>
@@ -511,6 +531,37 @@ export default function Invoices() {
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">{t('invoices_type_label')}</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
+                      className={cn(
+                        "flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all",
+                        newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
+                          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
+                          : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                      )}
+                    >
+                      <IconFileInvoice size={20} />
+                      {t('invoices_type_standard')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
+                      className={cn(
+                        "flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all",
+                        newInvoice.invoice_type === 'acompte'
+                          ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                          : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                      )}
+                    >
+                      <IconFileInvoice size={20} />
+                      {t('invoices_type_acompte')}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_amount_label')}</label>

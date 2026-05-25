@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   due_date TEXT, issue_date TEXT, description TEXT, created_at TEXT,
   seller_name TEXT, seller_address TEXT, seller_siret TEXT,
   seller_vat_number TEXT, seller_iban TEXT, seller_bic TEXT,
-  vat_rate NUMERIC, zoho_invoice_id TEXT
+  vat_rate NUMERIC, zoho_invoice_id TEXT, invoice_type TEXT DEFAULT 'standard'
 );
 
 CREATE TABLE IF NOT EXISTS invoice_items (
