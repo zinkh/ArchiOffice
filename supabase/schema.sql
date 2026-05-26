@@ -233,7 +233,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   due_date TEXT, issue_date TEXT, description TEXT, created_at TEXT,
   seller_name TEXT, seller_address TEXT, seller_siret TEXT,
   seller_vat_number TEXT, seller_iban TEXT, seller_bic TEXT,
-  vat_rate NUMERIC, zoho_invoice_id TEXT
+  vat_rate NUMERIC, zoho_invoice_id TEXT, invoice_type TEXT DEFAULT 'standard',
+  mission_id TEXT, mission_name TEXT, advancement_pct NUMERIC DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS invoice_items (
@@ -599,3 +600,56 @@ CREATE POLICY "own_profile" ON profiles
 -- Tenants : visible par ses membres uniquement
 CREATE POLICY "own_tenant" ON tenants
   USING (id = my_tenant_id());
+
+-- Activity Feed tables
+CREATE TABLE IF NOT EXISTS activities (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id TEXT,
+  user_name TEXT,
+  action TEXT NOT NULL,
+  target TEXT,
+  target_id TEXT,
+  target_type TEXT,
+  category TEXT,
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feed_posts (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id TEXT,
+  user_name TEXT,
+  content TEXT NOT NULL,
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feed_comments (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  post_id TEXT REFERENCES feed_posts(id) ON DELETE CASCADE,
+  user_id TEXT,
+  user_name TEXT,
+  content TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feed_likes (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  item_id TEXT NOT NULL,
+  item_type TEXT NOT NULL,
+  user_id TEXT
+);
+
+ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feed_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feed_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feed_likes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON activities USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON feed_posts USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON feed_comments USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON feed_likes USING (tenant_id = my_tenant_id());

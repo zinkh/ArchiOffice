@@ -759,6 +759,47 @@ if (false as any) {
       smtpUser TEXT,
       smtpPass TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      action TEXT NOT NULL,
+      target TEXT,
+      target_id TEXT,
+      target_type TEXT,
+      category TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_posts (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      content TEXT NOT NULL,
+      created_at TEXT,
+      likes_count INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_comments (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      post_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      content TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_likes (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      item_id TEXT NOT NULL,
+      item_type TEXT NOT NULL,
+      user_id TEXT
+    );
   `);
 
   // Add columns if they don't exist (for existing databases)
@@ -822,7 +863,11 @@ if (false as any) {
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
     { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
-    { table: 'invoices', columns: ['zoho_invoice_id'] }
+    { table: 'invoices', columns: ['zoho_invoice_id'] },
+    { table: 'invoices', columns: ['invoice_type'] },
+    { table: 'invoices', columns: ['mission_id', 'mission_name'] },
+    { table: 'activities', columns: ['likes_count'] },
+    { table: 'team_members', columns: ['notifications_last_seen'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -833,6 +878,12 @@ if (false as any) {
         // Column likely already exists
       }
     }
+  }
+
+  try {
+    db.prepare(`ALTER TABLE invoices ADD COLUMN advancement_pct NUMERIC DEFAULT 0`).run();
+  } catch (e) {
+    // Column likely already exists
   }
 
   try {
@@ -1963,6 +2014,11 @@ async function startServer() {
       if (categories_list?.length) {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
+      // Log activity
+      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
+
       res.status(201).json({ id, project_code });
     } catch (error: any) {
       console.error("Error creating project:", error);
@@ -2286,6 +2342,10 @@ async function startServer() {
       if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
       if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
       const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      // Log activity
+      const { data: meTndr } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const userNameTndr = (meTndr as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
       res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
   });
@@ -2633,6 +2693,7 @@ async function startServer() {
         project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        invoice_type, mission_id, mission_name, advancement_pct,
         items
       } = req.body;
 
@@ -2666,7 +2727,9 @@ async function startServer() {
         issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
         seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
-        seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20
+        seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20,
+        invoice_type: invoice_type || 'standard',
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
       });
       if (insErr) throw insErr;
 
@@ -2679,6 +2742,13 @@ async function startServer() {
       const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).single();
       const project_name = (invoice as any)?.projects?.name || null;
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
+
+      // Log activity
+      const { data: meInv } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const userNameInv = (meInv as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const invLabel = invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture';
+      logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${invoice_number || id.slice(0, 8)}`, project_name || '', id, 'invoice', 'Factures');
+
       res.status(201).json({ ...rest, project_name, items: invoice_items || [] });
     } catch (error: any) {
       console.error("Error creating invoice:", error);
@@ -2694,6 +2764,7 @@ async function startServer() {
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+        invoice_type, mission_id, mission_name, advancement_pct,
         items
       } = req.body;
 
@@ -2701,7 +2772,9 @@ async function startServer() {
         amount: amount || 0, description: description || '', status: status || 'Draft', due_date: due_date || null,
         invoice_number: invoice_number || null, tax_amount: tax_amount || 0, total_amount: total_amount || 0, issue_date: issue_date || null,
         seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
-        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20
+        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20,
+        invoice_type: invoice_type || 'standard',
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 
@@ -3237,6 +3310,202 @@ async function startServer() {
       });
     }
   });
+
+  // ── Activity Feed ──────────────────────────────────────────────────────────
+
+  const logActivity = async (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => {
+    try {
+      await supabaseAdmin.from('activities').insert({
+        id: crypto.randomUUID(),
+        tenant_id: tenantId,
+        user_id: userId,
+        user_name: userName,
+        action,
+        target,
+        target_id: targetId,
+        target_type: targetType,
+        category,
+        created_at: new Date().toISOString()
+      });
+    } catch (e) {
+      // Non-blocking
+    }
+  };
+
+  app.get("/api/feed", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const [{ data: acts }, { data: posts }, { data: member }] = await Promise.all([
+        supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+        supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+        supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
+      ]);
+
+      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
+
+      // Fetch likes for current user
+      const { data: myLikes } = await supabaseAdmin.from('feed_likes').select('item_id, item_type').eq('tenant_id', tenantId).eq('user_id', req.user.id);
+      const likedSet = new Set((myLikes || []).map((l: any) => `${l.item_type}:${l.item_id}`));
+
+      // Fetch comments per post
+      const postIds = (posts || []).map((p: any) => p.id);
+      const { data: allComments } = postIds.length
+        ? await supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true })
+        : { data: [] };
+
+      const feedItems = [
+        ...(acts || []).map((a: any) => ({
+          id: a.id,
+          kind: 'activity',
+          user_name: a.user_name,
+          user_id: a.user_id,
+          action: a.action,
+          target: a.target,
+          target_id: a.target_id,
+          target_type: a.target_type,
+          category: a.category,
+          created_at: a.created_at,
+          likes_count: a.likes_count || 0,
+          liked: likedSet.has(`activity:${a.id}`),
+          unread: a.created_at > lastSeen,
+          comments: [],
+          comments_count: 0
+        })),
+        ...(posts || []).map((p: any) => ({
+          id: p.id,
+          kind: 'post',
+          user_name: p.user_name,
+          user_id: p.user_id,
+          content: p.content,
+          category: 'Messages',
+          created_at: p.created_at,
+          likes_count: p.likes_count || 0,
+          liked: likedSet.has(`post:${p.id}`),
+          unread: p.created_at > lastSeen,
+          comments: (allComments || []).filter((c: any) => c.post_id === p.id),
+          comments_count: (allComments || []).filter((c: any) => c.post_id === p.id).length
+        }))
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      res.json(feedItems);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to fetch feed" });
+    }
+  });
+
+  app.post("/api/feed/posts", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { content } = req.body;
+      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+
+      // Get user name
+      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+
+      const id = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to create post" });
+    }
+  });
+
+  app.post("/api/feed/posts/:id/like", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'post').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      if (existing) {
+        await supabaseAdmin.from('feed_likes').delete().eq('id', (existing as any).id);
+        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).single();
+        const newCount = Math.max(0, ((post as any)?.likes_count || 1) - 1);
+        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id);
+        res.json({ liked: false, likes_count: newCount });
+      } else {
+        await supabaseAdmin.from('feed_likes').insert({ id: crypto.randomUUID(), item_id: id, item_type: 'post', user_id: req.user.id, tenant_id: tenantId });
+        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).single();
+        const newCount = ((post as any)?.likes_count || 0) + 1;
+        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id);
+        res.json({ liked: true, likes_count: newCount });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to toggle like" });
+    }
+  });
+
+  app.post("/api/feed/activities/:id/like", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'activity').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      if (existing) {
+        await supabaseAdmin.from('feed_likes').delete().eq('id', (existing as any).id);
+        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).single();
+        const newCount = Math.max(0, ((act as any)?.likes_count || 1) - 1);
+        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id);
+        res.json({ liked: false, likes_count: newCount });
+      } else {
+        await supabaseAdmin.from('feed_likes').insert({ id: crypto.randomUUID(), item_id: id, item_type: 'activity', user_id: req.user.id, tenant_id: tenantId });
+        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).single();
+        const newCount = ((act as any)?.likes_count || 0) + 1;
+        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id);
+        res.json({ liked: true, likes_count: newCount });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to toggle like" });
+    }
+  });
+
+  app.post("/api/feed/posts/:id/comments", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { content } = req.body;
+      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const commentId = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to add comment" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: member } = await supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
+
+      const [{ count: actCount }, { count: postCount }] = await Promise.all([
+        supabaseAdmin.from('activities').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gt('created_at', lastSeen),
+        supabaseAdmin.from('feed_posts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gt('created_at', lastSeen)
+      ]);
+
+      res.json({ count: (actCount || 0) + (postCount || 0) });
+    } catch (err: any) {
+      res.json({ count: 0 });
+    }
+  });
+
+  app.post("/api/notifications/mark-read", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const now = new Date().toISOString();
+      await supabaseAdmin.from('team_members').update({ notifications_last_seen: now }).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      res.json({ success: true, last_seen: now });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to mark notifications as read" });
+    }
+  });
+
+  // ── End Activity Feed ───────────────────────────────────────────────────────
 
   app.post("/api/send-email", async (req: any, res: any) => {
     try {

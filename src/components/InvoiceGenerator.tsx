@@ -15,8 +15,9 @@ interface InvoiceGeneratorProps {
 }
 
 export function InvoiceGenerator({ onClose, onSave, initialData, project }: InvoiceGeneratorProps) {
+  const isAcompte = initialData?.invoice_type === 'acompte';
   const [data, setData] = useState<Partial<Invoice>>({
-    invoice_number: `F${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+    invoice_number: `${isAcompte ? 'A' : 'F'}${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
     issue_date: new Date().toISOString().split('T')[0],
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     vat_rate: 20,
@@ -78,7 +79,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   </rsm:ExchangedDocumentContext>
   <rsm:ExchangedDocument>
     <ram:ID>${data.invoice_number}</ram:ID>
-    <ram:TypeCode>380</ram:TypeCode>
+    <ram:TypeCode>${data.invoice_type === 'acompte' ? '386' : '380'}</ram:TypeCode>
     <ram:IssueDateTime>
       <udt:DateTimeString format="102">${data.issue_date?.replace(/-/g, '')}</udt:DateTimeString>
     </ram:IssueDateTime>
@@ -220,7 +221,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       
       // Note: Full Factur-X PDF/A-3 embedding is complex in browser.
       // We provide the XML as a separate download for now to ensure compliance with structured data requirement.
-      const filename = `Facture_${data.invoice_number}.pdf`;
+      const invoiceLabel = data.invoice_type === 'acompte' ? 'Acompte' : 'Facture';
+      const filename = `${invoiceLabel}_${data.invoice_number}.pdf`;
       pdf.save(filename);
 
       // Auto-save to Documents module
@@ -228,7 +230,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       autoSaveDocument({
         blob: pdfBlob,
         filename,
-        name: `Facture ${data.invoice_number}`,
+        name: `${invoiceLabel} ${data.invoice_number}`,
         projectId: project?.id,
         phase: 'Général',
         category: 'Contract',
@@ -352,7 +354,9 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     </div>
                   </div>
                   <div className="text-right">
-                    <h2 className="text-xl font-bold uppercase mb-1">Facture</h2>
+                    <h2 className="text-xl font-bold uppercase mb-1">
+                      {data.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'}
+                    </h2>
                     <p className="text-sm font-bold">N° {data.invoice_number}</p>
                     <p className="text-sm text-zinc-500 mt-2">Date : {new Date(data.issue_date || '').toLocaleDateString('fr-FR')}</p>
                   </div>
@@ -376,6 +380,19 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     </div>
                   </div>
                 </div>
+
+                {/* Acompte reference block */}
+                {data.invoice_type === 'acompte' && data.mission_name && (
+                  <div className="mb-6 p-3 border border-amber-200 bg-amber-50 rounded-lg text-[9pt]">
+                    <p className="font-bold text-amber-800 mb-1">Référence de mission</p>
+                    <div className="grid grid-cols-[120px_1fr] gap-y-0.5 text-zinc-700">
+                      <span className="text-zinc-500">Phase :</span>
+                      <span className="font-medium">{data.mission_name}</span>
+                      <span className="text-zinc-500">Avancement :</span>
+                      <span className="font-medium">{data.advancement_pct ?? 0}%</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Items Table */}
                 <div className="flex-1">

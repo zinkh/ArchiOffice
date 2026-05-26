@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { apiFetch } from './lib/api';
 import './i18n';
 
 // Pages
@@ -43,6 +44,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
+import Notifications from './pages/Notifications';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -86,13 +88,32 @@ function Header() {
   const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const item = NAV_ITEMS.find(i => i.path === location.pathname);
     if (item) {
       setHeaderTitle(t(item.name));
     }
+    // Reset unread count when visiting notifications page
+    if (location.pathname === '/notifications') {
+      setUnreadCount(0);
+    }
   }, [location.pathname, t, setHeaderTitle]);
+
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const data = await apiFetch<{ count: number }>('/api/notifications/unread-count');
+        setUnreadCount(data.count || 0);
+      } catch {
+        // ignore
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl shadow-sm">
@@ -137,9 +158,14 @@ function Header() {
             <button
               onClick={() => navigate('/notifications')}
               className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 relative"
+              title="Notifications"
             >
               <IconBell size={18} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-zinc-900" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center border border-white dark:border-zinc-900 leading-none">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
 
             <div className="relative ml-0 sm:ml-1">
@@ -309,6 +335,7 @@ export default function App() {
               <Route path="/proposal-generator" element={<ProposalModule />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
+              <Route path="/notifications" element={<Notifications />} />
             </Route>
           </Routes>
         </Router>
