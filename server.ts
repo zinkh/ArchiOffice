@@ -782,12 +782,14 @@ try {
     { table: 'site_reports', columns: ['pageFormat', 'stakeholders', 'companies', 'meetingNotes', 'nextMeeting', 'meteo', 'temperature', 'effectif_total'] },
     { table: 'site_report_notes', columns: ['text', 'lot_concerne', 'photo_url', 'position', 'description', 'statut'] },
     { table: 'contacts', columns: [
-      'prefix', 'middle_name', 'suffix', 'nickname', 'job_title', 'department', 
-      'email_work', 'email_home', 'email_other', 
+      'prefix', 'middle_name', 'suffix', 'nickname', 'job_title', 'department',
+      'email_work', 'email_home', 'email_other',
       'phone_mobile', 'phone_work', 'phone_home', 'phone_main', 'phone_fax_work', 'phone_fax_home', 'phone_pager', 'phone_other',
       'address_work_street', 'address_work_city', 'address_work_state', 'address_work_zip', 'address_work_country',
       'address_home_street', 'address_home_city', 'address_home_state', 'address_home_zip', 'address_home_country',
-      'notes', 'birthday', 'category', 'company_name', 'siret', 'vat_number', 'website'
+      'notes', 'birthday', 'category', 'company_name', 'siret', 'vat_number', 'website',
+      'candidatures', 'affaires', 'logo', 'electronic_signature', 'contact_references', 'tags',
+      'created_at', 'created_by', 'market_number'
     ] },
     { table: 'team_members', columns: ['system_role', 'senderOption', 'defaultEmailTemplate', 'password'] },
     { table: 'invoices', columns: ['invoice_number', 'tax_amount', 'total_amount', 'issue_date', 'seller_name', 'seller_address', 'seller_siret', 'seller_vat_number', 'seller_iban', 'seller_bic', 'vat_rate'] },
@@ -841,6 +843,14 @@ try {
     db.prepare(`ALTER TABLE specifications ADD COLUMN is_template INTEGER DEFAULT 0`).run();
   } catch (e) {
     // Column likely already exists
+  }
+
+  for (const col of ['ca_amount', 'market_amount_base', 'market_amount_options', 'market_amount_avenants']) {
+    try {
+      db.prepare(`ALTER TABLE contacts ADD COLUMN ${col} REAL`).run();
+    } catch (e) {
+      // Column likely already exists
+    }
   }
 
   // Seed Data
@@ -2756,7 +2766,8 @@ async function startServer() {
         sanitize(contact.vat_number)
       );
       
-      res.status(201).json({ id: contact.id });
+      const saved = db.prepare("SELECT * FROM contacts WHERE id = ?").get(contact.id);
+      res.status(201).json(saved);
     } catch (error: any) {
       console.error("Error creating contact:", error.message);
       res.status(500).json({ error: "Failed to create contact: " + error.message });

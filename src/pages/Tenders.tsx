@@ -18,6 +18,7 @@ export default function Tenders() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactModalTarget, setContactModalTarget] = useState<'client' | number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingTender, setEditingTender] = useState<Tender | null>(null);
@@ -495,7 +496,7 @@ export default function Tenders() {
                           setNewTender({...newTender, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                         }
                       }}
-                      onAddNew={() => setIsContactModalOpen(true)}
+                      onAddNew={() => { setContactModalTarget('client'); setIsContactModalOpen(true); }}
                       addNewLabel="Add New Client"
                     />
                   </div>
@@ -670,7 +671,7 @@ export default function Tenders() {
                             contacts={contacts}
                             value={spec.contact_id || ''}
                             onChange={val => updateSpecialty(idx, 'contact_id', val)}
-                            onAddNew={() => setIsContactModalOpen(true)}
+                            onAddNew={() => { setContactModalTarget(idx); setIsContactModalOpen(true); }}
                           />
                           <button 
                             type="button"
@@ -747,17 +748,17 @@ export default function Tenders() {
       <ContactModal 
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
-        onSuccess={() => {
-          // Refetch contacts
-          const loadContacts = async () => {
-            try {
-              const data = await fetchJson<Contact[]>('/api/contacts');
-              setContacts(data);
-            } catch (err) {
-              console.error('Contacts fetch failed:', err);
-            }
-          };
-          loadContacts();
+        onSuccess={(newContact) => {
+          fetchJson<Contact[]>('/api/contacts')
+            .then(setContacts)
+            .catch(err => console.error('Contacts fetch failed:', err));
+          if (contactModalTarget === 'client') {
+            const name = newContact.company_name || `${newContact.first_name} ${newContact.last_name}`;
+            setNewTender(prev => ({ ...prev, client: name }));
+          } else if (typeof contactModalTarget === 'number') {
+            updateSpecialty(contactModalTarget, 'contact_id', newContact.id);
+          }
+          setContactModalTarget(null);
         }}
       />
     </div>

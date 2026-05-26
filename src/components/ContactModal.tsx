@@ -116,9 +116,15 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
         onClose();
         setNewContact({ category: initialCategory || '' });
       } else {
-        const errorData = await res.json();
-        console.error('Failed to save contact:', errorData);
-        alert(`Failed to save contact: ${errorData.error || 'Unknown error'}`);
+        let errorMsg = `Server returned ${res.status}`;
+        try {
+          const errorData = await res.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          // non-JSON response
+        }
+        console.error('Failed to save contact:', errorMsg);
+        alert(`Failed to save contact: ${errorMsg}`);
       }
     } catch (err) {
       console.error('Error submitting contact:', err);

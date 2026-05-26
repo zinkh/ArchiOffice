@@ -25,6 +25,7 @@ export default function Projects() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactModalTarget, setContactModalTarget] = useState<'client' | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
@@ -833,7 +834,7 @@ export default function Projects() {
                             setEditForm(prev => prev ? ({...prev, client: contact.company_name || `${contact.first_name} ${contact.last_name}`}) : null);
                           }
                         }}
-                        onAddNew={() => setIsContactModalOpen(true)}
+                        onAddNew={() => { setContactModalTarget('client'); setIsContactModalOpen(true); }}
                         addNewLabel="Add New Client"
                       />
                     ) : (
@@ -1559,6 +1560,11 @@ export default function Projects() {
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
           fetchContacts();
+          if (contactModalTarget === 'client') {
+            const name = newContact.company_name || `${newContact.first_name} ${newContact.last_name}`;
+            setEditForm(prev => prev ? ({ ...prev, client: name }) : null);
+          }
+          setContactModalTarget(null);
         }}
       />
     </div>

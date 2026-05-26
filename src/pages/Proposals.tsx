@@ -89,6 +89,7 @@ export default function Proposals() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactModalTarget, setContactModalTarget] = useState<'client' | number | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -591,7 +592,7 @@ export default function Proposals() {
                             setNewProposal(prev => ({...prev, client_id: v}));
                           }
                         }}
-                        onAddNew={() => setIsContactModalOpen(true)}
+                        onAddNew={() => { setContactModalTarget('client'); setIsContactModalOpen(true); }}
                         addNewLabel="Add New Client"
                       />
                     </div>
@@ -852,7 +853,7 @@ export default function Proposals() {
                                 contacts={contacts}
                                 value={spec.contact_id || ''}
                                 onChange={val => updateSpecialty(idx, 'contact_id', val)}
-                                onAddNew={() => setIsContactModalOpen(true)}
+                                onAddNew={() => { setContactModalTarget(idx); setIsContactModalOpen(true); }}
                               />
                             </td>
                             <td className="px-4 py-3 text-right">
@@ -1011,8 +1012,21 @@ export default function Proposals() {
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
           fetchContacts();
-          // If we are in the main proposal form, we might want to auto-select it
-          // but since we have multiple autocompletes, it's safer to just refresh the list
+          if (contactModalTarget === 'client') {
+            setNewProposal(prev => ({
+              ...prev,
+              client_id: newContact.id,
+              adresse_client: newContact.address || newContact.address_work_street || '',
+              cp_client: newContact.zip || newContact.address_work_zip || '',
+              ville_client: newContact.city || newContact.address_work_city || '',
+              telephone: newContact.phone || newContact.phone_work || '',
+              portable: newContact.phone_mobile || '',
+              email_client: newContact.email || newContact.email_work || ''
+            }));
+          } else if (typeof contactModalTarget === 'number') {
+            updateSpecialty(contactModalTarget, 'contact_id', newContact.id);
+          }
+          setContactModalTarget(null);
         }}
       />
     </div>
