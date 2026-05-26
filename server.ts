@@ -866,7 +866,8 @@ if (false as any) {
     { table: 'invoices', columns: ['zoho_invoice_id'] },
     { table: 'invoices', columns: ['invoice_type'] },
     { table: 'invoices', columns: ['mission_id', 'mission_name'] },
-    { table: 'activities', columns: ['likes_count'] }
+    { table: 'activities', columns: ['likes_count'] },
+    { table: 'team_members', columns: ['notifications_last_seen'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -3334,16 +3335,19 @@ async function startServer() {
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const [{ data: acts }, { data: posts }] = await Promise.all([
-        supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(30),
-        supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(30)
+      const [{ data: acts }, { data: posts }, { data: member }] = await Promise.all([
+        supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+        supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+        supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
       ]);
+
+      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
 
       // Fetch likes for current user
       const { data: myLikes } = await supabaseAdmin.from('feed_likes').select('item_id, item_type').eq('tenant_id', tenantId).eq('user_id', req.user.id);
       const likedSet = new Set((myLikes || []).map((l: any) => `${l.item_type}:${l.item_id}`));
 
-      // Fetch comments counts per post
+      // Fetch comments per post
       const postIds = (posts || []).map((p: any) => p.id);
       const { data: allComments } = postIds.length
         ? await supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true })
@@ -3363,6 +3367,7 @@ async function startServer() {
           created_at: a.created_at,
           likes_count: a.likes_count || 0,
           liked: likedSet.has(`activity:${a.id}`),
+          unread: a.created_at > lastSeen,
           comments: [],
           comments_count: 0
         })),
@@ -3372,9 +3377,11 @@ async function startServer() {
           user_name: p.user_name,
           user_id: p.user_id,
           content: p.content,
+          category: 'Messages',
           created_at: p.created_at,
           likes_count: p.likes_count || 0,
           liked: likedSet.has(`post:${p.id}`),
+          unread: p.created_at > lastSeen,
           comments: (allComments || []).filter((c: any) => c.post_id === p.id),
           comments_count: (allComments || []).filter((c: any) => c.post_id === p.id).length
         }))
@@ -3467,6 +3474,34 @@ async function startServer() {
       res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to add comment" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: member } = await supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
+
+      const [{ count: actCount }, { count: postCount }] = await Promise.all([
+        supabaseAdmin.from('activities').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gt('created_at', lastSeen),
+        supabaseAdmin.from('feed_posts').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gt('created_at', lastSeen)
+      ]);
+
+      res.json({ count: (actCount || 0) + (postCount || 0) });
+    } catch (err: any) {
+      res.json({ count: 0 });
+    }
+  });
+
+  app.post("/api/notifications/mark-read", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const now = new Date().toISOString();
+      await supabaseAdmin.from('team_members').update({ notifications_last_seen: now }).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      res.json({ success: true, last_seen: now });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to mark notifications as read" });
     }
   });
 
