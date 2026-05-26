@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { apiFetch } from './lib/api';
 import './i18n';
 
 // Pages
@@ -103,8 +104,7 @@ function Header() {
   useEffect(() => {
     const fetchUnread = async () => {
       try {
-        const { apiFetch: _apiFetch } = await import('./lib/api');
-        const data = await _apiFetch<{ count: number }>('/api/notifications/unread-count');
+        const data = await apiFetch<{ count: number }>('/api/notifications/unread-count');
         setUnreadCount(data.count || 0);
       } catch {
         // ignore
