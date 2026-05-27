@@ -35,6 +35,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [tenders, setTenders] = useState<any[]>([]);
 
   useEffect(() => {
     fetch('/api/projects')
@@ -52,11 +53,19 @@ export default function Dashboard() {
       })
       .then(setMilestones)
       .catch(err => console.error(err));
+
+    fetch('/api/tenders')
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch tenders');
+        return res.json();
+      })
+      .then(setTenders)
+      .catch(err => console.error(err));
   }, []);
 
   const stats = [
     { label: 'active_projects', value: projects.filter(p => p.status === 'In Progress').length, icon: IconActivity, trend: '+2', color: 'text-blue-500' },
-    { label: 'pending_tenders', value: 3, icon: IconAlertCircle, trend: 'STABLE', color: 'text-yellow-500' },
+    { label: 'pending_tenders', value: tenders.filter(t => t.status === 'pending' || t.status === 'Pending' || !t.status).length, icon: IconAlertCircle, trend: tenders.filter(t => t.status === 'pending' || t.status === 'Pending' || !t.status).length > 0 ? 'ACTIF' : 'STABLE', color: 'text-yellow-500' },
     { label: 'completed_month', value: projects.filter(p => p.status === 'Completed').length, icon: IconCircleCheck, trend: '+1', color: 'text-green-500' },
     { label: 'upcoming_deadlines', value: milestones.filter(m => !m.completed).length, icon: IconClock, trend: 'URGENT', color: 'text-red-500' },
   ];
