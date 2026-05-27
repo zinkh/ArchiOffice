@@ -12,7 +12,7 @@ import {
   IconLogout,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -90,6 +90,11 @@ function Header() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<{ projects: any[]; contacts: any[]; tenders: any[]; invoices: any[] }>({ projects: [], contacts: [], tenders: [], invoices: [] });
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const item = NAV_ITEMS.find(i => i.path === location.pathname);
@@ -116,6 +121,56 @@ function Header() {
     return () => clearInterval(interval);
   }, []);
 
+  // Debounced search
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.length < 2) {
+      setSearchResults({ projects: [], contacts: [], tenders: [], invoices: [] });
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data);
+        }
+      } catch (err) {
+        console.error('Search failed:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Escape / Ctrl+K keyboard shortcuts and outside click
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsSearchOpen(false);
+        setSearchQuery('');
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        setTimeout(() => document.getElementById('global-search-input')?.focus(), 50);
+      }
+    };
+    const handleClick = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    document.addEventListener('mousedown', handleClick);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, []);
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl shadow-sm">
       <div className="px-4 h-16 flex items-center justify-between">
@@ -139,13 +194,102 @@ function Header() {
           <div className="hidden lg:flex">
             <SyncStatus />
           </div>
-          <div className="hidden md:flex relative">
-            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-            <input
-              type="text"
-              placeholder={t('search_placeholder')}
-              className="pl-9 pr-4 py-1.5 bg-zinc-100 dark:bg-zinc-800 border-transparent focus:bg-white dark:focus:bg-zinc-900 border focus:border-blue-500 rounded text-sm w-64 transition-all outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500"
-            />
+          <div ref={searchRef} className="relative hidden md:flex">
+            <div className="relative">
+              <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                id="global-search-input"
+                type="text"
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setIsSearchOpen(true); }}
+                onFocus={() => setIsSearchOpen(true)}
+                placeholder={t('search_placeholder') + ' (Ctrl+K)'}
+                className="pl-9 pr-3 py-2 w-64 text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all focus:w-80"
+              />
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
+
+            {/* Results dropdown */}
+            {isSearchOpen && searchQuery.length >= 2 && (
+              <div className="absolute top-full mt-2 left-0 w-96 bg-white dark:bg-zinc-900 rounded-xl shadow-xl border border-zinc-200 dark:border-zinc-700 z-50 overflow-hidden max-h-[70vh] overflow-y-auto">
+                {Object.entries(searchResults).every(([, arr]) => (arr as any[]).length === 0) && !isSearching ? (
+                  <div className="p-4 text-sm text-zinc-500 text-center">Aucun résultat pour "{searchQuery}"</div>
+                ) : (
+                  <div>
+                    {searchResults.projects.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Projets</div>
+                        {searchResults.projects.map((item: any) => (
+                          <Link key={item.id} to={`/projects/${item.id}`} onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
+                            <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <span className="text-blue-600 dark:text-blue-400 text-xs font-bold">P</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
+                              {item.client && <p className="text-xs text-zinc-500 truncate">{item.client}</p>}
+                            </div>
+                            <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${item.status === 'In Progress' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>{item.status}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults.contacts.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Contacts</div>
+                        {searchResults.contacts.map((item: any) => (
+                          <Link key={item.id} to="/contacts" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
+                            <div className="w-7 h-7 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <span className="text-green-600 dark:text-green-400 text-xs font-bold">C</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
+                              {item.email && <p className="text-xs text-zinc-500 truncate">{item.email}</p>}
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults.tenders.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Appels d'offres</div>
+                        {searchResults.tenders.map((item: any) => (
+                          <Link key={item.id} to={`/tenders/${item.id}`} onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
+                            <div className="w-7 h-7 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <span className="text-amber-600 dark:text-amber-400 text-xs font-bold">A</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
+                              {item.client && <p className="text-xs text-zinc-500 truncate">{item.client}</p>}
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    {searchResults.invoices.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Factures</div>
+                        {searchResults.invoices.map((item: any) => (
+                          <Link key={item.id} to="/invoices" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
+                            <div className="w-7 h-7 bg-violet-100 dark:bg-violet-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <span className="text-violet-600 dark:text-violet-400 text-xs font-bold">F</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-0 sm:gap-2">
