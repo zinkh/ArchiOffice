@@ -171,6 +171,7 @@ export default function ProjectDetail() {
     return () => setHeaderTitle('Dashboard');
   }, [project, setHeaderTitle]);
   const [team, setTeam] = useState<any[]>([]);
+  const [projectMembers, setProjectMembers] = useState<any[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
@@ -252,8 +253,17 @@ export default function ProjectDetail() {
       fetchContacts();
       fetchTeam();
       fetchProjectTenders();
+      fetchProjectMembers();
     }
   }, [id]);
+
+  const fetchProjectMembers = async () => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/projects/${id}/members`);
+      if (res.ok) { const data = await res.json(); setProjectMembers(Array.isArray(data) ? data : []); }
+    } catch (err) { console.error('Failed to fetch project members:', err); }
+  };
 
   const fetchFullProject = async () => {
     try {
@@ -1369,6 +1379,66 @@ export default function ProjectDetail() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Project Members Section */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Équipe du projet</h3>
+                      <span className="text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full">{projectMembers.length}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none"
+                        defaultValue=""
+                        onChange={async e => {
+                          const userId = e.target.value;
+                          if (!userId) return;
+                          e.target.value = '';
+                          try {
+                            const res = await fetch(`/api/projects/${id}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, role: 'member' }) });
+                            if (res.ok) fetchProjectMembers();
+                          } catch (err) { console.error(err); }
+                        }}
+                      >
+                        <option value="">+ Ajouter un membre</option>
+                        {team.filter(m => !projectMembers.find(pm => pm.user_id === m.id || pm.id === m.id)).map(m => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    {projectMembers.length === 0 ? (
+                      <p className="text-sm text-zinc-400 italic text-center py-4">Aucun membre assigné à ce projet. Utilisez le menu ci-dessus pour en ajouter.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {projectMembers.map(m => (
+                          <div key={m.id || m.user_id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl group">
+                            <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-xs font-bold text-violet-700 dark:text-violet-400 flex-shrink-0">
+                              {(m.name || m.email || '?').charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{m.name || m.email}</p>
+                              <p className="text-[10px] text-zinc-400">{m.role || 'member'}</p>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const userId = m.user_id || m.id;
+                                  const res = await fetch(`/api/projects/${id}/members/${userId}`, { method: 'DELETE' });
+                                  if (res.ok) setProjectMembers(prev => prev.filter(pm => (pm.user_id || pm.id) !== userId));
+                                } catch (err) { console.error(err); }
+                              }}
+                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                              title="Retirer du projet"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
