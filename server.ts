@@ -3803,8 +3803,8 @@ async function startServer() {
         const { error } = await supabaseAdmin.from('settings').update(updatePayload).eq('tenant_id', tenantId);
         if (error) throw error;
       } else {
-        // id required for PRIMARY KEY — use frontend value or fallback
-        const insertPayload = { ...filteredData, id: filteredData.id || 'general', tenant_id: tenantId };
+        // Use tenantId as the row id to guarantee uniqueness across tenants
+        const insertPayload = { ...filteredData, id: tenantId, tenant_id: tenantId };
         const { error } = await supabaseAdmin.from('settings').insert(insertPayload);
         if (error) throw error;
       }
