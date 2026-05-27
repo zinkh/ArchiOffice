@@ -19,6 +19,7 @@ import {
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
+import { useSettings } from '../hooks/useSettings';
 
 export const NAV_ITEMS = [
   { name: 'dashboard', path: '/', icon: IconLayoutDashboard },
@@ -42,6 +43,7 @@ export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
   const { tenantPlan, isTrialExpired, trialEndsAt } = useUser();
+  const { settings } = useSettings();
 
   const daysLeft = trialEndsAt && tenantPlan === 'trial'
     ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
@@ -54,6 +56,9 @@ export function Sidebar() {
           <ArchiOfficeLogo size={32} />
           {t('app_name')}
         </Link>
+        {settings?.agencyName && (
+          <p className="mt-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 truncate pl-1">{settings.agencyName}</p>
+        )}
       </div>
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map((item) => {

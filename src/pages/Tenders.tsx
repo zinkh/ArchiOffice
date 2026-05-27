@@ -200,24 +200,31 @@ export default function Tenders() {
     setIsModalOpen(true);
   };
 
-  const handleExportXLSX = () => {
-    import('xlsx').then(XLSX => {
-      const data = filteredTenders.map(t => ({
-        'Titre': t.title,
-        'Client': t.client || '',
-        'Statut': t.status || '',
-        'Type': t.type || '',
-        'Date de rendu': t.submission_deadline || '',
-        'Valeur estimée': t.value || 0,
-        'Honoraires (%)': t.honoraires_percent || 0,
-        'Surface': t.surface || 0,
-        'Coût travaux': t.construction_cost || 0,
-      }));
-      const worksheet = XLSX.utils.json_to_sheet(data);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Appels d\'offres');
-      XLSX.writeFile(workbook, 'appels-offres.xlsx');
-    });
+  const handleExportXLSX = async () => {
+    let agencyName = '';
+    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
+    const XLSX = await import('xlsx');
+    const rows = filteredTenders.map(t => ({
+      'Titre': t.title,
+      'Client': t.client || '',
+      'Statut': t.status || '',
+      'Type': t.type || '',
+      'Date de rendu': t.submission_deadline || '',
+      'Valeur estimée': t.value || 0,
+      'Honoraires (%)': t.honoraires_percent || 0,
+      'Surface': t.surface || 0,
+      'Coût travaux': t.construction_cost || 0,
+    }));
+    const worksheet = XLSX.utils.json_to_sheet([]);
+    if (agencyName) {
+      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName], ['Appels d\'offres']], { origin: 'A1' });
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
+    } else {
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Appels d\'offres');
+    XLSX.writeFile(workbook, 'appels-offres.xlsx');
   };
 
   const getStatusIcon = (status: Tender['status']) => {

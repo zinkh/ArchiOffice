@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { IconFileExport, IconDownload, IconX, IconPlus, IconTrash, IconEye, IconEdit } from '@tabler/icons-react';
 import jsPDF from 'jspdf';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
@@ -148,6 +148,15 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
 
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
+  const [agencyName, setAgencyName] = useState('');
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(s => { if (s && !s.error) { if (s.logoUrl) setLogoUrl(s.logoUrl); if (s.agencyName) setAgencyName(s.agencyName); } })
+      .catch(() => {});
+  }, []);
   const previewRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -276,7 +285,12 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
             <div ref={previewRef} className="flex flex-col gap-16 origin-top" style={{ transform: 'scale(var(--pdf-scale, 1))' }}>
               {/* PAGE 1: Cover */}
               <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
-                <h1 className="text-4xl font-bold text-center mt-20 mb-16">PROPOSITION D'HONORAIRES</h1>
+                {/* Agency logo + name header */}
+                <div className="flex items-center gap-4 mb-8 pb-6 border-b border-zinc-200">
+                  {logoUrl && <img src={logoUrl} alt="Logo" style={{ height: '48px', maxWidth: '140px', objectFit: 'contain', display: 'block' }} crossOrigin="anonymous" />}
+                  {agencyName && <span className="text-sm font-semibold text-zinc-700">{agencyName}</span>}
+                </div>
+                <h1 className="text-4xl font-bold text-center mt-12 mb-16">PROPOSITION D'HONORAIRES</h1>
                 <h2 className="text-2xl text-center mb-24">{data.project.title}</h2>
                 <div className="mt-auto">
                   <h3 className="font-bold underline mb-6">Intervenants :</h3>

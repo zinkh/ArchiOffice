@@ -19,6 +19,7 @@ import type { Project } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { loadImageAsDataUrl } from '../lib/imageUtils';
 
 interface GroupedProjects {
   [domain: string]: Project[];
@@ -178,10 +179,32 @@ export default function References() {
     return sortConfig.direction === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />;
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     const selectedProjects = filteredProjects.filter(p => selectedIds.has(p.id));
     const doc = new jsPDF();
-    doc.text('Références Projets', 14, 15);
+    let startY = 20;
+
+    // Fetch settings for logo + agency name
+    try {
+      const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null);
+      if (s?.logoUrl) {
+        try {
+          const dataUrl = await loadImageAsDataUrl(s.logoUrl);
+          doc.addImage(dataUrl, 'PNG', 14, 8, 30, 12);
+          startY = 28;
+        } catch { /* skip logo if load fails */ }
+      }
+      const headerText = s?.agencyName || 'Références Projets';
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text(headerText, s?.logoUrl ? 48 : 14, 15);
+      if (s?.agencyName) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Références Projets', s?.logoUrl ? 48 : 14, 21);
+      }
+    } catch { doc.text('Références Projets', 14, 15); }
+
     autoTable(doc, {
       head: [['Projet', 'Client', 'Date', 'Surface', 'Budget', 'Statut']],
       body: selectedProjects.map(p => [
@@ -192,21 +215,32 @@ export default function References() {
         formatCurrency(p.budget),
         p.status
       ]),
-      startY: 20,
+      startY,
     });
     doc.save('references.pdf');
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     const selectedProjects = filteredProjects.filter(p => selectedIds.has(p.id));
-    const worksheet = XLSX.utils.json_to_sheet(selectedProjects.map(p => ({
+    let agencyName = '';
+    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
+
+    const rows = selectedProjects.map(p => ({
       Projet: p.name,
       Client: p.client,
       'Date de livraison': p.end_date ? new Date(p.end_date).toLocaleDateString() : '---',
       Surface: p.surface ? `${p.surface} m²` : '---',
       Budget: formatCurrency(p.budget),
       Statut: p.status
-    })));
+    }));
+    const worksheet = XLSX.utils.json_to_sheet([]);
+    if (agencyName) {
+      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName]], { origin: 'A1' });
+      XLSX.utils.sheet_add_aoa(worksheet, [['Références Projets']], { origin: 'A2' });
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
+    } else {
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
+    }
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Références');
     XLSX.writeFile(workbook, 'references.xlsx');

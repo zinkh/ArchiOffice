@@ -50,11 +50,13 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             seller_bic: settings.seller_bic || prev.seller_bic,
             currency: settings.currency || prev.currency
           }));
+          if (settings.logoUrl) setLogoUrl(settings.logoUrl);
         }
       })
       .catch(() => {});
   }, []);
 
+  const [logoUrl, setLogoUrl] = useState('');
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -345,6 +347,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 {/* Header */}
                 <div className="flex justify-between items-start mb-12">
                   <div>
+                    {logoUrl && <img src={logoUrl} alt="Logo" style={{ height: '56px', maxWidth: '160px', objectFit: 'contain', marginBottom: '8px', display: 'block' }} crossOrigin="anonymous" />}
                     <h1 className="text-2xl font-bold tracking-tight">{data.seller_name || 'KHALDOUN SEKTAOUI'}</h1>
                     <p className="text-sm text-zinc-600">Architecture + Urbanisme</p>
                     <div className="mt-4 text-[8pt] text-zinc-500">
