@@ -31,6 +31,7 @@ import Tenders from './pages/Tenders';
 import Specifications from './pages/Specifications';
 import Team from './pages/Team';
 import Gantt from './pages/Gantt';
+import Kanban from './pages/Kanban';
 import Contacts from './pages/Contacts';
 import ProjectTemplates from './pages/ProjectTemplates';
 import ProjectDetail from './pages/ProjectDetail';
@@ -330,6 +331,7 @@ export default function App() {
               <Route path="/specifications/:specId" element={<Specifications />} />
               <Route path="/team" element={<Team />} />
               <Route path="/gantt" element={<Gantt />} />
+              <Route path="/kanban" element={<Kanban />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/templates" element={<ProjectTemplates />} />
               <Route path="/proposal-generator" element={<ProposalModule />} />
