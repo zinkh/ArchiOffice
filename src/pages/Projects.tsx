@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
-import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser } from '@tabler/icons-react';
+import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -513,6 +513,27 @@ export default function Projects() {
     }
   };
 
+  const handleExportXLSX = () => {
+    import('xlsx').then(XLSX => {
+      const data = filteredProjects.map(p => ({
+        'Nom': p.name,
+        'Client': p.client || '',
+        'Statut': p.status || '',
+        'Catégorie': p.category_name || '',
+        'Chef de projet': p.project_manager_name || p.project_manager || '',
+        'Date début': p.start_date || '',
+        'Date fin': p.end_date || '',
+        'Budget': p.budget || 0,
+        'Surface': p.surface || 0,
+        'Adresse': p.address || '',
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Projets');
+      XLSX.writeFile(workbook, 'projets.xlsx');
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -541,7 +562,14 @@ export default function Projects() {
               <IconList size={18} />
             </button>
           </div>
-          <button 
+          <button
+            onClick={handleExportXLSX}
+            className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 rounded-md font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
+          >
+            <IconDownload size={18} />
+            Export XLSX
+          </button>
+          <button
             onClick={() => setIsCategoryModalOpen(true)}
             className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 rounded-md font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
           >

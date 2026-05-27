@@ -44,6 +44,9 @@ export interface Task {
   end_date: string;
   progress: number; // 0-100
   dependencies: string[]; // Array of task IDs
+  status?: 'todo' | 'in_progress' | 'review' | 'done';
+  due_date?: string;
+  completed?: boolean;
 }
 
 export interface ProjectCotraitant {

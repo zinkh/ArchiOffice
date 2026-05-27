@@ -200,6 +200,26 @@ export default function Tenders() {
     setIsModalOpen(true);
   };
 
+  const handleExportXLSX = () => {
+    import('xlsx').then(XLSX => {
+      const data = filteredTenders.map(t => ({
+        'Titre': t.title,
+        'Client': t.client || '',
+        'Statut': t.status || '',
+        'Type': t.type || '',
+        'Date de rendu': t.submission_deadline || '',
+        'Valeur estimée': t.value || 0,
+        'Honoraires (%)': t.honoraires_percent || 0,
+        'Surface': t.surface || 0,
+        'Coût travaux': t.construction_cost || 0,
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Appels d\'offres');
+      XLSX.writeFile(workbook, 'appels-offres.xlsx');
+    });
+  };
+
   const getStatusIcon = (status: Tender['status']) => {
     switch (status) {
       case 'Won': return <IconCircleCheck className="w-4 h-4 text-green-500" />;
@@ -257,12 +277,19 @@ export default function Tenders() {
           </div>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
-          <button 
+          <button
             onClick={() => setSortByDeadline(prev => prev === 'asc' ? 'desc' : 'asc')}
             className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             {sortByDeadline === 'asc' ? <IconSortAscending size={18} /> : <IconSortDescending size={18} />}
             {t('tenders_sort_by_deadline')}
+          </button>
+          <button
+            onClick={handleExportXLSX}
+            className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <IconDownload size={18} />
+            Export XLSX
           </button>
         </div>
       </div>
