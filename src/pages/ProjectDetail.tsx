@@ -200,6 +200,11 @@ export default function ProjectDetail() {
 
   const [isAddingOs, setIsAddingOs] = useState(false);
   const [isAddingOsMoe, setIsAddingOsMoe] = useState(false);
+
+  // VISA modal state
+  const [isVisaModalOpen, setIsVisaModalOpen] = useState(false);
+  const [editingVisa, setEditingVisa] = useState<Visa | null>(null);
+  const [visaForm, setVisaForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending' as Visa['status'], comments: '' });
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isAddingInvoice, setIsAddingInvoice] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
@@ -2180,31 +2185,124 @@ export default function ProjectDetail() {
 
             {activeTab === 'VISA' && (
               <div className="space-y-8">
+                {/* VISA Modal */}
+                {isVisaModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setIsVisaModalOpen(false)}>
+                    <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-base font-bold text-zinc-900 dark:text-white">{editingVisa ? 'Modifier le visa' : 'Nouveau visa'}</h4>
+                        <button onClick={() => setIsVisaModalOpen(false)} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
+                          <IconX size={18} />
+                        </button>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1">Titre *</label>
+                          <input
+                            type="text"
+                            value={visaForm.title}
+                            onChange={e => setVisaForm(f => ({ ...f, title: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                            placeholder="Ex: Visa plans d'exécution façade"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1">Date</label>
+                          <input
+                            type="date"
+                            value={visaForm.date}
+                            onChange={e => setVisaForm(f => ({ ...f, date: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-2">Statut</label>
+                          <div className="flex gap-2">
+                            {(['pending', 'approved', 'rejected', 'commented'] as const).map(s => (
+                              <button
+                                key={s}
+                                onClick={() => setVisaForm(f => ({ ...f, status: s }))}
+                                className={cn(
+                                  "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition-all border",
+                                  visaForm.status === s
+                                    ? s === 'approved' ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/40 dark:border-green-700 dark:text-green-400'
+                                      : s === 'rejected' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/40 dark:border-red-700 dark:text-red-400'
+                                      : s === 'commented' ? 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-400'
+                                      : 'bg-zinc-200 text-zinc-700 border-zinc-300 dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-200'
+                                    : 'bg-white text-zinc-500 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400'
+                                )}
+                              >
+                                {s === 'pending' ? 'Attente' : s === 'approved' ? 'Validé' : s === 'rejected' ? 'Rejeté' : 'Commenté'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1">Commentaires</label>
+                          <textarea
+                            rows={3}
+                            value={visaForm.comments}
+                            onChange={e => setVisaForm(f => ({ ...f, comments: e.target.value }))}
+                            className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
+                            placeholder="Observations, réserves, demandes de modifications..."
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-5">
+                        <button onClick={() => setIsVisaModalOpen(false)} className="flex-1 py-2 px-4 text-sm font-medium text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                          Annuler
+                        </button>
+                        <button
+                          disabled={!visaForm.title.trim()}
+                          onClick={async () => {
+                            if (!visaForm.title.trim()) return;
+                            try {
+                              if (editingVisa) {
+                                const res = await fetch(`/api/visas/${editingVisa.id}`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ ...editingVisa, ...visaForm })
+                                });
+                                if (res.ok) {
+                                  const updated = await res.json();
+                                  setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
+                                }
+                              } else {
+                                const res = await fetch('/api/visas', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ project_id: id, ...visaForm, date: visaForm.date || new Date().toISOString() })
+                                });
+                                if (res.ok) {
+                                  const data = await res.json();
+                                  setVisas(prev => [...prev, data]);
+                                }
+                              }
+                              setIsVisaModalOpen(false);
+                              setEditingVisa(null);
+                              setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '' });
+                            } catch (err) { console.error(err); }
+                          }}
+                          className="flex-1 py-2 px-4 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 rounded-lg transition-colors"
+                        >
+                          {editingVisa ? 'Enregistrer' : 'Créer'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Visas</h3>
-                    <button 
-                      onClick={async () => {
-                        const title = prompt('Titre du visa:');
-                        if (!title) return;
-                        try {
-                          const res = await fetch('/api/visas', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              project_id: id,
-                              title,
-                              date: new Date().toISOString(),
-                              status: 'pending'
-                            })
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setVisas(prev => [...prev, data]);
-                          }
-                        } catch (err) {
-                          console.error(err);
-                        }
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Visas</h3>
+                      <span className="text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full">{visas.length}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingVisa(null);
+                        setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '' });
+                        setIsVisaModalOpen(true);
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
                     >
@@ -2220,46 +2318,93 @@ export default function ProjectDetail() {
                           <th className="px-6 py-3 text-left">Date</th>
                           <th className="px-6 py-3 text-left">Statut</th>
                           <th className="px-6 py-3 text-left">Commentaires</th>
-                          <th className="px-6 py-3 text-right w-10"></th>
+                          <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                         {visas.map((visa) => (
-                          <tr key={visa.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                          <tr key={visa.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
                             <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{visa.title}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(visa.date).toLocaleDateString()}</td>
+                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(visa.date).toLocaleDateString('fr-FR')}</td>
                             <td className="px-6 py-4">
                               <span className={cn(
                                 "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                 visa.status === 'approved' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                                 visa.status === 'rejected' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                                visa.status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                                 "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400"
                               )}>
-                                {visa.status}
+                                {visa.status === 'pending' ? 'En attente' : visa.status === 'approved' ? 'Validé' : visa.status === 'rejected' ? 'Rejeté' : 'Commenté'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs truncate">{visa.comments}</td>
+                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs">
+                              <span className="truncate block max-w-48" title={visa.comments}>{visa.comments || <span className="italic text-zinc-400">—</span>}</span>
+                            </td>
                             <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={async () => {
-                                  if (!confirm('Supprimer ce visa ?')) return;
-                                  try {
-                                    const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
-                                    if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
-                                  } catch (err) {
-                                    console.error(err);
-                                  }
-                                }}
-                                className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
-                              >
-                                <IconTrash size={16} />
-                              </button>
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {/* Quick validate */}
+                                {visa.status !== 'approved' && (
+                                  <button
+                                    title="Valider"
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'approved' }) });
+                                        if (res.ok) setVisas(prev => prev.map(v => v.id === visa.id ? { ...v, status: 'approved' } : v));
+                                      } catch (err) { console.error(err); }
+                                    }}
+                                    className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                  >
+                                    <IconCheck size={15} />
+                                  </button>
+                                )}
+                                {/* Quick reject */}
+                                {visa.status !== 'rejected' && (
+                                  <button
+                                    title="Rejeter"
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'rejected' }) });
+                                        if (res.ok) setVisas(prev => prev.map(v => v.id === visa.id ? { ...v, status: 'rejected' } : v));
+                                      } catch (err) { console.error(err); }
+                                    }}
+                                    className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                  >
+                                    <IconX size={15} />
+                                  </button>
+                                )}
+                                {/* Edit */}
+                                <button
+                                  title="Modifier"
+                                  onClick={() => {
+                                    setEditingVisa(visa);
+                                    setVisaForm({ title: visa.title, date: visa.date.split('T')[0], status: visa.status, comments: visa.comments || '' });
+                                    setIsVisaModalOpen(true);
+                                  }}
+                                  className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                                >
+                                  <IconMessageDots size={15} />
+                                </button>
+                                {/* Delete */}
+                                <button
+                                  title="Supprimer"
+                                  onClick={async () => {
+                                    if (!confirm('Supprimer ce visa ?')) return;
+                                    try {
+                                      const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
+                                      if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
+                                    } catch (err) { console.error(err); }
+                                  }}
+                                  className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                >
+                                  <IconTrash size={15} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
                         {visas.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 italic">Aucun visa.</td>
+                            <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 italic">Aucun visa. Cliquez sur "Ajouter un visa" pour commencer.</td>
                           </tr>
                         )}
                       </tbody>

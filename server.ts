@@ -1683,6 +1683,20 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
+  app.put("/api/visas/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, date, status, comments, document_url } = req.body;
+      const { data, error } = await supabaseAdmin.from('visas')
+        .update({ title, date, status, comments, document_url })
+        .eq('id', req.params.id)
+        .eq('tenant_id', tenantId)
+        .select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update visa" }); }
+  });
+
   app.delete("/api/visas/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -4731,6 +4745,121 @@ async function startServer() {
   });
 
   // ─── End Stancer Billing ───────────────────────────────────────────────────
+
+  // ─── Project Members (per-project access control) ─────────────────────────
+  app.get("/api/projects/:id/members", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('project_members')
+        .select('*, profiles(id, name, email, role, avatar)')
+        .eq('project_id', req.params.id)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json((data || []).map((m: any) => ({ ...m, ...m.profiles })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch project members" }); }
+  });
+
+  app.post("/api/projects/:id/members", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { user_id, role } = req.body;
+      if (!user_id) return res.status(400).json({ error: "user_id is required" });
+      const { data, error } = await supabaseAdmin.from('project_members').insert({
+        id: crypto.randomUUID(), project_id: req.params.id, user_id, role: role || 'member', tenant_id: tenantId
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to add project member" }); }
+  });
+
+  app.delete("/api/projects/:id/members/:userId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('project_members')
+        .delete()
+        .eq('project_id', req.params.id)
+        .eq('user_id', req.params.userId)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to remove project member" }); }
+  });
+
+  // ─── Global Search ─────────────────────────────────────────────────────────
+  app.get("/api/search", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const q = (req.query.q as string || '').trim();
+      if (!q || q.length < 2) return res.json({ projects: [], contacts: [], tenders: [], invoices: [] });
+
+      const pattern = `%${q}%`;
+
+      const [projectsRes, contactsRes, tendersRes, invoicesRes] = await Promise.all([
+        supabaseAdmin.from('projects').select('id, name, client, status, address')
+          .eq('tenant_id', tenantId)
+          .or(`name.ilike.${pattern},client.ilike.${pattern},address.ilike.${pattern},description.ilike.${pattern}`)
+          .limit(8),
+        supabaseAdmin.from('contacts').select('id, first_name, last_name, company, email')
+          .eq('tenant_id', tenantId)
+          .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},company.ilike.${pattern},email.ilike.${pattern}`)
+          .limit(8),
+        supabaseAdmin.from('tenders').select('id, title, client, status, type')
+          .eq('tenant_id', tenantId)
+          .or(`title.ilike.${pattern},client.ilike.${pattern}`)
+          .limit(8),
+        supabaseAdmin.from('invoices').select('id, invoice_number, project_name, status')
+          .eq('tenant_id', tenantId)
+          .or(`invoice_number.ilike.${pattern},project_name.ilike.${pattern}`)
+          .limit(8),
+      ]);
+
+      res.json({
+        projects: (projectsRes.data || []).map((p: any) => ({ ...p, _type: 'project', _url: `/projects/${p.id}`, _label: p.name })),
+        contacts: (contactsRes.data || []).map((c: any) => ({ ...c, _type: 'contact', _url: '/contacts', _label: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company })),
+        tenders: (tendersRes.data || []).map((t: any) => ({ ...t, _type: 'tender', _url: `/tenders/${t.id}`, _label: t.title })),
+        invoices: (invoicesRes.data || []).map((i: any) => ({ ...i, _type: 'invoice', _url: '/invoices', _label: i.invoice_number || i.project_name })),
+      });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Search failed" }); }
+  });
+
+  // ─── AI: CCTP Article Suggestions ──────────────────────────────────────────
+  app.post("/api/ai/suggest-articles", async (req: any, res: any) => {
+    try {
+      const { lot_name, existing_articles = [] } = req.body;
+      if (!lot_name) return res.status(400).json({ error: "lot_name is required" });
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
+
+      const { GoogleGenerativeAI } = await import("@google/genai");
+      const genai = new GoogleGenerativeAI(apiKey);
+      const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const existingList = existing_articles.length > 0 ? `\nArticles déjà présents (à ne pas dupliquer) : ${existing_articles.join(', ')}` : '';
+      const prompt = `Tu es un expert en architecture et construction.
+Génère exactement 5 articles techniques pour le lot "${lot_name}" dans un CCTP (Cahier des Clauses Techniques Particulières) architectural français.${existingList}
+
+Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication), chaque élément ayant ces champs :
+- "numero": numéro de l'article (ex: "1.1")
+- "designation": nom court de l'article (ex: "Fourniture et pose de cloisons")
+- "description": description technique détaillée (2-3 phrases)
+- "unite": unité de mesure (m², ml, u, forfait, etc.)
+- "prescriptionsTechniques": normes et prescriptions techniques applicables (1-2 phrases)`;
+
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+
+      // Extract JSON from response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return res.status(500).json({ error: "Invalid AI response format" });
+
+      const articles = JSON.parse(jsonMatch[0]);
+      res.json({ articles });
+    } catch (e: any) {
+      console.error("AI suggest-articles error:", e.message);
+      res.status(500).json({ error: "AI suggestion failed: " + e.message });
+    }
+  });
 
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
