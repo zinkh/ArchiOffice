@@ -43,6 +43,7 @@ import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Onboarding from './pages/Onboarding';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
@@ -441,8 +442,8 @@ function ProtectedLayout() {
           <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
             <div>{t('footer_rights')}</div>
             <div className="flex gap-6">
-              <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_privacy')}</a>
-              <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_terms')}</a>
+              <Link to="/privacy" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_privacy')}</Link>
+              <Link to="/terms" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_terms')}</Link>
             </div>
           </div>
         </footer>
@@ -459,6 +460,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfUse />} />
             <Route element={<ProtectedLayout />}>
