@@ -67,16 +67,22 @@ function SyncStatus() {
 
   if (!isOnline) {
     return (
-      <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded text-[10px] font-bold uppercase tracking-wider border border-amber-200 dark:border-amber-800/50">
-        <IconCloudOff size={14} />
+      <div
+        className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+        style={{ background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
+      >
+        <IconCloudOff size={13} />
         {t('sync_offline')}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase tracking-wider border border-emerald-200 dark:border-emerald-800/50">
-      <IconCheck size={14} />
+    <div
+      className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+      style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}
+    >
+      <IconCheck size={13} />
       {t('sync_online')}
     </div>
   );
@@ -172,219 +178,282 @@ function Header() {
     };
   }, []);
 
+  /* ── Tabler navbar: opaque, 56px, border-bottom ── */
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl shadow-sm">
-      <div className="px-4 h-16 flex items-center justify-between">
-        <div className="md:hidden flex items-center gap-4">
+    <header
+      className="sticky top-0 z-40 w-full border-b"
+      style={{
+        background: 'var(--tblr-surface)',
+        borderColor: 'var(--tblr-border)',
+        height: 'var(--tblr-navbar-h)',
+        boxShadow: 'var(--tblr-shadow)',
+      }}
+    >
+      <div className="h-full px-4 flex items-center justify-between gap-4">
+
+        {/* Left: hamburger (mobile) + page title (desktop) */}
+        <div className="flex items-center gap-3 min-w-0">
           <button
-            className="p-2 text-zinc-500"
+            className="md:hidden p-1 rounded transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
-            <IconMenu2 size={24} />
+            <IconMenu2 size={20} />
           </button>
-          <Link to="/" className="flex items-center gap-2 text-zinc-900 dark:text-white font-bold text-xl tracking-tight">
-            <ArchiOfficeLogo size={32} />
-            {t('app_name')}
+          <Link
+            to="/"
+            className="md:hidden flex items-center gap-2 font-bold text-sm"
+            style={{ color: 'var(--tblr-text)' }}
+          >
+            <ArchiOfficeLogo size={24} />
+            ArchiOffice
           </Link>
-        </div>
-        <div className="hidden md:flex items-center gap-4">
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-white">{headerTitle}</h1>
+          <h1
+            className="hidden md:block text-sm font-semibold truncate"
+            style={{ color: 'var(--tblr-text)' }}
+          >
+            {headerTitle}
+          </h1>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="hidden lg:flex">
+        {/* Right: sync, search, theme, notifications, avatar */}
+        <div className="flex items-center gap-1">
+
+          {/* Sync status */}
+          <div className="hidden lg:flex mr-2">
             <SyncStatus />
           </div>
+
+          {/* Search */}
           <div ref={searchRef} className="relative hidden md:flex">
             <div className="relative">
-              <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <IconSearch
+                size={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--tblr-muted)' }}
+              />
               <input
                 id="global-search-input"
                 type="text"
                 value={searchQuery}
                 onChange={e => { setSearchQuery(e.target.value); setIsSearchOpen(true); }}
                 onFocus={() => setIsSearchOpen(true)}
-                placeholder={t('search_placeholder') + ' (Ctrl+K)'}
-                className="pl-9 pr-3 py-2 w-64 text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all focus:w-80"
+                placeholder={`${t('search_placeholder')} (Ctrl+K)`}
+                style={{
+                  background: 'var(--tblr-surface-2)',
+                  border: '1px solid var(--tblr-border)',
+                  color: 'var(--tblr-text)',
+                  borderRadius: 'var(--tblr-radius)',
+                  fontSize: '13px',
+                }}
+                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[width,border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
               />
               {isSearching && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                <div
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-t-transparent rounded-full animate-spin"
+                  style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
+                />
               )}
             </div>
 
-            {/* Results dropdown */}
+            {/* Search dropdown — Tabler card style */}
             {isSearchOpen && searchQuery.length >= 2 && (
-              <div className="absolute top-full mt-2 left-0 w-96 bg-white dark:bg-zinc-900 rounded-xl shadow-xl border border-zinc-200 dark:border-zinc-700 z-50 overflow-hidden max-h-[70vh] overflow-y-auto">
+              <div
+                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
+                style={{
+                  background: 'var(--tblr-surface)',
+                  border: '1px solid var(--tblr-border)',
+                  borderRadius: 'var(--tblr-radius)',
+                  boxShadow: '0 4px 16px rgba(0,0,0,.12)',
+                }}
+              >
                 {Object.entries(searchResults).every(([, arr]) => (arr as any[]).length === 0) && !isSearching ? (
-                  <div className="p-4 text-sm text-zinc-500 text-center">Aucun résultat pour "{searchQuery}"</div>
+                  <div className="p-4 text-sm text-center" style={{ color: 'var(--tblr-muted)' }}>
+                    Aucun résultat pour «&nbsp;{searchQuery}&nbsp;»
+                  </div>
                 ) : (
                   <div>
-                    {searchResults.projects.length > 0 && (
-                      <div>
-                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Projets</div>
-                        {searchResults.projects.map((item: any) => (
-                          <Link key={item.id} to={`/projects/${item.id}`} onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
-                            <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <span className="text-blue-600 dark:text-blue-400 text-xs font-bold">P</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
-                              {item.client && <p className="text-xs text-zinc-500 truncate">{item.client}</p>}
-                            </div>
-                            <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${item.status === 'In Progress' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>{item.status}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                    {searchResults.contacts.length > 0 && (
-                      <div>
-                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Contacts</div>
-                        {searchResults.contacts.map((item: any) => (
-                          <Link key={item.id} to="/contacts" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
-                            <div className="w-7 h-7 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <span className="text-green-600 dark:text-green-400 text-xs font-bold">C</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
-                              {item.email && <p className="text-xs text-zinc-500 truncate">{item.email}</p>}
-                            </div>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                    {searchResults.tenders.length > 0 && (
-                      <div>
-                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Appels d'offres</div>
-                        {searchResults.tenders.map((item: any) => (
-                          <Link key={item.id} to={`/tenders/${item.id}`} onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
-                            <div className="w-7 h-7 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <span className="text-amber-600 dark:text-amber-400 text-xs font-bold">A</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
-                              {item.client && <p className="text-xs text-zinc-500 truncate">{item.client}</p>}
-                            </div>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                    {searchResults.invoices.length > 0 && (
-                      <div>
-                        <div className="px-3 py-2 text-[10px] font-bold uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">Factures</div>
-                        {searchResults.invoices.map((item: any) => (
-                          <Link key={item.id} to="/invoices" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
-                            <div className="w-7 h-7 bg-violet-100 dark:bg-violet-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <span className="text-violet-600 dark:text-violet-400 text-xs font-bold">F</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item._label}</p>
-                            </div>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
+                    {([
+                      { key: 'projects',  label: 'Projets',         path: (id: string) => `/projects/${id}`, color: '#206bc4', letter: 'P' },
+                      { key: 'contacts',  label: 'Contacts',        path: () => '/contacts',                 color: '#2fb344', letter: 'C' },
+                      { key: 'tenders',   label: "Appels d'offres", path: (id: string) => `/tenders/${id}`,  color: '#f76707', letter: 'A' },
+                      { key: 'invoices',  label: 'Factures',        path: () => '/invoices',                 color: '#ae3ec9', letter: 'F' },
+                    ] as const).map(({ key, label, path, color, letter }) => {
+                      const items = (searchResults as any)[key] as any[];
+                      if (!items?.length) return null;
+                      return (
+                        <div key={key}>
+                          <div
+                            className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider border-b"
+                            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}
+                          >
+                            {label}
+                          </div>
+                          {items.map((item: any) => (
+                            <Link
+                              key={item.id}
+                              to={path(item.id)}
+                              onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                              className="flex items-center gap-3 px-3 py-2.5 transition-colors"
+                              style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                              onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                              onMouseOut={e => (e.currentTarget.style.background = '')}
+                            >
+                              <span
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold text-white shrink-0"
+                                style={{ background: color }}
+                              >
+                                {letter}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                                  {item._label}
+                                </p>
+                                {(item.client || item.email) && (
+                                  <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
+                                    {item.client || item.email}
+                                  </p>
+                                )}
+                              </div>
+                            </Link>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-0 sm:gap-2">
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title={theme === 'dark' ? t('theme_light') : t('theme_dark')}
-            >
-              {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
-            </button>
-            <button
-              onClick={() => navigate('/notifications')}
-              className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 relative"
-              title="Notifications"
-            >
-              <IconBell size={18} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center border border-white dark:border-zinc-900 leading-none">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
+          {/* Theme toggle */}
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="p-1.5 rounded transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+            onMouseOut={e => (e.currentTarget.style.background = '')}
+            title={theme === 'dark' ? t('theme_light') : t('theme_dark')}
+          >
+            {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+          </button>
 
-            <div className="relative ml-0 sm:ml-1">
-              <button
-                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-2 p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          {/* Notifications */}
+          <button
+            onClick={() => navigate('/notifications')}
+            className="p-1.5 rounded transition-colors relative"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+            onMouseOut={e => (e.currentTarget.style.background = '')}
+            title="Notifications"
+          >
+            <IconBell size={18} />
+            {unreadCount > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                style={{ background: 'var(--tblr-danger)' }}
               >
-                <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
-                  <img src={currentUser?.avatar || "https://picsum.photos/seed/arch/32/32"} alt="User" referrerPolicy="no-referrer" />
-                </div>
-              </button>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
 
-              <AnimatePresence>
-                {isUserMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                      className="absolute right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl z-50 overflow-hidden"
-                    >
-                      <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
-                        <div className="flex items-center gap-3 p-1">
-                          <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
-                            <img src={currentUser?.avatar || "https://picsum.photos/seed/arch/32/32"} alt={currentUser?.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          </div>
-                          <div className="overflow-hidden">
-                            <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">{currentUser?.name}</p>
-                            <p className="text-xs text-zinc-500 truncate">{currentUser?.email}</p>
-                          </div>
+          {/* Avatar + user menu */}
+          <div className="relative ml-1">
+            <button
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center gap-2 p-1 rounded transition-colors"
+              onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+              onMouseOut={e => (e.currentTarget.style.background = '')}
+            >
+              <div className="w-7 h-7 rounded-full overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
+                <img
+                  src={currentUser?.avatar || 'https://picsum.photos/seed/arch/32/32'}
+                  alt="User"
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </button>
+
+            <AnimatePresence>
+              {isUserMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute right-0 mt-1 w-52 z-50 overflow-hidden"
+                    style={{
+                      background: 'var(--tblr-surface)',
+                      border: '1px solid var(--tblr-border)',
+                      borderRadius: 'var(--tblr-radius)',
+                      boxShadow: '0 4px 16px rgba(0,0,0,.12)',
+                    }}
+                  >
+                    <div className="p-3 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full overflow-hidden shrink-0">
+                          <img
+                            src={currentUser?.avatar || 'https://picsum.photos/seed/arch/32/32'}
+                            alt={currentUser?.name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
+                            {currentUser?.name}
+                          </p>
+                          <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                            {currentUser?.email}
+                          </p>
                         </div>
                       </div>
-                      <div className="p-2">
-                        <button
-                          onClick={() => {
-                            navigate('/settings');
-                            setIsUserMenuOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 p-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                        >
-                          <IconSettings size={16} />
-                          {t('account_settings')}
-                        </button>
-                        <button
-                          onClick={() => {
-                            signOut();
-                            setIsUserMenuOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 p-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        >
-                          <IconLogout size={16} />
-                          Déconnexion
-                        </button>
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
+                    </div>
+                    <div className="p-1">
+                      <button
+                        onClick={() => { navigate('/settings'); setIsUserMenuOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        style={{ color: 'var(--tblr-text)' }}
+                        onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseOut={e => (e.currentTarget.style.background = '')}
+                      >
+                        <IconSettings size={15} style={{ color: 'var(--tblr-muted)' }} />
+                        {t('account_settings')}
+                      </button>
+                      <button
+                        onClick={() => { signOut(); setIsUserMenuOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        style={{ color: 'var(--tblr-danger)' }}
+                        onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseOut={e => (e.currentTarget.style.background = '')}
+                      >
+                        <IconLogout size={15} />
+                        Déconnexion
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
 
+      {/* Mobile nav drawer */}
       <AnimatePresence>
         {isMobileMenuOpen && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden"
+            className="md:hidden border-t overflow-hidden"
+            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
           >
-            <nav className="flex flex-col p-4 gap-2">
+            <nav className="flex flex-col p-2 gap-0.5">
               {NAV_ITEMS.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
@@ -393,13 +462,13 @@ function Header() {
                     to={item.path}
                     onClick={() => setIsMobileMenuOpen(false)}
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
+                      'flex items-center gap-2.5 px-3 py-2 rounded text-[13px] font-medium transition-colors',
                       isActive
-                        ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-500"
-                        : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200"
+                        ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                        : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
                     )}
                   >
-                    <item.icon size={20} />
+                    <item.icon size={16} />
                     <span>{t(item.name)}</span>
                   </Link>
                 );
@@ -418,8 +487,11 @@ function ProtectedLayout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
-        <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+        <div
+          className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
+          style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
+        />
       </div>
     );
   }
@@ -429,21 +501,27 @@ function ProtectedLayout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-zinc-50 dark:bg-[#050505] text-zinc-900 dark:text-zinc-100 font-sans transition-colors duration-300 overflow-x-hidden">
+    <div
+      className="flex min-h-screen font-sans overflow-x-hidden"
+      style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
+    >
       <Sidebar />
-      <div className="flex-1 flex flex-col w-full overflow-x-hidden">
+      <div className="flex-1 flex flex-col min-w-0">
         <Header />
 
-        <main className="container mx-auto px-4 py-8 flex-1">
+        <main className="flex-1 px-6 py-6 max-w-[1400px] w-full mx-auto">
           <Outlet />
         </main>
 
-        <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-xl mt-auto py-8">
-          <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <footer
+          className="border-t mt-auto py-4 px-6"
+          style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+        >
+          <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
             <div>{t('footer_rights')}</div>
-            <div className="flex gap-6">
-              <Link to="/privacy" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_privacy')}</Link>
-              <Link to="/terms" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors">{t('footer_terms')}</Link>
+            <div className="flex gap-4">
+              <Link to="/privacy" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_privacy')}</Link>
+              <Link to="/terms" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_terms')}</Link>
             </div>
           </div>
         </footer>
