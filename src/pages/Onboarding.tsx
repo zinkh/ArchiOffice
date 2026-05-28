@@ -162,34 +162,47 @@ export default function Onboarding() {
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Configurons votre espace en quelques étapes</p>
         </div>
 
-        {/* Step indicators */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {STEPS.map((s, i) => {
-            const Icon = s.icon;
-            const done = i < step;
-            const active = i === step;
-            return (
-              <React.Fragment key={s.id}>
-                <div className={`flex flex-col items-center gap-1 transition-opacity ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors ${
+        {/* Step indicators — circles row then labels row, so connector lines align with circle centers */}
+        <div className="mb-8">
+          <div className="flex items-center justify-center">
+            {STEPS.map((s, i) => {
+              const Icon = s.icon;
+              const done = i < step;
+              const active = i === step;
+              return (
+                <React.Fragment key={s.id}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 flex-shrink-0 transition-colors ${
                     done ? 'bg-blue-600 border-blue-600 text-white' :
                     active ? 'border-blue-600 text-blue-600 bg-white dark:bg-zinc-900' :
                     'border-zinc-300 dark:border-zinc-700 text-zinc-400 bg-white dark:bg-zinc-900'
-                  }`}>
+                  } ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
                     {done ? <IconCheck size={18} /> : <Icon size={18} />}
                   </div>
-                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400 hidden sm:block">{s.label}</span>
-                </div>
-                {i < STEPS.length - 1 && (
-                  <div className={`flex-1 h-0.5 max-w-[60px] transition-colors ${i < step ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'}`} />
-                )}
-              </React.Fragment>
-            );
-          })}
+                  {i < STEPS.length - 1 && (
+                    <div className={`flex-1 h-0.5 max-w-[60px] transition-colors ${i < step ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'}`} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+          <div className="hidden sm:flex justify-center mt-2" style={{ gap: 0 }}>
+            {STEPS.map((s, i) => {
+              const done = i < step;
+              const active = i === step;
+              return (
+                <React.Fragment key={s.id}>
+                  <div className={`w-10 flex-shrink-0 flex justify-center transition-opacity ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
+                    <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400 text-center leading-tight">{s.label}</span>
+                  </div>
+                  {i < STEPS.length - 1 && <div className="flex-1 max-w-[60px]" />}
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
 
         {/* Card */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-lg p-8">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-lg p-8 min-h-[320px]">
 
           {/* Step 0 — Agency info */}
           {step === 0 && (
@@ -252,30 +265,39 @@ export default function Onboarding() {
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Logo de votre cabinet</h2>
                 <p className="text-sm text-zinc-500 mt-1">Il apparaîtra dans l'en-tête de vos PDFs et dans la barre latérale.</p>
               </div>
-              <div
-                className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-400 transition-colors"
-                onClick={() => logoRef.current?.click()}
-              >
-                {logoPreview ? (
-                  <div className="relative" onClick={e => e.stopPropagation()}>
-                    <img src={logoPreview} alt="Aperçu logo" className="max-h-32 max-w-full object-contain rounded" />
+              {logoPreview ? (
+                <div className="border-2 border-zinc-200 dark:border-zinc-700 rounded-xl p-6 flex flex-col items-center gap-3">
+                  <img src={logoPreview} alt="Aperçu logo" className="max-h-32 max-w-full object-contain rounded" />
+                  <div className="flex gap-3">
                     <button
-                      onClick={() => { setLogoPreview(null); setLogoFile(null); }}
-                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600"
+                      type="button"
+                      onClick={() => logoRef.current?.click()}
+                      className="text-sm text-blue-600 hover:underline"
                     >
-                      <IconX size={12} />
+                      Changer
+                    </button>
+                    <span className="text-zinc-300 dark:text-zinc-600">|</span>
+                    <button
+                      type="button"
+                      onClick={() => { setLogoPreview(null); setLogoFile(null); }}
+                      className="text-sm text-red-500 hover:underline"
+                    >
+                      Supprimer
                     </button>
                   </div>
-                ) : (
-                  <>
-                    <IconUpload size={32} className="text-zinc-400" />
-                    <p className="text-sm text-zinc-500 text-center">
-                      Cliquez pour sélectionner une image<br />
-                      <span className="text-xs text-zinc-400">PNG, JPG, SVG — max 5 Mo</span>
-                    </p>
-                  </>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div
+                  className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-400 transition-colors"
+                  onClick={() => logoRef.current?.click()}
+                >
+                  <IconUpload size={32} className="text-zinc-400" />
+                  <p className="text-sm text-zinc-500 text-center">
+                    Cliquez pour sélectionner une image<br />
+                    <span className="text-xs text-zinc-400">PNG, JPG, SVG — max 5 Mo</span>
+                  </p>
+                </div>
+              )}
               <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
               {error && <p className="text-sm text-red-500">{error}</p>}
             </div>
@@ -325,33 +347,35 @@ export default function Onboarding() {
               </div>
               <div className="space-y-3">
                 {invites.map((inv, i) => (
-                  <div key={i} className="flex gap-2 items-center">
+                  <div key={i} className="flex flex-col sm:flex-row gap-2 sm:items-center">
                     <input
                       type="text"
                       placeholder="Prénom Nom"
                       value={inv.name}
                       onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, name: e.target.value } : row))}
-                      className="flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="flex-1 min-w-0 px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                     <input
                       type="email"
                       placeholder="email@cabinet.fr"
                       value={inv.email}
                       onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, email: e.target.value } : row))}
-                      className="flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="flex-1 min-w-0 px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     />
-                    <select
-                      value={inv.role}
-                      onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, role: e.target.value } : row))}
-                      className="px-2 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    >
-                      <option value="Member">Membre</option>
-                      <option value="Manager">Manager</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                    <div className="w-5 flex-shrink-0">
-                      {inviteResults[i] === 'ok' && <IconCheck size={18} className="text-green-500" />}
-                      {inviteResults[i] === 'err' && <IconX size={18} className="text-red-500" />}
+                    <div className="flex gap-2 items-center">
+                      <select
+                        value={inv.role}
+                        onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, role: e.target.value } : row))}
+                        className="flex-1 sm:flex-none px-2 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      >
+                        <option value="Member">Membre</option>
+                        <option value="Manager">Manager</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <div className="w-5 flex-shrink-0">
+                        {inviteResults[i] === 'ok' && <IconCheck size={18} className="text-green-500" />}
+                        {inviteResults[i] === 'err' && <IconX size={18} className="text-red-500" />}
+                      </div>
                     </div>
                   </div>
                 ))}

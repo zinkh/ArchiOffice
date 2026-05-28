@@ -86,13 +86,12 @@ export default function Login() {
             </div>
           )}
         </div>
-        <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">
+        <h2 className={`text-2xl font-bold text-center text-zinc-900 dark:text-white ${tenantBranding ? 'mb-1' : 'mb-8'}`}>
           {tenantBranding ? tenantBranding.name : t('login_welcome')}
         </h2>
         {tenantBranding && (
           <p className="text-sm text-center text-zinc-500 dark:text-zinc-400 mb-6">Connectez-vous à votre espace</p>
         )}
-        {!tenantBranding && <div className="mb-8" />}
 
         {/* Bouton Google */}
         <button
