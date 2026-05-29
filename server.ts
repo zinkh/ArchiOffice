@@ -3840,23 +3840,16 @@ async function startServer() {
         snakeData[col] = v;
       }
       // Only keep valid table columns (include id for PRIMARY KEY on insert)
-      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_books_org_id']);
+      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id']);
       const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
 
-      const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
-      if (existing) {
-        // Don't update id or tenant_id
-        const { id: _id, tenant_id: _t, ...updatePayload } = filteredData;
-        const { error } = await supabaseAdmin.from('settings').update(updatePayload).eq('tenant_id', tenantId);
-        if (error) throw error;
-      } else {
-        // Use tenantId as the row id to guarantee uniqueness across tenants
-        const insertPayload = { ...filteredData, id: tenantId, tenant_id: tenantId };
-        const { error } = await supabaseAdmin.from('settings').insert(insertPayload);
-        if (error) throw error;
-      }
+      // Use upsert to avoid race conditions and duplicate-row issues
+      const { id: _id, ...dataWithoutId } = filteredData;
+      const upsertPayload = { ...dataWithoutId, id: tenantId, tenant_id: tenantId };
+      const { error } = await supabaseAdmin.from('settings').upsert(upsertPayload, { onConflict: 'tenant_id' });
+      if (error) throw error;
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating settings:", error);
