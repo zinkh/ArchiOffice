@@ -6,6 +6,7 @@ import { db } from '../db';
 import { apiFetch } from '../lib/api';
 import { jsPDF } from 'jspdf';
 import { saveAs } from 'file-saver';
+import { loadImageAsDataUrl } from '../lib/imageUtils';
 
 interface Company {
   id: string;
@@ -140,11 +141,31 @@ export default function ACT({ projectId }: { projectId: string }) {
     saveAs(blob, 'analyse_act.csv');
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     const doc = new jsPDF();
-    doc.text('Analyse des Appels d\'Offres (ACT)', 10, 10);
+    let textY = 18;
+
+    try {
+      const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null);
+      if (s?.logoUrl) {
+        try {
+          const dataUrl = await loadImageAsDataUrl(s.logoUrl);
+          doc.addImage(dataUrl, 'PNG', 10, 6, 28, 10);
+        } catch { /* skip */ }
+      }
+      const label = s?.agencyName ? `${s.agencyName} — ` : '';
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${label}Analyse des Appels d'Offres (ACT)`, s?.logoUrl ? 42 : 10, textY);
+    } catch {
+      doc.text('Analyse des Appels d\'Offres (ACT)', 10, textY);
+    }
+
+    textY += 10;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
     data.companies.forEach((c, i) => {
-      doc.text(`${c.name}: Total ${formatCurrency(calculateTotal(c))} - Score ${calculateTechnicalScore(c).toFixed(2)}`, 10, 20 + i * 10);
+      doc.text(`${c.name}: Total ${formatCurrency(calculateTotal(c))} - Score ${calculateTechnicalScore(c).toFixed(2)}`, 10, textY + i * 8);
     });
     doc.save('analyse_act.pdf');
   };

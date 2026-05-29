@@ -71,7 +71,7 @@ export default function Register() {
       // Inscription réussie mais connexion auto échouée → rediriger vers login
       navigate('/login');
     } else {
-      navigate('/');
+      navigate('/onboarding');
     }
   };
 
@@ -110,8 +110,7 @@ export default function Register() {
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
               Identifiant URL
             </label>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-400 text-sm">archioffice.app/</span>
+            <div className="flex items-center rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
               <input
                 type="text"
                 name="slug"
@@ -119,10 +118,14 @@ export default function Register() {
                 onChange={handleChange}
                 placeholder="dupont-architecture"
                 pattern="[-a-z0-9]+"
-                className="flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white outline-none min-w-0"
                 required
               />
+              <span className="px-3 py-2 bg-zinc-50 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-400 text-sm border-l border-zinc-300 dark:border-zinc-600 whitespace-nowrap">.archimanager.fr</span>
             </div>
+            {form.slug && (
+              <p className="mt-1 text-xs text-zinc-400">Votre espace : <span className="font-mono text-blue-500">{form.slug}.archimanager.fr</span></p>
+            )}
           </div>
 
           <div>

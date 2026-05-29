@@ -1,8 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { IconCommand } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
+
+function getSubdomain(): string | null {
+  const host = window.location.hostname;
+  const parts = host.split('.');
+  if (parts.length >= 3 && parts[0] !== 'www') return parts[0];
+  return null;
+}
 
 function GoogleIcon() {
   return (
@@ -21,8 +28,18 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [tenantBranding, setTenantBranding] = useState<{ name: string; logoUrl: string | null } | null>(null);
   const navigate = useNavigate();
   const { t } = useTranslation();
+
+  useEffect(() => {
+    const slug = getSubdomain();
+    if (!slug) return;
+    fetch(`/api/public/tenant/${slug}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setTenantBranding({ name: data.name, logoUrl: data.logoUrl }); })
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,14 +77,21 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
       <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
-        <div className="flex justify-center mb-8">
-          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
-            <IconCommand size={32} />
-          </div>
+        <div className="flex justify-center mb-6">
+          {tenantBranding?.logoUrl ? (
+            <img src={tenantBranding.logoUrl} alt={tenantBranding.name} className="h-14 max-w-[200px] object-contain" />
+          ) : (
+            <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
+              <IconCommand size={32} />
+            </div>
+          )}
         </div>
-        <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-8">
-          {t('login_welcome')}
+        <h2 className={`text-2xl font-bold text-center text-zinc-900 dark:text-white ${tenantBranding ? 'mb-1' : 'mb-8'}`}>
+          {tenantBranding ? tenantBranding.name : t('login_welcome')}
         </h2>
+        {tenantBranding && (
+          <p className="text-sm text-center text-zinc-500 dark:text-zinc-400 mb-6">Connectez-vous à votre espace</p>
+        )}
 
         {/* Bouton Google */}
         <button

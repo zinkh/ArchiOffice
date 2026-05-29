@@ -353,11 +353,12 @@ export default function Settings() {
     setIsSaving(true);
     try {
       if (currentUser?.system_role === 'admin') {
-        await fetch('/api/settings', {
+        const res = await fetch('/api/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(settings)
         });
+        if (!res.ok) throw new Error(`Settings save failed: ${res.status}`);
         await db.settings.put(settings);
       }
       if (currentUser) {
