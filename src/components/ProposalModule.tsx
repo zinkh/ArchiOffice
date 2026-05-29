@@ -1,24 +1,24 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Proposal } from '../types';
-import { 
-  FileText, 
-  Download, 
-  Settings, 
-  Eye, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  XCircle,
-  ChevronRight,
-  Plus,
-  Trash2,
-  Layout,
-  Type,
-  Palette,
-  Image as ImageIcon,
-  ArrowLeft
-} from 'lucide-react';
+import {
+  IconFileText,
+  IconDownload,
+  IconSettings,
+  IconEye,
+  IconCircleCheck,
+  IconClock,
+  IconAlertCircle,
+  IconCircleX,
+  IconChevronRight,
+  IconPlus,
+  IconTrash,
+  IconLayout,
+  IconLetterCase,
+  IconPalette,
+  IconPhoto,
+  IconArrowLeft,
+} from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -916,7 +916,7 @@ export const ProposalGenerator = ({ data, template }: { data: ProposalData, temp
       <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
-            <FileText size={20} />
+            <IconFileText size={20} />
           </div>
           <div>
             <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Aperçu de la Proposition</h2>
@@ -927,7 +927,7 @@ export const ProposalGenerator = ({ data, template }: { data: ProposalData, temp
           onClick={handleExport}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20 active:scale-95"
         >
-          <Download size={16} />
+          <IconDownload size={16} />
           Exporter PDF
         </button>
       </div>
@@ -1010,7 +1010,7 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 w-80 overflow-y-auto">
       <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-        <Settings size={18} className="text-zinc-400" />
+        <IconSettings size={18} className="text-zinc-400" />
         <h2 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Éditeur de Modèle</h2>
       </div>
 
@@ -1018,7 +1018,7 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
         {/* Pages Toggle */}
         <section className="space-y-3">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-            <Layout size={14} />
+            <IconLayout size={14} />
             <h3 className="text-[10px] font-bold uppercase tracking-widest">Structure du Document</h3>
           </div>
           <div className="space-y-2">
@@ -1039,7 +1039,7 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
         {/* Visual Customization */}
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-            <Palette size={14} />
+            <IconPalette size={14} />
             <h3 className="text-[10px] font-bold uppercase tracking-widest">Personnalisation Visuelle</h3>
           </div>
           
@@ -1106,7 +1106,7 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
         {/* Clauses Editor */}
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-            <Type size={14} />
+            <IconLetterCase size={14} />
             <h3 className="text-[10px] font-bold uppercase tracking-widest">Clauses Juridiques</h3>
           </div>
           
@@ -1355,7 +1355,7 @@ export default function ProposalModule() {
             onClick={() => navigate('/proposals')}
             className="flex items-center gap-2 px-3 py-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
           >
-            <ArrowLeft size={16} />
+            <IconArrowLeft size={16} />
             <span className="text-sm font-medium">Retour aux Propositions</span>
           </button>
         </div>
@@ -1366,7 +1366,7 @@ export default function ProposalModule() {
           ) : (
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-4 text-zinc-400">
-              <Clock className="animate-spin" size={32} />
+              <IconClock className="animate-spin" size={32} />
               <p className="text-sm font-medium">Chargement du modèle...</p>
             </div>
           </div>
