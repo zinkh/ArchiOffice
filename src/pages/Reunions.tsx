@@ -15,10 +15,15 @@ import {
   IconBuilding,
   IconEye,
   IconSearch,
+  IconUsers,
+  IconUserPlus,
+  IconAlertTriangle,
+  IconUser,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import type { Project, Meeting, MeetingPhoto, MeetingType } from '../types';
+import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee } from '../types';
+import { isContactIncomplete } from './Contacts';
 
 type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
 
@@ -30,14 +35,313 @@ const SUBSECTIONS: { key: Subsection; label: string }[] = [
 
 function formatDate(iso: string) {
   if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function formatDateInput(iso: string) {
-  if (!iso) return '';
-  return iso.substring(0, 10);
+function contactDisplayName(c: MeetingAttendee['contact']) {
+  if (!c) return 'Inconnu';
+  return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || 'Sans nom';
 }
+
+// ── Attendee panel ────────────────────────────────────────────────────────────
+
+interface AttendeesPanelProps {
+  meetingId: string;
+}
+
+function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
+  const [attendees, setAttendees] = useState<MeetingAttendee[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [mode, setMode] = useState<null | 'search' | 'new'>( null);
+  const [query, setQuery] = useState('');
+  const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [roleValue, setRoleValue] = useState('');
+
+  // New contact form
+  const [newFirst, setNewFirst] = useState('');
+  const [newLast, setNewLast] = useState('');
+  const [newCompany, setNewCompany] = useState('');
+  const [newJob, setNewJob] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState('');
+
+  useEffect(() => {
+    apiFetch<MeetingAttendee[]>(`/api/meetings/${meetingId}/attendees`).then(setAttendees).catch(() => {});
+    apiFetch<Contact[]>('/api/contacts').then(setContacts).catch(() => {});
+  }, [meetingId]);
+
+  const alreadyAdded = new Set(attendees.map(a => a.contact_id));
+
+  const filteredContacts = contacts.filter(c => {
+    if (alreadyAdded.has(c.id)) return false;
+    const q = query.toLowerCase();
+    if (!q) return true;
+    return (
+      c.first_name?.toLowerCase().includes(q) ||
+      c.last_name?.toLowerCase().includes(q) ||
+      c.company_name?.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q)
+    );
+  }).slice(0, 8);
+
+  const addExisting = async (contact: Contact) => {
+    const att = await apiFetch<MeetingAttendee>(`/api/meetings/${meetingId}/attendees`, {
+      method: 'POST',
+      body: JSON.stringify({ contact_id: contact.id, role: '' }),
+    });
+    setAttendees(prev => [...prev, att]);
+    setQuery('');
+    setMode(null);
+  };
+
+  const createAndAdd = async () => {
+    if (!newFirst.trim() && !newLast.trim()) return;
+    const att = await apiFetch<MeetingAttendee>(`/api/meetings/${meetingId}/attendees/new-contact`, {
+      method: 'POST',
+      body: JSON.stringify({
+        first_name: newFirst, last_name: newLast, company_name: newCompany,
+        job_title: newJob, phone_mobile: newPhone, email: newEmail, role: newRole,
+      }),
+    });
+    setAttendees(prev => [...prev, att]);
+    setNewFirst(''); setNewLast(''); setNewCompany(''); setNewJob('');
+    setNewPhone(''); setNewEmail(''); setNewRole('');
+    setMode(null);
+  };
+
+  const removeAttendee = async (id: string) => {
+    await apiFetch(`/api/meetings/${meetingId}/attendees/${id}`, { method: 'DELETE' });
+    setAttendees(prev => prev.filter(a => a.id !== id));
+  };
+
+  const saveRole = async (id: string) => {
+    await apiFetch(`/api/meetings/${meetingId}/attendees/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role: roleValue }),
+    });
+    setAttendees(prev => prev.map(a => a.id === id ? { ...a, role: roleValue } : a));
+    setEditingRole(null);
+  };
+
+  const incomplete = (a: MeetingAttendee) => a.contact ? isContactIncomplete(a.contact as Contact) : false;
+
+  return (
+    <div>
+      {/* List */}
+      {attendees.length === 0 && !mode && (
+        <p className="text-sm text-zinc-400 italic mb-3">Aucun intervenant ajouté</p>
+      )}
+      {attendees.length > 0 && (
+        <div className="mb-3 divide-y divide-zinc-100 dark:divide-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+          {attendees.map(att => (
+            <div key={att.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-zinc-900">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                <IconUser size={16} className="text-zinc-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{contactDisplayName(att.contact)}</span>
+                  {att.contact?.company_name && (
+                    <span className="text-xs text-zinc-400">{att.contact.company_name}</span>
+                  )}
+                  {incomplete(att) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50">
+                      <IconAlertTriangle size={9} />
+                      À compléter
+                    </span>
+                  )}
+                </div>
+                {editingRole === att.id ? (
+                  <div className="flex items-center gap-1 mt-1">
+                    <input
+                      type="text"
+                      value={roleValue}
+                      onChange={e => setRoleValue(e.target.value)}
+                      placeholder="Rôle / Entreprise..."
+                      autoFocus
+                      className="flex-1 px-2 py-0.5 text-xs border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:ring-1 focus:ring-blue-500 bg-zinc-50 dark:bg-zinc-800"
+                      onKeyDown={e => e.key === 'Enter' && saveRole(att.id)}
+                    />
+                    <button onClick={() => saveRole(att.id)} className="p-1 text-blue-500 hover:text-blue-700"><IconCheck size={12} /></button>
+                    <button onClick={() => setEditingRole(null)} className="p-1 text-zinc-400 hover:text-zinc-600"><IconX size={12} /></button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditingRole(att.id); setRoleValue(att.role || ''); }}
+                    className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 mt-0.5 text-left"
+                  >
+                    {att.role || <span className="italic">+ Rôle / Entreprise</span>}
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => removeAttendee(att.id)}
+                className="flex-shrink-0 p-1 text-zinc-300 hover:text-red-500 transition-colors"
+              >
+                <IconTrash size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add buttons */}
+      {!mode && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMode('search')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition-colors"
+          >
+            <IconSearch size={12} />
+            Contact existant
+          </button>
+          <button
+            onClick={() => setMode('new')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition-colors"
+          >
+            <IconUserPlus size={12} />
+            Nouveau contact
+          </button>
+        </div>
+      )}
+
+      {/* Search existing */}
+      {mode === 'search' && (
+        <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+            <IconSearch size={14} className="text-zinc-400" />
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Rechercher un contact..."
+              autoFocus
+              className="flex-1 bg-transparent text-sm outline-none text-zinc-800 dark:text-zinc-200"
+            />
+            <button onClick={() => { setMode(null); setQuery(''); }} className="text-zinc-400 hover:text-zinc-600"><IconX size={14} /></button>
+          </div>
+          {filteredContacts.length === 0 ? (
+            <p className="px-3 py-3 text-sm text-zinc-400 italic">
+              {query ? 'Aucun contact trouvé' : 'Commencez à taper pour rechercher'}
+            </p>
+          ) : (
+            <div>
+              {filteredContacts.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => addExisting(c)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-left border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 transition-colors"
+                >
+                  <div className="w-7 h-7 rounded-full bg-zinc-100 dark:bg-zinc-700 flex items-center justify-center flex-shrink-0">
+                    <IconUser size={14} className="text-zinc-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                        {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name}
+                      </span>
+                      {isContactIncomplete(c) && (
+                        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap">
+                          <IconAlertTriangle size={8} />
+                          À compléter
+                        </span>
+                      )}
+                    </div>
+                    {c.job_title && <p className="text-xs text-zinc-400 truncate">{c.job_title}{c.company_name ? ` · ${c.company_name}` : ''}</p>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* New contact form */}
+      {mode === 'new' && (
+        <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+            <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Nouveau contact</span>
+            <button onClick={() => setMode(null)} className="text-zinc-400 hover:text-zinc-600"><IconX size={14} /></button>
+          </div>
+          <div className="p-3 grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              placeholder="Prénom"
+              value={newFirst}
+              onChange={e => setNewFirst(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="text"
+              placeholder="Nom *"
+              value={newLast}
+              onChange={e => setNewLast(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="text"
+              placeholder="Entreprise"
+              value={newCompany}
+              onChange={e => setNewCompany(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="text"
+              placeholder="Fonction"
+              value={newJob}
+              onChange={e => setNewJob(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="tel"
+              placeholder="Portable / Téléphone"
+              value={newPhone}
+              onChange={e => setNewPhone(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={newEmail}
+              onChange={e => setNewEmail(e.target.value)}
+              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+            <input
+              type="text"
+              placeholder="Rôle dans la réunion"
+              value={newRole}
+              onChange={e => setNewRole(e.target.value)}
+              className="col-span-2 px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-900"
+            />
+          </div>
+          {(!newFirst.trim() && !newLast.trim()) ? null : (
+            (!newPhone.trim() || !newEmail.trim()) && (
+              <div className="mx-3 mb-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2.5 py-1.5">
+                <IconAlertTriangle size={12} />
+                Ce contact sera marqué « À compléter » dans votre carnet d'adresses.
+              </div>
+            )
+          )}
+          <div className="px-3 pb-3 flex gap-2">
+            <button
+              onClick={createAndAdd}
+              disabled={!newFirst.trim() && !newLast.trim()}
+              className="flex-1 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Créer et ajouter
+            </button>
+            <button onClick={() => setMode(null)} className="px-3 py-2 text-sm bg-zinc-100 dark:bg-zinc-800 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors">
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Reunions() {
   const { t } = useTranslation();
@@ -66,7 +370,6 @@ export default function Reunions() {
 
   const [editingCaption, setEditingCaption] = useState<string | null>(null);
   const [captionValue, setCaptionValue] = useState('');
-
   const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
 
   useEffect(() => {
@@ -112,23 +415,21 @@ export default function Reunions() {
 
   const createMeeting = async () => {
     if (!selectedProject || !newMeetingTitle.trim()) return;
-    try {
-      const data = await apiFetch<Meeting>('/api/meetings', {
-        method: 'POST',
-        body: JSON.stringify({
-          project_id: selectedProject.id,
-          type: selectedSection,
-          title: newMeetingTitle.trim(),
-          date: newMeetingDate,
-          notes: '',
-        }),
-      });
-      setMeetings(prev => [data, ...prev]);
-      setNewMeetingTitle('');
-      setNewMeetingDate(new Date().toISOString().substring(0, 10));
-      setShowNewMeeting(false);
-      loadMeetingDetail(data);
-    } catch {}
+    const data = await apiFetch<Meeting>('/api/meetings', {
+      method: 'POST',
+      body: JSON.stringify({
+        project_id: selectedProject.id,
+        type: selectedSection,
+        title: newMeetingTitle.trim(),
+        date: newMeetingDate,
+        notes: '',
+      }),
+    });
+    setMeetings(prev => [data, ...prev]);
+    setNewMeetingTitle('');
+    setNewMeetingDate(new Date().toISOString().substring(0, 10));
+    setShowNewMeeting(false);
+    loadMeetingDetail(data);
   };
 
   const deleteMeeting = async (id: string) => {
@@ -222,7 +523,6 @@ export default function Reunions() {
             />
           </div>
         </div>
-
         <nav className="flex-1 overflow-y-auto py-2">
           {SUBSECTIONS.map(({ key, label }) => (
             <div key={key}>
@@ -298,12 +598,8 @@ export default function Reunions() {
                   className="w-full px-2 py-1.5 text-xs bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 />
                 <div className="flex gap-1">
-                  <button onClick={createMeeting} className="flex-1 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
-                    Créer
-                  </button>
-                  <button onClick={() => setShowNewMeeting(false)} className="px-2 py-1 text-xs bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors">
-                    <IconX size={12} />
-                  </button>
+                  <button onClick={createMeeting} className="flex-1 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">Créer</button>
+                  <button onClick={() => setShowNewMeeting(false)} className="px-2 py-1 text-xs bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"><IconX size={12} /></button>
                 </div>
               </div>
             )}
@@ -318,35 +614,33 @@ export default function Reunions() {
                   <button onClick={() => setShowNewMeeting(true)} className="text-blue-500 hover:underline">+ Ajouter</button>
                 </div>
               ) : (
-                <div>
-                  {meetings.map(meeting => (
-                    <div
-                      key={meeting.id}
-                      onClick={() => loadMeetingDetail(meeting)}
-                      className={`group relative px-3 py-2.5 cursor-pointer border-b border-zinc-100 dark:border-zinc-800/50 transition-colors ${
-                        selectedMeeting?.id === meeting.id
-                          ? 'bg-blue-50 dark:bg-blue-900/20'
-                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{meeting.title}</p>
-                          <p className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-1">
-                            <IconCalendar size={9} />
-                            {formatDate(meeting.date)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-zinc-400 hover:text-red-500 transition-all"
-                        >
-                          <IconTrash size={12} />
-                        </button>
+                meetings.map(meeting => (
+                  <div
+                    key={meeting.id}
+                    onClick={() => loadMeetingDetail(meeting)}
+                    className={`group relative px-3 py-2.5 cursor-pointer border-b border-zinc-100 dark:border-zinc-800/50 transition-colors ${
+                      selectedMeeting?.id === meeting.id
+                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        : 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{meeting.title}</p>
+                        <p className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-1">
+                          <IconCalendar size={9} />
+                          {formatDate(meeting.date)}
+                        </p>
                       </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-zinc-400 hover:text-red-500 transition-all"
+                      >
+                        <IconTrash size={12} />
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))
               )}
             </div>
           </>
@@ -368,17 +662,25 @@ export default function Reunions() {
               {/* Header */}
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-zinc-900 dark:text-white mb-1">{selectedMeeting.title}</h1>
-                <div className="flex items-center gap-3 text-sm text-zinc-500">
-                  <span className="flex items-center gap-1">
-                    <IconCalendar size={14} />
-                    {formatDate(selectedMeeting.date)}
-                  </span>
+                <div className="flex items-center gap-3 text-sm text-zinc-500 flex-wrap">
+                  <span className="flex items-center gap-1"><IconCalendar size={14} />{formatDate(selectedMeeting.date)}</span>
                   <span className="text-zinc-300 dark:text-zinc-700">•</span>
                   <span>{selectedProject?.name}</span>
                   <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                  <span className="capitalize">{SUBSECTIONS.find(s => s.key === selectedSection)?.label}</span>
+                  <span>{SUBSECTIONS.find(s => s.key === selectedSection)?.label}</span>
                 </div>
               </div>
+
+              {/* Intervenants */}
+              <div className="mb-8">
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-3 flex items-center gap-2">
+                  <IconUsers size={16} />
+                  Intervenants
+                </h2>
+                <AttendeesPanel meetingId={selectedMeeting.id} />
+              </div>
+
+              <hr className="border-zinc-100 dark:border-zinc-800 mb-8" />
 
               {/* Notes */}
               <div className="mb-8">
@@ -406,6 +708,8 @@ export default function Reunions() {
                   </button>
                 </div>
               </div>
+
+              <hr className="border-zinc-100 dark:border-zinc-800 mb-8" />
 
               {/* Photos */}
               <div>
@@ -454,16 +758,10 @@ export default function Reunions() {
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex flex-col justify-between p-2 opacity-0 group-hover:opacity-100">
                           <div className="flex justify-end gap-1">
-                            <button
-                              onClick={() => setLightboxPhoto(photo)}
-                              className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors"
-                            >
+                            <button onClick={() => setLightboxPhoto(photo)} className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors">
                               <IconEye size={14} />
                             </button>
-                            <button
-                              onClick={() => deletePhoto(photo.id)}
-                              className="p-1 bg-red-500/80 backdrop-blur-sm rounded text-white hover:bg-red-600 transition-colors"
-                            >
+                            <button onClick={() => deletePhoto(photo.id)} className="p-1 bg-red-500/80 backdrop-blur-sm rounded text-white hover:bg-red-600 transition-colors">
                               <IconTrash size={14} />
                             </button>
                           </div>
@@ -477,7 +775,6 @@ export default function Reunions() {
                         </div>
                       </div>
                     ))}
-                    {/* Add more photos tile */}
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="aspect-square rounded-xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:border-blue-400 hover:text-blue-400 transition-colors"
@@ -525,15 +822,8 @@ export default function Reunions() {
               onKeyDown={e => e.key === 'Enter' && saveCaption(editingCaption)}
             />
             <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => saveCaption(editingCaption)}
-                className="flex-1 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-              >
-                Enregistrer
-              </button>
-              <button onClick={() => setEditingCaption(null)} className="px-3 py-1.5 text-sm bg-zinc-200 dark:bg-zinc-700 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600">
-                Annuler
-              </button>
+              <button onClick={() => saveCaption(editingCaption)} className="flex-1 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Enregistrer</button>
+              <button onClick={() => setEditingCaption(null)} className="px-3 py-1.5 text-sm bg-zinc-200 dark:bg-zinc-700 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600">Annuler</button>
             </div>
           </div>
         </div>
@@ -541,14 +831,8 @@ export default function Reunions() {
 
       {/* Photo lightbox */}
       {lightboxPhoto && (
-        <div
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
-          onClick={() => setLightboxPhoto(null)}
-        >
-          <button
-            onClick={() => setLightboxPhoto(null)}
-            className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors"
-          >
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90" onClick={() => setLightboxPhoto(null)}>
+          <button onClick={() => setLightboxPhoto(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
             <IconX size={20} />
           </button>
           <img
@@ -557,9 +841,7 @@ export default function Reunions() {
             className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg"
             onClick={e => e.stopPropagation()}
           />
-          {lightboxPhoto.caption && (
-            <p className="mt-3 text-white/70 text-sm">{lightboxPhoto.caption}</p>
-          )}
+          {lightboxPhoto.caption && <p className="mt-3 text-white/70 text-sm">{lightboxPhoto.caption}</p>}
         </div>
       )}
     </div>

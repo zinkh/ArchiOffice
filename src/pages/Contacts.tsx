@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
-import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
@@ -7,6 +7,13 @@ import { fetchJson } from '../lib/api';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
+
+export function isContactIncomplete(c: Contact): boolean {
+  const hasName = !!(c.first_name?.trim() || c.last_name?.trim());
+  const hasPhone = !!(c.phone_mobile?.trim() || c.phone_work?.trim() || c.phone?.trim());
+  const hasEmail = !!(c.email?.trim() || c.email_work?.trim() || c.email_home?.trim());
+  return !hasName || !hasPhone || !hasEmail;
+}
 
 export default function Contacts() {
   const { t } = useTranslation();
@@ -522,7 +529,17 @@ export default function Contacts() {
                     <div>{contact.prefix}</div>
                     {contact.company_name && <div className="text-[10px] text-zinc-500 font-normal">{contact.company_name}</div>}
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.last_name}</td>
+                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                    <div className="flex items-center gap-2">
+                      <span>{contact.last_name}</span>
+                      {isContactIncomplete(contact) && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap" title="Informations manquantes : nom, téléphone ou email">
+                          <IconAlertTriangle size={9} />
+                          À compléter
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.first_name}</td>
                   <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
                     {contact.category && (
