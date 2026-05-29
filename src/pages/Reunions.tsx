@@ -19,11 +19,15 @@ import {
   IconUserPlus,
   IconAlertTriangle,
   IconUser,
+  IconFileTypePdf,
+  IconFileTypeDocx,
+  IconLoader2,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee } from '../types';
 import { isContactIncomplete } from './Contacts';
+import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
 
 type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
 
@@ -372,9 +376,22 @@ export default function Reunions() {
   const [captionValue, setCaptionValue] = useState('');
   const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
 
+  const [agencySettings, setAgencySettings] = useState<AgencySettings>({});
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingDocx, setExportingDocx] = useState(false);
+
   useEffect(() => {
     apiFetch<Project[]>('/api/projects').then(data => {
       setProjects(data.filter(p => p.status !== 'Completed'));
+    }).catch(() => {});
+    apiFetch<any>('/api/settings').then(s => {
+      setAgencySettings({
+        agencyName: s.agencyName || s.agency_name,
+        logoUrl: s.logoUrl || s.logo_url,
+        address: s.address,
+        phone: s.phone,
+        email: s.email,
+      });
     }).catch(() => {});
   }, []);
 
@@ -451,6 +468,34 @@ export default function Reunions() {
       setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, notes: notesValue } : m));
     } finally {
       setSavingNotes(false);
+    }
+  };
+
+  const getAttendeesForExport = async (): Promise<MeetingAttendee[]> => {
+    if (!selectedMeeting) return [];
+    try { return await apiFetch<MeetingAttendee[]>(`/api/meetings/${selectedMeeting.id}/attendees`); }
+    catch { return []; }
+  };
+
+  const handleExportPDF = async () => {
+    if (!selectedMeeting || !selectedProject) return;
+    setExportingPdf(true);
+    try {
+      const attendees = await getAttendeesForExport();
+      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, selectedProject.name);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!selectedMeeting || !selectedProject) return;
+    setExportingDocx(true);
+    try {
+      const attendees = await getAttendeesForExport();
+      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, selectedProject.name);
+    } finally {
+      setExportingDocx(false);
     }
   };
 
@@ -661,7 +706,29 @@ export default function Reunions() {
             <div className="max-w-3xl mx-auto p-6">
               {/* Header */}
               <div className="mb-6">
-                <h1 className="text-2xl font-bold text-zinc-900 dark:text-white mb-1">{selectedMeeting.title}</h1>
+                <div className="flex items-start justify-between gap-4 mb-1">
+                  <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{selectedMeeting.title}</h1>
+                  <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+                    <button
+                      onClick={handleExportPDF}
+                      disabled={exportingPdf}
+                      title="Exporter en PDF"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-300 dark:hover:border-red-700 hover:text-red-600 dark:hover:text-red-400 text-zinc-600 dark:text-zinc-400 transition-colors disabled:opacity-50"
+                    >
+                      {exportingPdf ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypePdf size={13} />}
+                      PDF
+                    </button>
+                    <button
+                      onClick={handleExportDocx}
+                      disabled={exportingDocx}
+                      title="Exporter en Word"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 dark:hover:text-blue-400 text-zinc-600 dark:text-zinc-400 transition-colors disabled:opacity-50"
+                    >
+                      {exportingDocx ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypeDocx size={13} />}
+                      Word
+                    </button>
+                  </div>
+                </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-500 flex-wrap">
                   <span className="flex items-center gap-1"><IconCalendar size={14} />{formatDate(selectedMeeting.date)}</span>
                   <span className="text-zinc-300 dark:text-zinc-700">•</span>
