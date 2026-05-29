@@ -513,25 +513,32 @@ export default function Projects() {
     }
   };
 
-  const handleExportXLSX = () => {
-    import('xlsx').then(XLSX => {
-      const data = filteredProjects.map(p => ({
-        'Nom': p.name,
-        'Client': p.client || '',
-        'Statut': p.status || '',
-        'Catégorie': p.category_name || '',
-        'Chef de projet': p.project_manager_name || p.project_manager || '',
-        'Date début': p.start_date || '',
-        'Date fin': p.end_date || '',
-        'Budget': p.budget || 0,
-        'Surface': p.surface || 0,
-        'Adresse': p.address || '',
-      }));
-      const worksheet = XLSX.utils.json_to_sheet(data);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Projets');
-      XLSX.writeFile(workbook, 'projets.xlsx');
-    });
+  const handleExportXLSX = async () => {
+    let agencyName = '';
+    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
+    const XLSX = await import('xlsx');
+    const rows = filteredProjects.map(p => ({
+      'Nom': p.name,
+      'Client': p.client || '',
+      'Statut': p.status || '',
+      'Catégorie': p.category_name || '',
+      'Chef de projet': p.project_manager_name || p.project_manager || '',
+      'Date début': p.start_date || '',
+      'Date fin': p.end_date || '',
+      'Budget': p.budget || 0,
+      'Surface': p.surface || 0,
+      'Adresse': p.address || '',
+    }));
+    const worksheet = XLSX.utils.json_to_sheet([]);
+    if (agencyName) {
+      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName], ['Liste des projets']], { origin: 'A1' });
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
+    } else {
+      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Projets');
+    XLSX.writeFile(workbook, 'projets.xlsx');
   };
 
   return (

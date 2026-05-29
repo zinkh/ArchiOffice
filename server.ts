@@ -1286,6 +1286,23 @@ async function startServer() {
     res.json({ success: true, tenant_id: tenant.id });
   });
 
+  // Public: get tenant branding info by slug (used on subdomain login page)
+  app.get("/api/public/tenant/:slug", async (req: any, res: any) => {
+    try {
+      const { slug } = req.params;
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name, slug').eq('slug', slug).single();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      const { data: settings } = await supabaseAdmin.from('settings').select('logo_url, agency_name').eq('tenant_id', tenant.id).single();
+      res.json({
+        slug: tenant.slug,
+        name: (settings as any)?.agency_name || tenant.name,
+        logoUrl: (settings as any)?.logo_url || null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/rnb-buildings", async (req, res) => {
     try {
       const { q } = req.query;
@@ -3835,8 +3852,8 @@ async function startServer() {
         const { error } = await supabaseAdmin.from('settings').update(updatePayload).eq('tenant_id', tenantId);
         if (error) throw error;
       } else {
-        // id required for PRIMARY KEY — use frontend value or fallback
-        const insertPayload = { ...filteredData, id: filteredData.id || 'general', tenant_id: tenantId };
+        // Use tenantId as the row id to guarantee uniqueness across tenants
+        const insertPayload = { ...filteredData, id: tenantId, tenant_id: tenantId };
         const { error } = await supabaseAdmin.from('settings').insert(insertPayload);
         if (error) throw error;
       }
@@ -3845,6 +3862,49 @@ async function startServer() {
       console.error("Error updating settings:", error);
       res.status(500).json({ error: "Failed to update settings: " + error.message });
     }
+  });
+
+  // Upload agency logo → save to Supabase Storage, update settings.logo_url
+  app.post("/api/upload/logo", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const ext = file.originalname.split('.').pop() || 'png';
+      const storagePath = `${tenantId}/logo/${Date.now()}.${ext}`;
+      // Ensure logos bucket exists
+      const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
+      if (!bucketData) {
+        await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
+      }
+      const url = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
+      // Persist to settings
+      const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
+      if (existing) {
+        await supabaseAdmin.from('settings').update({ logo_url: url }).eq('tenant_id', tenantId);
+      } else {
+        await supabaseAdmin.from('settings').insert({ id: tenantId, tenant_id: tenantId, logo_url: url });
+      }
+      res.json({ url });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message || "Upload failed" }); }
+  });
+
+  // Upload user avatar → save to Supabase Storage, update profile.avatar
+  app.post("/api/upload/avatar", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const userId = req.user.id;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const ext = file.originalname.split('.').pop() || 'png';
+      const storagePath = `avatars/${userId}/${Date.now()}.${ext}`;
+      const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
+      if (!bucketData) {
+        await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
+      }
+      const url = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
+      await supabaseAdmin.from('profiles').update({ avatar: url }).eq('id', userId);
+      res.json({ url });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message || "Upload failed" }); }
   });
 
   app.post("/api/test-smtp", async (req, res) => {
