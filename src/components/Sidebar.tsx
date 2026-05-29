@@ -16,6 +16,7 @@ import {
   IconArchive,
   IconCreditCard,
   IconLayoutKanban,
+  IconMessages,
   IconAlertTriangle,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
@@ -32,6 +33,14 @@ export const NAV_ITEMS = [
   { name: 'invoices',       path: '/invoices',       icon: IconFileInvoice },
   { name: 'tenders',        path: '/tenders',        icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconFileText },
+  { name: 'gantt', path: '/gantt', icon: IconChartBar },
+  { name: 'kanban', path: '/kanban', icon: IconLayoutKanban },
+  { name: 'reunions', path: '/reunions', icon: IconMessages },
+  { name: 'team', path: '/team', icon: IconUsers },
+  { name: 'contacts', path: '/contacts', icon: IconAddressBook },
+  { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
+  { name: 'settings', path: '/settings', icon: IconSettings },
+  { name: 'billing', path: '/billing', icon: IconCreditCard },
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'team',           path: '/team',           icon: IconUsers },

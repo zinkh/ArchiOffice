@@ -47,6 +47,7 @@ import Onboarding from './pages/Onboarding';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
+import Reunions from './pages/Reunions';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -562,6 +563,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/reunions" element={<Reunions />} />
             </Route>
           </Routes>
         </Router>

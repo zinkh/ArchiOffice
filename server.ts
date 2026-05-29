@@ -800,6 +800,38 @@ if (false as any) {
       item_type TEXT NOT NULL,
       user_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS meetings (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      project_id TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_photos (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      file_url TEXT NOT NULL,
+      caption TEXT,
+      uploaded_at TEXT NOT NULL,
+      FOREIGN KEY(meeting_id) REFERENCES meetings(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_attendees (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      role TEXT,
+      FOREIGN KEY(meeting_id) REFERENCES meetings(id),
+      FOREIGN KEY(contact_id) REFERENCES contacts(id)
+    );
   `);
 
   // Add columns if they don't exist (for existing databases)
@@ -4919,6 +4951,221 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       console.error("AI suggest-articles error:", e.message);
       res.status(500).json({ error: "AI suggestion failed: " + e.message });
     }
+  });
+
+  // ── Meetings ──────────────────────────────────────────────────────────────
+
+  app.get("/api/meetings", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, type } = req.query;
+      let query = supabaseAdmin.from('meetings').select('*').eq('tenant_id', tenantId).order('date', { ascending: false });
+      if (project_id) query = query.eq('project_id', project_id);
+      if (type) query = query.eq('type', type);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: meeting, error } = await supabaseAdmin.from('meetings').select('*').eq('id', id).eq('tenant_id', tenantId).single();
+      if (error) throw error;
+      const { data: photos } = await supabaseAdmin.from('meeting_photos').select('*').eq('meeting_id', id).eq('tenant_id', tenantId).order('uploaded_at');
+      res.json({ ...meeting, photos: photos || [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/meetings", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, type, title, date, notes } = req.body;
+      const id = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, type, title, date, notes: notes || null, created_at });
+      if (error) throw error;
+      res.status(201).json({ id, project_id, type, title, date, notes, created_at, photos: [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { title, date, notes } = req.body;
+      const updated_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meetings').update({ title, date, notes: notes || null, updated_at }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: photos } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('meeting_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('meeting_photos').delete().eq('meeting_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('meetings').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (photos?.length) {
+        for (const p of photos) deleteFromStorage('meeting-photos', p.file_url).catch(() => {});
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/meetings/:id/photos", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { caption } = req.body;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const photoId = crypto.randomUUID();
+      const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('meeting-photos', storagePath, file.buffer, file.mimetype);
+      const uploaded_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meeting_photos').insert({ id: photoId, meeting_id: id, tenant_id: tenantId, file_url, caption: caption || null, uploaded_at });
+      if (error) throw error;
+      res.status(201).json({ id: photoId, meeting_id: id, file_url, caption, uploaded_at });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/meetings/:meetingId/photos/:photoId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { meetingId, photoId } = req.params;
+      const { data: photo } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('id', photoId).eq('meeting_id', meetingId).eq('tenant_id', tenantId).single();
+      await supabaseAdmin.from('meeting_photos').delete().eq('id', photoId).eq('tenant_id', tenantId);
+      if (photo?.file_url) deleteFromStorage('meeting-photos', photo.file_url).catch(() => {});
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/meetings/photos/:photoId/caption", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { photoId } = req.params;
+      const { caption } = req.body;
+      const { error } = await supabaseAdmin.from('meeting_photos').update({ caption }).eq('id', photoId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Meeting Attendees ──────────────────────────────────────────────────────
+
+  app.get("/api/meetings/:id/attendees", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: attendees, error } = await supabaseAdmin
+        .from('meeting_attendees')
+        .select('id, contact_id, role')
+        .eq('meeting_id', id)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      if (!attendees?.length) return res.json([]);
+      const contactIds = attendees.map((a: any) => a.contact_id);
+      const { data: contacts } = await supabaseAdmin
+        .from('contacts')
+        .select('id, first_name, last_name, company_name, job_title, phone_mobile, phone_work, phone, email, email_work, email_home')
+        .in('id', contactIds)
+        .eq('tenant_id', tenantId);
+      const contactMap: Record<string, any> = {};
+      (contacts || []).forEach((c: any) => { contactMap[c.id] = c; });
+      res.json(attendees.map((a: any) => ({ ...a, contact: contactMap[a.contact_id] || null })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Add existing contact as attendee
+  app.post("/api/meetings/:id/attendees", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { contact_id, role } = req.body;
+      if (!contact_id) return res.status(400).json({ error: "contact_id required" });
+      // Check no duplicate
+      const { data: existing } = await supabaseAdmin
+        .from('meeting_attendees')
+        .select('id')
+        .eq('meeting_id', id)
+        .eq('contact_id', contact_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (existing) return res.status(409).json({ error: "Already added" });
+      const attendeeId = crypto.randomUUID();
+      const { error } = await supabaseAdmin
+        .from('meeting_attendees')
+        .insert({ id: attendeeId, meeting_id: id, tenant_id: tenantId, contact_id, role: role || null });
+      if (error) throw error;
+      const { data: contact } = await supabaseAdmin
+        .from('contacts')
+        .select('id, first_name, last_name, company_name, job_title, phone_mobile, phone_work, phone, email, email_work, email_home')
+        .eq('id', contact_id)
+        .eq('tenant_id', tenantId)
+        .single();
+      res.status(201).json({ id: attendeeId, contact_id, role, contact });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Create new contact and add as attendee
+  app.post("/api/meetings/:id/attendees/new-contact", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { first_name, last_name, company_name, job_title, phone_mobile, email, role } = req.body;
+      if (!first_name && !last_name) return res.status(400).json({ error: "Nom requis" });
+      const contactId = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      const { error: ce } = await supabaseAdmin.from('contacts').insert({
+        id: contactId,
+        tenant_id: tenantId,
+        first_name: first_name || '',
+        last_name: last_name || '',
+        company_name: company_name || null,
+        job_title: job_title || null,
+        phone_mobile: phone_mobile || null,
+        phone: phone_mobile || '',
+        email: email || '',
+        address: '', zip: '', city: '', state: '', country: '',
+        candidatures: '', affaires: '', logo: '', ca_amount: 0,
+        electronic_signature: '', contact_references: '', tags: '',
+        created_at, created_by: req.user.id
+      });
+      if (ce) throw ce;
+      const attendeeId = crypto.randomUUID();
+      const { error: ae } = await supabaseAdmin
+        .from('meeting_attendees')
+        .insert({ id: attendeeId, meeting_id: id, tenant_id: tenantId, contact_id: contactId, role: role || null });
+      if (ae) throw ae;
+      const contact = { id: contactId, first_name, last_name, company_name, job_title, phone_mobile, phone: phone_mobile || '', email, email_work: null, email_home: null, phone_work: null };
+      res.status(201).json({ id: attendeeId, contact_id: contactId, role, contact });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/meetings/:meetingId/attendees/:attendeeId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { attendeeId } = req.params;
+      const { role } = req.body;
+      const { error } = await supabaseAdmin.from('meeting_attendees').update({ role }).eq('id', attendeeId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/meetings/:meetingId/attendees/:attendeeId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { attendeeId } = req.params;
+      const { error } = await supabaseAdmin.from('meeting_attendees').delete().eq('id', attendeeId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   const distPath = path.join(process.cwd(), "dist");
