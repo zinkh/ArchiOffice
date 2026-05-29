@@ -800,6 +800,28 @@ if (false as any) {
       item_type TEXT NOT NULL,
       user_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS meetings (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      project_id TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_photos (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      file_url TEXT NOT NULL,
+      caption TEXT,
+      uploaded_at TEXT NOT NULL,
+      FOREIGN KEY(meeting_id) REFERENCES meetings(id)
+    );
   `);
 
   // Add columns if they don't exist (for existing databases)
@@ -4859,6 +4881,109 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       console.error("AI suggest-articles error:", e.message);
       res.status(500).json({ error: "AI suggestion failed: " + e.message });
     }
+  });
+
+  // ── Meetings ──────────────────────────────────────────────────────────────
+
+  app.get("/api/meetings", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, type } = req.query;
+      let query = supabaseAdmin.from('meetings').select('*').eq('tenant_id', tenantId).order('date', { ascending: false });
+      if (project_id) query = query.eq('project_id', project_id);
+      if (type) query = query.eq('type', type);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: meeting, error } = await supabaseAdmin.from('meetings').select('*').eq('id', id).eq('tenant_id', tenantId).single();
+      if (error) throw error;
+      const { data: photos } = await supabaseAdmin.from('meeting_photos').select('*').eq('meeting_id', id).eq('tenant_id', tenantId).order('uploaded_at');
+      res.json({ ...meeting, photos: photos || [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/meetings", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, type, title, date, notes } = req.body;
+      const id = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, type, title, date, notes: notes || null, created_at });
+      if (error) throw error;
+      res.status(201).json({ id, project_id, type, title, date, notes, created_at, photos: [] });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { title, date, notes } = req.body;
+      const updated_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meetings').update({ title, date, notes: notes || null, updated_at }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/meetings/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: photos } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('meeting_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('meeting_photos').delete().eq('meeting_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('meetings').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (photos?.length) {
+        for (const p of photos) deleteFromStorage('meeting-photos', p.file_url).catch(() => {});
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/meetings/:id/photos", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { caption } = req.body;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const photoId = crypto.randomUUID();
+      const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('meeting-photos', storagePath, file.buffer, file.mimetype);
+      const uploaded_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('meeting_photos').insert({ id: photoId, meeting_id: id, tenant_id: tenantId, file_url, caption: caption || null, uploaded_at });
+      if (error) throw error;
+      res.status(201).json({ id: photoId, meeting_id: id, file_url, caption, uploaded_at });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/meetings/:meetingId/photos/:photoId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { meetingId, photoId } = req.params;
+      const { data: photo } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('id', photoId).eq('meeting_id', meetingId).eq('tenant_id', tenantId).single();
+      await supabaseAdmin.from('meeting_photos').delete().eq('id', photoId).eq('tenant_id', tenantId);
+      if (photo?.file_url) deleteFromStorage('meeting-photos', photo.file_url).catch(() => {});
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/meetings/photos/:photoId/caption", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { photoId } = req.params;
+      const { caption } = req.body;
+      const { error } = await supabaseAdmin.from('meeting_photos').update({ caption }).eq('id', photoId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   const distPath = path.join(process.cwd(), "dist");

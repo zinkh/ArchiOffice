@@ -1,0 +1,567 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  IconPlus,
+  IconTrash,
+  IconChevronDown,
+  IconChevronRight,
+  IconCamera,
+  IconX,
+  IconEdit,
+  IconCheck,
+  IconPhoto,
+  IconCalendar,
+  IconNotes,
+  IconBuilding,
+  IconEye,
+  IconSearch,
+} from '@tabler/icons-react';
+import { apiFetch } from '../lib/api';
+import { supabase } from '../lib/supabase';
+import type { Project, Meeting, MeetingPhoto, MeetingType } from '../types';
+
+type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
+
+const SUBSECTIONS: { key: Subsection; label: string }[] = [
+  { key: 'projet', label: 'Projets' },
+  { key: 'visite_candidature', label: 'Visites Candidatures' },
+  { key: 'visite_proposition', label: 'Visites Propositions' },
+];
+
+function formatDate(iso: string) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatDateInput(iso: string) {
+  if (!iso) return '';
+  return iso.substring(0, 10);
+}
+
+export default function Reunions() {
+  const { t } = useTranslation();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    projet: true,
+    visite_candidature: false,
+    visite_proposition: false,
+  });
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedSection, setSelectedSection] = useState<Subsection>('projet');
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [loadingMeetings, setLoadingMeetings] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesValue, setNotesValue] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [showNewMeeting, setShowNewMeeting] = useState(false);
+  const [newMeetingTitle, setNewMeetingTitle] = useState('');
+  const [newMeetingDate, setNewMeetingDate] = useState(new Date().toISOString().substring(0, 10));
+
+  const [editingCaption, setEditingCaption] = useState<string | null>(null);
+  const [captionValue, setCaptionValue] = useState('');
+
+  const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
+
+  useEffect(() => {
+    apiFetch<Project[]>('/api/projects').then(data => {
+      setProjects(data.filter(p => p.status !== 'Completed'));
+    }).catch(() => {});
+  }, []);
+
+  const loadMeetings = useCallback(async (project: Project, section: Subsection) => {
+    setLoadingMeetings(true);
+    setSelectedMeeting(null);
+    try {
+      const data = await apiFetch<Meeting[]>(`/api/meetings?project_id=${project.id}&type=${section}`);
+      setMeetings(data);
+    } catch {
+      setMeetings([]);
+    } finally {
+      setLoadingMeetings(false);
+    }
+  }, []);
+
+  const selectProject = (project: Project, section: Subsection) => {
+    setSelectedProject(project);
+    setSelectedSection(section);
+    loadMeetings(project, section);
+    setShowNewMeeting(false);
+  };
+
+  const loadMeetingDetail = async (meeting: Meeting) => {
+    setLoadingDetail(true);
+    setSelectedMeeting(null);
+    try {
+      const data = await apiFetch<Meeting>(`/api/meetings/${meeting.id}`);
+      setSelectedMeeting(data);
+      setNotesValue(data.notes || '');
+    } catch {
+      setSelectedMeeting(meeting);
+      setNotesValue(meeting.notes || '');
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const createMeeting = async () => {
+    if (!selectedProject || !newMeetingTitle.trim()) return;
+    try {
+      const data = await apiFetch<Meeting>('/api/meetings', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: selectedProject.id,
+          type: selectedSection,
+          title: newMeetingTitle.trim(),
+          date: newMeetingDate,
+          notes: '',
+        }),
+      });
+      setMeetings(prev => [data, ...prev]);
+      setNewMeetingTitle('');
+      setNewMeetingDate(new Date().toISOString().substring(0, 10));
+      setShowNewMeeting(false);
+      loadMeetingDetail(data);
+    } catch {}
+  };
+
+  const deleteMeeting = async (id: string) => {
+    if (!confirm('Supprimer cette réunion ?')) return;
+    await apiFetch(`/api/meetings/${id}`, { method: 'DELETE' });
+    setMeetings(prev => prev.filter(m => m.id !== id));
+    if (selectedMeeting?.id === id) setSelectedMeeting(null);
+  };
+
+  const saveNotes = async () => {
+    if (!selectedMeeting) return;
+    setSavingNotes(true);
+    try {
+      await apiFetch(`/api/meetings/${selectedMeeting.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue }),
+      });
+      setSelectedMeeting(prev => prev ? { ...prev, notes: notesValue } : prev);
+      setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, notes: notesValue } : m));
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedMeeting || !e.target.files?.length) return;
+    const files = Array.from(e.target.files);
+    setUploadingPhoto(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch(`/api/meetings/${selectedMeeting.id}/photos`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+          body: formData,
+        });
+        if (res.ok) {
+          const photo = await res.json();
+          setSelectedMeeting(prev => prev ? { ...prev, photos: [...(prev.photos || []), photo] } : prev);
+        }
+      }
+    } finally {
+      setUploadingPhoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const deletePhoto = async (photoId: string) => {
+    if (!selectedMeeting) return;
+    await apiFetch(`/api/meetings/${selectedMeeting.id}/photos/${photoId}`, { method: 'DELETE' });
+    setSelectedMeeting(prev => prev ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) } : prev);
+  };
+
+  const saveCaption = async (photoId: string) => {
+    await apiFetch(`/api/meetings/photos/${photoId}/caption`, {
+      method: 'PATCH',
+      body: JSON.stringify({ caption: captionValue }),
+    });
+    setSelectedMeeting(prev => prev ? {
+      ...prev,
+      photos: (prev.photos || []).map(p => p.id === photoId ? { ...p, caption: captionValue } : p),
+    } : prev);
+    setEditingCaption(null);
+  };
+
+  const filteredProjects = (section: Subsection) => {
+    return projects.filter(p =>
+      !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.client?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  };
+
+  const toggleSection = (key: string) => {
+    setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Left panel: subsections + projects */}
+      <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white/30 dark:bg-zinc-900/30 flex flex-col overflow-hidden">
+        <div className="p-3 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="relative">
+            <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="Rechercher..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-7 pr-3 py-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-2">
+          {SUBSECTIONS.map(({ key, label }) => (
+            <div key={key}>
+              <button
+                onClick={() => toggleSection(key)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                {expandedSections[key] ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                {label}
+              </button>
+              {expandedSections[key] && (
+                <div className="pb-1">
+                  {filteredProjects(key).length === 0 ? (
+                    <p className="px-4 py-1.5 text-xs text-zinc-400 italic">Aucun projet actif</p>
+                  ) : (
+                    filteredProjects(key).map(project => (
+                      <button
+                        key={project.id}
+                        onClick={() => selectProject(project, key)}
+                        className={`w-full text-left px-4 py-2 text-xs transition-colors truncate ${
+                          selectedProject?.id === project.id && selectedSection === key
+                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
+                            : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200'
+                        }`}
+                      >
+                        <div className="truncate font-medium">{project.name}</div>
+                        <div className="truncate text-zinc-400 text-[10px]">{project.client}</div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+      </div>
+
+      {/* Middle panel: meetings list */}
+      <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white/20 dark:bg-zinc-900/20 flex flex-col overflow-hidden">
+        {selectedProject ? (
+          <>
+            <div className="p-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate">{selectedProject.name}</h3>
+                <button
+                  onClick={() => setShowNewMeeting(true)}
+                  className="p-1 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-500 transition-colors"
+                  title="Nouvelle réunion"
+                >
+                  <IconPlus size={14} />
+                </button>
+              </div>
+              <p className="text-[10px] text-zinc-400">
+                {SUBSECTIONS.find(s => s.key === selectedSection)?.label}
+              </p>
+            </div>
+
+            {showNewMeeting && (
+              <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 bg-blue-50/50 dark:bg-blue-900/10">
+                <input
+                  type="text"
+                  placeholder="Titre de la réunion"
+                  value={newMeetingTitle}
+                  onChange={e => setNewMeetingTitle(e.target.value)}
+                  autoFocus
+                  className="w-full px-2 py-1.5 text-xs bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                  onKeyDown={e => e.key === 'Enter' && createMeeting()}
+                />
+                <input
+                  type="date"
+                  value={newMeetingDate}
+                  onChange={e => setNewMeetingDate(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                />
+                <div className="flex gap-1">
+                  <button onClick={createMeeting} className="flex-1 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                    Créer
+                  </button>
+                  <button onClick={() => setShowNewMeeting(false)} className="px-2 py-1 text-xs bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors">
+                    <IconX size={12} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto">
+              {loadingMeetings ? (
+                <div className="flex items-center justify-center h-20 text-xs text-zinc-400">Chargement...</div>
+              ) : meetings.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-xs text-zinc-400 gap-2">
+                  <IconNotes size={24} className="opacity-30" />
+                  <p>Aucune réunion</p>
+                  <button onClick={() => setShowNewMeeting(true)} className="text-blue-500 hover:underline">+ Ajouter</button>
+                </div>
+              ) : (
+                <div>
+                  {meetings.map(meeting => (
+                    <div
+                      key={meeting.id}
+                      onClick={() => loadMeetingDetail(meeting)}
+                      className={`group relative px-3 py-2.5 cursor-pointer border-b border-zinc-100 dark:border-zinc-800/50 transition-colors ${
+                        selectedMeeting?.id === meeting.id
+                          ? 'bg-blue-50 dark:bg-blue-900/20'
+                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{meeting.title}</p>
+                          <p className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-1">
+                            <IconCalendar size={9} />
+                            {formatDate(meeting.date)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-zinc-400 hover:text-red-500 transition-all"
+                        >
+                          <IconTrash size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-xs text-zinc-400 gap-2 px-4 text-center">
+            <IconBuilding size={28} className="opacity-20" />
+            <p>Sélectionnez un projet pour voir les réunions</p>
+          </div>
+        )}
+      </div>
+
+      {/* Right panel: meeting detail */}
+      <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-950">
+        {selectedMeeting ? (
+          loadingDetail ? (
+            <div className="flex items-center justify-center h-40 text-sm text-zinc-400">Chargement...</div>
+          ) : (
+            <div className="max-w-3xl mx-auto p-6">
+              {/* Header */}
+              <div className="mb-6">
+                <h1 className="text-2xl font-bold text-zinc-900 dark:text-white mb-1">{selectedMeeting.title}</h1>
+                <div className="flex items-center gap-3 text-sm text-zinc-500">
+                  <span className="flex items-center gap-1">
+                    <IconCalendar size={14} />
+                    {formatDate(selectedMeeting.date)}
+                  </span>
+                  <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                  <span>{selectedProject?.name}</span>
+                  <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                  <span className="capitalize">{SUBSECTIONS.find(s => s.key === selectedSection)?.label}</span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="mb-8">
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-2 flex items-center gap-2">
+                  <IconNotes size={16} />
+                  Notes de réunion
+                </h2>
+                <textarea
+                  value={notesValue}
+                  onChange={e => setNotesValue(e.target.value)}
+                  onBlur={saveNotes}
+                  placeholder="Saisissez vos notes de réunion ici..."
+                  rows={10}
+                  className="w-full px-4 py-3 text-sm bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 resize-y text-zinc-800 dark:text-zinc-200 leading-relaxed"
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-xs text-zinc-400">Sauvegarde automatique à la perte de focus</p>
+                  <button
+                    onClick={saveNotes}
+                    disabled={savingNotes}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+                  >
+                    <IconCheck size={12} />
+                    {savingNotes ? 'Sauvegarde...' : 'Sauvegarder'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Photos */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                    <IconPhoto size={16} />
+                    Photos ({(selectedMeeting.photos || []).length})
+                  </h2>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-800 dark:bg-zinc-700 text-white rounded-lg hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-colors disabled:opacity-50"
+                  >
+                    <IconCamera size={14} />
+                    {uploadingPhoto ? 'Upload...' : 'Ajouter des photos'}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    capture="environment"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                  />
+                </div>
+
+                {(selectedMeeting.photos || []).length === 0 ? (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl p-10 flex flex-col items-center gap-3 text-zinc-400 hover:border-blue-400 hover:text-blue-400 transition-colors"
+                  >
+                    <IconCamera size={32} className="opacity-50" />
+                    <span className="text-sm">Appuyez pour ajouter des photos</span>
+                    <span className="text-xs opacity-70">Depuis l'appareil photo ou la galerie</span>
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {(selectedMeeting.photos || []).map(photo => (
+                      <div key={photo.id} className="group relative rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-900 aspect-square">
+                        <img
+                          src={photo.file_url}
+                          alt={photo.caption || 'Photo'}
+                          className="w-full h-full object-cover cursor-pointer"
+                          onClick={() => setLightboxPhoto(photo)}
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex flex-col justify-between p-2 opacity-0 group-hover:opacity-100">
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => setLightboxPhoto(photo)}
+                              className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors"
+                            >
+                              <IconEye size={14} />
+                            </button>
+                            <button
+                              onClick={() => deletePhoto(photo.id)}
+                              className="p-1 bg-red-500/80 backdrop-blur-sm rounded text-white hover:bg-red-600 transition-colors"
+                            >
+                              <IconTrash size={14} />
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => { setEditingCaption(photo.id); setCaptionValue(photo.caption || ''); }}
+                            className="text-left p-1 bg-black/30 backdrop-blur-sm rounded text-white text-xs flex items-center gap-1 hover:bg-black/50 transition-colors"
+                          >
+                            <IconEdit size={10} />
+                            {photo.caption || 'Légende...'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Add more photos tile */}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="aspect-square rounded-xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:border-blue-400 hover:text-blue-400 transition-colors"
+                    >
+                      <IconCamera size={20} />
+                      <span className="text-xs">Ajouter</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        ) : selectedProject ? (
+          <div className="flex flex-col items-center justify-center h-full text-zinc-400 gap-3">
+            <IconNotes size={36} className="opacity-20" />
+            <p className="text-sm">Sélectionnez ou créez une réunion</p>
+            <button
+              onClick={() => setShowNewMeeting(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              <IconPlus size={16} />
+              Nouvelle réunion
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-zinc-400 gap-3">
+            <IconBuilding size={48} className="opacity-10" />
+            <p className="text-sm">Sélectionnez un projet dans la liste</p>
+          </div>
+        )}
+      </div>
+
+      {/* Caption edit modal */}
+      {editingCaption && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setEditingCaption(null)}>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl p-4 w-72 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-2">Légende de la photo</h3>
+            <input
+              type="text"
+              value={captionValue}
+              onChange={e => setCaptionValue(e.target.value)}
+              autoFocus
+              placeholder="Saisissez une légende..."
+              className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-zinc-50 dark:bg-zinc-800"
+              onKeyDown={e => e.key === 'Enter' && saveCaption(editingCaption)}
+            />
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => saveCaption(editingCaption)}
+                className="flex-1 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              >
+                Enregistrer
+              </button>
+              <button onClick={() => setEditingCaption(null)} className="px-3 py-1.5 text-sm bg-zinc-200 dark:bg-zinc-700 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600">
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Photo lightbox */}
+      {lightboxPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
+          onClick={() => setLightboxPhoto(null)}
+        >
+          <button
+            onClick={() => setLightboxPhoto(null)}
+            className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors"
+          >
+            <IconX size={20} />
+          </button>
+          <img
+            src={lightboxPhoto.file_url}
+            alt={lightboxPhoto.caption || 'Photo'}
+            className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg"
+            onClick={e => e.stopPropagation()}
+          />
+          {lightboxPhoto.caption && (
+            <p className="mt-3 text-white/70 text-sm">{lightboxPhoto.caption}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

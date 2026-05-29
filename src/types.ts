@@ -653,3 +653,26 @@ export interface DonneeChiffree {
   prix_unitaire: number;
   unite: string;
 }
+
+export type MeetingType = 'projet' | 'visite_candidature' | 'visite_proposition';
+
+export interface MeetingPhoto {
+  id: string;
+  meeting_id: string;
+  file_url: string;
+  caption?: string;
+  uploaded_at: string;
+}
+
+export interface Meeting {
+  id: string;
+  tenant_id?: string;
+  project_id?: string;
+  type: MeetingType;
+  title: string;
+  date: string;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+  photos?: MeetingPhoto[];
+}
