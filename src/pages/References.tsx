@@ -16,6 +16,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
 import type { Project } from '../types';
+import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -334,7 +335,41 @@ export default function References() {
       </div>
 
       <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-        <div className="overflow-x-auto">
+        {/* Mobile accordion */}
+        <div className="md:hidden">
+          <MobileAccordionTable
+            data={filteredProjects}
+            keyField="id"
+            emptyText={t('references_no_projects')}
+            columns={[
+              { label: t('references_col_project'), primary: true, render: p => (
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded overflow-hidden shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
+                    <img src={p.image_url || `https://picsum.photos/seed/${p.id}/60/60`} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">{p.name}</p>
+                    <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{p.project_code || '---'}</p>
+                  </div>
+                </div>
+              )},
+              { label: t('references_col_client'), render: p => p.client || '---' },
+              { label: t('references_col_delivery'), render: p => p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---' },
+              { label: t('references_col_surface'), render: p => p.surface ? `${p.surface} m²` : '---' },
+              { label: t('references_col_budget'), render: p => <span className="font-mono">{p.budget ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(p.budget) : '---'}</span> },
+              { label: t('references_col_status'), render: p => (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{
+                  background: p.status === 'In Progress' ? 'var(--tblr-primary-lt)' : p.status === 'Completed' ? 'rgba(47,179,135,0.1)' : 'var(--tblr-surface-2)',
+                  color: p.status === 'In Progress' ? 'var(--tblr-primary)' : p.status === 'Completed' ? 'var(--tblr-success)' : 'var(--tblr-muted)',
+                  border: '1px solid currentColor',
+                }}>{p.status}</span>
+              )},
+            ]}
+          />
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>

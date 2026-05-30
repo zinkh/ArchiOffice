@@ -16,6 +16,7 @@ import { CadastreDownload } from '../components/CadastreDownload';
 import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import MilestoneGantt from '../components/MilestoneGantt';
+import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -428,7 +429,41 @@ export default function Proposals() {
       </div>
 
       <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-        <div className="overflow-x-auto">
+        {/* Mobile accordion */}
+        <div className="md:hidden">
+          <MobileAccordionTable
+            data={filteredProposals}
+            keyField="id"
+            emptyText={t('proposals_no_proposals')}
+            columns={[
+              { label: t('proposals_col_proposal'), primary: true, render: p => (
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{p.title}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{p.reference}</p>
+                </div>
+              )},
+              { label: t('proposals_col_client'), render: p => p.client_name || 'Unknown' },
+              { label: t('proposals_col_amount'), render: p => <span className="font-mono font-bold">{formatCurrency(p.amount)}</span> },
+              { label: t('proposals_col_status'), render: p => (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{
+                  background: p.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : p.status === 'Rejected' ? 'rgba(214,57,57,0.1)' : p.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
+                  color: p.status === 'Accepted' ? 'var(--tblr-success)' : p.status === 'Rejected' ? 'var(--tblr-danger)' : p.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
+                  border: '1px solid currentColor',
+                }}>{p.status}</span>
+              )},
+            ]}
+            actions={p => (
+              <div className="flex gap-2">
+                <button onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
+                <button onClick={() => navigate('/proposal-generator', { state: { proposal: p } })} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
+                {p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
+              </div>
+            )}
+          />
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
