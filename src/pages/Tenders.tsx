@@ -23,10 +23,10 @@ export default function Tenders() {
   const [editingTender, setEditingTender] = useState<Tender | null>(null);
   const [formSpecialties, setFormSpecialties] = useState<{id?: string, specialty_name: string, contact_id?: string}[]>([]);
   const [formMilestones, setFormMilestones] = useState<{id?: string, title: string, due_date: string, completed: boolean}[]>([]);
-  const initialTenderState: Partial<Tender> = { 
-    title: '', 
-    client: '', 
-    submission_deadline: '', 
+  const initialTenderState: Partial<Tender> = {
+    title: '',
+    client: '',
+    submission_deadline: '',
     value: 0,
     mandataire_id: '',
     type: 'Concours',
@@ -108,7 +108,7 @@ export default function Tenders() {
     try {
       const url = editingTender ? `/api/tenders/${editingTender.id}` : '/api/tenders';
       const method = editingTender ? 'PUT' : 'POST';
-      
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -126,13 +126,13 @@ export default function Tenders() {
         ...savedTender,
         mandatory_visit: !!savedTender.mandatory_visit
       };
-      
+
       if (editingTender) {
         setTenders(tenders.map(t => t.id === formattedTender.id ? formattedTender : t));
       } else {
         setTenders([formattedTender, ...tenders]);
       }
-      
+
       setShowSuccess(true);
       setTimeout(() => {
         setIsModalOpen(false);
@@ -229,10 +229,10 @@ export default function Tenders() {
 
   const getStatusIcon = (status: Tender['status']) => {
     switch (status) {
-      case 'Won': return <IconCircleCheck className="w-4 h-4 text-green-500" />;
-      case 'Lost': return <IconAlertTriangle className="w-4 h-4 text-red-500" />;
-      case 'Submitted': return <IconClock className="w-4 h-4 text-blue-500" />;
-      default: return <IconFileText className="w-4 h-4 text-zinc-400" />;
+      case 'Won': return <IconCircleCheck className="w-4 h-4" style={{ color: 'var(--tblr-success)' }} />;
+      case 'Lost': return <IconAlertTriangle className="w-4 h-4" style={{ color: 'var(--tblr-danger)' }} />;
+      case 'Submitted': return <IconClock className="w-4 h-4" style={{ color: 'var(--tblr-primary)' }} />;
+      default: return <IconFileText className="w-4 h-4" style={{ color: 'var(--tblr-muted)' }} />;
     }
   };
 
@@ -240,28 +240,33 @@ export default function Tenders() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('tenders')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('tenders_subtitle')}</p>
+          <h2 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tenders')}</h2>
+          <p style={{ color: 'var(--tblr-muted)' }}>{t('tenders_subtitle')}</p>
         </div>
-        <motion.button 
+        <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={handleOpenCreateModal}
-          className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-md font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm"
+          className="flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors shadow-sm"
+          style={{ background: 'var(--tblr-primary)', color: '#fff' }}
         >
           <IconPlus size={18} />
           {t('create_bid')}
         </motion.button>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      <div
+        className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-xl shadow-sm"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+      >
         <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
           <div className="flex items-center gap-2">
-            <IconFilter size={18} className="text-zinc-400" />
-            <select 
+            <IconFilter size={18} style={{ color: 'var(--tblr-muted)' }} />
+            <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+              className="rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="All">{t('tenders_all_statuses')}</option>
               <option value="Draft">Draft</option>
@@ -271,10 +276,11 @@ export default function Tenders() {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <select 
+            <select
               value={filterType}
               onChange={e => setFilterType(e.target.value)}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+              className="rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="All">{t('tenders_all_types')}</option>
               <option value="Concours">Concours</option>
@@ -286,14 +292,16 @@ export default function Tenders() {
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button
             onClick={() => setSortByDeadline(prev => prev === 'asc' ? 'desc' : 'asc')}
-            className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           >
             {sortByDeadline === 'asc' ? <IconSortAscending size={18} /> : <IconSortDescending size={18} />}
             {t('tenders_sort_by_deadline')}
           </button>
           <button
             onClick={handleExportXLSX}
-            className="flex items-center gap-2 px-4 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           >
             <IconDownload size={18} />
             Export XLSX
@@ -301,35 +309,53 @@ export default function Tenders() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
+      <div
+        className="rounded-xl overflow-hidden shadow-sm"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('description')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('client')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">Type</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('tenders_col_specialties')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('deadline')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('valuation')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('status')}</th>
-                <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs text-right">{t('actions')}</th>
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('client')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>Type</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_col_specialties')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('deadline')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('valuation')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('status')}</th>
+                <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>{t('actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody style={{ borderTop: '1px solid var(--tblr-border)' }}>
               {activeTenders.map((tender) => (
-                <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                <tr
+                  key={tender.id}
+                  className="transition-colors"
+                  style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '')}
+                >
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <Link to={`/tenders/${tender.id}`} className="font-medium text-zinc-900 dark:text-white hover:text-blue-600 transition-colors">
+                      <Link
+                        to={`/tenders/${tender.id}`}
+                        className="font-medium hover:underline transition-colors"
+                        style={{ color: 'var(--tblr-text)' }}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                      >
                         {tender.title}
                       </Link>
-                      <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || 'No representative'}</span>
+                      <span className="text-[10px] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || 'No representative'}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{tender.client}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{tender.client}</td>
                   <td className="px-6 py-4">
-                    <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">
+                    <span
+                      className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
+                    >
                       {tender.type || 'N/A'}
                     </span>
                   </td>
@@ -337,55 +363,73 @@ export default function Tenders() {
                     <div className="flex flex-wrap gap-1 max-w-xs">
                       {tender.specialties_list && tender.specialties_list.length > 0 ? (
                         tender.specialties_list.map((spec, i) => (
-                          <div key={i} className="flex flex-col bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 rounded px-1.5 py-0.5">
-                            <span className="text-[9px] font-bold text-zinc-400 uppercase leading-tight">{spec.specialty_name}</span>
-                            <span className="text-[10px] text-zinc-600 dark:text-zinc-300 leading-tight">{spec.contact_name || 'TBD'}</span>
+                          <div
+                            key={i}
+                            className="flex flex-col rounded px-1.5 py-0.5"
+                            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}
+                          >
+                            <span className="text-[9px] font-bold uppercase leading-tight" style={{ color: 'var(--tblr-muted)' }}>{spec.specialty_name}</span>
+                            <span className="text-[10px] leading-tight" style={{ color: 'var(--tblr-text)' }}>{spec.contact_name || 'TBD'}</span>
                           </div>
                         ))
                       ) : (
-                        <span className="text-xs text-zinc-400 italic">{t('tenders_no_specialties')}</span>
+                        <span className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_specialties')}</span>
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     <div className="flex flex-col">
                       <span>{new Date(tender.submission_deadline).toLocaleDateString()}</span>
                       {tender.withdrawal_deadline && (
-                        <span className="text-[10px] text-red-500">{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
+                        <span className="text-[10px]" style={{ color: 'var(--tblr-danger)' }}>{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 font-mono text-zinc-600 dark:text-zinc-300">{formatCurrency(tender.value)}</td>
+                  <td className="px-6 py-4 font-mono" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(tender.value)}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {getStatusIcon(tender.status)}
-                      <span className="font-medium text-zinc-700 dark:text-zinc-300">{tender.status}</span>
+                      <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Link 
+                      <Link
                         to={`/tenders/${tender.id}`}
-                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-blue-600 transition-colors"
+                        className="p-2 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
                         title="View Details"
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                       >
                         <IconEye size={18} />
                       </Link>
-                      <button 
+                      <button
                         onClick={() => handleEditClick(tender)}
-                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                        className="p-2 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
                         title="Edit"
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                       >
                         <IconEdit size={18} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleArchive(tender)}
-                        className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                        className="p-2 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
                         title="Archive"
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                       >
                         <IconArchive size={18} />
                       </button>
-                      <button className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
+                      <button
+                        className="p-2 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
+                      >
                         <IconDownload size={18} />
                       </button>
                     </div>
@@ -394,7 +438,7 @@ export default function Tenders() {
               ))}
               {activeTenders.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-zinc-400 dark:text-zinc-500">
+                  <td colSpan={8} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconFileText size={32} className="opacity-20" />
                       <p>{t('tenders_no_active')}</p>
@@ -409,59 +453,80 @@ export default function Tenders() {
 
       {archivedTenders.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+          <div className="flex items-center gap-2" style={{ color: 'var(--tblr-muted)' }}>
             <IconArchive size={20} />
             <h3 className="text-lg font-bold">{t('tenders_archived_title')}</h3>
           </div>
-          <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm opacity-75">
+          <div
+            className="rounded-xl overflow-hidden shadow-sm opacity-75"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+          >
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('description')}</th>
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('client')}</th>
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">Type</th>
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('deadline')}</th>
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs">{t('status')}</th>
-                    <th className="px-6 py-3 font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-xs text-right">{t('actions')}</th>
+                  <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('client')}</th>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>Type</th>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('deadline')}</th>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('status')}</th>
+                    <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>{t('actions')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+                <tbody>
                   {archivedTenders.map((tender) => (
-                    <tr key={tender.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                    <tr
+                      key={tender.id}
+                      className="transition-colors"
+                      style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '')}
+                    >
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
-                          <Link to={`/tenders/${tender.id}`} className="font-medium text-zinc-900 dark:text-white hover:text-blue-600 transition-colors">
+                          <Link
+                            to={`/tenders/${tender.id}`}
+                            className="font-medium hover:underline transition-colors"
+                            style={{ color: 'var(--tblr-text)' }}
+                            onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
+                            onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                          >
                             {tender.title}
                           </Link>
-                          <span className="text-[10px] text-zinc-400 uppercase tracking-tight">{tender.mandataire_name || t('tenders_no_representative')}</span>
+                          <span className="text-[10px] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || t('tenders_no_representative')}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{tender.client}</td>
+                      <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{tender.client}</td>
                       <td className="px-6 py-4">
-                        <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">
+                        <span
+                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                          style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
+                        >
                           {tender.type || 'N/A'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                      <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                         {new Date(tender.submission_deadline).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           {getStatusIcon(tender.status)}
-                          <span className="font-medium text-zinc-700 dark:text-zinc-300">{tender.status}</span>
+                          <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button 
+                          <button
                             onClick={() => handleArchive(tender)}
-                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                            className="p-2 rounded-lg transition-colors"
+                            style={{ color: 'var(--tblr-muted)' }}
                             title="Unarchive"
+                            onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                            onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                           >
                             <IconPlus size={18} className="rotate-45" />
                           </button>
-                          <button 
+                          <button
                             onClick={async () => {
                               if (!confirm(t('tenders_confirm_delete'))) return;
                               try {
@@ -471,8 +536,11 @@ export default function Tenders() {
                                 console.error(err);
                               }
                             }}
-                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-red-500 transition-colors"
+                            className="p-2 rounded-lg transition-colors"
+                            style={{ color: 'var(--tblr-muted)' }}
                             title="Delete"
+                            onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
+                            onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                           >
                             <IconTrash size={18} />
                           </button>
@@ -494,33 +562,41 @@ export default function Tenders() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-xl overflow-hidden"
+              className="rounded-2xl shadow-xl w-full max-w-xl overflow-hidden"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+              <div
+                className="p-6 flex items-center justify-between"
+                style={{ borderBottom: '1px solid var(--tblr-border)' }}
+              >
+                <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
                   {editingTender ? t('tenders_edit_title') : t('tenders_create_title')}
                 </h3>
-                <button onClick={() => setIsModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  style={{ color: 'var(--tblr-muted)' }}
+                >
                   <IconX size={20} />
                 </button>
               </div>
               <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_project_title_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_project_title_label')}</label>
+                    <input
                       required
                       placeholder="Réhabilitation du bâtiment URSSAF de Lorraine - S..."
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.title || ''}
                       onChange={e => setNewTender({...newTender, title: e.target.value})}
                     />
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('tenders_awarding_entity_label')}</label>
+                      <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{t('tenders_awarding_entity_label')}</label>
                     </div>
-                    <ContactAutocomplete 
+                    <ContactAutocomplete
                       contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
                       value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === newTender.client)?.id || ''}
                       onChange={id => {
@@ -534,9 +610,10 @@ export default function Tenders() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_representative_label')}</label>
-                    <select 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_representative_label')}</label>
+                    <select
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.mandataire_id || ''}
                       onChange={e => setNewTender({...newTender, mandataire_id: e.target.value})}
                     >
@@ -547,9 +624,10 @@ export default function Tenders() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
-                    <select 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>Type</label>
+                    <select
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.type || ''}
                       onChange={e => setNewTender({...newTender, type: e.target.value})}
                     >
@@ -559,48 +637,53 @@ export default function Tenders() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_surface_m2_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_surface_m2_label')}</label>
+                    <input
                       type="number"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.surface || 0}
                       onChange={e => setNewTender({...newTender, surface: Number(e.target.value)})}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_construction_cost_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_construction_cost_label')}</label>
+                    <input
                       type="number"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.construction_cost || 0}
                       onChange={e => setNewTender({...newTender, construction_cost: Number(e.target.value)})}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_fee_pct_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_fee_pct_label')}</label>
+                    <input
                       type="number"
                       step="0.01"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.honoraires_percent || 0}
                       onChange={e => setNewTender({...newTender, honoraires_percent: Number(e.target.value)})}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_submission_deadline_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_submission_deadline_label')}</label>
+                    <input
                       required
                       type="date"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.submission_deadline || ''}
                       onChange={e => setNewTender({...newTender, submission_deadline: e.target.value})}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_withdrawal_deadline_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_withdrawal_deadline_label')}</label>
+                    <input
                       type="date"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.withdrawal_deadline || ''}
                       onChange={e => setNewTender({...newTender, withdrawal_deadline: e.target.value})}
                     />
@@ -609,133 +692,148 @@ export default function Tenders() {
                   <div className="col-span-2">
                     <label className="flex items-center gap-2 cursor-pointer group">
                       <div className="relative flex items-center">
-                        <input 
+                        <input
                           type="checkbox"
                           className="peer sr-only"
                           checked={newTender.mandatory_visit || false}
                           onChange={e => setNewTender({...newTender, mandatory_visit: e.target.checked})}
                         />
-                        <div className="w-10 h-5 bg-zinc-200 dark:bg-zinc-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-10 h-5 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"
+                          style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}
+                        ></div>
                       </div>
-                      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
+                      <span className="text-sm font-medium transition-colors" style={{ color: 'var(--tblr-text)' }}>
                         {t('tenders_mandatory_visit_label')}
                       </span>
                     </label>
                   </div>
 
                   {newTender.mandatory_visit && (
-                    <div className="col-span-2 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                    <div className="col-span-2 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                       <div className="flex items-center justify-between mb-2">
-                        <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('tenders_dates_milestones_label')}</label>
+                        <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{t('tenders_dates_milestones_label')}</label>
                         <button
                           type="button"
                           onClick={addMilestoneRow}
-                          className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase"
+                          className="text-[10px] flex items-center gap-1 font-bold uppercase"
+                          style={{ color: 'var(--tblr-primary)' }}
                         >
                           <IconPlus size={12} /> {t('tenders_add_date')}
                         </button>
                       </div>
-                      
+
                       <div className="space-y-2 mb-4">
                         {formMilestones.map((m, idx) => (
                           <div key={idx} className="flex items-center gap-2">
-                            <input 
+                            <input
                               placeholder={t('tenders_milestone_title_placeholder')}
-                              className="flex-1 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                              className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                               value={m.title}
                               onChange={e => updateMilestone(idx, 'title', e.target.value)}
                             />
-                            <input 
+                            <input
                               type="datetime-local"
-                              className="w-44 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                              className="w-44 px-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                               value={m.due_date}
                               onChange={e => updateMilestone(idx, 'due_date', e.target.value)}
                             />
-                            <button 
+                            <button
                               type="button"
                               onClick={() => removeMilestoneRow(idx)}
-                              className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors"
+                              className="p-1.5 transition-colors"
+                              style={{ color: 'var(--tblr-muted)' }}
+                              onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
+                              onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                             >
                               <IconTrash size={16} />
                             </button>
                           </div>
                         ))}
                         {formMilestones.length === 0 && (
-                          <p className="text-[10px] text-zinc-500 italic">{t('tenders_no_milestones')}</p>
+                          <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_milestones')}</p>
                         )}
                       </div>
 
                       {editingTender && milestones.filter(m => m.tender_id === editingTender.id).length > 0 && (
                         <div className="space-y-4 mb-4">
-                          <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400">{t('tenders_timeline_preview')}</h3>
-                          <MilestoneGantt 
-                            milestones={milestones.filter(m => m.tender_id === editingTender.id)} 
-                            startDate={new Date(editingTender.submission_deadline)} 
-                            endDate={new Date()} 
+                          <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-primary)' }}>{t('tenders_timeline_preview')}</h3>
+                          <MilestoneGantt
+                            milestones={milestones.filter(m => m.tender_id === editingTender.id)}
+                            startDate={new Date(editingTender.submission_deadline)}
+                            endDate={new Date()}
                           />
                         </div>
                       )}
                     </div>
                   )}
-                  
-                  <div className="col-span-2 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+
+                  <div className="col-span-2 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('tenders_required_specialties_label')}</label>
+                      <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{t('tenders_required_specialties_label')}</label>
                       <button
                         type="button"
                         onClick={addSpecialtyRow}
-                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase"
+                        className="text-[10px] flex items-center gap-1 font-bold uppercase"
+                        style={{ color: 'var(--tblr-primary)' }}
                       >
                         <IconPlus size={12} /> {t('tenders_add_specialty_btn')}
                       </button>
                     </div>
-                    
+
                     <div className="space-y-2">
                       {formSpecialties.map((spec, idx) => (
                         <div key={idx} className="flex items-center gap-2">
-                          <input 
+                          <input
                             placeholder={t('tenders_specialty_placeholder')}
-                            className="flex-1 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                            className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                             value={spec.specialty_name}
                             onChange={e => updateSpecialty(idx, 'specialty_name', e.target.value)}
                           />
-                          <ContactAutocomplete 
+                          <ContactAutocomplete
                             className="flex-1"
                             contacts={contacts}
                             value={spec.contact_id || ''}
                             onChange={val => updateSpecialty(idx, 'contact_id', val)}
                             onAddNew={() => setIsContactModalOpen(true)}
                           />
-                          <button 
+                          <button
                             type="button"
                             onClick={() => removeSpecialtyRow(idx)}
-                            className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors"
+                            className="p-1.5 transition-colors"
+                            style={{ color: 'var(--tblr-muted)' }}
+                            onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
+                            onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                           >
                             <IconTrash size={16} />
                           </button>
                         </div>
                       ))}
                       {formSpecialties.length === 0 && (
-                        <p className="text-[10px] text-zinc-500 italic">{t('tenders_no_specialties_yet')}</p>
+                        <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_specialties_yet')}</p>
                       )}
                     </div>
                   </div>
 
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_valuation_label')}</label>
-                    <input 
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_valuation_label')}</label>
+                    <input
                       required
                       type="number"
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       value={newTender.value || 0}
                       onChange={e => setNewTender({...newTender, value: Number(e.target.value)})}
                     />
                   </div>
                   {editingTender && (
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('tenders_status_label')}</label>
-                      <select 
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_status_label')}</label>
+                      <select
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                         value={newTender.status || ''}
                         onChange={e => setNewTender({...newTender, status: e.target.value as any})}
                       >
@@ -747,16 +845,14 @@ export default function Tenders() {
                     </div>
                   )}
                 </div>
-                <button 
+                <button
                   type="submit"
                   disabled={isSaving || showSuccess}
-                  className={cn(
-                    "w-full py-2 rounded-lg font-medium transition-all mt-4 flex items-center justify-center gap-2",
-                    showSuccess 
-                      ? "bg-green-600 text-white" 
-                      : "bg-blue-600 text-white hover:bg-blue-700",
-                    (isSaving || showSuccess) && "opacity-80 cursor-not-allowed"
-                  )}
+                  className="w-full py-2 rounded-lg font-medium transition-all mt-4 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
+                  style={showSuccess
+                    ? { background: 'var(--tblr-success)', color: '#fff' }
+                    : { background: 'var(--tblr-primary)', color: '#fff' }
+                  }
                 >
                   {isSaving ? (
                     <>
@@ -778,7 +874,7 @@ export default function Tenders() {
         )}
       </AnimatePresence>
 
-      <ContactModal 
+      <ContactModal
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={() => {
