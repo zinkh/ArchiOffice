@@ -36,8 +36,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Synchronisez vos factures ArchiOffice avec Zoho Invoice. Importez clients et exportez factures automatiquement.',
     category: 'accounting',
     status: 'active',
-    iconBg: 'bg-orange-50 dark:bg-orange-900/20',
-    iconColor: 'text-orange-600 dark:text-orange-400',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
     iconLabel: 'ZI',
   },
   {
@@ -47,8 +47,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Comptabilité complète : synchronisez devis, factures, dépenses et plan comptable avec Zoho Books.',
     category: 'accounting',
     status: 'active',
-    iconBg: 'bg-orange-50 dark:bg-orange-900/20',
-    iconColor: 'text-orange-600 dark:text-orange-400',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
     iconLabel: 'ZB',
   },
   {
@@ -58,8 +58,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Acceptez des paiements en ligne directement depuis vos factures ArchiOffice.',
     category: 'accounting',
     status: 'coming_soon',
-    iconBg: 'bg-violet-50 dark:bg-violet-900/20',
-    iconColor: 'text-violet-600 dark:text-violet-400',
+    iconBg: 'bg-violet-50',
+    iconColor: 'text-violet-600',
     iconLabel: 'St',
   },
   {
@@ -69,8 +69,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Synchronisez votre comptabilité avec QuickBooks Online.',
     category: 'accounting',
     status: 'coming_soon',
-    iconBg: 'bg-green-50 dark:bg-green-900/20',
-    iconColor: 'text-green-600 dark:text-green-400',
+    iconBg: 'bg-green-50',
+    iconColor: 'text-green-600',
     iconLabel: 'QB',
   },
   {
@@ -80,8 +80,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Sauvegardez et partagez vos plans et documents directement sur Google Drive.',
     category: 'storage',
     status: 'coming_soon',
-    iconBg: 'bg-blue-50 dark:bg-blue-900/20',
-    iconColor: 'text-blue-600 dark:text-blue-400',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-600',
     iconLabel: 'GD',
   },
   {
@@ -91,8 +91,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Stockez vos plans et documents ArchiOffice directement sur Dropbox.',
     category: 'storage',
     status: 'coming_soon',
-    iconBg: 'bg-blue-50 dark:bg-blue-900/20',
-    iconColor: 'text-blue-600 dark:text-blue-400',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-600',
     iconLabel: 'Db',
   },
   {
@@ -102,8 +102,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Synchronisez vos contacts et clients ArchiOffice avec Salesforce CRM.',
     category: 'crm',
     status: 'coming_soon',
-    iconBg: 'bg-sky-50 dark:bg-sky-900/20',
-    iconColor: 'text-sky-600 dark:text-sky-400',
+    iconBg: 'bg-sky-50',
+    iconColor: 'text-sky-600',
     iconLabel: 'SF',
   },
   {
@@ -113,8 +113,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Recevez des notifications ArchiOffice dans vos canaux Slack.',
     category: 'communication',
     status: 'coming_soon',
-    iconBg: 'bg-pink-50 dark:bg-pink-900/20',
-    iconColor: 'text-pink-600 dark:text-pink-400',
+    iconBg: 'bg-pink-50',
+    iconColor: 'text-pink-600',
     iconLabel: 'Sl',
   },
   {
@@ -124,8 +124,8 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     description: 'Notifications et rappels de projets directement dans Microsoft Teams.',
     category: 'communication',
     status: 'coming_soon',
-    iconBg: 'bg-indigo-50 dark:bg-indigo-900/20',
-    iconColor: 'text-indigo-600 dark:text-indigo-400',
+    iconBg: 'bg-indigo-50',
+    iconColor: 'text-indigo-600',
     iconLabel: 'MT',
   },
 ];
@@ -402,9 +402,10 @@ export default function Settings() {
   const ZohoCredentialFields = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Data Center</label>
+        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Data Center</label>
         <select
-          className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-sm text-zinc-900 dark:text-white"
+          className="w-full p-2 rounded-lg text-sm"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           value={settings.zoho_data_center}
           onChange={e => setSettings({ ...settings, zoho_data_center: e.target.value })}
         >
@@ -416,19 +417,21 @@ export default function Settings() {
         </select>
       </div>
       <div>
-        <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Client ID</label>
+        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client ID</label>
         <input
-          className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-sm font-mono text-zinc-900 dark:text-white"
+          className="w-full p-2 rounded-lg text-sm font-mono"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder="1000.XXXXXXXXXXXXXXXXXXXX"
           value={settings.zoho_client_id}
           onChange={e => setSettings({ ...settings, zoho_client_id: e.target.value })}
         />
       </div>
       <div>
-        <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Client Secret</label>
+        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client Secret</label>
         <input
           type="password"
-          className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-sm font-mono text-zinc-900 dark:text-white"
+          className="w-full p-2 rounded-lg text-sm font-mono"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder="••••••••••••••••••••••••••"
           value={settings.zoho_client_secret}
           onChange={e => setSettings({ ...settings, zoho_client_secret: e.target.value })}
@@ -443,32 +446,34 @@ export default function Settings() {
     if (pluginId === 'zoho_invoice') return (
       <div className="space-y-4">
         {zohoNotice && (
-          <div className={cn("text-sm p-3 rounded-lg border", zohoNotice.type === 'success'
-            ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
-            : "bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400")}>
+          <div className="text-sm p-3 rounded-lg border" style={zohoNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
             {zohoNotice.message}
           </div>
         )}
         <ZohoCredentialFields />
         <div>
-          <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Organisation ID (Zoho Invoice)</label>
+          <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Organisation ID (Zoho Invoice)</label>
           <input
-            className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-sm font-mono text-zinc-900 dark:text-white"
+            className="w-full p-2 rounded-lg text-sm font-mono"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             placeholder="123456789"
             value={settings.zoho_org_id}
             onChange={e => setSettings({ ...settings, zoho_org_id: e.target.value })}
           />
         </div>
-        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
           <p className="font-bold mb-1">URL de redirection OAuth</p>
-          <code className="block bg-white dark:bg-zinc-900 px-2 py-1.5 rounded border border-blue-200 dark:border-blue-800 font-mono break-all select-all">
+          <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
             {zohoCallbackUrl || `${window.location.origin}/api/zoho/callback`}
           </code>
           <p className="mt-1 opacity-75">Copiez cette URL dans la console API Zoho → Authorized Redirect URIs.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
             <IconExternalLink size={13} /> Console API Zoho
           </a>
           {!zohoStatus?.connected ? (
@@ -476,17 +481,20 @@ export default function Settings() {
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_org_id}
               onClick={async () => { await handleSave(); window.location.href = '/api/zoho/auth'; }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-bold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: '#f76707', color: '#fff' }}>
               <IconPlugConnected size={13} /> Connecter Zoho
             </button>
           ) : (
             <>
               <button type="button" onClick={handleZohoSync} disabled={isSyncingZoho}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg text-xs font-bold hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                 {isSyncingZoho ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} Synchroniser
               </button>
               <button type="button" onClick={handleZohoDisconnect} disabled={isDisconnectingZoho}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
                 {isDisconnectingZoho ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
               </button>
             </>
@@ -498,36 +506,38 @@ export default function Settings() {
     if (pluginId === 'zoho_books') return (
       <div className="space-y-4">
         {zohoBooksNotice && (
-          <div className={cn("text-sm p-3 rounded-lg border", zohoBooksNotice.type === 'success'
-            ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
-            : "bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400")}>
+          <div className="text-sm p-3 rounded-lg border" style={zohoBooksNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
             {zohoBooksNotice.message}
           </div>
         )}
-        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#fff3bf', border: '1px solid #ffe066', color: '#e67700' }}>
           <p className="font-bold mb-0.5">Credentials partagés avec Zoho Invoice</p>
           <p className="opacity-80">Zoho Books utilise la même application OAuth que Zoho Invoice. Configurez d'abord le Client ID et le Secret dans l'onglet Zoho Invoice, puis connectez ci-dessous.</p>
         </div>
         <ZohoCredentialFields />
         <div>
-          <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Organisation ID (Zoho Books)</label>
+          <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Organisation ID (Zoho Books)</label>
           <input
-            className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-sm font-mono text-zinc-900 dark:text-white"
+            className="w-full p-2 rounded-lg text-sm font-mono"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             placeholder="Identique à Zoho Invoice si même organisation"
             value={settings.zoho_books_org_id || settings.zoho_org_id}
             onChange={e => setSettings({ ...settings, zoho_books_org_id: e.target.value })}
           />
         </div>
-        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
           <p className="font-bold mb-1">URL de redirection OAuth</p>
-          <code className="block bg-white dark:bg-zinc-900 px-2 py-1.5 rounded border border-blue-200 dark:border-blue-800 font-mono break-all select-all">
+          <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
             {zohoCallbackUrl || `${window.location.origin}/api/zoho/callback`}
           </code>
-          <p className="mt-1 opacity-75">Même URL que Zoho Invoice. Ajoutez le scope <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 rounded">ZohoBooks.fullaccess.all</code> dans votre app Zoho.</p>
+          <p className="mt-1 opacity-75">Même URL que Zoho Invoice. Ajoutez le scope <code className="font-mono px-1 rounded" style={{ background: 'var(--tblr-primary-lt)' }}>ZohoBooks.fullaccess.all</code> dans votre app Zoho.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
             <IconExternalLink size={13} /> Console API Zoho
           </a>
           {!zohoBooksStatus?.connected ? (
@@ -535,17 +545,20 @@ export default function Settings() {
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !(settings.zoho_books_org_id || settings.zoho_org_id)}
               onClick={async () => { await handleSave(); window.location.href = '/api/zoho-books/auth'; }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-bold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: '#f76707', color: '#fff' }}>
               <IconPlugConnected size={13} /> Connecter Zoho Books
             </button>
           ) : (
             <>
               <button type="button" onClick={handleZohoBooksSync} disabled={isSyncingZohoBooks}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg text-xs font-bold hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                 {isSyncingZohoBooks ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} Synchroniser
               </button>
               <button type="button" onClick={handleZohoDisconnect} disabled={isDisconnectingZoho}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
                 {isDisconnectingZoho ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
               </button>
             </>
@@ -563,25 +576,26 @@ export default function Settings() {
     <div className="space-y-6 max-w-4xl">
       {isAdmin && (
         <>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('general_settings')}</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('general_settings')}</h1>
 
           {/* ── Agency info ── */}
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 p-5 space-y-4">
-            <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Informations du cabinet</h2>
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Informations du cabinet</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('agency_name')} value={settings.agencyName} onChange={e => setSettings({...settings, agencyName: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('address')} value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('phone')} value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('email')} value={settings.email} onChange={e => setSettings({...settings, email: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('siret')} value={settings.siret} onChange={e => setSettings({...settings, siret: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('vat_number')} value={settings.vatNumber} onChange={e => setSettings({...settings, vatNumber: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm font-mono" placeholder="IBAN" value={settings.seller_iban} onChange={e => setSettings({...settings, seller_iban: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm font-mono" placeholder="BIC" value={settings.seller_bic} onChange={e => setSettings({...settings, seller_bic: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('currency')} value={settings.currency} onChange={e => setSettings({...settings, currency: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('agency_name')} value={settings.agencyName} onChange={e => setSettings({...settings, agencyName: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('email')} value={settings.email} onChange={e => setSettings({...settings, email: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('siret')} value={settings.siret} onChange={e => setSettings({...settings, siret: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('vat_number')} value={settings.vatNumber} onChange={e => setSettings({...settings, vatNumber: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm font-mono" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="IBAN" value={settings.seller_iban} onChange={e => setSettings({...settings, seller_iban: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm font-mono" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="BIC" value={settings.seller_bic} onChange={e => setSettings({...settings, seller_bic: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('currency')} value={settings.currency} onChange={e => setSettings({...settings, currency: e.target.value})} />
             </div>
             <div>
-              <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">{t('company_logo')}</label>
-              <input type="file" accept="image/*" className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg text-sm w-full dark:bg-zinc-800 dark:text-white"
+              <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>{t('company_logo')}</label>
+              <input type="file" accept="image/*" className="p-2 rounded-lg text-sm w-full"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                 onChange={e => {
                   const file = e.target.files?.[0];
                   if (file) {
@@ -590,32 +604,33 @@ export default function Settings() {
                     reader.readAsDataURL(file);
                   }
                 }} />
-              {settings.logoUrl && <img src={settings.logoUrl} alt="Logo" className="w-24 h-24 object-contain mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 p-1" />}
+              {settings.logoUrl && <img src={settings.logoUrl} alt="Logo" className="w-24 h-24 object-contain mt-2 rounded-lg p-1" style={{ border: '1px solid var(--tblr-border)' }} />}
             </div>
           </div>
 
           {/* ── SMTP ── */}
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 p-5 space-y-4">
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
-              <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('settings_smtp_title')}</h2>
-              <p className="text-xs text-zinc-400 mt-1">{t('settings_smtp_explanation')}</p>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_smtp_title')}</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_smtp_explanation')}</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('settings_smtp_host_placeholder')} value={settings.smtpHost} onChange={e => setSettings({...settings, smtpHost: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('settings_smtp_port_placeholder')} value={settings.smtpPort} onChange={e => setSettings({...settings, smtpPort: e.target.value})} />
-              <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('settings_smtp_user_placeholder')} value={settings.smtpUser} onChange={e => setSettings({...settings, smtpUser: e.target.value})} />
-              <input type="password" className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('settings_smtp_password_placeholder')} value={settings.smtpPass} onChange={e => setSettings({...settings, smtpPass: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('settings_smtp_host_placeholder')} value={settings.smtpHost} onChange={e => setSettings({...settings, smtpHost: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('settings_smtp_port_placeholder')} value={settings.smtpPort} onChange={e => setSettings({...settings, smtpPort: e.target.value})} />
+              <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('settings_smtp_user_placeholder')} value={settings.smtpUser} onChange={e => setSettings({...settings, smtpUser: e.target.value})} />
+              <input type="password" className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('settings_smtp_password_placeholder')} value={settings.smtpPass} onChange={e => setSettings({...settings, smtpPass: e.target.value})} />
             </div>
             <div className="flex flex-col gap-2">
               <button type="button" onClick={handleTestSmtp}
                 disabled={isTestingSmtp || !settings.smtpHost || !settings.smtpUser || !settings.smtpPass}
-                className="w-fit flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-white rounded-lg text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors disabled:opacity-50">
+                className="w-fit flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
                 {isTestingSmtp ? <><IconLoader2 className="w-4 h-4 animate-spin" />{t('settings_smtp_testing')}</> : t('settings_smtp_test_btn')}
               </button>
               {smtpTestResult && (
-                <div className={cn("text-sm p-3 rounded-lg border", smtpTestResult.success
-                  ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
-                  : "bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400")}>
+                <div className="text-sm p-3 rounded-lg border" style={smtpTestResult.success
+                  ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+                  : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
                   {smtpTestResult.message}
                 </div>
               )}
@@ -623,8 +638,8 @@ export default function Settings() {
           </div>
 
           {/* ── Email preferences ── */}
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 p-5 space-y-4">
-            <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('email_settings')}</h2>
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('email_settings')}</h2>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="radio" name="sender" value="agency" checked={settings.senderOption === 'agency'} onChange={() => setSettings({...settings, senderOption: 'agency'})} />
@@ -635,7 +650,8 @@ export default function Settings() {
                 {t('send_from_personal')}
               </label>
             </div>
-            <textarea className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg h-28 dark:bg-zinc-800 dark:text-white text-sm"
+            <textarea className="w-full p-2 rounded-lg h-28 text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               placeholder={t('default_email_template')} value={settings.defaultEmailTemplate ?? ''}
               onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} />
           </div>
@@ -646,19 +662,20 @@ export default function Settings() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <div className="flex items-center gap-2">
-                  <IconPuzzle size={20} className="text-zinc-400" />
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Marketplace de plugins</h2>
+                  <IconPuzzle size={20} style={{ color: 'var(--tblr-muted)' }} />
+                  <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>Marketplace de plugins</h2>
                 </div>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                <p className="text-sm mt-1" style={{ color: 'var(--tblr-muted)' }}>
                   Connectez ArchiOffice à vos outils métiers.
-                  {connectedCount > 0 && <span className="ml-2 text-green-600 dark:text-green-400 font-medium">{connectedCount} plugin{connectedCount > 1 ? 's' : ''} actif{connectedCount > 1 ? 's' : ''}.</span>}
+                  {connectedCount > 0 && <span className="ml-2 font-medium" style={{ color: 'var(--tblr-success)' }}>{connectedCount} plugin{connectedCount > 1 ? 's' : ''} actif{connectedCount > 1 ? 's' : ''}.</span>}
                 </p>
               </div>
               {/* Search */}
               <div className="relative">
-                <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
                 <input
-                  className="pl-8 pr-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 dark:text-white w-52 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="pl-8 pr-3 py-1.5 text-sm rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   placeholder="Rechercher un plugin..."
                   value={pluginSearch}
                   onChange={e => setPluginSearch(e.target.value)}
@@ -673,12 +690,10 @@ export default function Settings() {
                   key={cat.id}
                   type="button"
                   onClick={() => setCategoryFilter(cat.id)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors",
-                    categoryFilter === cat.id
-                      ? "bg-blue-600 text-white"
-                      : "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600"
-                  )}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors"
+                  style={categoryFilter === cat.id
+                    ? { background: 'var(--tblr-primary)', color: '#fff' }
+                    : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
                 >
                   {cat.label}
                 </button>
@@ -695,13 +710,13 @@ export default function Settings() {
                 return (
                   <div
                     key={plugin.id}
-                    className={cn(
-                      "rounded-xl border bg-white dark:bg-zinc-800/50 overflow-hidden transition-shadow",
-                      isOpen
-                        ? "border-blue-400 dark:border-blue-500 shadow-md shadow-blue-100 dark:shadow-blue-900/20"
-                        : "border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600",
-                      plugin.status === 'coming_soon' && "opacity-70"
-                    )}
+                    className="rounded-xl overflow-hidden transition-shadow"
+                    style={{
+                      background: 'var(--tblr-surface)',
+                      border: isOpen ? '1px solid var(--tblr-primary)' : '1px solid var(--tblr-border)',
+                      boxShadow: isOpen ? 'var(--tblr-shadow)' : undefined,
+                      opacity: plugin.status === 'coming_soon' ? 0.7 : 1,
+                    }}
                   >
                     {/* Card top */}
                     <div className="p-4">
@@ -712,23 +727,23 @@ export default function Settings() {
                         </div>
                         {/* Status badge */}
                         {plugin.status === 'coming_soon' ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 uppercase tracking-wider whitespace-nowrap">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             Bientôt
                           </span>
                         ) : isConnected ? (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 whitespace-nowrap">
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
                             <IconPlugConnected size={10} /> Connecté
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             <IconPlugConnectedX size={10} /> Non connecté
                           </span>
                         )}
                       </div>
 
-                      <p className="font-semibold text-sm text-zinc-900 dark:text-white">{plugin.name}</p>
-                      <p className="text-[11px] text-zinc-400 mb-1">{plugin.vendor}</p>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">{plugin.description}</p>
+                      <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{plugin.name}</p>
+                      <p className="text-[11px] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
+                      <p className="text-xs leading-relaxed" style={{ color: 'var(--tblr-muted)' }}>{plugin.description}</p>
                     </div>
 
                     {/* Card footer */}
@@ -737,25 +752,23 @@ export default function Settings() {
                         <button
                           type="button"
                           onClick={() => setOpenPlugin(isOpen ? null : plugin.id)}
-                          className={cn(
-                            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors",
-                            isOpen
-                              ? "bg-blue-600 text-white hover:bg-blue-700"
-                              : "bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600"
-                          )}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                          style={isOpen
+                            ? { background: 'var(--tblr-primary)', color: '#fff' }
+                            : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                         >
                           {isOpen ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
                           {isConnected ? 'Configurer' : 'Installer'}
                         </button>
                       ) : (
-                        <span className="text-xs text-zinc-400 italic">Disponible prochainement</span>
+                        <span className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Disponible prochainement</span>
                       )}
                       <span className={cn(
                         "text-[10px] font-medium px-2 py-0.5 rounded-full",
-                        plugin.category === 'accounting' ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400" :
-                        plugin.category === 'storage' ? "bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400" :
-                        plugin.category === 'crm' ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400" :
-                        "bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400"
+                        plugin.category === 'accounting' ? "bg-blue-50 text-blue-600" :
+                        plugin.category === 'storage' ? "bg-teal-50 text-teal-600" :
+                        plugin.category === 'crm' ? "bg-purple-50 text-purple-600" :
+                        "bg-pink-50 text-pink-600"
                       )}>
                         {CATEGORIES.find(c => c.id === plugin.category)?.label}
                       </span>
@@ -763,7 +776,7 @@ export default function Settings() {
 
                     {/* Config panel (accordion) */}
                     {isOpen && canConfigure && (
-                      <div className="border-t border-zinc-100 dark:border-zinc-700 px-4 py-4 bg-zinc-50 dark:bg-zinc-900/40">
+                      <div className="border-t px-4 py-4" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                         {renderPluginConfig(plugin.id)}
                       </div>
                     )}
@@ -773,7 +786,7 @@ export default function Settings() {
             </div>
 
             {filteredPlugins.length === 0 && (
-              <div className="text-center py-12 text-zinc-400">
+              <div className="text-center py-12" style={{ color: 'var(--tblr-muted)' }}>
                 <IconPuzzle size={32} className="mx-auto mb-2 opacity-40" />
                 <p className="text-sm">Aucun plugin trouvé.</p>
               </div>
@@ -783,13 +796,14 @@ export default function Settings() {
       )}
 
       {/* ── User section ── */}
-      <h2 className="text-xl font-bold mt-8 text-zinc-900 dark:text-white">{t('user_information')}</h2>
+      <h2 className="text-xl font-bold mt-8" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>
 
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 p-5 space-y-5">
+      <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         {/* Avatar */}
         <div className="flex items-center gap-5">
           <button type="button" onClick={() => avatarInputRef.current?.click()}
-            className="relative group w-20 h-20 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-700 border-2 border-zinc-300 dark:border-zinc-600 hover:border-blue-500 transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            className="relative group w-20 h-20 rounded-full overflow-hidden border-2 hover:border-blue-500 transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
             <img src={userSettings.avatar || currentUser?.avatar || `https://picsum.photos/seed/${currentUser?.id || 'user'}/80/80`}
               alt={currentUser?.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
@@ -799,35 +813,41 @@ export default function Settings() {
           </button>
           <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
           <div>
-            <p className="font-medium text-zinc-900 dark:text-white">{currentUser?.name}</p>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">{currentUser?.email}</p>
+            <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{currentUser?.name}</p>
+            <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{currentUser?.email}</p>
             <button type="button" onClick={() => avatarInputRef.current?.click()}
-              className="mt-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline">
+              className="mt-1.5 text-xs hover:underline" style={{ color: 'var(--tblr-primary)' }}>
               {t('change_photo') || 'Changer la photo de profil'}
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
-          <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
-          <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
-          <input className="p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg dark:bg-zinc-800 dark:text-white text-sm" placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
+          <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
+          <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
+          <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
+          <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('department')} value={userSettings.department} onChange={e => setUserSettings({...userSettings, department: e.target.value})} />
         </div>
 
         {/* Language switcher */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <IconLanguage size={16} className="text-zinc-400" />
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('language')}</span>
+            <IconLanguage size={16} style={{ color: 'var(--tblr-muted)' }} />
+            <span className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{t('language')}</span>
           </div>
-          <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden w-fit">
+          <div className="flex rounded-lg overflow-hidden w-fit" style={{ border: '1px solid var(--tblr-border)' }}>
             <button type="button" onClick={() => i18n.changeLanguage('fr')}
-              className={cn("px-5 py-2 text-sm font-medium transition-colors", i18n.language.startsWith('fr') ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700")}>
+              className="px-5 py-2 text-sm font-medium transition-colors"
+              style={i18n.language.startsWith('fr')
+                ? { background: 'var(--tblr-primary)', color: '#fff' }
+                : { background: 'var(--tblr-surface)', color: 'var(--tblr-muted)' }}>
               Français
             </button>
             <button type="button" onClick={() => i18n.changeLanguage('en')}
-              className={cn("px-5 py-2 text-sm font-medium border-l border-zinc-200 dark:border-zinc-700 transition-colors", i18n.language.startsWith('en') ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700")}>
+              className="px-5 py-2 text-sm font-medium transition-colors"
+              style={i18n.language.startsWith('en')
+                ? { background: 'var(--tblr-primary)', color: '#fff', borderLeft: '1px solid var(--tblr-border)' }
+                : { background: 'var(--tblr-surface)', color: 'var(--tblr-muted)', borderLeft: '1px solid var(--tblr-border)' }}>
               English
             </button>
           </div>
@@ -835,8 +855,8 @@ export default function Settings() {
       </div>
 
       {/* ── User email preferences ── */}
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 p-5 space-y-4">
-        <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('my_email_settings')}</h2>
+      <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('my_email_settings')}</h2>
         <div className="flex items-center gap-4">
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="radio" name="userSender" value="agency" checked={userSettings.senderOption === 'agency'} onChange={() => setUserSettings({...userSettings, senderOption: 'agency'})} />
@@ -847,7 +867,8 @@ export default function Settings() {
             {t('send_from_personal')}
           </label>
         </div>
-        <textarea className="w-full p-2 border border-zinc-200 dark:border-zinc-600 rounded-lg h-28 dark:bg-zinc-800 dark:text-white text-sm"
+        <textarea className="w-full p-2 rounded-lg h-28 text-sm"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder={t('default_email_template')} value={userSettings.defaultEmailTemplate ?? ''}
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
@@ -855,9 +876,10 @@ export default function Settings() {
       {/* Save button */}
       <button
         disabled={isSaving || showSuccess}
-        className={cn("px-6 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 text-sm",
-          showSuccess ? "bg-green-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700",
-          (isSaving || showSuccess) && "opacity-80 cursor-not-allowed")}
+        className="px-6 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 text-sm disabled:opacity-80 disabled:cursor-not-allowed"
+        style={showSuccess
+          ? { background: 'var(--tblr-success)', color: '#fff' }
+          : { background: 'var(--tblr-primary)', color: '#fff' }}
         onClick={handleSave}
       >
         {isSaving ? <><IconLoader2 className="w-4 h-4 animate-spin" />{t('saving')}...</>
