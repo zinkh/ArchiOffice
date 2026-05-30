@@ -27,7 +27,7 @@ export default function Contacts() {
   const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
   const [newContact, setNewContact] = useState<Partial<Contact>>({});
   const [newCategoryName, setNewCategoryName] = useState('');
-  
+
   // Search, Filter, Sort State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
@@ -126,7 +126,7 @@ export default function Contacts() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    
+
     const contactData = isEditing ? newContact : {
       ...newContact,
       id: `c${Date.now()}`,
@@ -154,13 +154,13 @@ export default function Contacts() {
     try {
       const url = isEditing ? `/api/contacts/${editingId}` : '/api/contacts';
       const method = isEditing ? 'PUT' : 'POST';
-      
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(contact)
       });
-      
+
       if (res.ok) {
         setIsModalOpen(false);
         setIsEditing(false);
@@ -282,7 +282,7 @@ export default function Contacts() {
             (contact as any)[field] = row[mapping[field]];
           }
         }
-        
+
         // Set primary email/phone if not set
         contact.email = contact.email_work || contact.email_home || contact.email_other || '';
         contact.phone = contact.phone_mobile || contact.phone_work || contact.phone_home || '';
@@ -307,15 +307,16 @@ export default function Contacts() {
     if (!isMappingModalOpen || !importData) return null;
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-          <h2 className="text-xl font-semibold mb-4">{t('contacts_map_fields_title')}</h2>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--tblr-text)' }}>{t('contacts_map_fields_title')}</h2>
           <div className="grid grid-cols-2 gap-4">
             {contactFields.map(field => (
               <div key={field} className="flex flex-col">
-                <label className="text-sm font-medium text-gray-700">{field}</label>
-                <select 
-                  className="border rounded p-2"
+                <label className="text-sm font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>{field}</label>
+                <select
+                  className="rounded px-2 py-2"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   onChange={(e) => setMapping({...mapping, [field]: e.target.value})}
                   value={mapping[field] || ''}
                 >
@@ -328,8 +329,20 @@ export default function Contacts() {
             ))}
           </div>
           <div className="mt-6 flex justify-end gap-4">
-            <button className="px-4 py-2 bg-gray-200 rounded" onClick={() => setIsMappingModalOpen(false)}>{t('btn_cancel')}</button>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={handleConfirm}>{t('contacts_import_btn')}</button>
+            <button
+              className="px-4 py-2 rounded transition-colors"
+              style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              onClick={() => setIsMappingModalOpen(false)}
+            >
+              {t('btn_cancel')}
+            </button>
+            <button
+              className="px-4 py-2 rounded"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+              onClick={handleConfirm}
+            >
+              {t('contacts_import_btn')}
+            </button>
           </div>
         </div>
       </div>
@@ -349,10 +362,10 @@ export default function Contacts() {
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
           const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          
+
           const headers = json[0] as string[];
           const rows = json.slice(1) as any[][];
-          
+
           const dataRows = rows.map(row => {
             const obj: any = {};
             headers.forEach((header, index) => {
@@ -377,7 +390,7 @@ export default function Contacts() {
     // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(c => 
+      result = result.filter(c =>
         c.first_name.toLowerCase().includes(query) ||
         c.last_name.toLowerCase().includes(query) ||
         c.company_name?.toLowerCase().includes(query) ||
@@ -396,10 +409,10 @@ export default function Contacts() {
     result.sort((a, b) => {
       const field = sortConfig.field;
       const order = sortConfig.order === 'asc' ? 1 : -1;
-      
+
       const valA = (a[field as keyof Contact] || '').toString().toLowerCase();
       const valB = (b[field as keyof Contact] || '').toString().toLowerCase();
-      
+
       if (field === 'ca_amount') {
         return (Number(a.ca_amount) - Number(b.ca_amount)) * order;
       }
@@ -412,44 +425,51 @@ export default function Contacts() {
     return result;
   }, [contacts, searchQuery, filterCategory, sortConfig]);
 
+  // Shared input style
+  const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('contacts')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('contacts_subtitle')}</p>
+          <h2 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('contacts')}</h2>
+          <p style={{ color: 'var(--tblr-muted)' }}>{t('contacts_subtitle')}</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => document.getElementById('file-upload')?.click()}
-            className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconFileText size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_import_label')}</span>
           </button>
           <input id="file-upload" type="file" className="hidden" accept=".vcf,.xlsx,.xls,.csv,.xml" onChange={handleImport} />
-          <button 
+          <button
             onClick={handleExport}
-            className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconFileText size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_export_label')}</span>
           </button>
-          <button 
+          <button
             onClick={() => setIsCategoryModalOpen(true)}
-            className="flex items-center gap-1 md:gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm"
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconSettings size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_categories_label')}</span>
           </button>
-          <button 
+          <button
             onClick={() => {
               setIsEditing(false);
               setEditingId(null);
               setNewContact({});
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-1 md:gap-2 bg-blue-600 text-white px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('add_contact')}</span>
@@ -460,20 +480,22 @@ export default function Contacts() {
       {/* Search and Filters */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+          <input
             type="text"
             placeholder={t('contacts_search_placeholder')}
-            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+            className="w-full pl-10 pr-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+            style={inputStyle}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
         <div className="flex gap-2">
           <div className="relative">
-            <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+            <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
             <select
-              className="pl-10 pr-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white appearance-none min-w-[180px]"
+              className="pl-10 pr-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none min-w-[180px]"
+              style={inputStyle}
               value={filterCategory}
               onChange={e => setFilterCategory(e.target.value)}
             >
@@ -486,86 +508,92 @@ export default function Contacts() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
+      <div className="rounded-xl overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-500 dark:text-zinc-400 font-medium border-b border-zinc-200 dark:border-zinc-700">
+            <thead style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
               <tr>
-                <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors" onClick={() => handleSort('prefix')}>
+                <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('prefix')}>
                   <div className="flex items-center gap-1">
                     {t('contacts_col_prefix')}
                     {sortConfig.field === 'prefix' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors" onClick={() => handleSort('last_name')}>
+                <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('last_name')}>
                   <div className="flex items-center gap-1">
                     {t('last_name')}
                     {sortConfig.field === 'last_name' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
-                <th className="px-6 py-4">{t('first_name')}</th>
-                <th className="px-6 py-4">{t('contacts_col_category')}</th>
-                <th className="px-6 py-4">{t('phone')}</th>
-                <th className="px-6 py-4">{t('email')}</th>
-                <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors" onClick={() => handleSort('city')}>
+                <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')}</th>
+                <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_col_category')}</th>
+                <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('phone')}</th>
+                <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('email')}</th>
+                <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('city')}>
                   <div className="flex items-center gap-1">
                     {t('city')}
                     {sortConfig.field === 'city' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors text-right" onClick={() => handleSort('ca_amount')}>
+                <th className="px-6 py-4 cursor-pointer transition-colors text-right font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('ca_amount')}>
                   <div className="flex items-center justify-end gap-1">
                     {t('ca_amount')}
                     {sortConfig.field === 'ca_amount' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
                   </div>
                 </th>
-                <th className="px-6 py-4 text-right">{t('contacts_col_actions')}</th>
+                <th className="px-6 py-4 text-right font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_col_actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody>
               {filteredAndSortedContacts.map((contact) => (
-                <tr key={contact.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/30 transition-colors">
-                  <td className="px-6 py-4 font-medium text-zinc-900 dark:text-white">
+                <tr key={contact.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <td className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-text)' }}>
                     <div>{contact.prefix}</div>
-                    {contact.company_name && <div className="text-[10px] text-zinc-500 font-normal">{contact.company_name}</div>}
+                    {contact.company_name && <div className="text-[10px] font-normal" style={{ color: 'var(--tblr-muted)' }}>{contact.company_name}</div>}
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     <div className="flex items-center gap-2">
                       <span>{contact.last_name}</span>
                       {isContactIncomplete(contact) && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap" title="Informations manquantes : nom, téléphone ou email">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }} title="Informations manquantes : nom, téléphone ou email">
                           <IconAlertTriangle size={9} />
                           À compléter
                         </span>
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.first_name}</td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.first_name}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     {contact.category && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                         {contact.category}
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.phone}</td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.email}</td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{contact.city}</td>
-                  <td className="px-6 py-4 font-mono text-zinc-600 dark:text-zinc-300 text-right">
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.phone}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.email}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.city}</td>
+                  <td className="px-6 py-4 font-mono text-right" style={{ color: 'var(--tblr-text)' }}>
                     {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(contact.ca_amount)}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button 
+                      <button
                         onClick={() => handleEdit(contact)}
-                        className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-primary)'; (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-primary-lt)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                         title="Edit"
                       >
                         <IconEdit size={16} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleDeleteContact(contact.id)}
-                        className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-danger)'; (e.currentTarget as HTMLButtonElement).style.background = '#ffe3e3'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                         title="Delete"
                       >
                         <IconTrash size={16} />
@@ -576,7 +604,7 @@ export default function Contacts() {
               ))}
               {filteredAndSortedContacts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-zinc-500 dark:text-zinc-400">
+                  <td colSpan={9} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconUser size={32} className="opacity-20" />
                       <p>{searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
@@ -592,22 +620,23 @@ export default function Contacts() {
       {/* Add/Edit Contact Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
           >
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+              <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
                 {isEditing ? t('contacts_edit_title') : t('add_contact')}
               </h3>
-              <button 
+              <button
                 onClick={() => {
                   setIsModalOpen(false);
                   setIsEditing(false);
                   setEditingId(null);
-                }} 
-                className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                }}
+                style={{ color: 'var(--tblr-muted)' }}
               >
                 ✕
               </button>
@@ -615,55 +644,61 @@ export default function Contacts() {
             <form onSubmit={handleSubmit} className="p-6 space-y-8">
               {/* Identité Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_identity')}</h4>
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_identity')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_prefix_label')}</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_prefix_label')}</label>
                     <input
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.prefix || ''}
                       onChange={e => setNewContact({...newContact, prefix: e.target.value})}
                       placeholder={t('contacts_prefix_placeholder')}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('first_name')} *</label>
-                    <input 
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')} *</label>
+                    <input
                       required
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.first_name || ''}
                       onChange={e => setNewContact({...newContact, first_name: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_middle_name_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_middle_name_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.middle_name || ''}
                       onChange={e => setNewContact({...newContact, middle_name: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('last_name')} *</label>
-                    <input 
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('last_name')} *</label>
+                    <input
                       required
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.last_name || ''}
                       onChange={e => setNewContact({...newContact, last_name: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_suffix_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_suffix_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.suffix || ''}
                       onChange={e => setNewContact({...newContact, suffix: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_nickname_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_nickname_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.nickname || ''}
                       onChange={e => setNewContact({...newContact, nickname: e.target.value})}
                     />
@@ -673,28 +708,31 @@ export default function Contacts() {
 
               {/* Organisation Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_organisation')}</h4>
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_organisation')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_company_name_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_name_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.company_name || ''}
                       onChange={e => setNewContact({...newContact, company_name: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_job_title_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_job_title_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.job_title || ''}
                       onChange={e => setNewContact({...newContact, job_title: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_department_label')}</label>
-                    <input 
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_department_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.department || ''}
                       onChange={e => setNewContact({...newContact, department: e.target.value})}
                     />
@@ -704,27 +742,29 @@ export default function Contacts() {
 
               {/* Coordonnées Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_contact_info')}</h4>
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_contact_info')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_emails_label')}</h5>
+                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_emails_label')}</h5>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <IconMail size={16} className="text-zinc-400" />
-                        <input 
+                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
+                        <input
                           type="email"
                           placeholder={t('contacts_email_work_placeholder')}
-                          className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.email_work || ''}
                           onChange={e => setNewContact({...newContact, email_work: e.target.value})}
                         />
                       </div>
                       <div className="flex items-center gap-2">
-                        <IconMail size={16} className="text-zinc-400" />
-                        <input 
+                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
+                        <input
                           type="email"
                           placeholder={t('contacts_email_personal_placeholder')}
-                          className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.email_home || ''}
                           onChange={e => setNewContact({...newContact, email_home: e.target.value})}
                         />
@@ -732,22 +772,24 @@ export default function Contacts() {
                     </div>
                   </div>
                   <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_phones_label')}</h5>
+                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_phones_label')}</h5>
                     <div className="grid grid-cols-1 gap-2">
                       <div className="flex items-center gap-2">
-                        <IconPhone size={16} className="text-zinc-400" />
-                        <input 
+                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
+                        <input
                           placeholder={t('contacts_phone_mobile_placeholder')}
-                          className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.phone_mobile || ''}
                           onChange={e => setNewContact({...newContact, phone_mobile: e.target.value})}
                         />
                       </div>
                       <div className="flex items-center gap-2">
-                        <IconPhone size={16} className="text-zinc-400" />
-                        <input 
+                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
+                        <input
                           placeholder={t('contacts_phone_work_placeholder')}
-                          className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.phone_work || ''}
                           onChange={e => setNewContact({...newContact, phone_work: e.target.value})}
                         />
@@ -759,49 +801,55 @@ export default function Contacts() {
 
               {/* Adresses Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_addresses')}</h4>
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_addresses')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_address_work_label')}</h5>
+                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_work_label')}</h5>
                     <input
                       placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.address_work_street || ''}
                       onChange={e => setNewContact({...newContact, address_work_street: e.target.value})}
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.address_work_zip || ''}
                         onChange={e => setNewContact({...newContact, address_work_zip: e.target.value})}
                       />
                       <input
                         placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.address_work_city || ''}
                         onChange={e => setNewContact({...newContact, address_work_city: e.target.value})}
                       />
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold text-zinc-400 uppercase">{t('contacts_address_home_label')}</h5>
+                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_home_label')}</h5>
                     <input
                       placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                      style={inputStyle}
                       value={newContact.address_home_street || ''}
                       onChange={e => setNewContact({...newContact, address_home_street: e.target.value})}
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.address_home_zip || ''}
                         onChange={e => setNewContact({...newContact, address_home_zip: e.target.value})}
                       />
                       <input
                         placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.address_home_city || ''}
                         onChange={e => setNewContact({...newContact, address_home_city: e.target.value})}
                       />
@@ -812,13 +860,14 @@ export default function Contacts() {
 
               {/* Autres Section */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">{t('contacts_section_other')}</h4>
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_other')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_category_label')}</label>
+                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_category_label')}</label>
                       <select
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.category || ''}
                         onChange={e => setNewContact({...newContact, category: e.target.value})}
                       >
@@ -829,18 +878,20 @@ export default function Contacts() {
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_tags_label')}</label>
+                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_tags_label')}</label>
                       <input
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.tags || ''}
                         onChange={e => setNewContact({...newContact, tags: e.target.value})}
                         placeholder={t('contacts_tags_placeholder')}
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_notes_label')}</label>
-                      <textarea 
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white h-24"
+                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_notes_label')}</label>
+                      <textarea
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
+                        style={inputStyle}
                         value={newContact.notes || ''}
                         onChange={e => setNewContact({...newContact, notes: e.target.value})}
                       />
@@ -849,36 +900,40 @@ export default function Contacts() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_siret_label')}</label>
-                        <input 
-                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_siret_label')}</label>
+                        <input
+                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.siret || ''}
                           onChange={e => setNewContact({...newContact, siret: e.target.value})}
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_vat_label')}</label>
-                        <input 
-                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_vat_label')}</label>
+                        <input
+                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={newContact.vat_number || ''}
                           onChange={e => setNewContact({...newContact, vat_number: e.target.value})}
                         />
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_annual_turnover_label')}</label>
-                      <input 
+                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_annual_turnover_label')}</label>
+                      <input
                         type="number"
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.ca_amount ?? ''}
                         onChange={e => setNewContact({...newContact, ca_amount: Number(e.target.value)})}
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('contacts_birthday_label')}</label>
-                      <input 
+                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_birthday_label')}</label>
+                      <input
                         type="date"
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newContact.birthday || ''}
                         onChange={e => setNewContact({...newContact, birthday: e.target.value})}
                       />
@@ -887,12 +942,13 @@ export default function Contacts() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-zinc-100 dark:border-zinc-700">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('affaires')} (Projects)</label>
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('affaires')} (Projects)</label>
                   <select
                     multiple
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white h-24"
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
+                    style={inputStyle}
                     value={newContact.affaires?.split(',').filter(Boolean) || []}
                     onChange={e => {
                       const options = e.target.selectedOptions;
@@ -910,10 +966,11 @@ export default function Contacts() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{t('candidatures')} (Tenders)</label>
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('candidatures')} (Tenders)</label>
                   <select
                     multiple
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white h-24"
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
+                    style={inputStyle}
                     value={newContact.candidatures?.split(',').filter(Boolean) || []}
                     onChange={e => {
                       const options = e.target.selectedOptions;
@@ -930,22 +987,24 @@ export default function Contacts() {
                   </select>
                 </div>
               </div>
-              
-              <div className="flex justify-end gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
-                <button 
+
+              <div className="flex justify-end gap-4 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <button
                   type="button"
                   onClick={() => {
                     setIsModalOpen(false);
                     setIsEditing(false);
                     setEditingId(null);
                   }}
-                  className="px-4 py-2 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  className="px-4 py-2 rounded-lg transition-colors"
+                  style={{ color: 'var(--tblr-text)' }}
                 >
                   {t('btn_cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="px-4 py-2 rounded-lg transition-colors"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {isEditing ? t('contacts_update_btn') : t('contacts_save_btn')}
                 </button>
@@ -958,39 +1017,45 @@ export default function Contacts() {
       {/* Category Management Modal */}
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+            className="rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
           >
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('contacts_manage_categories')}</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+              <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_manage_categories')}</h3>
+              <button onClick={() => setIsCategoryModalOpen(false)} style={{ color: 'var(--tblr-muted)' }}>
                 ✕
               </button>
             </div>
             <div className="p-6 flex-1 overflow-y-auto">
               <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                <input 
-                  className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                <input
+                  className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  style={inputStyle}
                   placeholder={t('contacts_new_category_placeholder')}
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
                 />
-                <button 
+                <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="px-4 py-2 rounded-lg transition-colors"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {t('contacts_add_category_btn')}
                 </button>
               </form>
               <div className="space-y-2">
                 {categories.map(cat => (
-                  <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
-                    <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
-                    <button 
+                  <div key={cat.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                    <span style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                    <button
                       onClick={() => handleDeleteCategory(cat.id)}
-                      className="text-zinc-400 hover:text-red-500 transition-colors"
+                      className="transition-colors"
+                      style={{ color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-danger)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'}
                     >
                       <IconTrash size={16} />
                     </button>
