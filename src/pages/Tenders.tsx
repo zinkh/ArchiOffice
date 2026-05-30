@@ -256,7 +256,7 @@ export default function Tenders() {
       </div>
 
       <div
-        className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-xl shadow-sm"
+        className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-lg shadow-sm"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
@@ -310,7 +310,7 @@ export default function Tenders() {
       </div>
 
       <div
-        className="rounded-xl overflow-hidden shadow-sm"
+        className="rounded-lg overflow-hidden shadow-sm"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         <div className="overflow-x-auto">
@@ -458,7 +458,7 @@ export default function Tenders() {
             <h3 className="text-lg font-bold">{t('tenders_archived_title')}</h3>
           </div>
           <div
-            className="rounded-xl overflow-hidden shadow-sm opacity-75"
+            className="rounded-lg overflow-hidden shadow-sm opacity-75"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
           >
             <div className="overflow-x-auto">
@@ -562,7 +562,7 @@ export default function Tenders() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-2xl shadow-xl w-full max-w-xl overflow-hidden"
+              className="rounded-lg shadow-xl w-full max-w-xl overflow-hidden"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div

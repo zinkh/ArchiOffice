@@ -247,7 +247,7 @@ export default function Specifications() {
         </header>
 
         <div
-          className="flex-1 rounded-xl p-2 overflow-y-auto"
+          className="flex-1 rounded-lg p-2 overflow-y-auto"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
           <div className="space-y-1">
@@ -291,7 +291,7 @@ export default function Specifications() {
       </div>
 
       <div
-        className="flex-1 rounded-xl flex flex-col overflow-hidden"
+        className="flex-1 rounded-lg flex flex-col overflow-hidden"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         {activeSpec ? (
@@ -444,7 +444,7 @@ export default function Specifications() {
               ))}
               <button
                 onClick={handleAddSection}
-                className="w-full py-4 rounded-xl font-medium text-sm uppercase tracking-wide flex items-center justify-center gap-2 hover:border-blue-200 transition-all"
+                className="w-full py-4 rounded-lg font-medium text-sm uppercase tracking-wide flex items-center justify-center gap-2 hover:border-blue-200 transition-all"
                 style={{ border: '2px dashed var(--tblr-border)', color: 'var(--tblr-muted)' }}
               >
                 <IconPlus size={18} />
@@ -454,7 +454,7 @@ export default function Specifications() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center gap-6" style={{ color: 'var(--tblr-muted)' }}>
-            <div className="w-20 h-20 rounded-2xl flex items-center justify-center" style={{ background: 'var(--tblr-surface-2)' }}>
+            <div className="w-20 h-20 rounded-lg flex items-center justify-center" style={{ background: 'var(--tblr-surface-2)' }}>
               <IconFileCode size={40} className="opacity-20" />
             </div>
             <p className="text-sm font-medium uppercase tracking-widest">{t('select_spec')}</p>
@@ -468,7 +468,7 @@ export default function Specifications() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+              className="rounded-lg shadow-xl w-full max-w-md overflow-hidden"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div
@@ -487,7 +487,7 @@ export default function Specifications() {
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_template_optional')}</label>
                   <select
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                     onChange={e => setSelectedTemplateId(e.target.value)}
                   >
@@ -500,7 +500,7 @@ export default function Specifications() {
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_title_label')}</label>
                   <input
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                     placeholder={t('specs_title_example')}
                     value={newSpecTitle}
@@ -510,7 +510,7 @@ export default function Specifications() {
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_project_label')}</label>
                   <select
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                     value={selectedProjectId}
                     onChange={e => setSelectedProjectId(e.target.value)}
@@ -528,7 +528,7 @@ export default function Specifications() {
               >
                 <button
                   onClick={() => setIsNewSpecModalOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                  className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all"
                   style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                 >
                   {t('btn_cancel')}
@@ -536,7 +536,7 @@ export default function Specifications() {
                 <button
                   onClick={handleNewSpec}
                   disabled={!newSpecTitle || !selectedProjectId}
-                  className="flex-1 px-4 py-2 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
+                  className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {t('btn_create')}

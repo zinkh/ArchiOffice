@@ -19,7 +19,7 @@ const PHASE_COLORS: Record<DocumentPhase, string> = {
   VISA: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
   DET: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
   AOR: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-  Général: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+  Général: '',
 };
 
 export default function Documents() {
@@ -210,7 +210,7 @@ export default function Documents() {
       >
         <button
           onClick={() => { setActiveProject(null); setActivePhase(null); }}
-          className="w-full text-left px-3 py-2 rounded-xl text-sm font-semibold transition-colors"
+          className="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
           style={
             !activeProject && !activePhase
               ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
@@ -238,7 +238,7 @@ export default function Documents() {
                 </button>
                 <button
                   onClick={() => { setActiveProject(p.id); setActivePhase(null); if (!isExpanded) toggleProject(p.id); }}
-                  className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-xl text-sm transition-colors text-left font-semibold"
+                  className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left font-semibold"
                   style={
                     isProjectActive
                       ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
@@ -285,7 +285,7 @@ export default function Documents() {
               </button>
               <button
                 onClick={() => { setActiveProject('unassigned'); setActivePhase(null); if (!expandedProjects.has('unassigned')) toggleProject('unassigned'); }}
-                className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-xl text-sm transition-colors text-left"
+                className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
                 style={
                   activeProject === 'unassigned' && !activePhase
                     ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 }
@@ -348,7 +348,7 @@ export default function Documents() {
                 onClick={() => setIsModalOpen(true)}
                 disabled={!isOnline}
                 title={!isOnline ? 'Connexion requise pour uploader des documents' : undefined}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: 'var(--tblr-primary)', color: '#fff' }}
               >
                 <IconPlus size={18} /> Ajouter un document
@@ -380,7 +380,7 @@ export default function Documents() {
                 </div>
 
                 {!isOnline && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }}>
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }}>
                     <IconCloudOff size={16} className="shrink-0" />
                     <span>Upload impossible hors-ligne. Reconnectez-vous pour envoyer des documents.</span>
                   </div>
@@ -389,7 +389,7 @@ export default function Documents() {
                 <div className="space-y-3">
                   <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Affaire</label>
                   <select
-                    className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                     onChange={e => setSelectedProject(e.target.value)}
                     value={selectedProject}
@@ -403,7 +403,7 @@ export default function Documents() {
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Phase</label>
                     <select
-                      className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       onChange={e => setSelectedPhase(e.target.value as DocumentPhase)}
                       value={selectedPhase}
@@ -414,7 +414,7 @@ export default function Documents() {
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Catégorie</label>
                     <select
-                      className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       onChange={e => setSelectedCategory(e.target.value)}
                       value={selectedCategory}
@@ -428,7 +428,7 @@ export default function Documents() {
                 </div>
 
                 <div
-                  className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
+                  className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all"
                   style={{ borderColor: 'var(--tblr-border)' }}
                   onDrop={e => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
                   onDragOver={e => e.preventDefault()}
@@ -448,7 +448,7 @@ export default function Documents() {
                 <button
                   onClick={handleFileUpload}
                   disabled={isUploading || !selectedFile || !isOnline}
-                  className="w-full py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full py-3 rounded-lg font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {isUploading ? 'Envoi en cours...' : 'Uploader'}
@@ -483,7 +483,7 @@ export default function Documents() {
                     type="text"
                     value={editName}
                     onChange={e => setEditName(e.target.value)}
-                    className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   />
                 </div>
@@ -491,7 +491,7 @@ export default function Documents() {
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Phase</label>
                     <select
-                      className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       onChange={e => setEditPhase(e.target.value as DocumentPhase)}
                       value={editPhase}
@@ -502,7 +502,7 @@ export default function Documents() {
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Catégorie</label>
                     <select
-                      className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       onChange={e => setEditCategory(e.target.value)}
                       value={editCategory}
@@ -519,14 +519,14 @@ export default function Documents() {
                   <textarea
                     value={editDescription}
                     onChange={e => setEditDescription(e.target.value)}
-                    className="w-full p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[80px]"
+                    className="w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[80px]"
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Nouvelle version (optionnel)</label>
                   <div
-                    className="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all"
+                    className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all"
                     style={{ borderColor: 'var(--tblr-border)' }}
                     onClick={() => editFileInputRef.current?.click()}
                   >
@@ -544,7 +544,7 @@ export default function Documents() {
                 <button
                   onClick={handleUpdate}
                   disabled={isUploading}
-                  className="w-full py-3 rounded-xl font-bold transition-all active:scale-[0.98] shadow-lg shadow-blue-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full py-3 rounded-lg font-bold transition-all active:scale-[0.98] shadow-lg shadow-blue-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {isUploading ? 'Enregistrement...' : 'Sauvegarder'}
@@ -576,14 +576,14 @@ export default function Documents() {
                 <div className="flex gap-3">
                   <button
                     onClick={() => setDocToDelete(null)}
-                    className="flex-1 py-3 rounded-xl font-bold transition-all"
+                    className="flex-1 py-3 rounded-lg font-bold transition-all"
                     style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                   >
                     Annuler
                   </button>
                   <button
                     onClick={handleDelete}
-                    className="flex-1 py-3 rounded-xl font-bold transition-all shadow-lg shadow-red-500/20"
+                    className="flex-1 py-3 rounded-lg font-bold transition-all shadow-lg shadow-red-500/20"
                     style={{ background: 'var(--tblr-danger)', color: '#fff' }}
                   >
                     Supprimer

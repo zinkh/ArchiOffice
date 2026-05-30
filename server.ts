@@ -830,6 +830,8 @@ if (false as any) {
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
       project_id TEXT,
+      proposal_id TEXT,
+      tender_id TEXT,
       type TEXT NOT NULL,
       title TEXT NOT NULL,
       date TEXT NOT NULL,
@@ -926,7 +928,8 @@ if (false as any) {
     { table: 'invoices', columns: ['invoice_type'] },
     { table: 'invoices', columns: ['mission_id', 'mission_name'] },
     { table: 'activities', columns: ['likes_count'] },
-    { table: 'team_members', columns: ['notifications_last_seen'] }
+    { table: 'team_members', columns: ['notifications_last_seen'] },
+    { table: 'meetings', columns: ['proposal_id', 'tender_id'] }
   ];
 
   for (const { table, columns } of tablesToUpdate) {
@@ -5086,9 +5089,11 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   app.get("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, type } = req.query;
+      const { project_id, proposal_id, tender_id, type } = req.query;
       let query = supabaseAdmin.from('meetings').select('*').eq('tenant_id', tenantId).order('date', { ascending: false });
       if (project_id) query = query.eq('project_id', project_id);
+      else if (proposal_id) query = query.eq('proposal_id', proposal_id);
+      else if (tender_id) query = query.eq('tender_id', tender_id);
       if (type) query = query.eq('type', type);
       const { data, error } = await query;
       if (error) throw error;
@@ -5110,12 +5115,12 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   app.post("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, type, title, date, notes } = req.body;
+      const { project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, type, title, date, notes: notes || null, created_at });
+      const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });
       if (error) throw error;
-      res.status(201).json({ id, project_id, type, title, date, notes, created_at, photos: [] });
+      res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

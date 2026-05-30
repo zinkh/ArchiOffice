@@ -338,7 +338,7 @@ export default function Invoices() {
             <button
               onClick={handleZohoSync}
               disabled={isSyncingZoho}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-60"
               style={{ background: '#f76707', color: '#fff' }}
             >
               <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
@@ -347,7 +347,7 @@ export default function Invoices() {
           )}
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -358,7 +358,7 @@ export default function Invoices() {
 
       {zohoSyncResult && (
         <div
-          className="text-sm p-3 rounded-xl flex items-center justify-between gap-4"
+          className="text-sm p-3 rounded-lg flex items-center justify-between gap-4"
           style={zohoSyncResult.errors.length > 0
             ? { background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }
             : { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}
@@ -375,7 +375,7 @@ export default function Invoices() {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row items-center gap-4 p-4 rounded-xl shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+      <div className="flex flex-col md:flex-row items-center gap-4 p-4 rounded-lg shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="relative flex-1 w-full">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
           <input
@@ -411,7 +411,7 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div className="rounded-2xl overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+      <div className="rounded-lg overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -693,7 +693,7 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -707,7 +707,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_project_label')}</label>
                   <select
                     required
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={newInvoice.project_id}
                     onChange={e => setNewInvoice({...newInvoice, project_id: e.target.value})}
@@ -724,7 +724,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
                       style={newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
                         ? { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -735,7 +735,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
                       style={newInvoice.invoice_type === 'acompte'
                         ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -746,11 +746,11 @@ export default function Invoices() {
                   </div>
                 </div>
                 {newInvoice.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 rounded-xl" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
+                  <div className="space-y-3 p-4 rounded-lg" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
                     <div>
                       <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
                       <select
-                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                         style={inputStyle}
                         value={newInvoice.mission_id || ''}
                         onChange={e => {
@@ -768,7 +768,7 @@ export default function Invoices() {
                       <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_advancement_label')}</label>
                       <input
                         type="number" min={0} max={100} step={5}
-                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                         style={inputStyle}
                         value={newInvoice.advancement_pct ?? ''}
                         onChange={e => setNewInvoice({ ...newInvoice, advancement_pct: Number(e.target.value) })}
@@ -793,7 +793,7 @@ export default function Invoices() {
                   <input
                     type="number"
                     required={newInvoice.invoice_type !== 'acompte' || newAcompteCalculated === null}
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={newAcompteCalculated !== null ? newAcompteCalculated.toFixed(2) : (newInvoice.amount ?? '')}
                     readOnly={newAcompteCalculated !== null}
@@ -805,7 +805,7 @@ export default function Invoices() {
                   <input
                     type="date"
                     required
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={newInvoice.due_date}
                     onChange={e => setNewInvoice({...newInvoice, due_date: e.target.value})}
@@ -814,7 +814,7 @@ export default function Invoices() {
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
                   <textarea
-                    className="w-full h-32 px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                    className="w-full h-32 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
                     style={inputStyle}
                     value={newInvoice.description ?? ''}
                     onChange={e => setNewInvoice({...newInvoice, description: e.target.value})}
@@ -824,14 +824,14 @@ export default function Invoices() {
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors"
                     style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                   >
                     {t('btn_cancel')}
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors"
                     style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                   >
                     {t('invoices_create_btn')}
@@ -849,7 +849,7 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -866,7 +866,7 @@ export default function Invoices() {
                         key={type}
                         type="button"
                         onClick={() => setEditForm({ ...editForm, invoice_type: type })}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-all"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all"
                         style={editForm.invoice_type === type
                           ? type === 'acompte'
                             ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
@@ -882,11 +882,11 @@ export default function Invoices() {
 
                 {/* Acompte mission fields */}
                 {editForm.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 rounded-xl" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
+                  <div className="space-y-3 p-4 rounded-lg" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
                     <div>
                       <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
                       <select
-                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                         style={inputStyle}
                         value={editForm.mission_id || ''}
                         onChange={e => {
@@ -905,7 +905,7 @@ export default function Invoices() {
                       <div className="relative">
                         <input
                           type="number" min={0} max={100} step={5}
-                          className="w-full px-4 py-2 pr-10 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                          className="w-full px-4 py-2 pr-10 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                           style={inputStyle}
                           value={editForm.advancement_pct ?? ''}
                           onChange={e => setEditForm({ ...editForm, advancement_pct: Number(e.target.value) })}
@@ -933,7 +933,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                   <input
                     type="number"
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
                     readOnly={acompteCalculated !== null}
@@ -946,7 +946,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_due_date_label')}</label>
                   <input
                     type="date" required
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={editForm.due_date || ''}
                     onChange={e => setEditForm({ ...editForm, due_date: e.target.value })}
@@ -957,7 +957,7 @@ export default function Invoices() {
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
                   <textarea
-                    className="w-full h-24 px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                    className="w-full h-24 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
                     style={inputStyle}
                     value={editForm.description || ''}
                     onChange={e => setEditForm({ ...editForm, description: e.target.value })}
@@ -968,7 +968,7 @@ export default function Invoices() {
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_col_status')}</label>
                   <select
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={editForm.status || 'Draft'}
                     onChange={e => setEditForm({ ...editForm, status: e.target.value as Invoice['status'] })}
@@ -983,7 +983,7 @@ export default function Invoices() {
                   <button
                     type="button"
                     onClick={() => setEditingInvoice(null)}
-                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors"
                     style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                   >
                     {t('btn_cancel')}
@@ -991,7 +991,7 @@ export default function Invoices() {
                   <button
                     type="submit"
                     disabled={isSavingEdit}
-                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                     style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                   >
                     <IconDeviceFloppy size={18} />
@@ -1010,7 +1010,7 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -1030,7 +1030,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_to_label')}</label>
                   <input
                     type="email" required
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={sendForm.to}
                     onChange={e => setSendForm({ ...sendForm, to: e.target.value })}
@@ -1041,7 +1041,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_subject_label')}</label>
                   <input
                     type="text" required
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={sendForm.subject}
                     onChange={e => setSendForm({ ...sendForm, subject: e.target.value })}
@@ -1051,7 +1051,7 @@ export default function Invoices() {
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_message_label')}</label>
                   <textarea
                     required rows={8}
-                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none font-mono text-sm"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 resize-none font-mono text-sm"
                     style={inputStyle}
                     value={sendForm.message}
                     onChange={e => setSendForm({ ...sendForm, message: e.target.value })}
@@ -1059,7 +1059,7 @@ export default function Invoices() {
                 </div>
                 {sendResult && (
                   <div
-                    className="text-sm p-3 rounded-xl"
+                    className="text-sm p-3 rounded-lg"
                     style={sendResult.success
                       ? { background: '#d3f9d8', color: '#2f9e44' }
                       : { background: '#ffe3e3', color: 'var(--tblr-danger)' }}
@@ -1071,7 +1071,7 @@ export default function Invoices() {
                   <button
                     type="button"
                     onClick={() => { setSendingInvoice(null); setSendResult(null); }}
-                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors"
                     style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                   >
                     {sendResult?.success ? t('btn_close') : t('btn_cancel')}
@@ -1080,7 +1080,7 @@ export default function Invoices() {
                     <button
                       type="submit"
                       disabled={isSending}
-                      className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                      className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                       style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                     >
                       <IconSend size={18} />

@@ -258,8 +258,8 @@ export default function References() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('references_title')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('references_subtitle')}</p>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('references_title')}</h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('references_subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -281,24 +281,26 @@ export default function References() {
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row items-start md:items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      <div className="flex flex-col md:flex-row items-start md:items-center gap-4 p-4 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="relative flex-1 w-full">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
-            type="text" 
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
             placeholder={t('references_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-white"
+            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2">
-            <IconCalendar size={18} className="text-zinc-400" />
-            <select 
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+            <IconCalendar size={16} style={{ color: 'var(--tblr-muted)' }} />
+            <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="bg-transparent text-sm outline-none text-zinc-900 dark:text-white cursor-pointer"
+              className="bg-transparent text-sm outline-none cursor-pointer"
+              style={{ color: 'var(--tblr-text)' }}
             >
               <option value="all">{t('references_all_dates')}</option>
               <option value="last_year">{t('references_last_year')}</option>
@@ -308,72 +310,56 @@ export default function References() {
               <option value="custom">{t('references_custom_range')}</option>
             </select>
           </div>
-          
+
           {dateFilter === 'custom' && (
-            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
-              <input 
-                type="date" 
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
                 value={customDateRange.start}
                 onChange={(e) => setCustomDateRange(prev => ({ ...prev, start: e.target.value }))}
-                className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                className="px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
-              <span className="text-zinc-400 text-sm">{t('references_date_separator')}</span>
-              <input 
-                type="date" 
+              <span className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('references_date_separator')}</span>
+              <input
+                type="date"
                 value={customDateRange.end}
                 onChange={(e) => setCustomDateRange(prev => ({ ...prev, end: e.target.value }))}
-                className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
+                className="px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
             </div>
           )}
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="w-12 px-4 py-3"></th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('name')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('name')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_project')} {getSortIcon('name')}</div>
                 </th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('client')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('client')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_client')} {getSortIcon('client')}</div>
                 </th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('end_date')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('end_date')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_delivery')} {getSortIcon('end_date')}</div>
                 </th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('surface')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('surface')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_surface')} {getSortIcon('surface')}</div>
                 </th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('budget')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('budget')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_budget')} {getSortIcon('budget')}</div>
                 </th>
-                <th 
-                  className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  onClick={() => requestSort('status')}
-                >
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('status')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <div className="flex items-center gap-1">{t('references_col_status')} {getSortIcon('status')}</div>
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody>
               {!sortConfig ? (
                 // Grouped View (Default)
                 domains.map(domain => {
@@ -384,24 +370,27 @@ export default function References() {
 
                   return (
                     <Fragment key={domain}>
-                      <tr 
-                        className="bg-zinc-50/50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-700/50 cursor-pointer transition-colors"
+                      <tr
+                        className="cursor-pointer transition-colors"
+                        style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}
                         onClick={() => toggleDomain(domain)}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                       >
                         <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <input 
-                              type="checkbox" 
+                            <input
+                              type="checkbox"
                               checked={allSelected}
                               ref={el => { if (el) el.indeterminate = someSelected; }}
                               onChange={() => toggleSelectAll(domain)}
-                              className="w-4 h-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                              className="w-4 h-4 rounded"
                             />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            {isExpanded ? <IconChevronDown size={18} className="text-zinc-400" /> : <IconChevronRight size={18} className="text-zinc-400" />}
-                            <span className="font-bold text-zinc-900 dark:text-white uppercase text-xs tracking-wider">{domain}</span>
-                            <span className="text-[10px] bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 rounded-full text-zinc-600 dark:text-zinc-400">
+                            {isExpanded ? <IconChevronDown size={16} style={{ color: 'var(--tblr-muted)' }} /> : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
+                            <span className="font-semibold uppercase text-xs tracking-wider" style={{ color: 'var(--tblr-text)' }}>{domain}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
                               {domainProjects.length}
                             </span>
                           </div>
@@ -415,45 +404,47 @@ export default function References() {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="hover:bg-zinc-50 dark:hover:bg-zinc-900/30 transition-colors group"
+                            className="transition-colors"
+                            style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = '')}
                           >
                             <td className="px-4 py-3 pl-8">
-                              <input 
-                                type="checkbox" 
+                              <input
+                                type="checkbox"
                                 checked={selectedIds.has(project.id)}
                                 onChange={() => toggleSelectProject(project.id)}
-                                className="w-4 h-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                                className="w-4 h-4 rounded"
                               />
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded bg-zinc-100 dark:bg-zinc-800 overflow-hidden shrink-0">
-                                  <img 
-                                    src={project.image_url || `https://picsum.photos/seed/${project.id}/100/100`} 
-                                    alt="" 
+                                <div className="w-8 h-8 rounded overflow-hidden shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
+                                  <img
+                                    src={project.image_url || `https://picsum.photos/seed/${project.id}/100/100`}
+                                    alt=""
                                     className="w-full h-full object-cover"
                                     referrerPolicy="no-referrer"
                                   />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-medium text-zinc-900 dark:text-white">{project.name}</p>
-                                  <p className="text-[10px] text-zinc-500 font-mono">#{project.project_code || '---'}</p>
+                                  <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{project.name}</p>
+                                  <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{project.project_code || '---'}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.client}</td>
-                            <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">
+                            <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.client}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>
                               {project.end_date ? new Date(project.end_date).toLocaleDateString() : '---'}
                             </td>
-                            <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.surface ? `${project.surface} m²` : '---'}</td>
-                            <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{formatCurrency(project.budget)}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.surface ? `${project.surface} m²` : '---'}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</td>
                             <td className="px-4 py-3">
-                              <span className={cn(
-                                "px-2 py-0.5 rounded-full text-[10px] font-medium border",
-                                project.status === 'In Progress' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                                project.status === 'Completed' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                                "bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-900/20 dark:text-zinc-400 dark:border-zinc-800"
-                              )}>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={
+                                project.status === 'In Progress' ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' } :
+                                project.status === 'Completed' ? { background: '#d3f9d8', color: '#2f9e44' } :
+                                { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }
+                              }>
                                 {project.status}
                               </span>
                             </td>
@@ -466,47 +457,48 @@ export default function References() {
               ) : (
                 // Flat Sorted View
                 filteredProjects.map((project) => (
-                  <tr 
+                  <tr
                     key={project.id}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-900/30 transition-colors group"
+                    style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '')}
                   >
                     <td className="px-4 py-3">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={selectedIds.has(project.id)}
                         onChange={() => toggleSelectProject(project.id)}
-                        className="w-4 h-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                        className="w-4 h-4 rounded"
                       />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded bg-zinc-100 dark:bg-zinc-800 overflow-hidden shrink-0">
-                          <img 
-                            src={project.image_url || `https://picsum.photos/seed/${project.id}/100/100`} 
-                            alt="" 
+                        <div className="w-8 h-8 rounded overflow-hidden shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
+                          <img
+                            src={project.image_url || `https://picsum.photos/seed/${project.id}/100/100`}
+                            alt=""
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
                           />
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-zinc-900 dark:text-white">{project.name}</p>
-                          <p className="text-[10px] text-zinc-500 font-mono">#{project.project_code || '---'}</p>
+                          <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{project.name}</p>
+                          <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{project.project_code || '---'}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.client}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-muted)' }}>{project.client}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-muted)' }}>
                       {project.end_date ? new Date(project.end_date).toLocaleDateString() : '---'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.surface ? `${project.surface} m²` : '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{formatCurrency(project.budget)}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-muted)' }}>{project.surface ? `${project.surface} m²` : '---'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(project.budget)}</td>
                     <td className="px-4 py-3">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-[10px] font-medium border",
-                        project.status === 'In Progress' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                        project.status === 'Completed' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                        "bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-900/20 dark:text-zinc-400 dark:border-zinc-800"
-                      )}>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{
+                        background: project.status === 'In Progress' ? 'var(--tblr-primary-lt)' : project.status === 'Completed' ? 'rgba(var(--tblr-success-rgb, 47,179,135), 0.1)' : 'var(--tblr-surface-2)',
+                        color: project.status === 'In Progress' ? 'var(--tblr-primary)' : project.status === 'Completed' ? 'var(--tblr-success)' : 'var(--tblr-muted)',
+                        border: '1px solid currentColor',
+                      }}>
                         {project.status}
                       </span>
                     </td>
@@ -515,7 +507,7 @@ export default function References() {
               )}
               {domains.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-zinc-500 dark:text-zinc-400">
+                  <td colSpan={7} className="px-4 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconBriefcase size={48} className="opacity-20" />
                       <p>{t('references_no_projects')}</p>
