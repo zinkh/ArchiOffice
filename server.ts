@@ -2647,7 +2647,7 @@ async function startServer() {
       const p = req.body;
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { specialties_list, ...proposalData } = p;
+      const { specialties_list, client_name: _cn, ...proposalData } = p;
       const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
       if (insErr) throw insErr;
       if (specialties_list && Array.isArray(specialties_list)) {
@@ -2674,7 +2674,7 @@ async function startServer() {
       // Fetch old proposal to check status transition
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
-      const { specialties_list, id: _pid, tenant_id: _tid, created_at: _ca, ...updateData } = p;
+      const { specialties_list, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, ...updateData } = p;
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 
