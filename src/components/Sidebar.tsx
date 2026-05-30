@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
@@ -18,6 +19,8 @@ import {
   IconLayoutKanban,
   IconMessages,
   IconAlertTriangle,
+  IconChevronDown,
+  IconChevronRight,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -33,16 +36,9 @@ export const NAV_ITEMS = [
   { name: 'invoices',       path: '/invoices',       icon: IconFileInvoice },
   { name: 'tenders',        path: '/tenders',        icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconFileText },
-  { name: 'gantt', path: '/gantt', icon: IconChartBar },
-  { name: 'kanban', path: '/kanban', icon: IconLayoutKanban },
-  { name: 'reunions', path: '/reunions', icon: IconMessages },
-  { name: 'team', path: '/team', icon: IconUsers },
-  { name: 'contacts', path: '/contacts', icon: IconAddressBook },
-  { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
-  { name: 'settings', path: '/settings', icon: IconSettings },
-  { name: 'billing', path: '/billing', icon: IconCreditCard },
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
+  { name: 'reunions',       path: '/reunions',        icon: IconMessages },
   { name: 'team',           path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
   { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
@@ -50,9 +46,9 @@ export const NAV_ITEMS = [
   { name: 'billing',        path: '/billing',        icon: IconCreditCard },
 ];
 
-// ── Tabler sidebar navigation with section groupings
 const NAV_SECTIONS = [
   {
+    key: 'gestion',
     label: 'Gestion',
     items: [
       { name: 'dashboard',  path: '/',          icon: IconLayoutDashboard },
@@ -62,6 +58,7 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    key: 'finances',
     label: 'Finances',
     items: [
       { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
@@ -70,15 +67,18 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    key: 'outils',
     label: 'Outils',
     items: [
       { name: 'specifications', path: '/specifications', icon: IconFileText },
       { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
+      { name: 'reunions',       path: '/reunions',        icon: IconMessages },
       { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
     ],
   },
   {
+    key: 'administration',
     label: 'Administration',
     items: [
       { name: 'team',      path: '/team',      icon: IconUsers },
@@ -89,11 +89,32 @@ const NAV_SECTIONS = [
   },
 ];
 
+const STORAGE_KEY = 'sidebar_collapsed_sections';
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
   const { tenantPlan, isTrialExpired, trialEndsAt } = useUser();
   const { settings } = useSettings();
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch {}
+  }, [collapsed]);
+
+  const toggleSection = (key: string) => {
+    setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const daysLeft = trialEndsAt && tenantPlan === 'trial'
     ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
@@ -132,45 +153,64 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto">
-        {NAV_SECTIONS.map(section => (
-          <div key={section.label}>
-            {/* Section label */}
-            <div
-              className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest"
-              style={{ color: 'var(--tblr-muted)' }}
-            >
-              {section.label}
-            </div>
+      <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
+        {NAV_SECTIONS.map(section => {
+          const isCollapsed = !!collapsed[section.key];
+          const hasActive = section.items.some(item =>
+            location.pathname === item.path ||
+            (item.path !== '/' && location.pathname.startsWith(item.path))
+          );
+          return (
+            <div key={section.key}>
+              {/* Section header — clickable to collapse */}
+              <button
+                onClick={() => toggleSection(section.key)}
+                className={cn(
+                  'w-full flex items-center justify-between px-3 py-1.5 mb-0.5 rounded text-[10px] font-semibold uppercase tracking-widest transition-colors group',
+                  hasActive && isCollapsed
+                    ? 'text-[var(--tblr-primary)]'
+                    : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'
+                )}
+              >
+                <span>{section.label}</span>
+                <span className="opacity-50 group-hover:opacity-100 transition-opacity">
+                  {isCollapsed
+                    ? <IconChevronRight size={11} />
+                    : <IconChevronDown size={11} />}
+                </span>
+              </button>
 
-            {/* Section items */}
-            <div className="space-y-0.5">
-              {section.items.map(item => {
-                const isActive = location.pathname === item.path
-                  || (item.path !== '/' && location.pathname.startsWith(item.path));
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={cn(
-                      'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
-                      isActive
-                        ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                        : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                    )}
-                  >
-                    <Icon
-                      size={16}
-                      className={isActive ? 'text-[var(--tblr-primary)]' : ''}
-                    />
-                    <span>{t(item.name)}</span>
-                  </Link>
-                );
-              })}
+              {/* Section items */}
+              {!isCollapsed && (
+                <div className="space-y-0.5 mb-2">
+                  {section.items.map(item => {
+                    const isActive = location.pathname === item.path
+                      || (item.path !== '/' && location.pathname.startsWith(item.path));
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        className={cn(
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          isActive
+                            ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                            : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                        )}
+                      >
+                        <Icon
+                          size={16}
+                          className={isActive ? 'text-[var(--tblr-primary)]' : ''}
+                        />
+                        <span>{t(item.name)}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Trial / expired banner */}
@@ -178,12 +218,12 @@ export function Sidebar() {
         <div className="p-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
           <Link
             to="/billing"
-            className="flex items-center gap-2 px-3 py-2 rounded text-[12px] font-medium transition-colors"
-            style={{
-              background: isTrialExpired ? '#ffe3e3' : '#fff3bf',
-              color: isTrialExpired ? '#c92a2a' : '#e67700',
-              border: `1px solid ${isTrialExpired ? '#ffc9c9' : '#ffe066'}`,
-            }}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded text-[12px] font-medium transition-colors border',
+              isTrialExpired
+                ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+                : 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800'
+            )}
           >
             <IconAlertTriangle size={14} />
             {isTrialExpired

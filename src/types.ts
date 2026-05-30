@@ -609,6 +609,24 @@ export interface SiteReportNote {
   statut?: 'A FAIRE' | 'EN COURS' | 'LEVÉE' | 'URGENT';
 }
 
+export interface Observation {
+  id: string;
+  project_id: string;
+  lot_id?: string;
+  lot?: Pick<ProjectLot, 'id' | 'lot_number' | 'lot_title'>;
+  contact_id?: string;
+  texte: string;
+  statut: 'À faire' | 'En cours' | 'Levée' | 'Urgent' | 'Refusée';
+  due_date?: string;
+  created_report_id?: string;
+  created_report_number?: number;
+  resolved_report_id?: string;
+  resolved_report_number?: number;
+  number?: number;
+  created_at?: string;
+  report_ids?: string[];
+}
+
 export interface DPGFItem {
   id: string;
   project_id: string;

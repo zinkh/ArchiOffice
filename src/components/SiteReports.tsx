@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { SiteReport, SiteReportNote, ProjectLot, Project } from '../types';
 import { IconPlus, IconFileText, IconCheck, IconEdit, IconFileDownload, IconTrash, IconCalendar, IconGripVertical } from '@tabler/icons-react';
+import ObservationsTable from './ObservationsTable';
 import jsPDF from 'jspdf';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 
@@ -10,6 +11,7 @@ interface SiteReportsProps {
 }
 
 export default function SiteReports({ project, lots_list }: SiteReportsProps) {
+  const [view, setView] = useState<'cr' | 'observations'>('cr');
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<SiteReport | null>(null);
   const [notes, setNotes] = useState<SiteReportNote[]>([]);
@@ -213,8 +215,29 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
 
   return (
     <div className="space-y-4">
+      {/* View toggle */}
+      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setView('cr')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${view === 'cr' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
+        >
+          CR de chantier
+        </button>
+        <button
+          onClick={() => setView('observations')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${view === 'observations' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
+        >
+          Base Observations
+        </button>
+      </div>
+
+      {view === 'observations' && (
+        <ObservationsTable projectId={project.id} lots={lots_list} currentReportId={selectedReport?.id} />
+      )}
+
+      {view === 'cr' && <>
       <div className="flex flex-wrap justify-between items-center gap-4">
-        <h3 className="text-lg font-bold dark:text-white">Site Reports</h3>
+        <h3 className="text-lg font-bold dark:text-white">Comptes Rendus de Chantier</h3>
         <div className="flex gap-2">
           <button onClick={exportToPDF} className="flex items-center gap-2 bg-zinc-600 text-white px-4 py-2 rounded text-sm dark:bg-zinc-700">
             <IconFileDownload size={18} /> Export PDF
@@ -795,6 +818,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
         </footer>
         </div>
       </div>
+      </>}
     </div>
   );
 }

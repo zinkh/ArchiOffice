@@ -48,6 +48,7 @@ import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ConstructionReportModule from '../components/ConstructionReportModule';
+import SiteReports from '../components/SiteReports';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
 
@@ -1892,6 +1893,9 @@ export default function ProjectDetail() {
                     </table>
                   </div>
                 </div>
+
+                {/* Comptes Rendus de Chantier */}
+                <SiteReports project={project} lots_list={project.lots_list || []} />
               </div>
             )}
             {activeTab === 'RDT' && (
