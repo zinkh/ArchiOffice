@@ -20,6 +20,18 @@ const MISSIONS = [
   { id: 'opc',      name: 'OPC',            default_pct: 0  },
 ];
 
+// Status badge style helper
+function statusStyle(status: string): React.CSSProperties {
+  switch (status) {
+    case 'Paid':     return { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' };
+    case 'Overdue':  return { background: '#ffe3e3', color: 'var(--tblr-danger)', border: '1px solid #ffc9c9' };
+    case 'Sent':     return { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary-lt)' };
+    case 'Draft':
+    case 'Cancelled':
+    default:         return { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' };
+  }
+}
+
 export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -284,7 +296,7 @@ export default function Invoices() {
     });
   };
 
-  const filteredInvoices = invoices.filter(i => 
+  const filteredInvoices = invoices.filter(i =>
     i.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
     i.project_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     i.invoice_number.toLowerCase().includes(searchQuery.toLowerCase())
@@ -306,22 +318,28 @@ export default function Invoices() {
 
   const SortIcon = ({ column }: { column: keyof Invoice | 'project_name' }) => {
     if (sortConfig?.key !== column) return <IconArrowsSort size={14} className="opacity-20 group-hover:opacity-50 transition-opacity" />;
-    return sortConfig.direction === 'asc' ? <IconSortAscending size={14} className="text-emerald-500" /> : <IconSortDescending size={14} className="text-emerald-500" />;
+    return sortConfig.direction === 'asc'
+      ? <IconSortAscending size={14} style={{ color: 'var(--tblr-primary)' }} />
+      : <IconSortDescending size={14} style={{ color: 'var(--tblr-primary)' }} />;
   };
+
+  // Shared input style
+  const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('invoices')}</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('invoices_subtitle')}</p>
+          <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--tblr-text)' }}>{t('invoices')}</h1>
+          <p style={{ color: 'var(--tblr-muted)' }}>{t('invoices_subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           {zohoConnected && (
             <button
               onClick={handleZohoSync}
               disabled={isSyncingZoho}
-              className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95 disabled:opacity-60"
+              style={{ background: '#f76707', color: '#fff' }}
             >
               <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
               {t('zoho_sync_btn')}
@@ -329,7 +347,8 @@ export default function Invoices() {
           )}
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95"
+            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
             {t('invoices_create_btn')}
@@ -338,12 +357,12 @@ export default function Invoices() {
       </div>
 
       {zohoSyncResult && (
-        <div className={cn(
-          "text-sm p-3 rounded-xl border flex items-center justify-between gap-4",
-          zohoSyncResult.errors.length > 0
-            ? "bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300"
-            : "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
-        )}>
+        <div
+          className="text-sm p-3 rounded-xl flex items-center justify-between gap-4"
+          style={zohoSyncResult.errors.length > 0
+            ? { background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }
+            : { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}
+        >
           <span>
             {t('zoho_sync_result', { pushed: zohoSyncResult.pushed, pulled: zohoSyncResult.pulled })}
             {zohoSyncResult.errors.length > 0 && (
@@ -356,34 +375,35 @@ export default function Invoices() {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      <div className="flex flex-col md:flex-row items-center gap-4 p-4 rounded-xl shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="relative flex-1 w-full">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
-            type="text" 
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
             placeholder={t('invoices_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all text-zinc-900 dark:text-white"
+            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
-        <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <button 
+        <div className="flex items-center gap-2 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+          <button
             onClick={() => setIsGroupedByProject(true)}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all",
-              isGroupedByProject ? "bg-white dark:bg-zinc-800 text-emerald-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-            )}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            style={isGroupedByProject
+              ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
+              : { color: 'var(--tblr-muted)' }}
           >
             <IconLayoutGrid size={16} />
             {t('invoices_group_by_project')}
           </button>
           <button
             onClick={() => setIsGroupedByProject(false)}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all",
-              !isGroupedByProject ? "bg-white dark:bg-zinc-800 text-emerald-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-            )}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            style={!isGroupedByProject
+              ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
+              : { color: 'var(--tblr-muted)' }}
           >
             <IconList size={16} />
             {t('invoices_list_view')}
@@ -391,13 +411,14 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
+      <div className="rounded-2xl overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                <th 
-                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <th
+                  className="px-6 py-4 text-xs font-bold uppercase tracking-wider cursor-pointer group"
+                  style={{ color: 'var(--tblr-muted)' }}
                   onClick={() => handleSort('project_name')}
                 >
                   <div className="flex items-center gap-2">
@@ -406,7 +427,8 @@ export default function Invoices() {
                   </div>
                 </th>
                 <th
-                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  className="px-6 py-4 text-xs font-bold uppercase tracking-wider cursor-pointer group"
+                  style={{ color: 'var(--tblr-muted)' }}
                   onClick={() => handleSort('amount')}
                 >
                   <div className="flex items-center gap-2">
@@ -415,7 +437,8 @@ export default function Invoices() {
                   </div>
                 </th>
                 <th
-                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  className="px-6 py-4 text-xs font-bold uppercase tracking-wider cursor-pointer group"
+                  style={{ color: 'var(--tblr-muted)' }}
                   onClick={() => handleSort('due_date')}
                 >
                   <div className="flex items-center gap-2">
@@ -424,7 +447,8 @@ export default function Invoices() {
                   </div>
                 </th>
                 <th
-                  className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer group"
+                  className="px-6 py-4 text-xs font-bold uppercase tracking-wider cursor-pointer group"
+                  style={{ color: 'var(--tblr-muted)' }}
                   onClick={() => handleSort('status')}
                 >
                   <div className="flex items-center gap-2">
@@ -432,155 +456,158 @@ export default function Invoices() {
                     <SortIcon column="status" />
                   </div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">{t('invoices_col_actions')}</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-right" style={{ color: 'var(--tblr-muted)' }}>{t('invoices_col_actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody>
               {isGroupedByProject ? (
                 Object.entries(groupedInvoices).map(([projectId, group]) => (
                   <React.Fragment key={projectId}>
-                    <tr 
-                      className="bg-zinc-100/50 dark:bg-zinc-900/50 cursor-pointer hover:bg-zinc-200/50 dark:hover:bg-zinc-900/80 transition-colors group/header"
+                    <tr
+                      className="cursor-pointer transition-colors group/header"
+                      style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)', borderBottom: '1px solid var(--tblr-border)' }}
                       onClick={() => toggleProjectExpansion(projectId)}
                     >
-                      <td colSpan={5} className="px-6 py-3 border-y border-zinc-200/50 dark:border-zinc-700/50">
+                      <td colSpan={5} className="px-6 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="p-1 bg-white dark:bg-zinc-800 rounded shadow-sm border border-zinc-200 dark:border-zinc-700">
-                            {expandedProjects.has(projectId) ? <IconChevronDown size={16} className="text-emerald-500" /> : <IconChevronRight size={16} className="text-zinc-400" />}
+                          <div className="p-1 rounded shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+                            {expandedProjects.has(projectId)
+                              ? <IconChevronDown size={16} style={{ color: 'var(--tblr-primary)' }} />
+                              : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
                           </div>
-                          <span className="font-bold text-sm text-zinc-900 dark:text-white group-hover/header:text-emerald-600 transition-colors">{group.name}</span>
-                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full text-[10px] font-bold">
+                          <span className="font-bold text-sm transition-colors" style={{ color: 'var(--tblr-text)' }}>{group.name}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                             {group.invoices.length > 1 ? t('invoices_count_invoices_plural', { count: group.invoices.length }) : t('invoices_count_invoices', { count: group.invoices.length })}
                           </span>
                         </div>
                       </td>
                     </tr>
                     {expandedProjects.has(projectId) && group.invoices.map((invoice) => (
-                        <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-l-4 border-emerald-500/30">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3 pl-4">
-                              <div className={cn(
-                                "p-2 rounded-lg",
-                                invoice.invoice_type === 'acompte'
-                                  ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
-                                  : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                              )}>
-                                <IconFileInvoice size={20} />
+                      <tr key={invoice.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)', borderLeft: '4px solid var(--tblr-primary)' }}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3 pl-4">
+                            <div
+                              className="p-2 rounded-lg"
+                              style={invoice.invoice_type === 'acompte'
+                                ? { background: '#fff3bf', color: '#e67700' }
+                                : { background: '#d3f9d8', color: '#2f9e44' }}
+                            >
+                              <IconFileInvoice size={20} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
+                                {invoice.invoice_type === 'acompte' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                                )}
                               </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
-                                  {invoice.invoice_type === 'acompte' && (
-                                    <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[9px] font-bold uppercase tracking-wider">{t('invoices_badge_acompte')}</span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
-                              </div>
+                              <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
-                          </td>
-                          <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white text-sm">
-                            {formatCurrency(invoice.amount, currency)}
-                          </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-sm">
-                            <div className="flex items-center gap-1.5">
-                              <IconClock size={14} className="text-zinc-400" />
-                              {new Date(invoice.due_date).toLocaleDateString()}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={cn(
-                              "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                              invoice.status === 'Paid' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                              invoice.status === 'Overdue' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800" :
-                              invoice.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                              "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
-                            )}>
-                              {invoice.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 font-mono font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>
+                          {formatCurrency(invoice.amount, currency)}
+                        </td>
+                        <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                          <div className="flex items-center gap-1.5">
+                            <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
+                            {new Date(invoice.due_date).toLocaleDateString()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                            {invoice.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openEditModal(invoice)}
+                              className="p-1.5 rounded-lg transition-colors"
+                              style={{ color: 'var(--tblr-muted)' }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-text)'; (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-surface-2)'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                              title={t('invoices_edit_btn')}
+                            >
+                              <IconEdit size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleOpenGenerator(invoice)}
+                              className="p-1.5 rounded-lg transition-colors"
+                              style={{ color: 'var(--tblr-primary)' }}
+                              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-primary-lt)'}
+                              onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                              title="Generate Factur-X"
+                            >
+                              <IconFileCode size={18} />
+                            </button>
+                            {invoice.status !== 'Paid' && (
                               <button
-                                onClick={() => openEditModal(invoice)}
-                                className="p-1.5 text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
-                                title={t('invoices_edit_btn')}
+                                onClick={() => openSendModal(invoice)}
+                                className="p-1.5 rounded-lg transition-colors"
+                                style={{ color: 'var(--tblr-primary)' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-primary-lt)'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title={t('invoices_send_btn')}
                               >
-                                <IconEdit size={18} />
+                                <IconSend size={18} />
                               </button>
+                            )}
+                            {invoice.status !== 'Paid' && (
                               <button
-                                onClick={() => handleOpenGenerator(invoice)}
-                                className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                title="Generate Factur-X"
+                                onClick={() => handleUpdateStatus(invoice, 'Paid')}
+                                className="p-1.5 rounded-lg transition-colors"
+                                style={{ color: '#2f9e44' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#d3f9d8'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title="Mark as Paid"
                               >
-                                <IconFileCode size={18} />
+                                <IconCircleCheck size={18} />
                               </button>
-                              {invoice.status !== 'Paid' && (
-                                <button
-                                  onClick={() => openSendModal(invoice)}
-                                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                  title={t('invoices_send_btn')}
-                                >
-                                  <IconSend size={18} />
-                                </button>
-                              )}
-                              {invoice.status !== 'Paid' && (
-                                <button
-                                  onClick={() => handleUpdateStatus(invoice, 'Paid')}
-                                  className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
-                                  title="Mark as Paid"
-                                >
-                                  <IconCircleCheck size={18} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </React.Fragment>
                 ))
               ) : (
                 sortedInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                  <tr key={invoice.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "p-2 rounded-lg",
-                          invoice.invoice_type === 'acompte'
-                            ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
-                            : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                        )}>
+                        <div
+                          className="p-2 rounded-lg"
+                          style={invoice.invoice_type === 'acompte'
+                            ? { background: '#fff3bf', color: '#e67700' }
+                            : { background: '#d3f9d8', color: '#2f9e44' }}
+                        >
                           <IconFileInvoice size={20} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <p className="font-bold text-zinc-900 dark:text-white text-sm">{invoice.invoice_number}</p>
+                            <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                             {invoice.invoice_type === 'acompte' && (
-                              <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[9px] font-bold uppercase tracking-wider">{t('invoices_badge_acompte')}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                             )}
-                            <span className="text-[10px] text-zinc-400 font-mono">/</span>
-                            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{invoice.project_name || 'General'}</p>
+                            <span className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
+                            <p className="text-xs font-medium" style={{ color: 'var(--tblr-primary)' }}>{invoice.project_name || 'General'}</p>
                           </div>
-                          <p className="text-xs text-zinc-500 truncate max-w-[200px]">{invoice.description}</p>
+                          <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white text-sm">
+                    <td className="px-6 py-4 font-mono font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>
                       {formatCurrency(invoice.amount, currency)}
                     </td>
-                    <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-sm">
+                    <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                       <div className="flex items-center gap-1.5">
-                        <IconClock size={14} className="text-zinc-400" />
+                        <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
                         {new Date(invoice.due_date).toLocaleDateString()}
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={cn(
-                        "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                        invoice.status === 'Paid' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                        invoice.status === 'Overdue' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-green-800" :
-                        invoice.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                        "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
-                      )}>
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
                         {invoice.status}
                       </span>
                     </td>
@@ -588,14 +615,20 @@ export default function Invoices() {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => openEditModal(invoice)}
-                          className="p-1.5 text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                          className="p-1.5 rounded-lg transition-colors"
+                          style={{ color: 'var(--tblr-muted)' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-text)'; (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-surface-2)'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                           title={t('invoices_edit_btn')}
                         >
                           <IconEdit size={18} />
                         </button>
                         <button
                           onClick={() => handleOpenGenerator(invoice)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                          className="p-1.5 rounded-lg transition-colors"
+                          style={{ color: 'var(--tblr-primary)' }}
+                          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-primary-lt)'}
+                          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
                           title="Generate Factur-X"
                         >
                           <IconFileCode size={18} />
@@ -603,7 +636,10 @@ export default function Invoices() {
                         {invoice.status !== 'Paid' && (
                           <button
                             onClick={() => openSendModal(invoice)}
-                            className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: 'var(--tblr-primary)' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-primary-lt)'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
                             title={t('invoices_send_btn')}
                           >
                             <IconSend size={18} />
@@ -612,7 +648,10 @@ export default function Invoices() {
                         {invoice.status !== 'Paid' && (
                           <button
                             onClick={() => handleUpdateStatus(invoice, 'Paid')}
-                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: '#2f9e44' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#d3f9d8'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
                             title="Mark as Paid"
                           >
                             <IconCircleCheck size={18} />
@@ -625,7 +664,7 @@ export default function Invoices() {
               )}
               {sortedInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                  <td colSpan={5} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     {t('invoices_no_invoices')}
                   </td>
                 </tr>
@@ -637,7 +676,7 @@ export default function Invoices() {
 
       <AnimatePresence>
         {isGeneratorOpen && selectedInvoice && (
-          <InvoiceGenerator 
+          <InvoiceGenerator
             onClose={() => setIsGeneratorOpen(false)}
             onSave={(updated) => {
               setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
@@ -654,20 +693,22 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('invoices_new_title')}</h2>
-                <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('invoices_new_title')}</h2>
+                <button onClick={() => setIsModalOpen(false)} style={{ color: 'var(--tblr-muted)' }}>
                   <IconX size={24} />
                 </button>
               </div>
               <form onSubmit={handleCreateInvoice} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_project_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_project_label')}</label>
                   <select
                     required
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={newInvoice.project_id}
                     onChange={e => setNewInvoice({...newInvoice, project_id: e.target.value})}
                   >
@@ -678,17 +719,15 @@ export default function Invoices() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">{t('invoices_type_label')}</label>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--tblr-text)' }}>{t('invoices_type_label')}</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
-                      className={cn(
-                        "flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all",
-                        newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
-                          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
-                          : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
-                      )}
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all"
+                      style={newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
+                        ? { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                        : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
                     >
                       <IconFileInvoice size={20} />
                       {t('invoices_type_standard')}
@@ -696,12 +735,10 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
-                      className={cn(
-                        "flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all",
-                        newInvoice.invoice_type === 'acompte'
-                          ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
-                          : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
-                      )}
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all"
+                      style={newInvoice.invoice_type === 'acompte'
+                        ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
+                        : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
                     >
                       <IconFileInvoice size={20} />
                       {t('invoices_type_acompte')}
@@ -709,11 +746,12 @@ export default function Invoices() {
                   </div>
                 </div>
                 {newInvoice.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl">
+                  <div className="space-y-3 p-4 rounded-xl" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_mission_label')}</label>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
                       <select
-                        className="w-full px-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-zinc-900 dark:text-white"
+                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newInvoice.mission_id || ''}
                         onChange={e => {
                           const m = MISSIONS.find(m => m.id === e.target.value);
@@ -727,10 +765,11 @@ export default function Invoices() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_advancement_label')}</label>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_advancement_label')}</label>
                       <input
                         type="number" min={0} max={100} step={5}
-                        className="w-full px-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-zinc-900 dark:text-white"
+                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={newInvoice.advancement_pct ?? ''}
                         onChange={e => setNewInvoice({ ...newInvoice, advancement_pct: Number(e.target.value) })}
                         placeholder="Ex : 30"
@@ -738,57 +777,62 @@ export default function Invoices() {
                     </div>
                     {newAcompteCalculated !== null && (
                       <div className="flex items-center gap-2 text-sm">
-                        <IconInfoCircle size={16} className="text-amber-600 shrink-0" />
-                        <span className="text-amber-800 dark:text-amber-300">
+                        <IconInfoCircle size={16} style={{ color: '#e67700' }} className="shrink-0" />
+                        <span style={{ color: '#7d4e00' }}>
                           {t('invoices_calculated_amount')} : <strong>{formatCurrency(newAcompteCalculated, currency)}</strong>
                         </span>
                       </div>
                     )}
                     {newInvoice.project_id && !projects.find(p => p.id === newInvoice.project_id)?.remuneration && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices_no_remuneration')}</p>
+                      <p className="text-xs" style={{ color: '#e67700' }}>{t('invoices_no_remuneration')}</p>
                     )}
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_amount_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                   <input
                     type="number"
                     required={newInvoice.invoice_type !== 'acompte' || newAcompteCalculated === null}
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={newAcompteCalculated !== null ? newAcompteCalculated.toFixed(2) : (newInvoice.amount ?? '')}
                     readOnly={newAcompteCalculated !== null}
                     onChange={e => newAcompteCalculated === null && setNewInvoice({...newInvoice, amount: Number(e.target.value)})}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_due_date_label')}</label>
-                  <input 
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_due_date_label')}</label>
+                  <input
                     type="date"
                     required
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={newInvoice.due_date}
                     onChange={e => setNewInvoice({...newInvoice, due_date: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_description_label')}</label>
-                  <textarea 
-                    className="w-full h-32 px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white resize-none"
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                    style={inputStyle}
                     value={newInvoice.description ?? ''}
                     onChange={e => setNewInvoice({...newInvoice, description: e.target.value})}
                   />
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                   >
                     {t('btn_cancel')}
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20"
+                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                   >
                     {t('invoices_create_btn')}
                   </button>
@@ -797,6 +841,7 @@ export default function Invoices() {
             </motion.div>
           </div>
         )}
+
         {/* Edit Invoice Modal */}
         {editingInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -804,30 +849,29 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between shrink-0">
-                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('invoices_edit_title')}</h2>
-                <button onClick={() => setEditingInvoice(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><IconX size={24} /></button>
+              <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('invoices_edit_title')}</h2>
+                <button onClick={() => setEditingInvoice(null)} style={{ color: 'var(--tblr-muted)' }}><IconX size={24} /></button>
               </div>
               <form onSubmit={handleSaveEdit} className="p-6 space-y-4 overflow-y-auto">
                 {/* Invoice type toggle */}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">{t('invoices_type_label')}</label>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--tblr-text)' }}>{t('invoices_type_label')}</label>
                   <div className="grid grid-cols-2 gap-2">
                     {(['standard', 'acompte'] as const).map(type => (
                       <button
                         key={type}
                         type="button"
                         onClick={() => setEditForm({ ...editForm, invoice_type: type })}
-                        className={cn(
-                          "flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-all",
-                          editForm.invoice_type === type
-                            ? type === 'acompte'
-                              ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
-                              : "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
-                            : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
-                        )}
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-all"
+                        style={editForm.invoice_type === type
+                          ? type === 'acompte'
+                            ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
+                            : { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                          : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
                       >
                         <IconFileInvoice size={16} />
                         {t(`invoices_type_${type}`)}
@@ -838,11 +882,12 @@ export default function Invoices() {
 
                 {/* Acompte mission fields */}
                 {editForm.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl">
+                  <div className="space-y-3 p-4 rounded-xl" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_mission_label')}</label>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
                       <select
-                        className="w-full px-4 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-zinc-900 dark:text-white"
+                        className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                        style={inputStyle}
                         value={editForm.mission_id || ''}
                         onChange={e => {
                           const m = MISSIONS.find(m => m.id === e.target.value);
@@ -856,38 +901,40 @@ export default function Invoices() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_advancement_label')}</label>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_advancement_label')}</label>
                       <div className="relative">
                         <input
                           type="number" min={0} max={100} step={5}
-                          className="w-full px-4 py-2 pr-10 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-zinc-900 dark:text-white"
+                          className="w-full px-4 py-2 pr-10 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                          style={inputStyle}
                           value={editForm.advancement_pct ?? ''}
                           onChange={e => setEditForm({ ...editForm, advancement_pct: Number(e.target.value) })}
                           placeholder="Ex : 30"
                         />
-                        <IconPercentage size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                        <IconPercentage size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--tblr-muted)' }} />
                       </div>
                     </div>
                     {acompteCalculated !== null && (
-                      <div className="flex items-center gap-2 text-sm p-2 bg-amber-100 dark:bg-amber-900/20 rounded-lg">
-                        <IconInfoCircle size={16} className="text-amber-600 shrink-0" />
-                        <span className="text-amber-800 dark:text-amber-300">
+                      <div className="flex items-center gap-2 text-sm p-2 rounded-lg" style={{ background: 'rgba(255,243,191,0.7)' }}>
+                        <IconInfoCircle size={16} style={{ color: '#e67700' }} className="shrink-0" />
+                        <span style={{ color: '#7d4e00' }}>
                           {t('invoices_calculated_amount')} : <strong>{formatCurrency(acompteCalculated, currency)}</strong>
                         </span>
                       </div>
                     )}
                     {editForm.project_id && !projects.find(p => p.id === editForm.project_id)?.remuneration && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices_no_remuneration')}</p>
+                      <p className="text-xs" style={{ color: '#e67700' }}>{t('invoices_no_remuneration')}</p>
                     )}
                   </div>
                 )}
 
                 {/* Amount */}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_amount_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                   <input
                     type="number"
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
                     readOnly={acompteCalculated !== null}
                     onChange={e => acompteCalculated === null && setEditForm({ ...editForm, amount: Number(e.target.value) })}
@@ -896,10 +943,11 @@ export default function Invoices() {
 
                 {/* Due date */}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_due_date_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_due_date_label')}</label>
                   <input
                     type="date" required
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={editForm.due_date || ''}
                     onChange={e => setEditForm({ ...editForm, due_date: e.target.value })}
                   />
@@ -907,9 +955,10 @@ export default function Invoices() {
 
                 {/* Description */}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_description_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
                   <textarea
-                    className="w-full h-24 px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white resize-none"
+                    className="w-full h-24 px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                    style={inputStyle}
                     value={editForm.description || ''}
                     onChange={e => setEditForm({ ...editForm, description: e.target.value })}
                   />
@@ -917,9 +966,10 @@ export default function Invoices() {
 
                 {/* Status */}
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_col_status')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_col_status')}</label>
                   <select
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={editForm.status || 'Draft'}
                     onChange={e => setEditForm({ ...editForm, status: e.target.value as Invoice['status'] })}
                   >
@@ -930,12 +980,20 @@ export default function Invoices() {
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setEditingInvoice(null)}
-                    className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setEditingInvoice(null)}
+                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
                     {t('btn_cancel')}
                   </button>
-                  <button type="submit" disabled={isSavingEdit}
-                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                    style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                  >
                     <IconDeviceFloppy size={18} />
                     {isSavingEdit ? '...' : t('btn_save')}
                   </button>
@@ -952,67 +1010,79 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                  <div className="p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                     <IconSend size={20} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{t('invoices_send_title')}</h2>
-                    <p className="text-xs text-zinc-500">{sendingInvoice.invoice_number}</p>
+                    <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_title')}</h2>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{sendingInvoice.invoice_number}</p>
                   </div>
                 </div>
-                <button onClick={() => { setSendingInvoice(null); setSendResult(null); }} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><IconX size={24} /></button>
+                <button onClick={() => { setSendingInvoice(null); setSendResult(null); }} style={{ color: 'var(--tblr-muted)' }}><IconX size={24} /></button>
               </div>
               <form onSubmit={handleSendInvoice} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_send_to_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_to_label')}</label>
                   <input
                     type="email" required
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={sendForm.to}
                     onChange={e => setSendForm({ ...sendForm, to: e.target.value })}
                     placeholder="client@exemple.fr"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_send_subject_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_subject_label')}</label>
                   <input
                     type="text" required
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
                     value={sendForm.subject}
                     onChange={e => setSendForm({ ...sendForm, subject: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('invoices_send_message_label')}</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_message_label')}</label>
                   <textarea
                     required rows={8}
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-900 dark:text-white resize-none font-mono text-sm"
+                    className="w-full px-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 resize-none font-mono text-sm"
+                    style={inputStyle}
                     value={sendForm.message}
                     onChange={e => setSendForm({ ...sendForm, message: e.target.value })}
                   />
                 </div>
                 {sendResult && (
-                  <div className={cn(
-                    "text-sm p-3 rounded-xl",
-                    sendResult.success
-                      ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                      : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                  )}>
+                  <div
+                    className="text-sm p-3 rounded-xl"
+                    style={sendResult.success
+                      ? { background: '#d3f9d8', color: '#2f9e44' }
+                      : { background: '#ffe3e3', color: 'var(--tblr-danger)' }}
+                  >
                     {sendResult.message}
                   </div>
                 )}
                 <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => { setSendingInvoice(null); setSendResult(null); }}
-                    className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => { setSendingInvoice(null); setSendResult(null); }}
+                    className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors"
+                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
                     {sendResult?.success ? t('btn_close') : t('btn_cancel')}
                   </button>
                   {!sendResult?.success && (
-                    <button type="submit" disabled={isSending}
-                      className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-60 flex items-center justify-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isSending}
+                      className="flex-1 px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                    >
                       <IconSend size={18} />
                       {isSending ? '...' : t('invoices_send_confirm')}
                     </button>
