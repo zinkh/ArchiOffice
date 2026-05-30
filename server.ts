@@ -618,6 +618,31 @@ if (false as any) {
       FOREIGN KEY(report_id) REFERENCES site_reports(id)
     );
 
+    CREATE TABLE IF NOT EXISTS observations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      lot_id TEXT,
+      contact_id TEXT,
+      texte TEXT NOT NULL DEFAULT '',
+      statut TEXT NOT NULL DEFAULT 'À faire',
+      due_date TEXT,
+      created_report_id TEXT,
+      resolved_report_id TEXT,
+      number INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(project_id) REFERENCES projects(id),
+      FOREIGN KEY(created_report_id) REFERENCES site_reports(id),
+      FOREIGN KEY(resolved_report_id) REFERENCES site_reports(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS observation_reports (
+      observation_id TEXT,
+      report_id TEXT,
+      PRIMARY KEY (observation_id, report_id),
+      FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE,
+      FOREIGN KEY(report_id) REFERENCES site_reports(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY,
       project_id TEXT,
@@ -893,6 +918,8 @@ if (false as any) {
     ] },
     { table: 'ordres_de_service', columns: ['type'] },
     { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
+    { table: 'observations', columns: ['lot_id', 'contact_id', 'texte', 'statut', 'due_date', 'created_report_id', 'resolved_report_id', 'number', 'created_at'] },
+    { table: 'observation_reports', columns: ['observation_id', 'report_id'] },
     { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
     { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
     { table: 'invoices', columns: ['zoho_invoice_id'] },
@@ -3733,6 +3760,114 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete note" });
     }
   });
+
+  // --- Observations routes ---
+
+  app.get("/api/projects/:projectId/observations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { data, error } = await supabaseAdmin
+        .from('observations')
+        .select(`*, lot:project_lots(id,lot_number,lot_title), created_report:site_reports!created_report_id(report_number), resolved_report:site_reports!resolved_report_id(report_number), observation_reports(report_id)`)
+        .eq('project_id', projectId).eq('tenant_id', tenantId)
+        .order('number', { ascending: true });
+      if (error) throw error;
+      const mapped = (data || []).map((o: any) => ({
+        ...o,
+        created_report_number: o.created_report?.report_number,
+        resolved_report_number: o.resolved_report?.report_number,
+        report_ids: (o.observation_reports || []).map((r: any) => r.report_id),
+      }));
+      res.json(mapped);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch observations" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/observations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { lot_id, contact_id, texte, statut, due_date, created_report_id } = req.body;
+      const { data: existing } = await supabaseAdmin.from('observations').select('number').eq('project_id', projectId).eq('tenant_id', tenantId).order('number', { ascending: false }).limit(1);
+      const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
+      const id = `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const { data, error } = await supabaseAdmin.from('observations').insert({
+        id, tenant_id: tenantId, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
+        texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
+        created_report_id: created_report_id || null, number
+      }).select().single();
+      if (error) throw error;
+      if (created_report_id) {
+        await supabaseAdmin.from('observation_reports').insert({ observation_id: id, report_id: created_report_id });
+      }
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create observation" });
+    }
+  });
+
+  app.put("/api/observations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { lot_id, contact_id, texte, statut, due_date, resolved_report_id } = req.body;
+      const update: any = { lot_id: lot_id || null, contact_id: contact_id || null, texte, statut, due_date: due_date || null };
+      if (statut === 'Levée' && resolved_report_id) update.resolved_report_id = resolved_report_id;
+      const { error } = await supabaseAdmin.from('observations').update(update).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update observation" });
+    }
+  });
+
+  app.delete("/api/observations/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from('observations').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete observation" });
+    }
+  });
+
+  app.get("/api/reports/:reportId/observations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { reportId } = req.params;
+      const { data, error } = await supabaseAdmin
+        .from('observations')
+        .select(`*, lot:project_lots(id,lot_number,lot_title), created_report:site_reports!created_report_id(report_number), resolved_report:site_reports!resolved_report_id(report_number), observation_reports!inner(report_id)`)
+        .eq('tenant_id', tenantId)
+        .eq('observation_reports.report_id', reportId)
+        .order('number', { ascending: true });
+      if (error) throw error;
+      const mapped = (data || []).map((o: any) => ({
+        ...o,
+        created_report_number: o.created_report?.report_number,
+        resolved_report_number: o.resolved_report?.report_number,
+        report_ids: (o.observation_reports || []).map((r: any) => r.report_id),
+      }));
+      res.json(mapped);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report observations" });
+    }
+  });
+
+  app.post("/api/observations/:id/link/:reportId", async (req: any, res: any) => {
+    try {
+      await supabaseAdmin.from('observation_reports').insert({ observation_id: req.params.id, report_id: req.params.reportId });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to link observation to report" });
+    }
+  });
+
+  // --- End Observations routes ---
 
   app.get("/api/projects/:projectId/cctp", async (req: any, res: any) => {
     try {
