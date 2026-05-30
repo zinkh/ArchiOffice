@@ -392,7 +392,7 @@ export default function Proposals() {
           <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('proposals')}</h1>
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_subtitle')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => document.getElementById('xml-file-upload')?.click()}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all"

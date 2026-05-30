@@ -261,7 +261,7 @@ export default function References() {
           <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('references_title')}</h2>
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('references_subtitle')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button 
             onClick={exportToPDF}
             disabled={selectedIds.size === 0}

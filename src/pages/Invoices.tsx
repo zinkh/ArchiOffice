@@ -330,10 +330,10 @@ export default function Invoices() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--tblr-text)' }}>{t('invoices')}</h1>
-          <p style={{ color: 'var(--tblr-muted)' }}>{t('invoices_subtitle')}</p>
+          <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('invoices')}</h1>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('invoices_subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {zohoConnected && (
             <button
               onClick={handleZohoSync}
