@@ -10,6 +10,7 @@ import { ContactModal } from '../components/ContactModal';
 import type { Tender, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
+import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 export default function Tenders() {
   const { t } = useTranslation();
@@ -310,10 +311,45 @@ export default function Tenders() {
       </div>
 
       <div
-        className="rounded-lg overflow-hidden shadow-sm"
+        className="rounded-lg overflow-hidden"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
-        <div className="overflow-x-auto">
+        {/* Mobile accordion */}
+        <div className="md:hidden">
+          <MobileAccordionTable
+            data={activeTenders}
+            keyField="id"
+            emptyText={t('tenders_no_active')}
+            columns={[
+              { label: t('description'), primary: true, render: t => (
+                <div>
+                  <p className="font-medium text-sm">{t.title}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t.mandataire_name || '---'}</p>
+                </div>
+              )},
+              { label: t('client'), render: td => td.client_name || '---' },
+              { label: 'Type', render: td => td.type || '---' },
+              { label: t('deadline'), render: td => td.deadline ? new Date(td.deadline).toLocaleDateString('fr-FR') : '---' },
+              { label: t('valuation'), render: td => td.valuation ? `${td.valuation.toLocaleString('fr-FR')} €` : '---' },
+              { label: t('status'), render: td => (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{
+                  background: td.status === 'Won' ? 'rgba(47,179,135,0.1)' : td.status === 'Lost' ? 'rgba(214,57,57,0.1)' : 'var(--tblr-primary-lt)',
+                  color: td.status === 'Won' ? 'var(--tblr-success)' : td.status === 'Lost' ? 'var(--tblr-danger)' : 'var(--tblr-primary)',
+                  border: '1px solid currentColor',
+                }}>{td.status}</span>
+              )},
+            ]}
+            actions={td => (
+              <div className="flex gap-2">
+                <Link to={`/tenders/${td.id}`} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></Link>
+                <button onClick={() => handleEditClick(td)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface-2)' }}><IconEdit size={15} /></button>
+              </div>
+            )}
+          />
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>

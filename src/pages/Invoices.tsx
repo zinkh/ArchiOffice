@@ -1,12 +1,13 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Invoice, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
+import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
@@ -411,8 +412,37 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div className="rounded-lg overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-        <div className="overflow-x-auto">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        {/* Mobile accordion */}
+        <div className="md:hidden">
+          <MobileAccordionTable
+            data={sortedInvoices}
+            keyField="id"
+            emptyText={t('invoices_no_invoices')}
+            columns={[
+              { label: t('invoices_col_invoice_project'), primary: true, render: inv => (
+                <div>
+                  <p className="font-semibold text-sm">{inv.invoice_number}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
+                </div>
+              )},
+              { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
+              { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
+              { label: t('invoices_col_status'), render: inv => (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+              )},
+            ]}
+            actions={inv => (
+              <div className="flex gap-2">
+                <button onClick={() => { setSelectedInvoice(inv); setIsGeneratorOpen(true); }} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
+                {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
+              </div>
+            )}
+          />
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>

@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson } from '../lib/api';
+import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
@@ -508,8 +509,41 @@ export default function Contacts() {
         </div>
       </div>
 
-      <div className="rounded-xl overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-        <div className="overflow-x-auto">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        {/* Mobile accordion */}
+        <div className="md:hidden">
+          <MobileAccordionTable
+            data={filteredAndSortedContacts}
+            keyField="id"
+            emptyText={searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}
+            columns={[
+              { label: 'Nom', primary: true, render: c => (
+                <div className="flex items-center gap-2">
+                  <span>{c.prefix} {c.last_name} {c.first_name}</span>
+                  {isContactIncomplete(c) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#fff3bf', color: '#e67700' }}>
+                      <IconAlertTriangle size={9} /> À compléter
+                    </span>
+                  )}
+                </div>
+              )},
+              { label: t('contacts_col_category'), render: c => c.category ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span> : '---' },
+              { label: t('phone'), render: c => c.phone || '---' },
+              { label: t('email'), render: c => c.email || '---' },
+              { label: t('city'), render: c => c.city || '---' },
+              { label: t('ca_amount'), render: c => <span className="font-mono">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(c.ca_amount)}</span> },
+            ]}
+            actions={contact => (
+              <div className="flex gap-2">
+                <button onClick={() => handleEdit(contact)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEdit size={15} /></button>
+                <button onClick={() => handleDeleteContact(contact.id)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-danger)', background: '#ffe3e3' }}><IconTrash size={15} /></button>
+              </div>
+            )}
+          />
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
               <tr>
