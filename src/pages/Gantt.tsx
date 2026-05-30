@@ -172,30 +172,36 @@ export default function Gantt() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('temporal_analysis')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('timeline')}</p>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('temporal_analysis')}</h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('timeline')}</p>
         </div>
-        <div className="flex items-center gap-2 bg-white dark:bg-zinc-800 p-1 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <button 
+        <div className="flex items-center gap-2 p-1 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <button
             onClick={() => setViewDate(subMonths(viewDate, 1))}
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded text-zinc-600 dark:text-zinc-400"
+            className="p-2 rounded"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+            onMouseLeave={e => (e.currentTarget.style.background = '')}
           >
             <IconChevronLeft size={18} />
           </button>
-          <span className="px-4 font-medium text-sm text-zinc-900 dark:text-white min-w-[140px] text-center">
+          <span className="px-4 font-medium text-sm min-w-[140px] text-center" style={{ color: 'var(--tblr-text)' }}>
             {format(viewDate, 'MMMM yyyy')}
           </span>
-          <button 
+          <button
             onClick={() => setViewDate(addMonths(viewDate, 1))}
-            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded text-zinc-600 dark:text-zinc-400"
+            className="p-2 rounded"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+            onMouseLeave={e => (e.currentTarget.style.background = '')}
           >
             <IconChevronRight size={18} />
           </button>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-6 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="p-4 flex items-center gap-6 text-xs font-medium" style={{ borderBottom: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-blue-500 rounded-sm" />
             <span>{t('project_span')}</span>
@@ -212,7 +218,7 @@ export default function Gantt() {
             <div className="w-2 h-2 bg-green-500 rounded-full" />
             <span>{t('completed_event')}</span>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 text-zinc-400">
+          <div className="ml-auto flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
             <IconInfoCircle size={14} />
             <span>{t('scroll_active')}</span>
           </div>
@@ -267,17 +273,20 @@ export default function Gantt() {
 
             <div className="grid grid-cols-[200px_1fr] gap-0 relative z-10">
               {/* Header */}
-              <div className="py-4 font-bold text-sm text-zinc-900 dark:text-white border-b border-zinc-200 dark:border-zinc-700">
+              <div className="py-4 font-semibold text-sm" style={{ borderBottom: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
                 {t('project_task')}
               </div>
-              <div className="flex border-b border-zinc-200 dark:border-zinc-700">
+              <div className="flex" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                 {days.map(day => (
-                  <div 
-                    key={day.toISOString()} 
-                    className={cn(
-                      "flex-1 min-w-[30px] text-center text-[10px] py-4 border-l border-zinc-100 dark:border-zinc-800/50",
-                      isSameDay(day, new Date()) ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold" : "text-zinc-500 dark:text-zinc-400"
-                    )}
+                  <div
+                    key={day.toISOString()}
+                    className="flex-1 min-w-[30px] text-center text-[10px] py-4"
+                    style={{
+                      borderLeft: '1px solid var(--tblr-border)',
+                      background: isSameDay(day, new Date()) ? 'var(--tblr-primary-lt)' : undefined,
+                      color: isSameDay(day, new Date()) ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
+                      fontWeight: isSameDay(day, new Date()) ? 'bold' : undefined,
+                    }}
                   >
                     {format(day, 'd')}
                   </div>
@@ -292,18 +301,20 @@ export default function Gantt() {
                 
                 return (
                   <Fragment key={project.id}>
-                    <div className="py-4 pr-4 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50 dark:bg-zinc-900/50">
-                      <div className="font-medium text-sm text-zinc-900 dark:text-white truncate">{project.name}</div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">{project.client}</div>
+                    <div className="py-4 pr-4" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                      <div className="font-medium text-sm truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</div>
+                      <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
                     </div>
-                    <div className="flex border-b border-zinc-100 dark:border-zinc-800/50 relative py-4 bg-zinc-50 dark:bg-zinc-900/50">
+                    <div className="flex relative py-4" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                       {days.map(day => (
-                        <div 
-                          key={day.toISOString()} 
-                          className={cn(
-                            "flex-1 min-w-[30px] border-l border-zinc-100 dark:border-zinc-800/50",
-                            isSameDay(day, new Date()) && "bg-blue-50/50 dark:bg-blue-900/10"
-                          )}
+                        <div
+                          key={day.toISOString()}
+                          className="flex-1 min-w-[30px]"
+                          style={{
+                            borderLeft: '1px solid var(--tblr-border)',
+                            background: isSameDay(day, new Date()) ? 'var(--tblr-primary-lt)' : undefined,
+                            opacity: isSameDay(day, new Date()) ? 0.4 : undefined,
+                          }}
                         />
                       ))}
                       
@@ -329,17 +340,19 @@ export default function Gantt() {
                       const taskEnd = new Date(task.end_date);
                       return (
                         <Fragment key={task.id}>
-                          <div className="py-2 pr-4 border-b border-zinc-100 dark:border-zinc-800/50 pl-6">
-                            <div className="text-xs text-zinc-700 dark:text-zinc-300 truncate">{task.title}</div>
+                          <div className="py-2 pr-4 pl-6" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                            <div className="text-xs truncate" style={{ color: 'var(--tblr-text)' }}>{task.title}</div>
                           </div>
-                          <div className="flex border-b border-zinc-100 dark:border-zinc-800/50 relative py-2">
+                          <div className="flex relative py-2" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                             {days.map(day => (
-                              <div 
-                                key={day.toISOString()} 
-                                className={cn(
-                                  "flex-1 min-w-[30px] border-l border-zinc-100 dark:border-zinc-800/50",
-                                  isSameDay(day, new Date()) && "bg-blue-50/50 dark:bg-blue-900/10"
-                                )}
+                              <div
+                                key={day.toISOString()}
+                                className="flex-1 min-w-[30px]"
+                                style={{
+                                  borderLeft: '1px solid var(--tblr-border)',
+                                  background: isSameDay(day, new Date()) ? 'var(--tblr-primary-lt)' : undefined,
+                                  opacity: isSameDay(day, new Date()) ? 0.3 : undefined,
+                                }}
                               />
                             ))}
                             

@@ -32,16 +32,19 @@ const DEFAULT_MISSIONS = [
   { id: 'opc', name: 'OPC', category: 'Mission Exécution' },
 ];
 
+const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
+
 const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
   <div>
-    <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+    <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
       {label} {required && <span className="text-red-500">*</span>}
     </label>
     {type === "select" ? (
-      <select 
+      <select
         id={id}
         required={required}
-        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
+        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
+        style={fieldStyle}
         value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       >
@@ -51,28 +54,30 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
         ))}
       </select>
     ) : type === "textarea" ? (
-      <textarea 
+      <textarea
         id={id}
-        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white resize-none h-20"
+        className="w-full px-3 py-2 rounded-lg outline-none text-sm resize-none h-20"
+        style={fieldStyle}
         value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       />
     ) : type === "checkbox" ? (
       <div className="flex items-center h-9">
-        <input 
+        <input
           id={id}
           type="checkbox"
-          className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+          className="w-4 h-4 rounded"
           checked={!!value}
           onChange={e => onChange(e.target.checked)}
         />
       </div>
     ) : (
-      <input 
+      <input
         id={id}
         type={type}
         required={required}
-        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
+        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
+        style={fieldStyle}
         value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
         onChange={e => onChange(e.target.value)}
       />
@@ -384,21 +389,23 @@ export default function Proposals() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('proposals')}</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('proposals_subtitle')}</p>
+          <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('proposals')}</h1>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_subtitle')}</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => document.getElementById('xml-file-upload')?.click()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl font-semibold transition-all shadow-sm"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconFileText size={18} />
             {t('proposals_import_xml')}
           </button>
           <input id="xml-file-upload" type="file" className="hidden" accept=".xml" onChange={handleImport} />
-          <button 
+          <button
             onClick={handleOpenCreateModal}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
             {t('proposals_create_btn')}
@@ -406,75 +413,85 @@ export default function Proposals() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      <div className="flex items-center gap-4 p-4 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="relative flex-1">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
-            type="text" 
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
             placeholder={t('proposals_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-zinc-900 dark:text-white"
+            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
       </div>
 
-      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_proposal')}</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_client')}</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_amount')}</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_col_status')}</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider text-right">{t('proposals_col_actions')}</th>
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_proposal')}</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_client')}</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_amount')}</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_status')}</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-right" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody>
               {filteredProposals.map((proposal) => (
-                <tr key={proposal.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors">
+                <tr
+                  key={proposal.id}
+                  style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '')}
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg">
+                      <div className="p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                         <IconFileSpreadsheet size={20} />
                       </div>
                       <div>
-                        <p className="font-bold text-zinc-900 dark:text-white">{proposal.title}</p>
-                        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{proposal.reference}</p>
-                        <p className="text-[10px] text-zinc-400">Created {new Date(proposal.created_at).toLocaleDateString()}</p>
+                        <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{proposal.title}</p>
+                        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 font-medium">
+                  <td className="px-6 py-4 font-medium text-sm" style={{ color: 'var(--tblr-muted)' }}>
                     {proposal.client_name || 'Unknown Client'}
                   </td>
-                  <td className="px-6 py-4 font-mono font-bold text-zinc-900 dark:text-white">
+                  <td className="px-6 py-4 font-mono font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>
                     {formatCurrency(proposal.amount)}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                      proposal.status === 'Accepted' ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" :
-                      proposal.status === 'Rejected' ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800" :
-                      proposal.status === 'Sent' ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800" :
-                      "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
-                    )}>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{
+                      background: proposal.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : proposal.status === 'Rejected' ? 'rgba(var(--tblr-danger-rgb,214,57,57),0.1)' : proposal.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
+                      color: proposal.status === 'Accepted' ? 'var(--tblr-success)' : proposal.status === 'Rejected' ? 'var(--tblr-danger)' : proposal.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
+                      border: '1px solid currentColor',
+                    }}>
                       {proposal.status}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button 
+                      <button
                         onClick={() => handleEditClick(proposal)}
-                        className="p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
                         title="Edit Proposal"
                       >
                         <IconEdit size={20} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleExport(proposal.id)}
-                        className="p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
                         title="Export XML"
                       >
                         <IconFileText size={20} />
@@ -510,7 +527,7 @@ export default function Proposals() {
               ))}
               {filteredProposals.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                  <td colSpan={5} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     {t('proposals_no_proposals')}
                   </td>
                 </tr>
@@ -527,18 +544,19 @@ export default function Proposals() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50">
+              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                 <div>
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
+                  <h2 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>
                     {editingProposal ? t('proposals_edit_title') : t('proposals_new_title')}
                   </h2>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
                     {editingProposal ? t('proposals_edit_subtitle') : t('proposals_new_subtitle')}
                   </p>
                 </div>
-                <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
+                <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-full transition-colors" style={{ color: 'var(--tblr-muted)' }}>
                   <IconX size={24} />
                 </button>
               </div>
@@ -567,7 +585,7 @@ export default function Proposals() {
                     {t('proposals_section_client')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30">
+                    <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
                       <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
                         Client Database <span className="text-red-500">*</span>
                       </label>
@@ -750,15 +768,15 @@ export default function Proposals() {
                     <div className="space-y-4">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Cadastre</div>
                         </div>
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <GoogleMap address={newProposal.adresse_terrain || ''} />
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Google Maps</div>
                         </div>
-                        <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
+                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
                         </div>
@@ -782,13 +800,13 @@ export default function Proposals() {
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedExePercent.toFixed(2)} %
                       </div>
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedTotalPercent.toFixed(2)} %
                       </div>
                     </div>
@@ -797,13 +815,13 @@ export default function Proposals() {
                     <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-900 dark:text-white">
+                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {formatCurrency(vatAmount)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
-                      <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl text-sm font-bold text-blue-700 dark:text-blue-400">
+                      <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-400">
                         {formatCurrency(totalTTC)}
                       </div>
                     </div>
@@ -826,7 +844,7 @@ export default function Proposals() {
                     </button>
                   </div>
                   
-                  <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-visible bg-white dark:bg-zinc-900/50">
+                  <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-visible bg-white dark:bg-zinc-900/50">
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                         <tr>
@@ -943,7 +961,7 @@ export default function Proposals() {
                       </button>
                     </div>
                   </div>
-                  <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
+                  <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
                     <FeeDistributionGrid 
                       proposal={newProposal} 
                       contacts={contacts} 
@@ -985,18 +1003,20 @@ export default function Proposals() {
                 )}
               </form>
 
-              <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex gap-3">
-                <button 
+              <div className="p-6 flex gap-3" style={{ borderTop: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 rounded-xl font-bold hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                 >
                   {t('btn_cancel')}
                 </button>
                 <button
                   type="submit"
                   form="proposal-form"
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {editingProposal ? t('proposals_update_btn') : t('proposals_create_btn')}
                 </button>

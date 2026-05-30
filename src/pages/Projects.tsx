@@ -593,123 +593,121 @@ export default function Projects() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
-        <div className="relative flex-1">
-          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
-            type="text" 
+      <div className="flex flex-wrap items-center gap-3 p-4 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="relative flex-1 min-w-[200px]">
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
             placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-zinc-900 dark:text-white"
+            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
-        <div className="flex gap-2">
-          <button 
+        <div className="flex gap-2 flex-wrap">
+          <button
             onClick={cycleFilter}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors",
-              filterStatus === 'All' 
-                ? "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                : "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-            )}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={filterStatus === 'All'
+              ? { border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }
+              : { border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}
           >
-            <IconFilter size={18} />
+            <IconFilter size={16} />
             {filterStatus === 'All' ? t('projects_filter_status') : filterStatus}
           </button>
           <button
             onClick={cycleCategoryFilter}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors",
-              filterCategory === 'All'
-                ? "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                : "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-            )}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={filterCategory === 'All'
+              ? { border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }
+              : { border: '1px solid #2fb344', color: '#2fb344', background: '#d3f9d8' }}
           >
-            <IconTag size={18} />
+            <IconTag size={16} />
             {filterCategory === 'All' ? t('projects_filter_domain') : filterCategory}
           </button>
           <button
             onClick={cycleProjectManagerFilter}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors",
-              filterProjectManager === 'All'
-                ? "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                : "border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
-            )}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={filterProjectManager === 'All'
+              ? { border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }
+              : { border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}
           >
-            <IconUser size={18} />
+            <IconUser size={16} />
             {filterProjectManager === 'All' ? t('projects_filter_manager') : filterProjectManager}
           </button>
         </div>
       </div>
 
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {filteredProjects.map((project, i) => (
             <motion.div
               key={project.id}
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.05 }}
+              transition={{ delay: i * 0.04 }}
               onClick={() => handleProjectClick(project)}
-              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col cursor-pointer"
+              className="rounded-lg overflow-hidden group flex flex-col cursor-pointer transition-shadow hover:shadow-md"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
             >
-              <div className="h-48 bg-zinc-100 dark:bg-zinc-900 relative overflow-hidden">
-                <img 
-                  src={project.image_url || `https://picsum.photos/seed/${project.id}/600/400`} 
-                  alt={project.name} 
+              <div className="h-44 relative overflow-hidden" style={{ background: 'var(--tblr-surface-2)' }}>
+                <img
+                  src={project.image_url || `https://picsum.photos/seed/${project.id}/600/400`}
+                  alt={project.name}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute top-4 left-4">
-                  <span className="px-2 py-1 rounded text-[10px] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
+                <div className="absolute top-3 left-3">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
                     #{project.project_code || '---'}
                   </span>
                 </div>
-                <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
-                  <span className={cn(
-                    "px-2 py-1 rounded text-xs font-medium border shadow-sm backdrop-blur-md",
-                    project.status === 'In Progress' ? "bg-blue-50/80 dark:bg-blue-900/80 text-blue-700 dark:text-blue-100 border-blue-200 dark:border-blue-700" :
-                    project.status === 'Completed' ? "bg-green-50/80 dark:bg-green-900/80 text-green-700 dark:text-green-100 border-green-200 dark:border-green-700" :
-                    "bg-zinc-50/80 dark:bg-zinc-900/80 text-zinc-700 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700"
-                  )}>
+                <div className="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={
+                    project.status === 'In Progress' ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' } :
+                    project.status === 'Completed' ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } :
+                    { background: 'rgba(255,255,255,0.85)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }
+                  }>
                     {project.status}
                   </span>
                   {project.category && (
-                    <span className="px-2 py-1 rounded text-xs font-medium border shadow-sm bg-emerald-50/80 dark:bg-emerald-900/80 text-emerald-700 dark:text-emerald-100 border-emerald-200 dark:border-emerald-700 backdrop-blur-md">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
                       {project.category}
                     </span>
                   )}
                 </div>
               </div>
-              <div className="p-5 flex-1 flex flex-col">
+              <div className="p-4 flex-1 flex flex-col">
                 <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{project.name}</h3>
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400">{project.client}</p>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-[15px] font-semibold truncate transition-colors" style={{ color: 'var(--tblr-text)' }}>{project.name}</h3>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{project.client}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Link 
+                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                    <Link
                       to={`/projects/${project.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                      className="p-1.5 rounded-lg transition-all"
+                      style={{ color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                     >
-                      <IconExternalLink size={18} />
+                      <IconExternalLink size={16} />
                     </Link>
-                    <IconArrowUpRight className="text-zinc-400 group-hover:text-blue-500 transition-colors" size={20} />
+                    <IconArrowUpRight size={18} style={{ color: 'var(--tblr-muted)' }} />
                   </div>
                 </div>
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-2 mb-4 flex-1">
+                <p className="text-xs line-clamp-2 mb-4 flex-1" style={{ color: 'var(--tblr-muted)' }}>
                   {project.description || t('projects_no_description')}
                 </p>
-                <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-700 mt-auto">
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    <p className="font-semibold text-zinc-900 dark:text-white text-sm">{formatCurrency(project.budget)}</p>
+                <div className="flex items-center justify-between pt-3 mt-auto" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</p>
                     <p>{t('budget')}</p>
                   </div>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 text-right">
-                    <p className="font-semibold text-zinc-900 dark:text-white text-sm">{new Date(project.end_date).toLocaleDateString()}</p>
+                  <div className="text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>
+                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString()}</p>
                     <p>{t('deadline')}</p>
                   </div>
                 </div>
@@ -718,84 +716,69 @@ export default function Projects() {
           ))}
         </div>
       ) : (
-        <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden shadow-sm">
+        <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[1200px]">
               <thead>
-                <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-700">
-                  <th 
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                  <th
+                    className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors"
+                    style={{ color: 'var(--tblr-muted)' }}
                     onClick={() => requestSort('project_code')}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '')}
                   >
                     <div className="flex items-center gap-1">{t('projects_col_code')} {getSortIcon('project_code')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('name')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('name')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_name')} {getSortIcon('name')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('client')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('client')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_client')} {getSortIcon('client')}</div>
                   </th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_description')}</th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('surface')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('projects_col_description')}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('surface')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_surface')} {getSortIcon('surface')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('construction_cost')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('construction_cost')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_construction_cost')} {getSortIcon('construction_cost')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('remuneration')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('remuneration')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_remuneration')} {getSortIcon('remuneration')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('progression')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('progression')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_progression')} {getSortIcon('progression')}</div>
                   </th>
-                  <th
-                    className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    onClick={() => requestSort('project_manager')}
-                  >
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => requestSort('project_manager')} onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-border)')} onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <div className="flex items-center gap-1">{t('projects_col_manager')} {getSortIcon('project_manager')}</div>
                   </th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_cotraitants')}</th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_intervenants')}</th>
-                  <th className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">{t('projects_col_entreprises')}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('projects_col_cotraitants')}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('projects_col_intervenants')}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('projects_col_entreprises')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+              <tbody>
                 {filteredProjects.map((project) => (
-                  <tr 
-                    key={project.id} 
+                  <tr
+                    key={project.id}
                     onClick={() => handleProjectClick(project)}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors"
+                    className="cursor-pointer transition-colors"
+                    style={{ borderBottom: '1px solid var(--tblr-border)' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '')}
                   >
-                    <td className="px-4 py-3 text-sm font-mono text-zinc-500">{project.project_code || '---'}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white">{project.name}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.client}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400 max-w-xs truncate">{project.description}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.surface ? `${project.surface} m²` : '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.construction_cost ? formatCurrency(project.construction_cost) : '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.remuneration ? formatCurrency(project.remuneration) : '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.progression ? `${project.progression}%` : '0%'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">{project.project_manager || '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300 max-w-xs truncate">{project.cotraitants || '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300 max-w-xs truncate">{project.external_intervenants || '---'}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300 max-w-xs truncate">{project.entreprises || '---'}</td>
+                    <td className="px-4 py-3 text-xs font-mono" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || '---'}</td>
+                    <td className="px-4 py-3 text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.name}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.client}</td>
+                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{project.description}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.surface ? `${project.surface} m²` : '---'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.construction_cost ? formatCurrency(project.construction_cost) : '---'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.remuneration ? formatCurrency(project.remuneration) : '---'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.progression ? `${project.progression}%` : '0%'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{project.project_manager || '---'}</td>
+                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{project.cotraitants || '---'}</td>
+                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{project.external_intervenants || '---'}</td>
+                    <td className="px-4 py-3 text-xs max-w-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{project.entreprises || '---'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -694,6 +694,8 @@ export interface Meeting {
   id: string;
   tenant_id?: string;
   project_id?: string;
+  proposal_id?: string;
+  tender_id?: string;
   type: MeetingType;
   title: string;
   date: string;

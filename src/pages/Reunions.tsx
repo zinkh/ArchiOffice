@@ -23,20 +23,29 @@ import {
   IconFileTypePdf,
   IconFileTypeDocx,
   IconLoader2,
+  IconBriefcase,
+  IconClipboardList,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee } from '../types';
+import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
 import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
 
 type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
 type MobileView = 'projects' | 'meetings' | 'detail';
+type ParentKind = 'project' | 'proposal' | 'tender';
 
 const SUBSECTIONS: { key: Subsection; label: string }[] = [
   { key: 'projet', label: 'Projets' },
   { key: 'visite_candidature', label: 'Visites Candidatures' },
   { key: 'visite_proposition', label: 'Visites Propositions' },
+];
+
+const TOP_SECTIONS = [
+  { key: 'projects' as const, label: 'Projets', icon: IconBuilding },
+  { key: 'proposals' as const, label: 'Propositions', icon: IconBriefcase },
+  { key: 'tenders' as const, label: 'Appels d\'offres', icon: IconClipboardList },
 ];
 
 function formatDate(iso: string) {
@@ -337,17 +346,30 @@ export default function Reunions() {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mobile navigation state — one panel visible at a time on small screens
   const [mobileView, setMobileView] = useState<MobileView>('projects');
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [tenders, setTenders] = useState<Tender[]>([]);
+
+  const [expandedTopSections, setExpandedTopSections] = useState<Record<string, boolean>>({
+    projects: true,
+    proposals: false,
+    tenders: false,
+  });
+  const [expandedProjectSubsections, setExpandedProjectSubsections] = useState<Record<string, boolean>>({
     projet: true,
     visite_candidature: false,
     visite_proposition: false,
   });
+
+  // Active entity
+  const [activeKind, setActiveKind] = useState<ParentKind>('project');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedSection, setSelectedSection] = useState<Subsection>('projet');
+  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
+  const [selectedTender, setSelectedTender] = useState<Tender | null>(null);
+
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
@@ -360,6 +382,8 @@ export default function Reunions() {
   const [showNewMeeting, setShowNewMeeting] = useState(false);
   const [newMeetingTitle, setNewMeetingTitle] = useState('');
   const [newMeetingDate, setNewMeetingDate] = useState(new Date().toISOString().substring(0, 10));
+  const [creatingMeeting, setCreatingMeeting] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const [editingCaption, setEditingCaption] = useState<string | null>(null);
   const [captionValue, setCaptionValue] = useState('');
@@ -373,6 +397,12 @@ export default function Reunions() {
     apiFetch<Project[]>('/api/projects').then(data => {
       setProjects(data.filter(p => p.status !== 'Completed'));
     }).catch(() => {});
+    apiFetch<Proposal[]>('/api/proposals').then(data => {
+      setProposals(data);
+    }).catch(() => {});
+    apiFetch<any[]>('/api/tenders').then(data => {
+      setTenders(data);
+    }).catch(() => {});
     apiFetch<any>('/api/settings').then(s => {
       setAgencySettings({
         agencyName: s.agencyName || s.agency_name,
@@ -384,11 +414,15 @@ export default function Reunions() {
     }).catch(() => {});
   }, []);
 
-  const loadMeetings = useCallback(async (project: Project, section: Subsection) => {
+  const loadMeetings = useCallback(async (kind: ParentKind, id: string, section?: Subsection) => {
     setLoadingMeetings(true);
     setSelectedMeeting(null);
     try {
-      const data = await apiFetch<Meeting[]>(`/api/meetings?project_id=${project.id}&type=${section}`);
+      let url = '';
+      if (kind === 'project') url = `/api/meetings?project_id=${id}&type=${section}`;
+      else if (kind === 'proposal') url = `/api/meetings?proposal_id=${id}`;
+      else url = `/api/meetings?tender_id=${id}`;
+      const data = await apiFetch<Meeting[]>(url);
       setMeetings(data);
     } catch {
       setMeetings([]);
@@ -398,9 +432,32 @@ export default function Reunions() {
   }, []);
 
   const selectProject = (project: Project, section: Subsection) => {
+    setActiveKind('project');
     setSelectedProject(project);
     setSelectedSection(section);
-    loadMeetings(project, section);
+    setSelectedProposal(null);
+    setSelectedTender(null);
+    loadMeetings('project', project.id, section);
+    setShowNewMeeting(false);
+    setMobileView('meetings');
+  };
+
+  const selectProposal = (proposal: Proposal) => {
+    setActiveKind('proposal');
+    setSelectedProposal(proposal);
+    setSelectedProject(null);
+    setSelectedTender(null);
+    loadMeetings('proposal', proposal.id);
+    setShowNewMeeting(false);
+    setMobileView('meetings');
+  };
+
+  const selectTender = (tender: Tender) => {
+    setActiveKind('tender');
+    setSelectedTender(tender);
+    setSelectedProject(null);
+    setSelectedProposal(null);
+    loadMeetings('tender', tender.id);
     setShowNewMeeting(false);
     setMobileView('meetings');
   };
@@ -422,22 +479,37 @@ export default function Reunions() {
   };
 
   const createMeeting = async () => {
-    if (!selectedProject || !newMeetingTitle.trim()) return;
-    const data = await apiFetch<Meeting>('/api/meetings', {
-      method: 'POST',
-      body: JSON.stringify({
-        project_id: selectedProject.id,
-        type: selectedSection,
-        title: newMeetingTitle.trim(),
-        date: newMeetingDate,
-        notes: '',
-      }),
-    });
-    setMeetings(prev => [data, ...prev]);
-    setNewMeetingTitle('');
-    setNewMeetingDate(new Date().toISOString().substring(0, 10));
-    setShowNewMeeting(false);
-    loadMeetingDetail(data);
+    if (!newMeetingTitle.trim()) return;
+
+    const body: any = {
+      type: activeKind === 'project' ? selectedSection : 'projet',
+      title: newMeetingTitle.trim(),
+      date: newMeetingDate,
+      notes: '',
+    };
+
+    if (activeKind === 'project' && selectedProject) body.project_id = selectedProject.id;
+    else if (activeKind === 'proposal' && selectedProposal) body.proposal_id = selectedProposal.id;
+    else if (activeKind === 'tender' && selectedTender) body.tender_id = selectedTender.id;
+    else return;
+
+    setCreatingMeeting(true);
+    setCreateError('');
+    try {
+      const data = await apiFetch<Meeting>('/api/meetings', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      setMeetings(prev => [data, ...prev]);
+      setNewMeetingTitle('');
+      setNewMeetingDate(new Date().toISOString().substring(0, 10));
+      setShowNewMeeting(false);
+      loadMeetingDetail(data);
+    } catch {
+      setCreateError('Erreur lors de la création. Veuillez réessayer.');
+    } finally {
+      setCreatingMeeting(false);
+    }
   };
 
   const deleteMeeting = async (id: string) => {
@@ -468,21 +540,28 @@ export default function Reunions() {
     catch { return []; }
   };
 
+  const getParentName = () => {
+    if (activeKind === 'project') return selectedProject?.name || '';
+    if (activeKind === 'proposal') return selectedProposal?.title || '';
+    if (activeKind === 'tender') return selectedTender?.title || '';
+    return '';
+  };
+
   const handleExportPDF = async () => {
-    if (!selectedMeeting || !selectedProject) return;
+    if (!selectedMeeting) return;
     setExportingPdf(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, selectedProject.name);
+      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, getParentName());
     } finally { setExportingPdf(false); }
   };
 
   const handleExportDocx = async () => {
-    if (!selectedMeeting || !selectedProject) return;
+    if (!selectedMeeting) return;
     setExportingDocx(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, selectedProject.name);
+      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, getParentName());
     } finally { setExportingDocx(false); }
   };
 
@@ -529,17 +608,29 @@ export default function Reunions() {
     setEditingCaption(null);
   };
 
-  const filteredProjects = (_section: Subsection) => {
-    return projects.filter(p =>
-      !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.client?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+  const filteredProjects = () => projects.filter(p =>
+    !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.client?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredProposals = () => proposals.filter(p =>
+    !searchQuery || p.title.toLowerCase().includes(searchQuery.toLowerCase()) || (p.client_name || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredTenders = () => tenders.filter(t =>
+    !searchQuery || t.title.toLowerCase().includes(searchQuery.toLowerCase()) || t.client?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const toggleTopSection = (key: string) => {
+    setExpandedTopSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const toggleSection = (key: string) => {
-    setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleProjectSubsection = (key: string) => {
+    setExpandedProjectSubsections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // ── Panel: project list ──────────────────────────────────────────────────────
+  const hasActiveEntity = activeKind === 'project' ? !!selectedProject : activeKind === 'proposal' ? !!selectedProposal : !!selectedTender;
+
+  // ── Panel: project/entity list ───────────────────────────────────────────────
 
   const ProjectsPanel = (
     <div className={`
@@ -561,64 +652,156 @@ export default function Reunions() {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto py-2">
-        {SUBSECTIONS.map(({ key, label }) => (
-          <div key={key}>
-            <button
-              onClick={() => toggleSection(key)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
-              style={{ color: 'var(--tblr-muted)' }}
-              onMouseEnter={e => {
-                e.currentTarget.style.color = 'var(--tblr-text)';
-                e.currentTarget.style.background = 'var(--tblr-surface)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.color = 'var(--tblr-muted)';
-                e.currentTarget.style.background = '';
-              }}
-            >
-              {expandedSections[key] ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-              {label}
-            </button>
-            {expandedSections[key] && (
-              <div className="pb-1">
-                {filteredProjects(key).length === 0 ? (
-                  <p className="px-4 py-1.5 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
-                ) : (
-                  filteredProjects(key).map(project => (
+        {/* ── Projets section ── */}
+        <div>
+          <button
+            onClick={() => toggleTopSection('projects')}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+          >
+            {expandedTopSections.projects ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+            <IconBuilding size={12} />
+            Projets
+          </button>
+          {expandedTopSections.projects && (
+            <div className="pl-2 pb-1">
+              {SUBSECTIONS.map(({ key, label }) => (
+                <div key={key}>
+                  <button
+                    onClick={() => toggleProjectSubsection(key)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                    style={{ color: 'var(--tblr-muted)' }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+                  >
+                    {expandedProjectSubsections[key] ? <IconChevronDown size={10} /> : <IconChevronRight size={10} />}
+                    {label}
+                  </button>
+                  {expandedProjectSubsections[key] && (
+                    <div className="pb-0.5">
+                      {filteredProjects().length === 0 ? (
+                        <p className="px-5 py-1 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
+                      ) : (
+                        filteredProjects().map(project => {
+                          const isActive = activeKind === 'project' && selectedProject?.id === project.id && selectedSection === key;
+                          return (
+                            <button
+                              key={project.id}
+                              onClick={() => selectProject(project, key)}
+                              className="w-full text-left px-5 py-1.5 text-xs transition-colors truncate"
+                              style={isActive
+                                ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                                : { color: 'var(--tblr-muted)' }}
+                              onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
+                              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                            >
+                              <div className="truncate font-medium">{project.name}</div>
+                              <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Propositions section ── */}
+        <div>
+          <button
+            onClick={() => toggleTopSection('proposals')}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+          >
+            {expandedTopSections.proposals ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+            <IconBriefcase size={12} />
+            Propositions
+          </button>
+          {expandedTopSections.proposals && (
+            <div className="pl-2 pb-1">
+              {filteredProposals().length === 0 ? (
+                <p className="px-4 py-1.5 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
+              ) : (
+                filteredProposals().map(proposal => {
+                  const isActive = activeKind === 'proposal' && selectedProposal?.id === proposal.id;
+                  return (
                     <button
-                      key={project.id}
-                      onClick={() => selectProject(project, key)}
-                      className="w-full text-left px-4 py-2 text-xs transition-colors truncate"
-                      style={selectedProject?.id === project.id && selectedSection === key
+                      key={proposal.id}
+                      onClick={() => selectProposal(proposal)}
+                      className="w-full text-left px-4 py-1.5 text-xs transition-colors truncate"
+                      style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => {
-                        if (!(selectedProject?.id === project.id && selectedSection === key)) {
-                          e.currentTarget.style.background = 'var(--tblr-surface)';
-                          e.currentTarget.style.color = 'var(--tblr-text)';
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        if (!(selectedProject?.id === project.id && selectedSection === key)) {
-                          e.currentTarget.style.background = '';
-                          e.currentTarget.style.color = 'var(--tblr-muted)';
-                        }
-                      }}
+                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
+                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
-                      <div className="truncate font-medium">{project.name}</div>
-                      <div className="truncate text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
+                      <div className="truncate font-medium">{proposal.title}</div>
+                      <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
                     </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Appels d'offres section ── */}
+        <div>
+          <button
+            onClick={() => toggleTopSection('tenders')}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+          >
+            {expandedTopSections.tenders ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+            <IconClipboardList size={12} />
+            Appels d'offres
+          </button>
+          {expandedTopSections.tenders && (
+            <div className="pl-2 pb-1">
+              {filteredTenders().length === 0 ? (
+                <p className="px-4 py-1.5 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
+              ) : (
+                filteredTenders().map(tender => {
+                  const isActive = activeKind === 'tender' && selectedTender?.id === tender.id;
+                  return (
+                    <button
+                      key={tender.id}
+                      onClick={() => selectTender(tender)}
+                      className="w-full text-left px-4 py-1.5 text-xs transition-colors truncate"
+                      style={isActive
+                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                        : { color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
+                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                    >
+                      <div className="truncate font-medium">{tender.title}</div>
+                      <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
       </nav>
     </div>
   );
 
   // ── Panel: meetings list ─────────────────────────────────────────────────────
+
+  const activeEntityName = getParentName();
+  const activeEntitySubtitle = activeKind === 'project'
+    ? SUBSECTIONS.find(s => s.key === selectedSection)?.label
+    : activeKind === 'proposal' ? 'Proposition' : "Appel d'offres";
 
   const MeetingsPanel = (
     <div className={`
@@ -634,15 +817,15 @@ export default function Reunions() {
           style={{ color: 'var(--tblr-primary)' }}
         >
           <IconChevronLeft size={14} />
-          Projets
+          Retour
         </button>
       </div>
 
-      {selectedProject ? (
+      {hasActiveEntity ? (
         <>
           <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-xs font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{selectedProject.name}</h3>
+              <h3 className="text-xs font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
               <button
                 onClick={() => setShowNewMeeting(true)}
                 className="p-1 rounded-md transition-colors"
@@ -654,9 +837,7 @@ export default function Reunions() {
                 <IconPlus size={14} />
               </button>
             </div>
-            <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
-              {SUBSECTIONS.find(s => s.key === selectedSection)?.label}
-            </p>
+            <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>
           </div>
 
           {showNewMeeting && (
@@ -665,7 +846,7 @@ export default function Reunions() {
                 type="text"
                 placeholder="Titre de la réunion"
                 value={newMeetingTitle}
-                onChange={e => setNewMeetingTitle(e.target.value)}
+                onChange={e => { setNewMeetingTitle(e.target.value); setCreateError(''); }}
                 autoFocus
                 className="w-full px-2 py-1.5 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
@@ -678,9 +859,26 @@ export default function Reunions() {
                 className="w-full px-2 py-1.5 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
+              {createError && (
+                <p className="text-[10px] mb-1.5 px-1" style={{ color: 'var(--tblr-danger)' }}>{createError}</p>
+              )}
               <div className="flex gap-1">
-                <button onClick={createMeeting} className="flex-1 py-1 text-xs rounded transition-colors" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>Créer</button>
-                <button onClick={() => setShowNewMeeting(false)} className="px-2 py-1 text-xs rounded transition-colors" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}><IconX size={12} /></button>
+                <button
+                  onClick={createMeeting}
+                  disabled={creatingMeeting || !newMeetingTitle.trim()}
+                  className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                >
+                  {creatingMeeting ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                  Créer
+                </button>
+                <button
+                  onClick={() => { setShowNewMeeting(false); setCreateError(''); }}
+                  className="px-2 py-1 text-xs rounded transition-colors"
+                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                >
+                  <IconX size={12} />
+                </button>
               </div>
             </div>
           )}
@@ -737,13 +935,13 @@ export default function Reunions() {
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-xs gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
           <IconBuilding size={28} className="opacity-20" />
-          <p>Sélectionnez un projet pour voir les réunions</p>
+          <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
           <button
             onClick={() => setMobileView('projects')}
             className="md:hidden hover:underline mt-1"
             style={{ color: 'var(--tblr-primary)' }}
           >
-            ← Retour aux projets
+            ← Retour
           </button>
         </div>
       )}
@@ -787,16 +985,8 @@ export default function Reunions() {
                     title="Exporter en PDF"
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50"
                     style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.background = '#ffe0e0';
-                      e.currentTarget.style.color = 'var(--tblr-danger)';
-                      e.currentTarget.style.borderColor = '#fca5a5';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = 'var(--tblr-surface)';
-                      e.currentTarget.style.color = 'var(--tblr-muted)';
-                      e.currentTarget.style.borderColor = 'var(--tblr-border)';
-                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#ffe0e0'; e.currentTarget.style.color = 'var(--tblr-danger)'; e.currentTarget.style.borderColor = '#fca5a5'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.borderColor = 'var(--tblr-border)'; }}
                   >
                     {exportingPdf ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypePdf size={13} />}
                     PDF
@@ -807,16 +997,8 @@ export default function Reunions() {
                     title="Exporter en Word"
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50"
                     style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.background = 'var(--tblr-primary-lt)';
-                      e.currentTarget.style.color = 'var(--tblr-primary)';
-                      e.currentTarget.style.borderColor = 'var(--tblr-primary)';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = 'var(--tblr-surface)';
-                      e.currentTarget.style.color = 'var(--tblr-muted)';
-                      e.currentTarget.style.borderColor = 'var(--tblr-border)';
-                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--tblr-primary-lt)'; e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.borderColor = 'var(--tblr-primary)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.borderColor = 'var(--tblr-border)'; }}
                   >
                     {exportingDocx ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypeDocx size={13} />}
                     Word
@@ -826,9 +1008,13 @@ export default function Reunions() {
               <div className="flex items-center gap-2 sm:gap-3 text-sm flex-wrap" style={{ color: 'var(--tblr-muted)' }}>
                 <span className="flex items-center gap-1"><IconCalendar size={14} />{formatDate(selectedMeeting.date)}</span>
                 <span style={{ color: 'var(--tblr-border)' }}>•</span>
-                <span className="truncate max-w-[120px] sm:max-w-none">{selectedProject?.name}</span>
-                <span className="hidden sm:inline" style={{ color: 'var(--tblr-border)' }}>•</span>
-                <span className="hidden sm:inline">{SUBSECTIONS.find(s => s.key === selectedSection)?.label}</span>
+                <span className="truncate max-w-[120px] sm:max-w-none">{activeEntityName}</span>
+                {activeKind === 'project' && (
+                  <>
+                    <span className="hidden sm:inline" style={{ color: 'var(--tblr-border)' }}>•</span>
+                    <span className="hidden sm:inline">{activeEntitySubtitle}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -906,14 +1092,8 @@ export default function Reunions() {
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 transition-colors"
                   style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = 'var(--tblr-primary)';
-                    e.currentTarget.style.color = 'var(--tblr-primary)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'var(--tblr-border)';
-                    e.currentTarget.style.color = 'var(--tblr-muted)';
-                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--tblr-border)'; e.currentTarget.style.color = 'var(--tblr-muted)'; }}
                 >
                   <IconCamera size={32} className="opacity-50" />
                   <span className="text-sm">Appuyez pour ajouter des photos</span>
@@ -952,14 +1132,8 @@ export default function Reunions() {
                     onClick={() => fileInputRef.current?.click()}
                     className="aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors"
                     style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.borderColor = 'var(--tblr-primary)';
-                      e.currentTarget.style.color = 'var(--tblr-primary)';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.borderColor = 'var(--tblr-border)';
-                      e.currentTarget.style.color = 'var(--tblr-muted)';
-                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--tblr-border)'; e.currentTarget.style.color = 'var(--tblr-muted)'; }}
                   >
                     <IconCamera size={20} />
                     <span className="text-xs">Ajouter</span>
@@ -969,7 +1143,7 @@ export default function Reunions() {
             </div>
           </div>
         )
-      ) : selectedProject ? (
+      ) : hasActiveEntity ? (
         <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: 'var(--tblr-muted)' }}>
           <IconNotes size={36} className="opacity-20" />
           <p className="text-sm">Sélectionnez ou créez une réunion</p>
@@ -985,7 +1159,7 @@ export default function Reunions() {
       ) : (
         <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: 'var(--tblr-muted)' }}>
           <IconBuilding size={48} className="opacity-10" />
-          <p className="text-sm">Sélectionnez un projet dans la liste</p>
+          <p className="text-sm">Sélectionnez un projet, une proposition ou un appel d'offres</p>
         </div>
       )}
     </div>

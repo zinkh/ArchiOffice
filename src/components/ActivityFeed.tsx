@@ -193,86 +193,93 @@ export default function ActivityFeed() {
   const visibleItems = items.filter(i => !hiddenTypes.has(i.category || (i.kind === 'post' ? 'Messages' : '')));
 
   return (
-    <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
       {/* Header */}
-      <div className="flex justify-between items-center p-6 border-b border-zinc-100 dark:border-zinc-700/50">
-        <h2 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">Flux d'activité</h2>
+      <div className="flex justify-between items-center px-5 py-3" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+        <h2 className="text-[13px] font-semibold" style={{ color: 'var(--tblr-text)' }}>Flux d'activité</h2>
         <div className="relative" ref={hiddenMenuRef}>
           <button
             onClick={() => setShowHiddenMenu(v => !v)}
-            className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors flex items-center gap-1"
+            className="text-xs flex items-center gap-1 transition-colors"
+            style={{ color: 'var(--tblr-muted)' }}
           >
             {hiddenTypes.size > 0 && (
-              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+              <span className="w-2 h-2 rounded-full inline-block" style={{ background: 'var(--tblr-primary)' }} />
             )}
             Activités masquées
-            <IconChevronDown size={14} />
+            <IconChevronDown size={13} />
           </button>
           {showHiddenMenu && (
-            <div className="absolute right-0 top-8 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg z-20 p-2 min-w-[180px]">
+            <div className="absolute right-0 top-8 rounded-lg shadow-lg z-20 p-2 min-w-[180px]" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
               {allCategories.map(cat => (
                 <button
                   key={cat}
                   onClick={() => toggleHiddenType(cat)}
-                  className={cn(
-                    "flex items-center justify-between gap-2 w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors",
-                    hiddenTypes.has(cat)
-                      ? "text-zinc-400 dark:text-zinc-500"
-                      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  )}
+                  className="flex items-center justify-between gap-2 w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors"
+                  style={{ color: hiddenTypes.has(cat) ? 'var(--tblr-muted)' : 'var(--tblr-text)' }}
+                  onMouseEnter={e => { if (!hiddenTypes.has(cat)) e.currentTarget.style.background = 'var(--tblr-surface-2)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = ''; }}
                 >
                   {cat}
-                  {hiddenTypes.has(cat) && <span className="text-[10px] text-zinc-400">masqué</span>}
+                  {hiddenTypes.has(cat) && <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>masqué</span>}
                 </button>
               ))}
-              {allCategories.length === 0 && <p className="text-xs text-zinc-400 px-3 py-2">Aucune catégorie</p>}
+              {allCategories.length === 0 && <p className="text-xs px-3 py-2" style={{ color: 'var(--tblr-muted)' }}>Aucune catégorie</p>}
             </div>
           )}
         </div>
       </div>
 
       {/* Compose area */}
-      <div className="p-4 border-b border-zinc-100 dark:border-zinc-700/50">
-        <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+      <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
           <textarea
             ref={textareaRef}
             placeholder="Partagez quelque chose. Utilisez @ pour mentionner des personnes."
-            className="w-full bg-transparent px-4 pt-3 pb-1 outline-none text-sm resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400"
+            className="w-full bg-transparent px-4 pt-3 pb-1 outline-none text-sm resize-none"
+            style={{ color: 'var(--tblr-text)' }}
             rows={2}
             value={message}
             onChange={e => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <div className="flex justify-between items-center px-4 py-2 bg-zinc-50 dark:bg-zinc-900/50">
-            <div className="flex gap-3 text-zinc-400">
+          <div className="flex justify-between items-center px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
+            <div className="flex gap-3">
               <input type="file" ref={fileInputRef} className="hidden" />
-              <button onClick={() => fileInputRef.current?.click()} className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Joindre un fichier">
+              <button onClick={() => fileInputRef.current?.click()} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier"
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconPaperclip size={16} />
               </button>
-              <button className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Insérer un lien">
+              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien"
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconLink size={16} />
               </button>
-              <button className="hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" title="Formater">
+              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Formater"
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconAlignLeft size={16} />
               </button>
             </div>
             <button
               onClick={handlePost}
               disabled={!message.trim() || isPosting}
-              className="flex items-center gap-1.5 bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
               {isPosting ? '...' : 'Partagez'}
               <IconChevronDown size={14} />
             </button>
           </div>
         </div>
-        <p className="text-[10px] text-zinc-400 mt-1.5 pl-1">Ctrl+Entrée pour publier</p>
+        <p className="text-[10px] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
       </div>
 
       {/* Feed */}
-      <div className="divide-y divide-zinc-100 dark:divide-zinc-700/50 max-h-[600px] overflow-y-auto">
+      <div className="max-h-[600px] overflow-y-auto">
         {visibleItems.length === 0 && (
-          <div className="px-6 py-10 text-center text-zinc-400 text-sm">
+          <div className="px-6 py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>
             <IconMessageCircle size={32} className="mx-auto mb-2 opacity-30" />
             Aucune activité récente
           </div>
@@ -280,26 +287,26 @@ export default function ActivityFeed() {
         {visibleItems.map(item => {
           const isCommentsOpen = expandedComments.has(item.id);
           const CategoryIcon = TYPE_ICONS[item.target_type || (item.kind === 'post' ? 'post' : 'project')] || IconFileText;
-          const catColor = CATEGORY_COLORS[item.category || 'Messages'] || 'text-zinc-500 bg-zinc-100 dark:bg-zinc-700';
+          const catColor = CATEGORY_COLORS[item.category || 'Messages'] || 'text-blue-600 bg-blue-50';
 
           return (
-            <div key={item.id} className="px-6 py-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-700/20 transition-colors">
+            <div key={item.id} className="px-5 py-4 transition-colors" style={{ borderBottom: '1px solid var(--tblr-border)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+              onMouseLeave={e => (e.currentTarget.style.background = '')}>
               <div className="flex gap-3">
-                <Avatar name={item.user_name || 'U'} size={36} />
+                <Avatar name={item.user_name || 'U'} size={34} />
                 <div className="flex-1 min-w-0">
-                  {/* Activity title */}
                   {item.kind === 'activity' ? (
-                    <p className="text-sm font-semibold text-zinc-900 dark:text-white leading-snug">
+                    <p className="text-[13px] font-semibold leading-snug" style={{ color: 'var(--tblr-text)' }}>
                       {item.action}
                     </p>
                   ) : (
-                    <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{item.content}</p>
                   )}
 
-                  {/* Meta line */}
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                     <CategoryIcon size={12} className="shrink-0" />
-                    <span>par <span className="font-medium text-zinc-700 dark:text-zinc-300">{item.user_name}</span></span>
+                    <span>par <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{item.user_name}</span></span>
                     <span>·</span>
                     <span>{timeAgo(item.created_at)}</span>
                     {item.category && (
@@ -312,49 +319,49 @@ export default function ActivityFeed() {
                     )}
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center gap-4 mt-2">
                     <button
                       onClick={() => toggleComments(item.id)}
-                      className="flex items-center gap-1 text-xs text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      className="flex items-center gap-1 text-xs transition-colors"
+                      style={{ color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
                     >
                       <IconMessageCircle size={13} />
                       Commentaire{item.comments_count > 0 ? ` (${item.comments_count})` : ''}
                     </button>
                     <button
                       onClick={() => handleLike(item)}
-                      className={cn(
-                        "flex items-center gap-1 text-xs transition-colors",
-                        item.liked
-                          ? "text-rose-500 dark:text-rose-400"
-                          : "text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400"
-                      )}
+                      className="flex items-center gap-1 text-xs transition-colors"
+                      style={{ color: item.liked ? '#e03131' : 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#e03131')}
+                      onMouseLeave={e => (e.currentTarget.style.color = item.liked ? '#e03131' : 'var(--tblr-muted)')}
                     >
                       <IconHeart size={13} className={item.liked ? "fill-current" : ''} />
                       {item.likes_count > 0 ? item.likes_count : 'Aimer'}
                     </button>
                   </div>
 
-                  {/* Comments section */}
                   {isCommentsOpen && (
                     <div className="mt-3 space-y-2">
                       {item.comments.map(c => (
                         <div key={c.id} className="flex gap-2">
                           <Avatar name={c.user_name || 'U'} size={24} />
-                          <div className="flex-1 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
-                            <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
-                            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{c.content}</p>
+                          <div className="flex-1 rounded-lg px-3 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
+                            <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
+                            <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{c.content}</p>
                           </div>
                         </div>
                       ))}
                       {item.kind === 'post' && (
                         <div className="flex gap-2 items-center">
                           <Avatar name={currentUser?.name || 'U'} size={24} />
-                          <div className="flex-1 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-1.5">
+                          <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
                             <input
                               type="text"
                               placeholder="Ajouter un commentaire..."
-                              className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+                              className="flex-1 bg-transparent text-xs outline-none"
+                              style={{ color: 'var(--tblr-text)' }}
                               value={commentDraft[item.id] || ''}
                               onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
                               onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
@@ -362,7 +369,8 @@ export default function ActivityFeed() {
                             <button
                               onClick={() => handleComment(item.id)}
                               disabled={!commentDraft[item.id]?.trim()}
-                              className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors"
+                              className="disabled:opacity-30 transition-colors"
+                              style={{ color: 'var(--tblr-primary)' }}
                             >
                               <IconSend size={13} />
                             </button>
