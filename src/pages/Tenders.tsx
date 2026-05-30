@@ -238,10 +238,10 @@ export default function Tenders() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tenders')}</h2>
-          <p style={{ color: 'var(--tblr-muted)' }}>{t('tenders_subtitle')}</p>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tenders')}</h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_subtitle')}</p>
         </div>
         <motion.button
           whileHover={{ scale: 1.02 }}

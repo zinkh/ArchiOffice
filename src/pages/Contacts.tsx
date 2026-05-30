@@ -310,7 +310,7 @@ export default function Contacts() {
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
         <div className="rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--tblr-text)' }}>{t('contacts_map_fields_title')}</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {contactFields.map(field => (
               <div key={field} className="flex flex-col">
                 <label className="text-sm font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>{field}</label>
@@ -430,12 +430,12 @@ export default function Contacts() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('contacts')}</h2>
-          <p style={{ color: 'var(--tblr-muted)' }}>{t('contacts_subtitle')}</p>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts')}</h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_subtitle')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => document.getElementById('file-upload')?.click()}
             className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
@@ -490,11 +490,11 @@ export default function Contacts() {
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="relative">
             <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
             <select
-              className="pl-10 pr-4 py-2 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none min-w-[180px]"
+              className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
               style={inputStyle}
               value={filterCategory}
               onChange={e => setFilterCategory(e.target.value)}

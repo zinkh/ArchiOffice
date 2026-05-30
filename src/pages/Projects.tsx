@@ -545,10 +545,10 @@ export default function Projects() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('projects')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('projects_subtitle')}</p>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('projects')}</h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('projects_subtitle')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg mr-2">
             <button 
               onClick={() => setViewMode('grid')}
@@ -927,7 +927,7 @@ export default function Projects() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-6 mb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
                   {isEditing && (
                     <div className="col-span-2 space-y-2">
                       <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_image_label')}</label>

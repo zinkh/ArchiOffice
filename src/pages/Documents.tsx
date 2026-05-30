@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUpload, IconCloudOff, IconChevronDown, IconChevronRight, IconFolder, IconFolderOpen } from '@tabler/icons-react';
+import { IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX, IconUpload, IconCloudOff, IconChevronDown, IconChevronRight, IconFolder, IconFolderOpen, IconLayoutSidebar } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Document, DocumentPhase, Project } from '../types';
 import { useUser } from '../UserContext';
@@ -48,6 +48,7 @@ export default function Documents() {
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [activePhase, setActivePhase] = useState<DocumentPhase | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const on = () => setIsOnline(true);
@@ -203,13 +204,21 @@ export default function Documents() {
 
   return (
     <div className="flex gap-4 h-full">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
       {/* Sidebar tree */}
       <div
-        className="w-60 shrink-0 rounded-3xl p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-120px)]"
+        className={`
+          fixed inset-y-0 left-0 z-50 w-64 p-3 space-y-1 overflow-y-auto transition-transform duration-300
+          md:static md:w-60 md:shrink-0 md:rounded-3xl md:max-h-[calc(100vh-120px)] md:translate-x-0
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         <button
-          onClick={() => { setActiveProject(null); setActivePhase(null); }}
+          onClick={() => { setActiveProject(null); setActivePhase(null); setSidebarOpen(false); }}
           className="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
           style={
             !activeProject && !activePhase
@@ -237,7 +246,7 @@ export default function Documents() {
                   {isExpanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
                 </button>
                 <button
-                  onClick={() => { setActiveProject(p.id); setActivePhase(null); if (!isExpanded) toggleProject(p.id); }}
+                  onClick={() => { setActiveProject(p.id); setActivePhase(null); setSidebarOpen(false); if (!isExpanded) toggleProject(p.id); }}
                   className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left font-semibold"
                   style={
                     isProjectActive
@@ -255,7 +264,7 @@ export default function Documents() {
                   {phases.map(phase => (
                     <button
                       key={phase}
-                      onClick={() => { setActiveProject(p.id); setActivePhase(phase); }}
+                      onClick={() => { setActiveProject(p.id); setActivePhase(phase); setSidebarOpen(false); }}
                       className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
                       style={
                         activeProject === p.id && activePhase === phase
@@ -284,7 +293,7 @@ export default function Documents() {
                 {expandedProjects.has('unassigned') ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
               </button>
               <button
-                onClick={() => { setActiveProject('unassigned'); setActivePhase(null); if (!expandedProjects.has('unassigned')) toggleProject('unassigned'); }}
+                onClick={() => { setActiveProject('unassigned'); setActivePhase(null); setSidebarOpen(false); if (!expandedProjects.has('unassigned')) toggleProject('unassigned'); }}
                 className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
                 style={
                   activeProject === 'unassigned' && !activePhase
@@ -302,7 +311,7 @@ export default function Documents() {
                 {getPhasesForProject(null).map(phase => (
                   <button
                     key={phase}
-                    onClick={() => { setActiveProject('unassigned'); setActivePhase(phase); }}
+                    onClick={() => { setActiveProject('unassigned'); setActivePhase(phase); setSidebarOpen(false); }}
                     className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
                     style={
                       activeProject === 'unassigned' && activePhase === phase
@@ -323,18 +332,28 @@ export default function Documents() {
       {/* Main content */}
       <div className="flex-1 space-y-4 min-w-0">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>
-              {activeProject
-                ? (activeProject === 'unassigned'
-                    ? 'Sans projet'
-                    : projects.find(p => p.id === activeProject)?.name || 'Documents')
-                : 'Documents'}
-              {activePhase && (
-                <span className={`ml-2 text-sm font-bold px-2 py-0.5 rounded ${PHASE_COLORS[activePhase]}`}>{activePhase}</span>
-              )}
-            </h1>
-            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{visibleDocs.length} document{visibleDocs.length !== 1 ? 's' : ''}</p>
+          <div className="flex items-center gap-2">
+            <button
+              className="md:hidden p-1.5 rounded-lg transition-colors"
+              style={{ color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+              onClick={() => setSidebarOpen(true)}
+              title="Parcourir les projets"
+            >
+              <IconLayoutSidebar size={18} />
+            </button>
+            <div>
+              <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>
+                {activeProject
+                  ? (activeProject === 'unassigned'
+                      ? 'Sans projet'
+                      : projects.find(p => p.id === activeProject)?.name || 'Documents')
+                  : 'Documents'}
+                {activePhase && (
+                  <span className={`ml-2 text-sm font-bold px-2 py-0.5 rounded ${PHASE_COLORS[activePhase]}`}>{activePhase}</span>
+                )}
+              </h1>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{visibleDocs.length} document{visibleDocs.length !== 1 ? 's' : ''}</p>
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
@@ -399,7 +418,7 @@ export default function Documents() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Phase</label>
                     <select
@@ -487,7 +506,7 @@ export default function Documents() {
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>Phase</label>
                     <select
