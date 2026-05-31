@@ -29,9 +29,12 @@ import {
   IconMessageDots,
   IconRefresh,
   IconSend,
-  IconClipboardList
+  IconClipboardList,
+  IconFileDownload,
 } from '@tabler/icons-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn } from '../lib/utils';
@@ -191,8 +194,19 @@ export default function ProjectDetail() {
     lot: '',
     entreprise: '',
     maitrise_oeuvre: '',
-    montant_devis_presente: ''
+    montant_devis_presente: '',
+    date_emission: new Date().toISOString().slice(0, 10),
+    emetteur_os: '',
+    destinataire_os: '',
+    delai_execution: '',
+    delai_unit: 'jours',
+    objet: '',
   });
+
+  // AR modal state
+  const [arOsTarget, setArOsTarget] = useState<OrdreDeService | null>(null);
+  const [arForm, setArForm] = useState({ date_ar: new Date().toISOString().slice(0, 10), date_execution: '', notes_ar: '' });
+  const [arSaving, setArSaving] = useState(false);
 
   const [newOsMoe, setNewOsMoe] = useState({
     title: '',
@@ -600,17 +614,23 @@ export default function ProjectDetail() {
           os_number: newOs.os_number,
           title: newOs.title,
           lot: newOs.lot,
-          entreprise: newOs.entreprise,
+          entreprise: newOs.entreprise || newOs.destinataire_os,
           maitrise_oeuvre_adresse: newOs.maitrise_oeuvre,
           montant_devis_presente: Number(newOs.montant_devis_presente) || null,
-          date: new Date().toISOString(),
+          date: newOs.date_emission || new Date().toISOString().slice(0, 10),
+          date_emission: newOs.date_emission || new Date().toISOString().slice(0, 10),
+          emetteur_os: newOs.emetteur_os || newOs.maitrise_oeuvre,
+          destinataire_os: newOs.destinataire_os || newOs.entreprise,
+          delai_execution: Number(newOs.delai_execution) || null,
+          delai_unit: newOs.delai_unit,
+          objet: newOs.objet,
           status: 'draft',
           type: 'travaux'
         })
       });
       if (res.ok) {
         await fetchOrdresDeService();
-        setNewOs({ title: '', os_number: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '' });
+        setNewOs({ title: '', os_number: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
         setIsAddingOs(false);
       }
     } catch (err) {
@@ -645,24 +665,127 @@ export default function ProjectDetail() {
   };
 
   const handleUpdateOsStatus = async (osId: string, newStatus: OrdreDeService['status'], montantAccepte?: number) => {
+    if (newStatus === 'approved') {
+      const os = ordresDeService.find(o => o.id === osId);
+      if (os) { setArOsTarget(os); setArForm({ date_ar: new Date().toISOString().slice(0, 10), date_execution: '', notes_ar: '' }); }
+      return;
+    }
     try {
       const os = ordresDeService.find(o => o.id === osId);
       if (!os) return;
       const body: Partial<OrdreDeService> = { ...os, status: newStatus };
       if (montantAccepte !== undefined) body.montant_devis_accepte = montantAccepte;
       const res = await fetch(`/api/ordres_de_service/${osId}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ status: newStatus })
       });
       if (res.ok) {
         setOrdresDeService(prev => prev.map(o =>
-          o.id === osId ? { ...o, status: newStatus, ...(montantAccepte !== undefined ? { montant_devis_accepte: montantAccepte } : {}) } : o
+          o.id === osId ? { ...o, status: newStatus } : o
         ));
       }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleArSubmit = async () => {
+    if (!arOsTarget || !arForm.date_ar) return;
+    setArSaving(true);
+    try {
+      const res = await fetch(`/api/ordres_de_service/${arOsTarget.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved', date_ar: arForm.date_ar, date_execution: arForm.date_execution || null, notes_ar: arForm.notes_ar || null })
+      });
+      if (res.ok) {
+        setOrdresDeService(prev => prev.map(o =>
+          o.id === arOsTarget.id ? { ...o, status: 'approved', date_ar: arForm.date_ar, date_execution: arForm.date_execution, notes_ar: arForm.notes_ar } : o
+        ));
+        setArOsTarget(null);
+      }
+    } catch (err) { console.error(err); }
+    finally { setArSaving(false); }
+  };
+
+  const generateOsPdf = (os: OrdreDeService) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    doc.setFillColor(30, 64, 175);
+    doc.rect(0, 0, 210, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text('ORDRE DE SERVICE', 14, 12);
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+    doc.text(`N° ${os.os_number}`, 14, 20);
+    doc.text(`Projet : ${project?.name ?? ''}`, 80, 14);
+    doc.text(`Date : ${os.date_emission ?? os.date ?? ''}`, 80, 20);
+    const statusLabels: Record<string, string> = { draft: 'Brouillon', submitted: 'Émis', approved: 'AR reçu', rejected: 'Annulé' };
+    doc.text(`Statut : ${statusLabels[os.status] ?? os.status}`, 80, 26);
+    doc.setTextColor(30, 30, 30);
+    let y = 36;
+    autoTable(doc, {
+      startY: y,
+      head: [['Parties', '']],
+      body: [
+        ['Émetteur (MOE)', os.emetteur_os ?? project?.project_manager ?? '—'],
+        ['Destinataire (Entreprise)', os.destinataire_os ?? os.entreprise ?? '—'],
+        ['Lot', os.lot ?? '—'],
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+    if (os.objet ?? os.title) {
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.text('OBJET', 14, y); y += 5;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      const lines = doc.splitTextToSize(os.objet ?? os.title ?? '', 182);
+      doc.text(lines, 14, y); y += lines.length * 5 + 4;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [['Champ', 'Valeur']],
+      body: [
+        ['Délai d\'exécution', os.delai_execution ? `${os.delai_execution} ${os.delai_unit ?? 'jours'}` : '—'],
+        ['N° Marché', os.march_number ?? '—'],
+        ['Montant présenté HT', os.montant_devis_presente != null ? `${Number(os.montant_devis_presente).toLocaleString('fr-FR')} €` : '—'],
+        ['Montant accepté HT', os.montant_devis_accepte != null ? `${Number(os.montant_devis_accepte).toLocaleString('fr-FR')} €` : '—'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 10;
+    if (y > 220) { doc.addPage(); y = 20; }
+    const sigY = Math.max(y, 230);
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, sigY, 82, 30, 'F'); doc.rect(114, sigY, 82, 30, 'F');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text('Maître d\'œuvre (Émetteur)', 55, sigY + 6, { align: 'center' });
+    doc.text('Entreprise (Destinataire)', 155, sigY + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text('Signature & cachet :', 18, sigY + 14); doc.text('Signature & cachet :', 118, sigY + 14);
+    doc.text(`Date : ${os.date_emission ?? ''}`, 18, sigY + 22);
+    doc.text(`Date d'AR : ${os.date_ar ?? '_______'}`, 118, sigY + 22);
+    if (os.status === 'approved' && os.date_ar) {
+      const arY = sigY + 36;
+      doc.setFillColor(240, 253, 244); doc.rect(14, arY, 182, 20, 'F');
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(22, 163, 74);
+      doc.text('ACCUSÉ DE RÉCEPTION', 14, arY + 7);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
+      doc.text(`Reçu le : ${os.date_ar}  |  Exécution prévue le : ${os.date_execution ?? '—'}`, 14, arY + 14);
+    }
+    const n = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+      doc.text(`OS N° ${os.os_number} — ${project?.name ?? ''} — Page ${i}/${n}`, 105, 290, { align: 'center' });
+    }
+    doc.save(`OS_${os.os_number}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleDeleteOs = async (osId: string) => {
@@ -679,10 +802,10 @@ export default function ProjectDetail() {
 
   const osStatusBadge = (status: OrdreDeService['status']) => {
     const map: Record<OrdreDeService['status'], { label: string; cls: string }> = {
-      draft:     { label: 'Brouillon',  cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
-      submitted: { label: 'Soumis',     cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-      approved:  { label: 'Approuvé',   cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-      rejected:  { label: 'Rejeté',     cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+      draft:     { label: 'Brouillon', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
+      submitted: { label: 'Émis',      cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+      approved:  { label: 'AR reçu',   cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+      rejected:  { label: 'Annulé',    cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
     };
     const { label, cls } = map[status] ?? map.draft;
     return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
@@ -1577,62 +1700,83 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre</label>
-                          <input
-                            type="text"
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° OS</label>
+                          <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.title}
-                            onChange={e => setNewOs({...newOs, title: e.target.value})}
-                            placeholder="ex: Travaux supplémentaires"
-                          />
+                            value={newOs.os_number} onChange={e => setNewOs({...newOs, os_number: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date d'émission</label>
+                          <input type="date"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-bold text-zinc-400 uppercase">Lot</label>
                           <select
                             className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.lot}
-                            onChange={e => handleLotChange(e.target.value)}
-                          >
+                            value={newOs.lot} onChange={e => handleLotChange(e.target.value)}>
                             <option value="">Sélectionner un lot</option>
                             {project.lots_list?.map(l => (
                               <option key={l.id} value={l.lot_number}>{l.lot_number} - {l.lot_title}</option>
                             ))}
                           </select>
                         </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Titre *</label>
+                        <input type="text"
+                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          value={newOs.title} onChange={e => setNewOs({...newOs, title: e.target.value})}
+                          placeholder="ex: Travaux supplémentaires fondations" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Objet</label>
+                        <input type="text"
+                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          value={newOs.objet} onChange={e => setNewOs({...newOs, objet: e.target.value})}
+                          placeholder="Description succincte de l'objet de l'OS" />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Entreprise</label>
-                          <input
-                            type="text"
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Émetteur (MOE)</label>
+                          <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.entreprise}
-                            onChange={e => handleEntrepriseChange(e.target.value)}
-                          />
+                            value={newOs.emetteur_os} onChange={e => setNewOs({...newOs, emetteur_os: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Entreprise destinataire</label>
+                          <input type="text"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.destinataire_os || newOs.entreprise}
+                            onChange={e => { handleEntrepriseChange(e.target.value); setNewOs(prev => ({...prev, destinataire_os: e.target.value})); }} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Montant présenté HT</label>
+                          <input type="number"
+                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOs.montant_devis_presente} onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})} />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° OS</label>
-                          <input
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.os_number}
-                            onChange={e => setNewOs({...newOs, os_number: e.target.value})}
-                          />
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Délai d'exécution</label>
+                          <div className="flex gap-2">
+                            <input type="number" placeholder="ex: 30"
+                              className="w-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newOs.delai_execution} onChange={e => setNewOs({...newOs, delai_execution: e.target.value})} />
+                            <select
+                              className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newOs.delai_unit} onChange={e => setNewOs({...newOs, delai_unit: e.target.value})}>
+                              <option value="jours">Jours</option>
+                              <option value="semaines">Semaines</option>
+                              <option value="mois">Mois</option>
+                            </select>
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Montant présenté HT</label>
-                          <input
-                            type="number"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.montant_devis_presente}
-                            onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})}
-                          />
-                        </div>
-                        <div className="flex items-end">
-                          <button
-                            onClick={handleCreateOs}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                          >
+                        <div className="md:col-span-2 flex items-end">
+                          <button onClick={handleCreateOs}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
                             Créer l'OS
                           </button>
                         </div>
@@ -1646,22 +1790,29 @@ export default function ProjectDetail() {
                           <th className="px-4 py-3 text-left">N°</th>
                           <th className="px-4 py-3 text-left">Titre</th>
                           <th className="px-4 py-3 text-left">Lot / Entreprise</th>
+                          <th className="px-4 py-3 text-left">Date émission</th>
+                          <th className="px-4 py-3 text-left">Délai</th>
                           <th className="px-4 py-3 text-right">Présenté HT</th>
                           <th className="px-4 py-3 text-right">Accepté HT</th>
                           <th className="px-4 py-3 text-center">Statut</th>
                           <th className="px-4 py-3 text-center">Actions</th>
-                          <th className="px-4 py-3 w-8"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).map((os) => (
                           <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-4 py-3 font-bold text-zinc-900 dark:text-white whitespace-nowrap">OS {os.os_number}</td>
-                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200">{os.title}</td>
+                            <td className="px-4 py-3 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap font-mono text-xs">
+                              OS {os.os_number}
+                            </td>
+                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[160px] truncate">{os.title}</td>
                             <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400 text-xs">
                               {os.lot && <span className="font-semibold">{os.lot}</span>}
-                              {os.lot && os.entreprise && ' · '}
-                              {os.entreprise}
+                              {os.lot && (os.destinataire_os || os.entreprise) && ' · '}
+                              {os.destinataire_os || os.entreprise}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-zinc-500">{os.date_emission ?? os.date?.slice(0,10) ?? '—'}</td>
+                            <td className="px-4 py-3 text-xs text-zinc-500">
+                              {os.delai_execution ? `${os.delai_execution} ${os.delai_unit ?? 'j'}` : '—'}
                             </td>
                             <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
                               {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
@@ -1672,59 +1823,47 @@ export default function ProjectDetail() {
                                 : '—'}
                             </td>
                             <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
-                            <td className="px-4 py-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1">
                                 {os.status === 'draft' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
-                                    title="Soumettre"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"
-                                  >
-                                    <IconSend size={11} /> Soumettre
+                                  <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
+                                    title="Émettre l'OS"
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[10px] font-bold transition-all">
+                                    <IconSend size={11} /> Émettre
                                   </button>
                                 )}
                                 {os.status === 'submitted' && (
-                                  <>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
-                                      title="Approuver"
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"
-                                    >
-                                      <IconCheck size={11} /> Approuver
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
-                                      title="Rejeter"
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"
-                                    >
-                                      <IconX size={11} /> Rejeter
-                                    </button>
-                                  </>
-                                )}
-                                {os.status === 'rejected' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'draft')}
-                                    title="Remettre en brouillon"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"
-                                  >
-                                    <IconRefresh size={11} /> Rouvrir
+                                  <button onClick={() => handleUpdateOsStatus(os.id, 'approved')}
+                                    title="Enregistrer AR"
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all">
+                                    <IconCheck size={11} /> AR reçu
                                   </button>
                                 )}
+                                {(os.status === 'draft' || os.status === 'submitted') && (
+                                  <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
+                                    title="Annuler"
+                                    className="p-1 text-red-400 hover:text-red-600 transition-colors">
+                                    <IconX size={13} />
+                                  </button>
+                                )}
+                                <button onClick={() => generateOsPdf(os)} title="Exporter PDF"
+                                  className="p-1 text-zinc-300 hover:text-blue-500 transition-colors">
+                                  <IconFileDownload size={13} />
+                                </button>
+                                <button onClick={() => handleDeleteOs(os.id)}
+                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors">
+                                  <IconTrash size={13} />
+                                </button>
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleDeleteOs(os.id)}
-                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                              >
-                                <IconTrash size={14} />
-                              </button>
+                              {os.status === 'approved' && os.date_ar && (
+                                <p className="text-[10px] text-green-600 mt-0.5">AR : {os.date_ar}</p>
+                              )}
                             </td>
                           </tr>
                         ))}
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
                           <tr>
-                            <td colSpan={8} className="px-6 py-8 text-center text-zinc-500 italic">Aucun ordre de service travaux.</td>
+                            <td colSpan={9} className="px-6 py-8 text-center text-zinc-500 italic">Aucun ordre de service travaux.</td>
                           </tr>
                         )}
                       </tbody>
@@ -3039,7 +3178,50 @@ export default function ProjectDetail() {
           </div>
         </div>
       </div>
-      <ContactModal 
+      {/* AR Modal */}
+      <AnimatePresence>
+        {arOsTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6"
+            >
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-white mb-4">
+                Accusé de réception — OS N° {arOsTarget.os_number}
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Date d'AR *</label>
+                  <input type="date" value={arForm.date_ar} onChange={e => setArForm(f => ({...f, date_ar: e.target.value}))}
+                    className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Date d'exécution prévue</label>
+                  <input type="date" value={arForm.date_execution} onChange={e => setArForm(f => ({...f, date_execution: e.target.value}))}
+                    className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Notes</label>
+                  <textarea rows={3} value={arForm.notes_ar} onChange={e => setArForm(f => ({...f, notes_ar: e.target.value}))}
+                    className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm resize-none outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5 justify-end">
+                <button onClick={() => setArOsTarget(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                  Annuler
+                </button>
+                <button onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar}
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-all">
+                  {arSaving ? 'Enregistrement…' : 'Confirmer AR'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <ContactModal
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
