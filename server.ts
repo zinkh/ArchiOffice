@@ -2674,7 +2674,7 @@ async function startServer() {
       // Fetch old proposal to check status transition
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
-      const { specialties_list, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, ...updateData } = p;
+      const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, ...updateData } = p;
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

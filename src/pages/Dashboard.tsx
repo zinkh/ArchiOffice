@@ -9,6 +9,12 @@ import {
   IconChevronRight,
   IconTrendingUp,
   IconTrendingDown,
+  IconPlus,
+  IconFileInvoice,
+  IconBriefcase,
+  IconFileText,
+  IconCurrencyEuro,
+  IconReceiptOff,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import type { Project, Milestone } from '../types';
@@ -27,11 +33,9 @@ import {
   CartesianGrid,
 } from 'recharts';
 
-/* ── Tabler color palette for charts ── */
-const PIE_COLORS  = ['#2fb344', '#206bc4', '#f76707', '#6c7a91'];
-const BAR_COLOR   = '#206bc4';
+const PIE_COLORS = ['#2fb344', '#206bc4', '#f76707', '#6c7a91'];
+const BAR_COLOR  = '#206bc4';
 
-/* ── Status badge helper ── */
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string }> = {
     'In Progress': { bg: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' },
@@ -50,65 +54,66 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-/* ── Tabler-style stat card ── */
+/* ── Colored stat card (mobile-first) ── */
 interface StatCardProps {
   label: string;
-  value: number;
+  value: string | number;
   icon: React.ElementType;
-  iconColor: string;
-  iconBg: string;
-  trend: string;
+  accent: string;       // hex color
+  accentBg: string;     // light tint
+  cardBg?: string;      // optional card background tint
+  trend?: string;
   trendUp?: boolean;
+  to?: string;
 }
-function StatCard({ label, value, icon: Icon, iconColor, iconBg, trend, trendUp }: StatCardProps) {
+function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, trend, trendUp, to }: StatCardProps) {
+  const navigate = useNavigate();
   return (
     <div
-      className="rounded p-5 flex flex-col gap-3"
+      className="rounded-xl p-4 flex flex-col gap-2 cursor-pointer transition-all active:scale-[0.98]"
       style={{
-        background: 'var(--tblr-surface)',
-        border: '1px solid var(--tblr-border)',
+        background: cardBg ?? 'var(--tblr-surface)',
+        border: `1px solid ${cardBg ? accent + '33' : 'var(--tblr-border)'}`,
         boxShadow: 'var(--tblr-shadow)',
       }}
+      onClick={() => to && navigate(to)}
     >
       <div className="flex items-center justify-between">
         <span
-          className="subheader"
-          style={{ color: 'var(--tblr-muted)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          className="text-[10px] font-bold uppercase tracking-wider"
+          style={{ color: cardBg ? accent : 'var(--tblr-muted)' }}
         >
           {label}
         </span>
         <span
-          className="w-9 h-9 rounded flex items-center justify-center"
-          style={{ background: iconBg, color: iconColor }}
+          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: accentBg, color: accent }}
         >
-          <Icon size={18} />
+          <Icon size={16} />
         </span>
       </div>
 
-      <div>
-        <p
-          className="text-3xl font-bold leading-none"
-          style={{ color: 'var(--tblr-text)' }}
-        >
-          {value}
-        </p>
-      </div>
+      <p
+        className="text-2xl font-bold leading-none"
+        style={{ color: cardBg ? accent : 'var(--tblr-text)' }}
+      >
+        {value}
+      </p>
 
-      <div className="flex items-center gap-1 text-[12px] font-medium" style={{ color: 'var(--tblr-muted)' }}>
-        {trendUp !== undefined && (
-          trendUp
-            ? <IconTrendingUp size={14} style={{ color: 'var(--tblr-success)' }} />
-            : <IconTrendingDown size={14} style={{ color: 'var(--tblr-danger)' }} />
-        )}
-        <span style={{ color: trendUp ? 'var(--tblr-success)' : trendUp === false ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}>
-          {trend}
-        </span>
-      </div>
+      {trend && (
+        <div className="flex items-center gap-1 text-[11px] font-medium">
+          {trendUp !== undefined && (
+            trendUp
+              ? <IconTrendingUp size={12} style={{ color: '#2fb344' }} />
+              : <IconTrendingDown size={12} style={{ color: '#d63939' }} />
+          )}
+          <span style={{ color: cardBg ? accent + 'cc' : 'var(--tblr-muted)' }}>{trend}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── Tabler tooltip ── */
 function TblrTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -129,26 +134,45 @@ function TblrTooltip({ active, payload, label }: any) {
   );
 }
 
-/* ── Section card wrapper ── */
 function SectionCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div
-      className="rounded overflow-hidden"
+      className="rounded-xl overflow-hidden"
       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
     >
       <div
-        className="flex items-center justify-between px-5 py-3 border-b"
+        className="flex items-center justify-between px-4 py-3 border-b"
         style={{ borderColor: 'var(--tblr-border)' }}
       >
         <h2 className="text-[13px] font-semibold" style={{ color: 'var(--tblr-text)' }}>{title}</h2>
         {action}
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-4">{children}</div>
     </div>
   );
 }
 
-/* ────────────────────────────────────────────────── */
+/* ── Quick action button ── */
+function QuickAction({ icon: Icon, label, to, color }: { icon: React.ElementType; label: string; to: string; color: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={() => navigate(to)}
+      className="flex flex-col items-center gap-2 p-3 rounded-xl transition-all active:scale-95 flex-1"
+      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+    >
+      <span
+        className="w-11 h-11 rounded-xl flex items-center justify-center"
+        style={{ background: color + '18', color }}
+      >
+        <Icon size={22} />
+      </span>
+      <span className="text-[11px] font-semibold text-center leading-tight" style={{ color: 'var(--tblr-muted)' }}>
+        {label}
+      </span>
+    </button>
+  );
+}
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -156,59 +180,34 @@ export default function Dashboard() {
   const [projects,   setProjects]   = useState<Project[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [tenders,    setTenders]    = useState<any[]>([]);
+  const [invoices,   setInvoices]   = useState<any[]>([]);
+  const [proposals,  setProposals]  = useState<any[]>([]);
 
   useEffect(() => {
     fetch('/api/projects').then(r => r.ok ? r.json() : []).then(setProjects).catch(() => {});
     fetch('/api/milestones').then(r => r.ok ? r.json() : []).then(setMilestones).catch(() => {});
     fetch('/api/tenders').then(r => r.ok ? r.json() : []).then(setTenders).catch(() => {});
+    fetch('/api/invoices').then(r => r.ok ? r.json() : []).then(setInvoices).catch(() => {});
+    fetch('/api/proposals').then(r => r.ok ? r.json() : []).then(setProposals).catch(() => {});
   }, []);
 
-  const pendingTenders = tenders.filter(t => !t.status || t.status === 'pending' || t.status === 'Pending').length;
+  const pendingTenders   = tenders.filter(t => !t.status || t.status === 'pending' || t.status === 'Pending').length;
+  const overdueInvoices  = invoices.filter(inv => inv.status === 'overdue' || inv.status === 'Overdue').length;
+  const totalRevenue     = invoices
+    .filter(inv => inv.status === 'paid' || inv.status === 'Paid')
+    .reduce((s, inv) => s + (inv.total_amount || inv.amount || 0), 0);
+  const pendingProposals = proposals.filter(p => p.status === 'Pending' || p.status === 'Draft').length;
 
-  const stats: StatCardProps[] = [
-    {
-      label:     t('active_projects'),
-      value:     projects.filter(p => p.status === 'In Progress').length,
-      icon:      IconActivity,
-      iconColor: '#206bc4',
-      iconBg:    '#e8f0fb',
-      trend:     'Projets actifs',
-      trendUp:   true,
-    },
-    {
-      label:     t('pending_tenders'),
-      value:     pendingTenders,
-      icon:      IconAlertCircle,
-      iconColor: '#f76707',
-      iconBg:    '#fff4e6',
-      trend:     pendingTenders > 0 ? 'En attente de réponse' : 'Aucun en attente',
-      trendUp:   undefined,
-    },
-    {
-      label:     t('completed_month'),
-      value:     projects.filter(p => p.status === 'Completed').length,
-      icon:      IconCircleCheck,
-      iconColor: '#2fb344',
-      iconBg:    '#d3f9d8',
-      trend:     'Projets livrés',
-      trendUp:   true,
-    },
-    {
-      label:     t('upcoming_deadlines'),
-      value:     milestones.filter(m => !m.completed).length,
-      icon:      IconClock,
-      iconColor: '#d63939',
-      iconBg:    '#ffe3e3',
-      trend:     milestones.filter(m => !m.completed).length > 0 ? 'Jalons à traiter' : 'Tout à jour',
-      trendUp:   milestones.filter(m => !m.completed).length === 0,
-    },
-  ];
+  const formatEur = (n: number) =>
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
+
+  const upcomingDeadlines = milestones.filter(m => !m.completed).length;
 
   const statusData = [
-    { name: 'Terminés',     value: projects.filter(p => p.status === 'Completed').length },
-    { name: 'En cours',     value: projects.filter(p => p.status === 'In Progress').length },
-    { name: 'Planification',value: projects.filter(p => p.status === 'Planning').length },
-    { name: 'En attente',   value: projects.filter(p => p.status === 'On Hold').length },
+    { name: 'Terminés',      value: projects.filter(p => p.status === 'Completed').length },
+    { name: 'En cours',      value: projects.filter(p => p.status === 'In Progress').length },
+    { name: 'Planification', value: projects.filter(p => p.status === 'Planning').length },
+    { name: 'En attente',    value: projects.filter(p => p.status === 'On Hold').length },
   ].filter(d => d.value > 0);
 
   const categoryData = React.useMemo(() => {
@@ -218,10 +217,10 @@ export default function Dashboard() {
   }, [projects]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
-      {/* Page header — Tabler style */}
-      <div className="flex items-center justify-between pb-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+      {/* Page header */}
+      <div className="flex items-center justify-between pb-4 hidden sm:flex" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
             {t('dashboard')}
@@ -232,13 +231,115 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {stats.map(s => <StatCard key={s.label} {...s} />)}
+      {/* Mobile date greeting */}
+      <div className="sm:hidden">
+        <p className="text-[12px] capitalize" style={{ color: 'var(--tblr-muted)' }}>
+          {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Financial summary cards (2 cols on mobile) ── */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard
+          label="CA encaissé"
+          value={formatEur(totalRevenue)}
+          icon={IconCurrencyEuro}
+          accent="#206bc4"
+          accentBg="#e8f0fb"
+          cardBg="#eef3fb"
+          trend="Factures payées"
+          trendUp={true}
+          to="/invoices"
+        />
+        <StatCard
+          label="Factures en retard"
+          value={overdueInvoices}
+          icon={IconReceiptOff}
+          accent="#d63939"
+          accentBg="#ffe3e3"
+          cardBg="#fef2f2"
+          trend={overdueInvoices > 0 ? 'À régulariser' : 'Aucun retard'}
+          trendUp={overdueInvoices === 0}
+          to="/invoices"
+        />
+        <StatCard
+          label={t('active_projects')}
+          value={projects.filter(p => p.status === 'In Progress').length}
+          icon={IconActivity}
+          accent="#206bc4"
+          accentBg="#e8f0fb"
+          trend="Projets actifs"
+          trendUp={true}
+          to="/projects"
+        />
+        <StatCard
+          label="Devis en attente"
+          value={pendingProposals}
+          icon={IconAlertCircle}
+          accent="#f76707"
+          accentBg="#fff4e6"
+          trend={pendingProposals > 0 ? 'En cours de réponse' : 'Aucun en attente'}
+          trendUp={pendingProposals === 0}
+          to="/proposals"
+        />
+      </div>
+
+      {/* 2nd row of stats */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard
+          label={t('pending_tenders')}
+          value={pendingTenders}
+          icon={IconBriefcase}
+          accent="#ae3ec9"
+          accentBg="#f8d7ff"
+          trend={pendingTenders > 0 ? "Appels d'offres" : 'Aucun en attente'}
+          to="/tenders"
+        />
+        <StatCard
+          label={t('completed_month')}
+          value={projects.filter(p => p.status === 'Completed').length}
+          icon={IconCircleCheck}
+          accent="#2fb344"
+          accentBg="#d3f9d8"
+          trend="Projets livrés"
+          trendUp={true}
+          to="/projects"
+        />
+        <StatCard
+          label={t('upcoming_deadlines')}
+          value={upcomingDeadlines}
+          icon={IconClock}
+          accent="#d63939"
+          accentBg="#ffe3e3"
+          trend={upcomingDeadlines > 0 ? 'Jalons à traiter' : 'Tout à jour'}
+          trendUp={upcomingDeadlines === 0}
+        />
+        <StatCard
+          label="Total projets"
+          value={projects.length}
+          icon={IconFileText}
+          accent="#6c7a91"
+          accentBg="#f1f3f6"
+          trend="Tous statuts"
+          to="/projects"
+        />
+      </div>
+
+      {/* ── Quick actions (mobile-prominent) ── */}
+      <div className="xl:hidden">
+        <p className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>
+          Création rapide
+        </p>
+        <div className="flex gap-2">
+          <QuickAction icon={IconPlus}         label="Nouveau projet"  to="/projects"   color="#206bc4" />
+          <QuickAction icon={IconFileText}      label="Nouveau devis"   to="/proposals"  color="#f76707" />
+          <QuickAction icon={IconFileInvoice}   label="Nouvelle facture" to="/invoices"  color="#2fb344" />
+          <QuickAction icon={IconBriefcase}     label="Appel d'offres"  to="/tenders"   color="#ae3ec9" />
+        </div>
+      </div>
+
+      {/* ── Charts (desktop only) ── */}
+      <div className="hidden lg:grid grid-cols-2 gap-4">
         <SectionCard title={t('dashboard_project_status')}>
           {statusData.length === 0 ? (
             <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
@@ -254,7 +355,6 @@ export default function Dashboard() {
               </ResponsiveContainer>
             </div>
           )}
-          {/* Legend */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
             {statusData.map((d, i) => (
               <div key={d.name} className="flex items-center gap-1.5 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
@@ -311,21 +411,18 @@ export default function Dashboard() {
             {projects.slice(0, 6).map(project => (
               <div
                 key={project.id}
-                className="flex items-center gap-4 py-3 cursor-pointer transition-colors"
+                className="flex items-center gap-3 py-3 cursor-pointer transition-colors"
                 style={{ borderColor: 'var(--tblr-border)' }}
                 onClick={() => navigate(`/projects/${project.id}`)}
                 onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                 onMouseOut={e => (e.currentTarget.style.background = '')}
               >
-                {/* Avatar */}
                 <div
-                  className="w-9 h-9 rounded flex items-center justify-center text-sm font-bold shrink-0"
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
                   style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                 >
                   {project.name.charAt(0).toUpperCase()}
                 </div>
-
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
                     {project.name}
@@ -336,10 +433,7 @@ export default function Dashboard() {
                     </p>
                   )}
                 </div>
-
-                {/* Status */}
                 <StatusBadge status={project.status} />
-
                 <IconChevronRight size={14} style={{ color: 'var(--tblr-muted)' }} className="shrink-0" />
               </div>
             ))}

@@ -181,6 +181,7 @@ function Header() {
 
   /* ── Tabler navbar: opaque, 56px, border-bottom ── */
   return (
+    <>
     <header
       className="sticky top-0 z-40 w-full border-b"
       style={{
@@ -444,41 +445,66 @@ function Header() {
         </div>
       </div>
 
-      {/* Mobile nav drawer */}
+    </header>
+
+      {/* Mobile nav drawer — slides in from left */}
       <AnimatePresence>
         {isMobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-t overflow-hidden"
-            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
-          >
-            <nav className="flex flex-col p-2 gap-0.5">
-              {NAV_ITEMS.map((item) => {
-                const isActive = location.pathname === item.path;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={cn(
-                      'flex items-center gap-2.5 px-3 py-2 rounded text-[13px] font-medium transition-colors',
-                      isActive
-                        ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                        : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                    )}
-                  >
-                    <item.icon size={16} />
-                    <span>{t(item.name)}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-          </motion.div>
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-40 md:hidden"
+              style={{ background: 'rgba(0,0,0,0.45)' }}
+              onClick={() => setIsMobileMenuOpen(false)}
+            />
+            {/* Drawer */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'tween', duration: 0.25 }}
+              className="fixed inset-y-0 left-0 z-50 w-72 md:hidden flex flex-col overflow-y-auto"
+              style={{ background: 'var(--tblr-surface)', borderRight: '1px solid var(--tblr-border)' }}
+            >
+              {/* Drawer header */}
+              <div
+                className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
+                style={{ borderColor: 'var(--tblr-border)' }}
+              >
+                <ArchiOfficeLogo size={28} />
+                <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
+              </div>
+              {/* Nav items */}
+              <nav className="flex flex-col p-2 gap-0.5 flex-1">
+                {NAV_ITEMS.map((item) => {
+                  const isActive = location.pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
+                        isActive
+                          ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                          : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                      )}
+                    >
+                      <item.icon size={18} />
+                      <span>{t(item.name)}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
-    </header>
+    </>
   );
 }
 
