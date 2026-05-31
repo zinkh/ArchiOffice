@@ -221,6 +221,12 @@ export interface Reception {
   has_reserves: boolean;
   reserves_count?: number;
   document_url?: string;
+  reference_pv?: string;
+  lieu?: string;
+  signataires?: string; // JSON [{nom, role}]
+  observations?: string;
+  date_limite_levee?: string;
+  pv_valide?: boolean;
 }
 
 export interface Reserve {
