@@ -193,6 +193,14 @@ export interface OrdreDeService {
   montant_devis_presente?: number;
   montant_devis_accepte?: number;
   date_signature?: string;
+  date_emission?: string;
+  date_ar?: string;
+  date_execution?: string;
+  emetteur_os?: string;
+  destinataire_os?: string;
+  notes_ar?: string;
+  delai_execution?: number;
+  delai_unit?: string;
 }
 
 export interface Visa {

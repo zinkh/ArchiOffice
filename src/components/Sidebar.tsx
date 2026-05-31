@@ -21,6 +21,7 @@ import {
   IconAlertTriangle,
   IconChevronDown,
   IconChevronRight,
+  IconClipboardList,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -39,6 +40,7 @@ export const NAV_ITEMS = [
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
+  { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
   { name: 'team',           path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
   { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
@@ -74,6 +76,7 @@ const NAV_SECTIONS = [
       { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
       { name: 'reunions',       path: '/reunions',        icon: IconMessages },
+      { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
       { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
     ],
   },

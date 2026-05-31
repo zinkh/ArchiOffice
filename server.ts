@@ -1710,13 +1710,17 @@ async function startServer() {
         os_number, march_number, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
+        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature,
+        date_emission, date_ar, date_execution, emetteur_os, destinataire_os, notes_ar,
+        delai_execution, delai_unit
       } = req.body;
       const { error } = await supabaseAdmin.from('ordres_de_service').update({
         os_number, march_number, title, date, description, lot, status, type: type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
-        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
+        incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature,
+        date_emission, date_ar, date_execution, emetteur_os, destinataire_os, notes_ar,
+        delai_execution, delai_unit
       }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
@@ -1737,6 +1741,39 @@ async function startServer() {
       console.error(e);
       res.status(500).json({ error: "Failed to delete OS" });
     }
+  });
+
+  // PATCH status transition for OS
+  app.patch("/api/ordres_de_service/:id/status", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { status, date_ar, date_execution, notes_ar } = req.body;
+      const validStatuses = ['draft', 'submitted', 'approved', 'rejected'];
+      if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      const updateData: any = { status };
+      if (status === 'submitted') updateData.date_emission = new Date().toISOString().split('T')[0];
+      if (date_ar) updateData.date_ar = date_ar;
+      if (date_execution) updateData.date_execution = date_execution;
+      if (notes_ar) updateData.notes_ar = notes_ar;
+      const { error } = await supabaseAdmin.from('ordres_de_service').update(updateData).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET next OS number for a project
+  app.get("/api/ordres_de_service/next-number", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id } = req.query;
+      const query = supabaseAdmin.from('ordres_de_service').select('os_number').eq('tenant_id', tenantId);
+      if (project_id) (query as any).eq('project_id', project_id as string);
+      const { data } = await query;
+      const nums = (data || []).map((r: any) => parseInt(r.os_number) || 0);
+      const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+      res.json({ next: String(next).padStart(3, '0') });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // Visa Routes
