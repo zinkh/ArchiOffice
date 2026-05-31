@@ -1914,7 +1914,8 @@ async function startServer() {
       const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description });
+      const { indice, emetteur, doc_type } = req.body;
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       res.status(201).json({ id });
@@ -1946,25 +1947,28 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, category, phase, description, uploaded_by } = req.body;
+      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type } = req.body;
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
-        const { data: doc } = await supabaseAdmin.from('documents').select('version, project_id, phase').eq('id', id).eq('tenant_id', tenantId).single();
+        const { data: doc } = await supabaseAdmin.from('documents').select('version, project_id, phase, indice').eq('id', id).eq('tenant_id', tenantId).single();
         const newVersion = ((doc as any)?.version || 1) + 1;
+        const currentIndice = (doc as any)?.indice || 'A';
+        const nextIndice = String.fromCharCode(currentIndice.charCodeAt(0) + 1);
         const existingPhase = phaseVal || (doc as any)?.phase || null;
         const projectId = (doc as any)?.project_id || 'general';
         const phaseSegment = existingPhase ? `${existingPhase}/` : '';
         const storagePath = `${tenantId}/${projectId}/${phaseSegment}${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`;
         const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
         const uploaded_at = new Date().toISOString();
-        const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at };
+        const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
         await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
       } else {
-        const updateFields: any = { name, category, description };
+        const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
+        if (indice !== undefined) updateFields.indice = indice;
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
@@ -1981,6 +1985,62 @@ async function startServer() {
       if (error) throw error;
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch document versions" }); }
+  });
+
+  // PATCH statut d'un document
+  app.patch("/api/documents/:id/statut", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { doc_statut, approbateur } = req.body;
+      if (!['en_cours', 'approuve', 'perime'].includes(doc_statut)) {
+        return res.status(400).json({ error: 'Invalid statut' });
+      }
+      const updateData: any = { doc_statut };
+      if (doc_statut === 'approuve') {
+        updateData.approbateur = approbateur || null;
+        updateData.date_approbation = new Date().toISOString();
+      }
+      const { error } = await supabaseAdmin.from('documents').update(updateData).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET diffusions d'un document
+  app.get("/api/documents/:id/diffusions", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data, error } = await supabaseAdmin.from('document_diffusions').select('*').eq('tenant_id', tenantId).eq('document_id', id).order('sent_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST diffusion (send to recipient)
+  app.post("/api/documents/:id/diffusions", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { contact_name, contact_email, notes } = req.body;
+      if (!contact_name) return res.status(400).json({ error: 'contact_name required' });
+      const diffusion = { id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, contact_name, contact_email: contact_email || null, sent_at: new Date().toISOString(), notes: notes || null };
+      const { error } = await supabaseAdmin.from('document_diffusions').insert(diffusion);
+      if (error) throw error;
+      res.status(201).json(diffusion);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // PATCH acknowledge
+  app.patch("/api/documents/:id/diffusions/:diffId/acknowledge", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { diffId } = req.params;
+      const { error } = await supabaseAdmin.from('document_diffusions').update({ acknowledged_at: new Date().toISOString() }).eq('id', diffId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 
   app.get("/api/projects", async (req: any, res: any) => {

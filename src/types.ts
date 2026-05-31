@@ -11,6 +11,12 @@ export interface Document {
   uploaded_by: string; // TeamMember ID
   uploaded_at: string;
   description?: string;
+  indice?: string;           // 'A', 'B', 'C'...
+  doc_statut?: 'en_cours' | 'approuve' | 'perime';
+  emetteur?: string;
+  approbateur?: string;
+  date_approbation?: string;
+  doc_type?: string;
 }
 
 export interface DocumentVersion {
@@ -21,6 +27,16 @@ export interface DocumentVersion {
   uploaded_by: string;
   uploaded_at: string;
   description?: string;
+}
+
+export interface DocumentDiffusion {
+  id: string;
+  document_id: string;
+  contact_name: string;
+  contact_email?: string;
+  sent_at: string;
+  acknowledged_at?: string;
+  notes?: string;
 }
 
 export interface ProjectTemplate {
