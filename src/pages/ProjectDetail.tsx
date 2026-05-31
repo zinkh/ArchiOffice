@@ -31,6 +31,9 @@ import {
   IconSend,
   IconClipboardList,
   IconFileDownload,
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconFilePlus,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -255,6 +258,28 @@ export default function ProjectDetail() {
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const planInputRef = useRef<HTMLInputElement>(null);
 
+  // Reception PV form state
+  const [showPvForm, setShowPvForm] = useState(false);
+  const [editingReceptionId, setEditingReceptionId] = useState<string | null>(null);
+  const defaultPvForm = () => ({
+    reference_pv: '',
+    type: 'provisoire' as 'provisoire' | 'definitive',
+    date: new Date().toISOString().split('T')[0],
+    lieu: '',
+    date_limite_levee: '',
+    has_reserves: false,
+    reserves_count: 0,
+    signataires: [] as { nom: string; role: string }[],
+    observations: '',
+    pv_valide: false,
+  });
+  const [pvForm, setPvForm] = useState(defaultPvForm());
+
+  // DOE documents state
+  const [doeDocuments, setDoeDocuments] = useState<any[]>([]);
+  const doeInputRef = useRef<HTMLInputElement>(null);
+  const [doeUploading, setDoeUploading] = useState(false);
+
   useEffect(() => {
     if (project && !project.is_chantier && ['ACT', 'DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
       setActiveTab('INFOS');
@@ -271,6 +296,12 @@ export default function ProjectDetail() {
       fetchProjectMembers();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (activeTab === 'AOR' && id) {
+      fetchDoeDocuments();
+    }
+  }, [activeTab, id]);
 
   const fetchProjectMembers = async () => {
     if (!id) return;
@@ -333,6 +364,18 @@ export default function ProjectDetail() {
     try {
       const res = await fetch(`/api/plans?project_id=${id}`);
       if (res.ok) setPlans(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchDoeDocuments = async () => {
+    try {
+      const res = await fetch(`/api/documents?project_id=${id}&doc_type=DOE`);
+      if (res.ok) {
+        const data = await res.json();
+        setDoeDocuments(data.filter((d: any) => d.doc_type === 'DOE'));
+      }
     } catch (err) {
       console.error(err);
     }
@@ -786,6 +829,123 @@ export default function ProjectDetail() {
       doc.text(`OS N° ${os.os_number} — ${project?.name ?? ''} — Page ${i}/${n}`, 105, 290, { align: 'center' });
     }
     doc.save(`OS_${os.os_number}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
+  };
+
+  const generatePvPdf = (rec: Reception, pvReserves: Reserve[], projectName: string, signataires: { nom: string; role: string }[]) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const blue: [number, number, number] = [30, 64, 175];
+    // Header
+    doc.setFillColor(...blue);
+    doc.rect(0, 0, 210, 32, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text('PROCÈS-VERBAL DE RÉCEPTION', 105, 13, { align: 'center' });
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+    doc.text(`${rec.reference_pv ? `Réf. : ${rec.reference_pv}  |  ` : ''}${rec.type === 'definitive' ? 'Réception Définitive' : 'Réception Provisoire'}`, 105, 22, { align: 'center' });
+    doc.setTextColor(30, 30, 30);
+    let y = 40;
+    // Section opération
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text('Opération', 14, y); y += 5;
+    doc.setDrawColor(200); doc.line(14, y, 196, y); y += 5;
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`Projet : ${projectName}`, 14, y); y += 5;
+    doc.text(`Date de réception : ${new Date(rec.date).toLocaleDateString('fr-FR')}`, 14, y); y += 5;
+    if (rec.lieu) { doc.text(`Lieu : ${rec.lieu}`, 14, y); y += 5; }
+    // Date limite levée
+    if (rec.date_limite_levee) {
+      const dlimit = new Date(rec.date_limite_levee);
+      const isUrgent = (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
+      if (isUrgent) { doc.setFillColor(255, 237, 213); doc.rect(14, y - 2, 182, 10, 'F'); doc.setTextColor(194, 65, 12); }
+      else { doc.setTextColor(30, 30, 30); }
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Date limite de levée des réserves : ${dlimit.toLocaleDateString('fr-FR')}${isUrgent ? ' ⚠ Délai proche' : ''}`, 14, y + 5);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
+      y += 14;
+    }
+    y += 3;
+    // Signataires
+    if (signataires.length > 0) {
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text('Présents / Signataires', 14, y); y += 5;
+      doc.setDrawColor(200); doc.line(14, y, 196, y); y += 4;
+      autoTable(doc, {
+        startY: y,
+        head: [['Nom', 'Rôle']],
+        body: signataires.map(s => [s.nom, s.role]),
+        theme: 'grid',
+        headStyles: { fillColor: blue, textColor: 255, fontSize: 9 },
+        bodyStyles: { fontSize: 9 },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    }
+    // Réserves
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text('État des réserves', 14, y); y += 5;
+    doc.setDrawColor(200); doc.line(14, y, 196, y); y += 4;
+    if (pvReserves.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [['N°', 'Bâtiment / Local', 'Intitulé', 'Lots', 'Entreprises', 'Statut', 'Échéance']],
+        body: pvReserves.map(r => [
+          `#${r.number || '—'}`,
+          `${r.batiment}${r.local ? ' / ' + r.local : ''}`,
+          r.title,
+          JSON.parse(r.lots || '[]').join(', ') || '—',
+          JSON.parse(r.entreprises || '[]').join(', ') || '—',
+          r.status,
+          new Date(r.due_date).toLocaleDateString('fr-FR'),
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: blue, textColor: 255, fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 2: { cellWidth: 40 }, 5: { cellWidth: 28 } },
+        margin: { left: 14, right: 14 },
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && data.row.raw[5] === 'Levée') {
+            data.cell.styles.textColor = [22, 163, 74];
+          } else if (data.section === 'body' && (data.row.raw[5] === 'A faire' || data.row.raw[5] === 'En cours')) {
+            data.cell.styles.textColor = [180, 100, 0];
+          }
+        }
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    } else {
+      doc.setFontSize(9); doc.setFont('helvetica', 'italic'); doc.setTextColor(120);
+      doc.text('Aucune réserve enregistrée pour cette réception.', 14, y + 5);
+      y += 14; doc.setTextColor(30, 30, 30);
+    }
+    // Observations
+    if (rec.observations) {
+      if (y > 240) { doc.addPage(); y = 20; }
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 30, 30);
+      doc.text('Observations', 14, y); y += 5;
+      doc.setDrawColor(200); doc.line(14, y, 196, y); y += 4;
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      const lines = doc.splitTextToSize(rec.observations, 182);
+      doc.text(lines, 14, y); y += lines.length * 5 + 6;
+    }
+    // Signatures
+    if (y > 230) { doc.addPage(); y = 20; }
+    const sigY = Math.max(y + 10, 240);
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, sigY, 82, 30, 'F'); doc.rect(114, sigY, 82, 30, 'F');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text('Maître d\'œuvre (MOE)', 55, sigY + 7, { align: 'center' });
+    doc.text('Maître d\'ouvrage (MOA)', 155, sigY + 7, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text('Signature & cachet :', 18, sigY + 17);
+    doc.text('Signature & cachet :', 118, sigY + 17);
+    doc.text(`Date : ${new Date(rec.date).toLocaleDateString('fr-FR')}`, 18, sigY + 25);
+    doc.text(`Date : ${new Date(rec.date).toLocaleDateString('fr-FR')}`, 118, sigY + 25);
+    // Footer
+    const n = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+      doc.text(`${rec.reference_pv || 'PV'} — ${projectName} — Page ${i}/${n}`, 105, 290, { align: 'center' });
+    }
+    doc.save(`PV_${(rec.reference_pv || rec.id).replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleDeleteOs = async (osId: string) => {
@@ -2629,6 +2789,44 @@ export default function ProjectDetail() {
 
             {activeTab === 'AOR' && (
               <div className="space-y-8">
+                {/* Cartes d'alertes réserves */}
+                {(() => {
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const in7 = new Date(today.getTime() + 7*24*60*60*1000);
+                  const ouvertes = reserves.filter(r => r.status === 'A faire' || r.status === 'En cours');
+                  const retard = reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) < today);
+                  const urgentes = reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) >= today && new Date(r.due_date) <= in7);
+                  const levees = reserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis');
+                  return (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="relative bg-blue-50 dark:bg-blue-950/30 rounded-2xl p-5 overflow-hidden border border-blue-100 dark:border-blue-900/50">
+                        <IconAlertTriangle size={56} className="absolute right-2 bottom-0 text-blue-200 dark:text-blue-900" />
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-blue-500 dark:text-blue-400 mb-1">Réserves ouvertes</div>
+                        <div className="text-3xl font-black text-blue-700 dark:text-blue-300">{ouvertes.length}</div>
+                        <div className="text-[10px] text-blue-400 mt-1">A faire + En cours</div>
+                      </div>
+                      <div className="relative bg-red-50 dark:bg-red-950/30 rounded-2xl p-5 overflow-hidden border border-red-100 dark:border-red-900/50">
+                        <IconAlertCircle size={56} className="absolute right-2 bottom-0 text-red-200 dark:text-red-900" />
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-red-500 dark:text-red-400 mb-1">En retard</div>
+                        <div className="text-3xl font-black text-red-700 dark:text-red-300">{retard.length}</div>
+                        <div className="text-[10px] text-red-400 mt-1">Échéance dépassée</div>
+                      </div>
+                      <div className="relative bg-orange-50 dark:bg-orange-950/30 rounded-2xl p-5 overflow-hidden border border-orange-100 dark:border-orange-900/50">
+                        <IconClock size={56} className="absolute right-2 bottom-0 text-orange-200 dark:text-orange-900" />
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-orange-500 dark:text-orange-400 mb-1">Urgentes</div>
+                        <div className="text-3xl font-black text-orange-700 dark:text-orange-300">{urgentes.length}</div>
+                        <div className="text-[10px] text-orange-400 mt-1">Dans les 7 jours</div>
+                      </div>
+                      <div className="relative bg-green-50 dark:bg-green-950/30 rounded-2xl p-5 overflow-hidden border border-green-100 dark:border-green-900/50">
+                        <IconCheck size={56} className="absolute right-2 bottom-0 text-green-200 dark:text-green-900" />
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-green-500 dark:text-green-400 mb-1">Levées</div>
+                        <div className="text-3xl font-black text-green-700 dark:text-green-300">{levees.length}</div>
+                        <div className="text-[10px] text-green-400 mt-1">Levée + Quitus</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
                     <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -2636,7 +2834,7 @@ export default function ProjectDetail() {
                         <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Réserves</h3>
                         <div className="flex items-center gap-2">
                           {plans.length > 0 && (
-                            <select 
+                            <select
                               className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-xl px-3 py-2 text-xs font-bold outline-none"
                               value={selectedPlanId || ''}
                               onChange={e => setSelectedPlanId(e.target.value || null)}
@@ -2828,30 +3026,30 @@ export default function ProjectDetail() {
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
                         <tr>
-                          <th className="px-6 py-3 text-left w-16">N°</th>
-                          <th className="px-6 py-3 text-left">Lot / Entreprise</th>
-                          <th className="px-6 py-3 text-left">Bâtiment / Local</th>
-                          <th className="px-6 py-3 text-left">Intitulé</th>
-                          <th className="px-6 py-3 text-left">Statut</th>
-                          <th className="px-6 py-3 text-left">Echéance</th>
-                          <th className="px-6 py-3 text-right w-10"></th>
+                          <th className="px-4 py-3 text-left w-12">N°</th>
+                          <th className="px-4 py-3 text-left">Bâtiment / Local</th>
+                          <th className="px-4 py-3 text-left">Intitulé</th>
+                          <th className="px-4 py-3 text-left">Statut</th>
+                          <th className="px-4 py-3 text-left">Créé le</th>
+                          <th className="px-4 py-3 text-left">Echéance / Retard</th>
+                          <th className="px-4 py-3 text-right w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {Object.entries(reserves.reduce((acc, res) => {
+                        {(Object.entries(reserves.reduce((acc, res) => {
                           const lots = JSON.parse(res.lots || '[]');
                           const entreprises = JSON.parse(res.entreprises || '[]');
                           const groupKey = lots.length > 0 ? `${lots.join(', ')} / ${entreprises.join(', ')}` : 'Sans Lot / Entreprise';
                           if (!acc[groupKey]) acc[groupKey] = [];
                           acc[groupKey].push(res);
                           return acc;
-                        }, {} as Record<string, Reserve[]>)).map(([groupKey, groupReserves]) => (
+                        }, {} as Record<string, Reserve[]>)) as [string, Reserve[]][]).map(([groupKey, groupReserves]) => (
                           <React.Fragment key={groupKey}>
-                            <tr 
+                            <tr
                               className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
                               onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
                             >
-                              <td colSpan={6} className="px-6 py-3">
+                              <td colSpan={7} className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   {expandedGroups[groupKey] ? <IconChevronDown size={14} className="text-zinc-400" /> : <IconChevronRight size={14} className="text-zinc-400" />}
                                   <span className="font-bold text-zinc-900 dark:text-white uppercase tracking-wider text-[11px]">{groupKey}</span>
@@ -2859,52 +3057,75 @@ export default function ProjectDetail() {
                                 </div>
                               </td>
                             </tr>
-                            {expandedGroups[groupKey] && groupReserves.map((res) => (
-                              <tr key={res.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
-                                <td className="px-6 py-4 font-mono text-[10px] text-zinc-500">
-                                  #{res.number || '-'}
-                                </td>
-                                <td className="px-6 py-4 pl-4 text-zinc-400 text-[10px] italic">
-                                  Détail réserve
-                                </td>
-                                <td className="px-6 py-4">
-                                  {editingReserveId === res.id ? (
-                                    <div className="flex gap-2">
-                                      <input 
+                            {expandedGroups[groupKey] && groupReserves.map((res) => {
+                              const todayD = new Date(); todayD.setHours(0,0,0,0);
+                              const dueD = new Date(res.due_date); dueD.setHours(0,0,0,0);
+                              const isOverdue = dueD < todayD && res.status !== 'Levée' && res.status !== 'Quitus Transmis';
+                              const retardJours = isOverdue ? Math.floor((todayD.getTime() - dueD.getTime()) / 86400000) : 0;
+                              return (
+                                <tr key={res.id} className={cn("transition-colors group", isOverdue ? "bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50")}>
+                                  <td className="px-4 py-4 font-mono text-[10px] text-zinc-500">
+                                    #{res.number || '-'}
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    {editingReserveId === res.id ? (
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs w-20"
+                                          value={editReserveData?.batiment}
+                                          onChange={e => setEditReserveData(prev => prev ? ({ ...prev, batiment: e.target.value }) : null)}
+                                        />
+                                        <input
+                                          type="text"
+                                          className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs w-20"
+                                          value={editReserveData?.local}
+                                          onChange={e => setEditReserveData(prev => prev ? ({ ...prev, local: e.target.value }) : null)}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <span className="text-zinc-600 dark:text-zinc-300">{res.batiment} {res.local && `/ ${res.local}`}</span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    {editingReserveId === res.id ? (
+                                      <input
                                         type="text"
-                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs w-20"
-                                        value={editReserveData?.batiment}
-                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, batiment: e.target.value }) : null)}
+                                        className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs"
+                                        value={editReserveData?.title}
+                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, title: e.target.value }) : null)}
                                       />
-                                      <input 
-                                        type="text"
-                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs w-20"
-                                        value={editReserveData?.local}
-                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, local: e.target.value }) : null)}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <span className="text-zinc-600 dark:text-zinc-300">{res.batiment} {res.local && `/ ${res.local}`}</span>
-                                  )}
-                                </td>
-                                <td className="px-6 py-4">
-                                  {editingReserveId === res.id ? (
-                                    <input 
-                                      type="text"
-                                      className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs"
-                                      value={editReserveData?.title}
-                                      onChange={e => setEditReserveData(prev => prev ? ({ ...prev, title: e.target.value }) : null)}
-                                    />
-                                  ) : (
-                                    <div className="font-medium text-zinc-900 dark:text-white">{res.title}</div>
-                                  )}
-                                </td>
-                                <td className="px-6 py-4">
-                                  {editingReserveId === res.id ? (
-                                    <select 
-                                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs"
-                                      value={editReserveData?.status}
-                                      onChange={e => setEditReserveData(prev => prev ? ({ ...prev, status: e.target.value as any }) : null)}
+                                    ) : (
+                                      <div className="font-medium text-zinc-900 dark:text-white">{res.title}</div>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    {/* Inline status select — saves immediately */}
+                                    <select
+                                      className={cn(
+                                        "border-none rounded-full text-[10px] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer",
+                                        res.status === 'Levée' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                                        res.status === 'Quitus Transmis' ? "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400" :
+                                        res.status === 'En cours' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                                        res.status === 'Refusée par l\'entreprise' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                                        res.status === 'Levée refusée par le MOE' ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400" :
+                                        "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                      )}
+                                      value={res.status}
+                                      onChange={async (e) => {
+                                        const newStatus = e.target.value as Reserve['status'];
+                                        try {
+                                          const updated = { ...res, status: newStatus };
+                                          const response = await fetch(`/api/reserves/${res.id}`, {
+                                            method: 'PUT',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify(updated)
+                                          });
+                                          if (response.ok) {
+                                            setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
+                                          }
+                                        } catch (err) { console.error(err); }
+                                      }}
                                     >
                                       <option value="A faire">A faire</option>
                                       <option value="En cours">En cours</option>
@@ -2913,107 +3134,96 @@ export default function ProjectDetail() {
                                       <option value="Quitus Transmis">Quitus Transmis</option>
                                       <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
                                     </select>
-                                  ) : (
-                                    <span className={cn(
-                                      "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                      res.status === 'Levée' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                                      res.status === 'En cours' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                                      res.status === 'Refusée par l\'entreprise' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                                      "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                    )}>
-                                      {res.status}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-6 py-4">
-                                  {editingReserveId === res.id ? (
-                                    <input 
-                                      type="date"
-                                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs"
-                                      value={editReserveData?.due_date}
-                                      onChange={e => setEditReserveData(prev => prev ? ({ ...prev, due_date: e.target.value }) : null)}
-                                    />
-                                  ) : (
-                                    <div className={cn(
-                                      "text-xs font-medium",
-                                      new Date(res.due_date) < new Date() && res.status !== 'Levée' ? "text-red-500" : "text-zinc-600 dark:text-zinc-300"
-                                    )}>
-                                      {new Date(res.due_date).toLocaleDateString()}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  </td>
+                                  <td className="px-4 py-4 text-[10px] text-zinc-400">
+                                    {new Date(res.created_at).toLocaleDateString('fr-FR')}
+                                  </td>
+                                  <td className="px-4 py-4">
                                     {editingReserveId === res.id ? (
-                                      <>
-                                        <button 
-                                          onClick={async () => {
-                                            if (!editReserveData) return;
-                                            try {
-                                              const response = await fetch(`/api/reserves/${editReserveData.id}`, {
-                                                method: 'PUT',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify(editReserveData)
-                                              });
-                                              if (response.ok) {
-                                                setReserves(prev => prev.map(r => r.id === editReserveData.id ? editReserveData : r));
-                                                setEditingReserveId(null);
-                                                setEditReserveData(null);
-                                              }
-                                            } catch (err) {
-                                              console.error(err);
-                                            }
-                                          }}
-                                          className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
-                                        >
-                                          <IconCheck size={14} />
-                                        </button>
-                                        <button 
-                                          onClick={() => {
-                                            setEditingReserveId(null);
-                                            setEditReserveData(null);
-                                          }}
-                                          className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                        >
-                                          <IconX size={14} />
-                                        </button>
-                                      </>
+                                      <input
+                                        type="date"
+                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-xs"
+                                        value={editReserveData?.due_date}
+                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, due_date: e.target.value }) : null)}
+                                      />
                                     ) : (
-                                      <>
-                                        <button 
-                                          onClick={() => {
-                                            setEditingReserveId(res.id);
-                                            setEditReserveData({ ...res });
-                                          }}
-                                          className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
-                                        >
-                                          <IconFileText size={14} />
-                                        </button>
-                                        <button 
-                                          onClick={async () => {
-                                            if (!confirm('Supprimer cette réserve ?')) return;
-                                            try {
-                                              const response = await fetch(`/api/reserves/${res.id}`, { method: 'DELETE' });
-                                              if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
-                                            } catch (err) {
-                                              console.error(err);
-                                            }
-                                          }}
-                                          className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                        >
-                                          <IconTrash size={14} />
-                                        </button>
-                                      </>
+                                      <div className="space-y-0.5">
+                                        <div className={cn("text-xs font-medium", isOverdue ? "text-red-500" : "text-zinc-600 dark:text-zinc-300")}>
+                                          {new Date(res.due_date).toLocaleDateString('fr-FR')}
+                                        </div>
+                                        {isOverdue && (
+                                          <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[9px] font-bold">
+                                            +{retardJours}j
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                  <td className="px-4 py-4 text-right">
+                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {editingReserveId === res.id ? (
+                                        <>
+                                          <button
+                                            onClick={async () => {
+                                              if (!editReserveData) return;
+                                              try {
+                                                const response = await fetch(`/api/reserves/${editReserveData.id}`, {
+                                                  method: 'PUT',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(editReserveData)
+                                                });
+                                                if (response.ok) {
+                                                  setReserves(prev => prev.map(r => r.id === editReserveData.id ? editReserveData : r));
+                                                  setEditingReserveId(null);
+                                                  setEditReserveData(null);
+                                                }
+                                              } catch (err) { console.error(err); }
+                                            }}
+                                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
+                                          >
+                                            <IconCheck size={14} />
+                                          </button>
+                                          <button
+                                            onClick={() => { setEditingReserveId(null); setEditReserveData(null); }}
+                                            className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                          >
+                                            <IconX size={14} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => { setEditingReserveId(res.id); setEditReserveData({ ...res }); }}
+                                            className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                                            title="Modifier"
+                                          >
+                                            <IconFileText size={14} />
+                                          </button>
+                                          <button
+                                            onClick={async () => {
+                                              if (!confirm('Supprimer cette réserve ?')) return;
+                                              try {
+                                                const response = await fetch(`/api/reserves/${res.id}`, { method: 'DELETE' });
+                                                if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
+                                              } catch (err) { console.error(err); }
+                                            }}
+                                            className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                            title="Supprimer"
+                                          >
+                                            <IconTrash size={14} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </React.Fragment>
                         ))}
                         {reserves.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="px-6 py-8 text-center text-zinc-500 italic">Aucune réserve.</td>
+                            <td colSpan={7} className="px-6 py-8 text-center text-zinc-500 italic">Aucune réserve.</td>
                           </tr>
                         )}
                       </tbody>
@@ -3021,56 +3231,317 @@ export default function ProjectDetail() {
                   </div>
                 </div>
 
+                {/* PV de réception */}
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Réceptions</h3>
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Procès-verbaux de réception</h3>
+                    <button
+                      onClick={() => { setShowPvForm(true); setEditingReceptionId(null); setPvForm(defaultPvForm()); }}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                    >
+                      <IconPlus size={14} />
+                      Créer PV de réception
+                    </button>
+                  </div>
+
+                  {/* Formulaire PV */}
+                  {showPvForm && (
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Référence PV</label>
+                          <input type="text" placeholder="ex: PV-2024-001" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reference_pv} onChange={e => setPvForm(prev => ({ ...prev, reference_pv: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Type</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.type} onChange={e => setPvForm(prev => ({ ...prev, type: e.target.value as 'provisoire' | 'definitive' }))}>
+                            <option value="provisoire">Réception provisoire</option>
+                            <option value="definitive">Réception définitive</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date} onChange={e => setPvForm(prev => ({ ...prev, date: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Lieu</label>
+                          <input type="text" placeholder="ex: Site du projet" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.lieu} onChange={e => setPvForm(prev => ({ ...prev, lieu: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date limite levée des réserves</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Réserves</label>
+                          <div className="flex items-center gap-3 pt-2">
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="checkbox" checked={pvForm.has_reserves} onChange={e => setPvForm(prev => ({ ...prev, has_reserves: e.target.checked }))} className="rounded" />
+                              Avec réserves
+                            </label>
+                            {pvForm.has_reserves && (
+                              <input type="number" placeholder="Nb" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reserves_count} onChange={e => setPvForm(prev => ({ ...prev, reserves_count: Number(e.target.value) }))} />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Signataires */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Signataires</label>
+                          <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: [...prev.signataires, { nom: '', role: '' }] }))} className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                            <IconPlus size={12} /> Ajouter signataire
+                          </button>
+                        </div>
+                        {pvForm.signataires.map((sig, idx) => (
+                          <div key={idx} className="flex gap-2 items-center">
+                            <input type="text" placeholder="Nom" className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.nom} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, nom: e.target.value } : s) }))} />
+                            <input type="text" placeholder="Rôle (ex: MOE, MOA)" className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.role} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, role: e.target.value } : s) }))} />
+                            <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: prev.signataires.filter((_, i) => i !== idx) }))} className="p-2 text-red-400 hover:text-red-600 transition-colors"><IconX size={14} /></button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Observations</label>
+                        <textarea rows={3} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={pvForm.observations} onChange={e => setPvForm(prev => ({ ...prev, observations: e.target.value }))} />
+                      </div>
+
+                      <div className="flex justify-end gap-3">
+                        <button onClick={() => { setShowPvForm(false); setEditingReceptionId(null); }} className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const body = {
+                                project_id: id,
+                                date: pvForm.date,
+                                type: pvForm.type,
+                                has_reserves: pvForm.has_reserves,
+                                reserves_count: pvForm.reserves_count,
+                                reference_pv: pvForm.reference_pv,
+                                lieu: pvForm.lieu,
+                                date_limite_levee: pvForm.date_limite_levee,
+                                signataires: JSON.stringify(pvForm.signataires),
+                                observations: pvForm.observations,
+                                pv_valide: pvForm.pv_valide,
+                              };
+                              if (editingReceptionId) {
+                                const res = await fetch(`/api/receptions/${editingReceptionId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                                if (res.ok) { const data = await res.json(); setReceptions(prev => prev.map(r => r.id === editingReceptionId ? data : r)); }
+                              } else {
+                                const res = await fetch('/api/receptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                                if (res.ok) { const data = await res.json(); setReceptions(prev => [...prev, data]); }
+                              }
+                              setShowPvForm(false);
+                              setEditingReceptionId(null);
+                              setPvForm(defaultPvForm());
+                            } catch (err) { console.error(err); }
+                          }}
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                        >
+                          {editingReceptionId ? 'Enregistrer' : 'Créer le PV'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-6 py-3 text-left">Référence</th>
+                          <th className="px-6 py-3 text-left">Type</th>
+                          <th className="px-6 py-3 text-left">Date</th>
+                          <th className="px-6 py-3 text-left">Lieu</th>
+                          <th className="px-6 py-3 text-left">Réserves</th>
+                          <th className="px-6 py-3 text-left">Délai levée</th>
+                          <th className="px-6 py-3 text-left">Statut</th>
+                          <th className="px-6 py-3 text-right w-28"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {receptions.map((rec) => {
+                          const dlimit = rec.date_limite_levee ? new Date(rec.date_limite_levee) : null;
+                          const isUrgent = dlimit && (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
+                          return (
+                            <tr key={rec.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                              <td className="px-6 py-4 font-mono text-xs font-bold text-zinc-900 dark:text-white">{rec.reference_pv || '—'}</td>
+                              <td className="px-6 py-4">
+                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
+                                  {rec.type === 'provisoire' ? 'Provisoire' : 'Définitive'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(rec.date).toLocaleDateString('fr-FR')}</td>
+                              <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{rec.lieu || '—'}</td>
+                              <td className="px-6 py-4">
+                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.has_reserves ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
+                                  {rec.has_reserves ? `Avec réserves${rec.reserves_count ? ` (${rec.reserves_count})` : ''}` : 'Sans réserves'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                {dlimit ? (
+                                  <span className={cn("text-xs font-medium", isUrgent ? "text-orange-600 dark:text-orange-400 font-bold" : "text-zinc-600 dark:text-zinc-300")}>
+                                    {dlimit.toLocaleDateString('fr-FR')}
+                                    {isUrgent && ' ⚠'}
+                                  </span>
+                                ) : '—'}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.pv_valide ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400")}>
+                                  {rec.pv_valide ? 'Validé' : 'Brouillon'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {/* PDF export */}
+                                  <button
+                                    title="Exporter PDF"
+                                    onClick={() => {
+                                      const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
+                                      const projectReserves = reserves.filter(r => r.reception_id === rec.id || !r.reception_id);
+                                      generatePvPdf(rec, projectReserves, project?.name || 'Projet', signataires);
+                                    }}
+                                    className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                                  >
+                                    <IconFileDownload size={15} />
+                                  </button>
+                                  {/* Edit */}
+                                  <button
+                                    title="Modifier"
+                                    onClick={() => {
+                                      setEditingReceptionId(rec.id);
+                                      setPvForm({
+                                        reference_pv: rec.reference_pv || '',
+                                        type: rec.type,
+                                        date: rec.date,
+                                        lieu: rec.lieu || '',
+                                        date_limite_levee: rec.date_limite_levee || '',
+                                        has_reserves: rec.has_reserves,
+                                        reserves_count: rec.reserves_count || 0,
+                                        signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
+                                        observations: rec.observations || '',
+                                        pv_valide: rec.pv_valide || false,
+                                      });
+                                      setShowPvForm(true);
+                                    }}
+                                    className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
+                                  >
+                                    <IconFileText size={15} />
+                                  </button>
+                                  {/* Delete */}
+                                  <button
+                                    title="Supprimer"
+                                    onClick={async () => {
+                                      if (!confirm('Supprimer ce PV de réception ?')) return;
+                                      try {
+                                        const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
+                                        if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
+                                      } catch (err) { console.error(err); }
+                                    }}
+                                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                  >
+                                    <IconTrash size={15} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {receptions.length === 0 && (
+                          <tr>
+                            <td colSpan={8} className="px-6 py-8 text-center text-zinc-500 italic">Aucun PV de réception. Cliquez sur "Créer PV de réception" pour commencer.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* DOE — Dossier des Ouvrages Exécutés */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">DOE — Dossier des Ouvrages Exécutés</h3>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">Le DOE regroupe les plans conformes à exécution, notices de fonctionnement et documents remis en fin de chantier.</p>
+                    </div>
+                    <div>
+                      <input type="file" className="hidden" ref={doeInputRef} onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file || !id) return;
+                        setDoeUploading(true);
+                        try {
+                          const form = new FormData();
+                          form.append('file', file);
+                          form.append('name', file.name);
+                          form.append('project_id', id);
+                          form.append('doc_type', 'DOE');
+                          form.append('category', 'DOE');
+                          const res = await fetch('/api/documents', { method: 'POST', body: form });
+                          if (res.ok) {
+                            await fetchDoeDocuments();
+                          }
+                        } catch (err) { console.error(err); } finally {
+                          setDoeUploading(false);
+                          if (doeInputRef.current) doeInputRef.current.value = '';
+                        }
+                      }} />
+                      <button
+                        onClick={() => doeInputRef.current?.click()}
+                        disabled={doeUploading}
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                      >
+                        <IconFilePlus size={14} />
+                        {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
+                      </button>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
                         <tr>
+                          <th className="px-6 py-3 text-left">Nom</th>
                           <th className="px-6 py-3 text-left">Type</th>
                           <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-left">Réserves</th>
-                          <th className="px-6 py-3 text-left">Nombre de réserves</th>
-                          <th className="px-6 py-3 text-right w-10"></th>
+                          <th className="px-6 py-3 text-right w-24">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {receptions.map((rec) => (
-                          <tr key={rec.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 font-bold text-zinc-900 dark:text-white">{rec.type}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(rec.date).toLocaleDateString()}</td>
+                        {doeDocuments.map((doc) => (
+                          <tr key={doc.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                            <td className="px-6 py-4 font-medium text-zinc-900 dark:text-white">{doc.name}</td>
                             <td className="px-6 py-4">
-                              <span className={cn(
-                                "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                rec.has_reserves ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                              )}>
-                                {rec.has_reserves ? 'Avec réserves' : 'Sans réserves'}
+                              <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px] font-bold">
+                                {doc.category || 'DOE'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{rec.reserves_count}</td>
+                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(doc.uploaded_at).toLocaleDateString('fr-FR')}</td>
                             <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={async () => {
-                                  if (!confirm('Supprimer cette réception ?')) return;
-                                  try {
-                                    const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
-                                    if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
-                                  } catch (err) {
-                                    console.error(err);
-                                  }
-                                }}
-                                className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
-                              >
-                                <IconTrash size={16} />
-                              </button>
+                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-zinc-400 hover:text-blue-600 transition-colors" title="Télécharger">
+                                  <IconExternalLink size={15} />
+                                </a>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm('Supprimer ce document DOE ?')) return;
+                                    try {
+                                      const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
+                                      if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
+                                    } catch (err) { console.error(err); }
+                                  }}
+                                  className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                  title="Supprimer"
+                                >
+                                  <IconTrash size={15} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
-                        {receptions.length === 0 && (
+                        {doeDocuments.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-zinc-500 italic">Aucune réception.</td>
+                            <td colSpan={4} className="px-6 py-8 text-center text-zinc-500 italic">Aucun document DOE. Ajoutez les plans conformes à exécution.</td>
                           </tr>
                         )}
                       </tbody>
