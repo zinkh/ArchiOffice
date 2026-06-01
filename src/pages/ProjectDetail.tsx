@@ -857,17 +857,17 @@ export default function ProjectDetail() {
               <IconTrash size={20} />
             </button>
           )}
-          <button 
+          <button
             onClick={handleSave}
             disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-3 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50"
           >
             {isSaving ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
               <IconDeviceFloppy size={20} />
             )}
-            {t('commit_changes')}
+            <span className="hidden sm:inline">{t('commit_changes')}</span>
           </button>
         </div>
       </div>
@@ -1157,7 +1157,7 @@ export default function ProjectDetail() {
                               </div>
                               <button 
                                 onClick={() => {
-                                  if(confirm('Delete milestone?')) {
+                                  if(confirm('Supprimer ce jalon ?')) {
                                     fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
                                       .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
                                   }
@@ -1168,7 +1168,7 @@ export default function ProjectDetail() {
                               </button>
                             </div>
                           )) : (
-                            <p className="text-xs text-zinc-500 italic text-center py-4">No milestones defined.</p>
+                            <p className="text-xs text-zinc-500 italic text-center py-4">Aucun jalon défini.</p>
                           )}
                         </div>
                       </div>
@@ -1453,18 +1453,19 @@ export default function ProjectDetail() {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       <div className="lg:col-span-2 space-y-8">
                         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                          <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                            <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Plans du projet (PRO)</h3>
-                            <div className="flex items-center gap-2">
-                              <button 
+                          <div className="p-4 sm:p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider truncate min-w-0">Plans du projet (PRO)</h3>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
                                 onClick={() => {
                                   setUpdatingPlanId(null);
                                   planInputRef.current?.click();
                                 }}
-                                className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap"
                               >
                                 <IconUpload size={14} />
-                                Importer un plan
+                                <span className="hidden sm:inline">Importer un plan</span>
+                                <span className="sm:hidden">Importer</span>
                               </button>
                             </div>
                           </div>
@@ -2944,24 +2945,25 @@ export default function ProjectDetail() {
                   const aorPlans = plans.filter(p => p.category === 'AOR' || !p.category);
                   return (
                     <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden mt-8">
-                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Plans de l'opération</h3>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="file" 
-                            className="hidden" 
+                      <div className="p-4 sm:p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-3">
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider truncate min-w-0">Plans de l'opération</h3>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <input
+                            type="file"
+                            className="hidden"
                             ref={planInputRef}
                             onChange={handlePlanUpload}
                           />
-                          <button 
+                          <button
                             onClick={() => {
                               setUpdatingPlanId(null);
                               planInputRef.current?.click();
                             }}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap"
                           >
                             <IconUpload size={14} />
-                            Importer un plan
+                            <span className="hidden sm:inline">Importer un plan</span>
+                            <span className="sm:hidden">Importer</span>
                           </button>
                         </div>
                       </div>
