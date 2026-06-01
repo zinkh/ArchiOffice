@@ -70,7 +70,7 @@ function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, trend, t
   const navigate = useNavigate();
   return (
     <div
-      className="rounded-xl p-4 flex flex-col gap-2 cursor-pointer transition-all active:scale-[0.98]"
+      className="rounded-xl p-4 flex flex-col gap-2 cursor-pointer transition-all active:scale-[0.98] relative overflow-hidden"
       style={{
         background: cardBg ?? 'var(--tblr-surface)',
         border: `1px solid ${cardBg ? accent + '33' : 'var(--tblr-border)'}`,
@@ -78,6 +78,14 @@ function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, trend, t
       }}
       onClick={() => to && navigate(to)}
     >
+      {/* Watermark icon */}
+      <div
+        className="absolute -bottom-3 -right-3 pointer-events-none"
+        style={{ color: accent, opacity: 0.12 }}
+      >
+        <Icon size={80} strokeWidth={1.2} />
+      </div>
+
       <div className="flex items-center justify-between">
         <span
           className="text-[10px] font-bold uppercase tracking-wider"
@@ -86,7 +94,7 @@ function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, trend, t
           {label}
         </span>
         <span
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
           style={{ background: accentBg, color: accent }}
         >
           <Icon size={16} />

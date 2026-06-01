@@ -11,6 +11,12 @@ export interface Document {
   uploaded_by: string; // TeamMember ID
   uploaded_at: string;
   description?: string;
+  indice?: string;           // 'A', 'B', 'C'...
+  doc_statut?: 'en_cours' | 'approuve' | 'perime';
+  emetteur?: string;
+  approbateur?: string;
+  date_approbation?: string;
+  doc_type?: string;
 }
 
 export interface DocumentVersion {
@@ -21,6 +27,16 @@ export interface DocumentVersion {
   uploaded_by: string;
   uploaded_at: string;
   description?: string;
+}
+
+export interface DocumentDiffusion {
+  id: string;
+  document_id: string;
+  contact_name: string;
+  contact_email?: string;
+  sent_at: string;
+  acknowledged_at?: string;
+  notes?: string;
 }
 
 export interface ProjectTemplate {
@@ -177,6 +193,14 @@ export interface OrdreDeService {
   montant_devis_presente?: number;
   montant_devis_accepte?: number;
   date_signature?: string;
+  date_emission?: string;
+  date_ar?: string;
+  date_execution?: string;
+  emetteur_os?: string;
+  destinataire_os?: string;
+  notes_ar?: string;
+  delai_execution?: number;
+  delai_unit?: string;
 }
 
 export interface Visa {
@@ -197,6 +221,12 @@ export interface Reception {
   has_reserves: boolean;
   reserves_count?: number;
   document_url?: string;
+  reference_pv?: string;
+  lieu?: string;
+  signataires?: string; // JSON [{nom, role}]
+  observations?: string;
+  date_limite_levee?: string;
+  pv_valide?: boolean;
 }
 
 export interface Reserve {
