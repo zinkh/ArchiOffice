@@ -810,7 +810,7 @@ export default function Reunions() {
       ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
     `} style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
       {/* Mobile back button */}
-      <div className="md:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+      <div className="md:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
         <button
           onClick={() => setMobileView('projects')}
           className="flex items-center gap-1 text-xs font-medium"
@@ -819,6 +819,16 @@ export default function Reunions() {
           <IconChevronLeft size={14} />
           Retour
         </button>
+        {hasActiveEntity && (
+          <button
+            onClick={() => setShowNewMeeting(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+          >
+            <IconPlus size={14} />
+            Nouvelle réunion
+          </button>
+        )}
       </div>
 
       {hasActiveEntity ? (
@@ -828,13 +838,14 @@ export default function Reunions() {
               <h3 className="text-xs font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
               <button
                 onClick={() => setShowNewMeeting(true)}
-                className="p-1 rounded-md transition-colors"
-                style={{ color: 'var(--tblr-primary)' }}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                 title="Nouvelle réunion"
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-primary-lt)')}
-                onMouseLeave={e => (e.currentTarget.style.background = '')}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-primary)', e.currentTarget.style.color = '#fff')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'var(--tblr-primary-lt)', e.currentTarget.style.color = 'var(--tblr-primary)')}
               >
-                <IconPlus size={14} />
+                <IconPlus size={13} />
+                <span>Nouveau</span>
               </button>
             </div>
             <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>

@@ -95,21 +95,21 @@ export default function Kanban() {
           borderBottom: '1px solid var(--tblr-border)',
         }}
       >
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
             <IconLayoutKanban size={22} style={{ color: 'var(--tblr-primary)' }} />
             <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>Kanban — Tâches</h1>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
             {/* Search */}
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none">
               <IconSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Rechercher..."
-                className="pl-9 pr-3 py-2 text-sm rounded-lg outline-none"
+                className="w-full sm:w-48 pl-9 pr-3 py-2 text-sm rounded-lg outline-none"
                 style={inputStyle}
               />
             </div>
@@ -117,7 +117,7 @@ export default function Kanban() {
             <select
               value={filterProject}
               onChange={e => setFilterProject(e.target.value)}
-              className="px-3 py-2 text-sm rounded-lg outline-none"
+              className="flex-1 sm:flex-none px-3 py-2 text-sm rounded-lg outline-none"
               style={inputStyle}
             >
               <option value="all">Tous les projets</option>
@@ -128,7 +128,7 @@ export default function Kanban() {
       </div>
 
       {/* Board */}
-      <div className="flex-1 overflow-x-auto p-4" style={{ background: 'var(--tblr-bg)' }}>
+      <div className="flex-1 overflow-x-auto p-4 pb-2" style={{ background: 'var(--tblr-bg)' }}>
         <div className="flex gap-4 min-w-max h-full">
           {COLUMNS.map(col => {
             const colTasks = getColumnTasks(col.id);

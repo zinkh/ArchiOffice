@@ -331,18 +331,18 @@ export default function Documents() {
 
       {/* Main content */}
       <div className="flex-1 space-y-4 min-w-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button
-              className="md:hidden p-1.5 rounded-lg transition-colors"
+              className="md:hidden p-2 rounded-lg transition-colors shrink-0"
               style={{ color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
               onClick={() => setSidebarOpen(true)}
               title="Parcourir les projets"
             >
               <IconLayoutSidebar size={18} />
             </button>
-            <div>
-              <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
                 {activeProject
                   ? (activeProject === 'unassigned'
                       ? 'Sans projet'
@@ -355,24 +355,23 @@ export default function Documents() {
               <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{visibleDocs.length} document{visibleDocs.length !== 1 ? 's' : ''}</p>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2">
-              {!isOnline && (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }}>
-                  <IconCloudOff size={13} />
-                  Upload indisponible hors-ligne
-                </span>
-              )}
-              <button
-                onClick={() => setIsModalOpen(true)}
-                disabled={!isOnline}
-                title={!isOnline ? 'Connexion requise pour uploader des documents' : undefined}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-              >
-                <IconPlus size={18} /> Ajouter un document
-              </button>
-            </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!isOnline && (
+              <span className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }}>
+                <IconCloudOff size={13} />
+                Upload indisponible hors-ligne
+              </span>
+            )}
+            <button
+              onClick={() => setIsModalOpen(true)}
+              disabled={!isOnline}
+              title={!isOnline ? 'Connexion requise pour uploader des documents' : 'Ajouter un document'}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            >
+              <IconPlus size={18} />
+              <span className="hidden sm:inline">Ajouter un document</span>
+            </button>
           </div>
         </div>
 
