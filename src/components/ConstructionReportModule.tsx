@@ -54,72 +54,87 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
     },
     topBar: {
       background: 'linear-gradient(to right, #0f2540, #1e3a5f)',
-      height: '52px',
+      minHeight: '52px',
       display: 'flex',
+      flexWrap: 'wrap',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 20px',
+      padding: '8px 12px',
+      gap: '8px',
       color: 'white',
       boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     },
     logoSection: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '8px',
+      minWidth: 0,
+      flex: '1 1 auto',
+      overflow: 'hidden',
     },
     projectName: {
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: '600',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
     },
     clientName: {
       color: '#60a5fa',
-      fontSize: '12px',
-      marginLeft: '8px',
+      fontSize: '11px',
     },
     weekSelector: {
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
+      gap: '6px',
       background: 'rgba(255,255,255,0.1)',
-      padding: '4px 12px',
+      padding: '4px 8px',
       borderRadius: '20px',
+      fontSize: '12px',
+      flex: '0 1 auto',
+      minWidth: 0,
     },
     btnNew: {
       background: '#3b82f6',
       color: 'white',
       border: 'none',
-      padding: '6px 14px',
+      padding: '6px 12px',
       borderRadius: '6px',
-      fontSize: '13px',
+      fontSize: '12px',
       fontWeight: '600',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
+      gap: '5px',
+      flexShrink: 0,
+      whiteSpace: 'nowrap',
     },
     tabsWrapper: {
-      padding: '16px 20px',
+      padding: '12px 12px',
+      overflowX: 'auto',
+      WebkitOverflowScrolling: 'touch',
     },
     tabsContainer: {
       background: '#e2e8f0',
       borderRadius: '10px',
       padding: '4px',
       display: 'flex',
-      gap: '4px',
-      maxWidth: 'fit-content',
+      gap: '2px',
+      width: 'max-content',
     },
     tab: {
-      padding: '8px 16px',
+      padding: '6px 10px',
       borderRadius: '8px',
       cursor: 'pointer',
-      fontSize: '14px',
+      fontSize: '12px',
       fontWeight: '500',
       transition: 'all 0.2s',
       border: 'none',
       background: 'transparent',
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '5px',
+      whiteSpace: 'nowrap',
     },
     activeTab: {
       background: 'white',
@@ -127,19 +142,19 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       color: '#1e3a5f',
     },
     contentArea: {
-      padding: '0 20px 20px 20px',
+      padding: '0 12px 20px 12px',
     },
     card: {
       background: 'white',
       borderRadius: '12px',
-      padding: '24px',
+      padding: '16px',
       boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
       border: '1px solid #e2e8f0',
     },
     grid2: {
       display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '24px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+      gap: '16px',
     },
     sectionTitle: {
       fontSize: '16px',
@@ -392,10 +407,10 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       {/* TopBar */}
       <div style={styles.topBar}>
         <div style={styles.logoSection}>
-          <div style={{ background: 'white', width: '32px', height: '32px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#0f2540', fontWeight: 'bold', fontSize: '18px' }}>A</span>
+          <div style={{ background: 'white', width: '28px', height: '28px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: '#0f2540', fontWeight: 'bold', fontSize: '16px' }}>A</span>
           </div>
-          <div>
+          <div style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={styles.projectName}>{project.name}</div>
             <div style={styles.clientName}>{project.client}</div>
           </div>

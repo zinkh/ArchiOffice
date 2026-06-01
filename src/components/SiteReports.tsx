@@ -158,7 +158,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
   };
 
   const deleteNote = (noteId: string) => {
-    if (!confirm('Are you sure you want to delete this note?')) return;
+    if (!confirm('Supprimer cette observation ?')) return;
     fetch(`/api/notes/${noteId}`, { method: 'DELETE' })
       .then(() => {
         setNotes(notes.filter(n => n.id !== noteId));
@@ -236,17 +236,18 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
       )}
 
       {view === 'cr' && <>
-      <div className="flex flex-wrap justify-between items-center gap-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-between sm:items-center gap-3">
         <h3 className="text-lg font-bold dark:text-white">Comptes Rendus de Chantier</h3>
-        <div className="flex gap-2">
-          <button onClick={exportToPDF} className="flex items-center gap-2 bg-zinc-600 text-white px-4 py-2 rounded text-sm dark:bg-zinc-700">
-            <IconFileDownload size={18} /> Export PDF
+        <div className="flex flex-wrap gap-2">
+          <button onClick={exportToPDF} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white px-3 py-2 rounded-xl text-sm font-semibold transition-all">
+            <IconFileDownload size={16} />
+            <span>Export PDF</span>
           </button>
           <div className="flex gap-2">
-            <input 
+            <input
               id="new-category-input"
-              placeholder="New Category" 
-              className="p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700 dark:text-white" 
+              placeholder="Nouvelle catégorie"
+              className="p-2 border rounded-lg text-sm dark:bg-zinc-800 dark:border-zinc-700 dark:text-white w-36 sm:w-auto"
               onKeyDown={e => {
                 if (e.key === 'Enter') {
                   const input = e.currentTarget;
@@ -257,7 +258,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
                 }
               }}
             />
-            <button 
+            <button
               onClick={() => {
                 const input = document.getElementById('new-category-input') as HTMLInputElement;
                 if (input && input.value.trim()) {
@@ -265,13 +266,14 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
                   input.value = '';
                 }
               }}
-              className="bg-blue-600 text-white px-3 py-2 rounded text-sm font-bold dark:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-bold transition-all"
             >
-              Add
+              +
             </button>
           </div>
-          <button onClick={createReport} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded text-sm dark:bg-blue-700">
-            <IconPlus size={18} /> New Weekly Report
+          <button onClick={createReport} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-semibold transition-all">
+            <IconPlus size={16} />
+            <span>Nouveau CR</span>
           </button>
         </div>
       </div>
@@ -283,7 +285,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
             className={`p-4 rounded border ${selectedReport?.id === report.id ? 'bg-blue-50 border-blue-500 dark:bg-blue-900/20 dark:border-blue-700' : 'bg-white border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700'} transition-colors`}
           >
             <IconFileText className="mx-auto mb-2" />
-            <div className="font-bold text-sm dark:text-white">Report #{report.report_number}</div>
+            <div className="font-bold text-sm dark:text-white">CR N°{report.report_number}</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400">{report.date}</div>
           </button>
         ))}
@@ -295,46 +297,46 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
             <p className="text-zinc-600 dark:text-zinc-400">{project.client}</p>
             <p className="text-zinc-600 dark:text-zinc-400">{project.address}</p>
           </div>
-          <h4 className="text-lg font-bold mb-4 dark:text-white">Report #{selectedReport.report_number} - {selectedReport.date}</h4>
-          
+          <h4 className="text-lg font-bold mb-4 dark:text-white">CR N°{selectedReport.report_number} - {selectedReport.date}</h4>
+
           {meetingNotes && (
             <div className="mb-6">
-              <h5 className="font-bold underline mb-2 dark:text-white">Meeting Notes:</h5>
+              <h5 className="font-bold underline mb-2 dark:text-white">Notes de réunion :</h5>
               <p className="text-sm dark:text-zinc-300">{meetingNotes}</p>
             </div>
           )}
           
           <div className="bg-zinc-50 dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 mb-6 print:hidden">
-            <h5 className="font-bold mb-3 dark:text-white">PDF Customizations</h5>
+            <h5 className="font-bold mb-3 dark:text-white">Personnalisation PDF</h5>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Page Format</label>
+                <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Format de page</label>
                 <select className="w-full p-2 border rounded dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" value={pageFormat} onChange={e => setPageFormat(e.target.value as 'portrait' | 'landscape')}>
                   <option value="portrait">Portrait</option>
-                  <option value="landscape">Landscape</option>
+                  <option value="landscape">Paysage</option>
                 </select>
               </div>
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Stakeholders (Cover Page)</label>
+              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Intervenants (page de garde)</label>
               <div className="space-y-2 mb-2">
                 {stakeholders.map((s, i) => (
                   <div key={`stakeholder-${i}`} className="flex gap-2">
-                    <input 
-                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" 
-                      placeholder="Name" 
-                      value={s.name} 
+                    <input
+                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white"
+                      placeholder="Nom"
+                      value={s.name}
                       onChange={e => {
                         const newS = [...stakeholders];
                         newS[i].name = e.target.value;
                         setStakeholders(newS);
                       }}
                     />
-                    <input 
-                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" 
-                      placeholder="Role" 
-                      value={s.role} 
+                    <input
+                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white"
+                      placeholder="Rôle"
+                      value={s.role}
                       onChange={e => {
                         const newS = [...stakeholders];
                         newS[i].role = e.target.value;
@@ -345,33 +347,33 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
                   </div>
                 ))}
               </div>
-              <button 
+              <button
                 onClick={() => setStakeholders([...stakeholders, { name: '', role: '' }])}
                 className="text-xs bg-zinc-200 dark:bg-zinc-700 px-2 py-1 rounded dark:text-white"
               >
-                + Add Stakeholder
+                + Ajouter un intervenant
               </button>
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Companies (Page 2)</label>
+              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Entreprises (page 2)</label>
               <div className="space-y-2 mb-2">
                 {companies.map((c, i) => (
                   <div key={`company-${i}`} className="flex gap-2">
-                    <input 
-                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" 
-                      placeholder="Company Name" 
-                      value={c.name} 
+                    <input
+                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white"
+                      placeholder="Nom de l'entreprise"
+                      value={c.name}
                       onChange={e => {
                         const newC = [...companies];
                         newC[i].name = e.target.value;
                         setCompanies(newC);
                       }}
                     />
-                    <input 
-                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" 
-                      placeholder="Trade/Lot" 
-                      value={c.trade} 
+                    <input
+                      className="flex-1 p-2 border rounded text-sm dark:bg-zinc-700 dark:border-zinc-600 dark:text-white"
+                      placeholder="Lot"
+                      value={c.trade}
                       onChange={e => {
                         const newC = [...companies];
                         newC[i].trade = e.target.value;
@@ -382,23 +384,23 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
                   </div>
                 ))}
               </div>
-              <button 
+              <button
                 onClick={() => setCompanies([...companies, { name: '', trade: '' }])}
                 className="text-xs bg-zinc-200 dark:bg-zinc-700 px-2 py-1 rounded dark:text-white"
               >
-                + Add Company
+                + Ajouter une entreprise
               </button>
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Next Meeting</label>
-              <input type="text" className="w-full p-2 border rounded dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" value={nextMeeting} onChange={e => setNextMeeting(e.target.value)} placeholder="e.g. Mardi 18/05/21 à 9h00 sur site" />
+              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Prochaine réunion</label>
+              <input type="text" className="w-full p-2 border rounded dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" value={nextMeeting} onChange={e => setNextMeeting(e.target.value)} placeholder="ex : Mardi 18/05/21 à 9h00 sur site" />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Meeting Notes</label>
+              <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Notes de réunion</label>
               <textarea className="w-full p-2 border rounded dark:bg-zinc-700 dark:border-zinc-600 dark:text-white" value={meetingNotes} onChange={e => setMeetingNotes(e.target.value)} />
             </div>
-            <button onClick={updateReportCustomizations} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold dark:bg-blue-700">Save Customizations</button>
+            <button onClick={updateReportCustomizations} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold dark:bg-blue-700">Enregistrer</button>
           </div>
 
 
