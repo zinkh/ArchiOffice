@@ -48,6 +48,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
 import Reunions from './pages/Reunions';
+import OrdresDeService from './pages/OrdresDeService';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -590,6 +591,7 @@ export default function App() {
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/reunions" element={<Reunions />} />
+              <Route path="/ordres-de-service" element={<OrdresDeService />} />
             </Route>
           </Routes>
         </Router>
