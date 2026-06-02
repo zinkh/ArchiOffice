@@ -36,6 +36,8 @@ import {
   IconAlertTriangle,
   IconFilePlus,
   IconCurrencyEuro,
+  IconReceipt,
+  IconEdit,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -193,6 +195,10 @@ export default function ProjectDetail() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [ordresDeService, setOrdresDeService] = useState<OrdreDeService[]>([]);
   const [linkedContratsMoe, setLinkedContratsMoe] = useState<any[]>([]);
+  const [notesHonoraires, setNotesHonoraires] = useState<any[]>([]);
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [editingNote, setEditingNote] = useState<any | null>(null);
+  const [noteForm, setNoteForm] = useState<any>(null);
 
   const [newOs, setNewOs] = useState({
     title: '',
@@ -304,6 +310,10 @@ export default function ProjectDetail() {
       fetch('/api/contrats_moe')
         .then(r => r.json())
         .then((all: any[]) => setLinkedContratsMoe((all || []).filter((c: any) => c.project_id === id)))
+        .catch(() => {});
+      fetch(`/api/notes_honoraires?project_id=${id}`)
+        .then(r => r.json())
+        .then((data: any[]) => setNotesHonoraires(data || []))
         .catch(() => {});
     }
   }, [activeTab, id]);
@@ -1517,13 +1527,20 @@ export default function ProjectDetail() {
                         );
                       })()}
                     </div>
-                    <button
-                      onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                    >
-                      <IconPlus size={14} />
-                      Nouvel avenant
-                    </button>
+                    {linkedContratsMoe.length === 0 ? (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-400 rounded-xl text-xs font-bold">
+                        <IconAlertCircle size={14} />
+                        Contrat requis pour créer un avenant
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                      >
+                        <IconPlus size={14} />
+                        Nouvel avenant
+                      </button>
+                    )}
                   </div>
                   {isAddingOsMoe && (
                     <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-5">
@@ -1710,6 +1727,315 @@ export default function ProjectDetail() {
                     </table>
                   </div>
                 </div>
+
+                {/* ── Notes d'honoraires ──────────────────────────────────── */}
+                {(() => {
+                  const DEFAULT_PHASES = [
+                    { id: 'esquisse', name: 'ESQ — Esquisse' },
+                    { id: 'aps', name: 'APS — Avant-Projet Sommaire' },
+                    { id: 'apd', name: 'APD — Avant-Projet Détaillé' },
+                    { id: 'pro', name: 'PRO — Projet' },
+                    { id: 'act', name: 'ACT — Assistance Contrats de Travaux' },
+                    { id: 'visa', name: 'VISA' },
+                    { id: 'det', name: 'DET — Direction de l\'Exécution des Travaux' },
+                    { id: 'aor', name: 'AOR — Assistance à la Réception' },
+                  ];
+                  const honRevises = (Number(project.remuneration) || 0) +
+                    ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s: number, o: any) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                  const contrat = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
+                  const cotraitants: any[] = contrat?.cotraitants || [];
+                  const sousTraitants: any[] = contrat?.sous_traitants || [];
+
+                  const initNoteForm = () => ({
+                    numero: `NH-${String(notesHonoraires.length + 1).padStart(2, '0')}`,
+                    date: new Date().toISOString().split('T')[0],
+                    objet: '',
+                    status: 'Brouillon',
+                    tva_rate: 20,
+                    phases: DEFAULT_PHASES.map(p => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                    cotraitants_facturation: cotraitants.map((ct: any) => ({ contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0 })),
+                    sous_traitants_facturation: sousTraitants.map((st: any) => ({ contact_id: st.contact_id, nom: st.contact_name || st.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa })),
+                    notes: '',
+                  });
+
+                  const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
+                  const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
+
+                  const saveNote = async () => {
+                    if (!noteForm || !id) return;
+                    const montant_ht = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                    const montant_tva = montant_ht * (noteForm.tva_rate || 20) / 100;
+                    const montant_ttc = montant_ht + montant_tva;
+                    const payload = { ...noteForm, project_id: id, contrat_id: contrat?.id || null, montant_ht, montant_tva, montant_ttc };
+                    if (editingNote?.id) {
+                      await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    } else {
+                      await fetch('/api/notes_honoraires', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    }
+                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
+                    setNotesHonoraires(data || []);
+                    setIsAddingNote(false);
+                    setEditingNote(null);
+                    setNoteForm(null);
+                  };
+
+                  const deleteNote = async (noteId: string) => {
+                    if (!confirm('Supprimer cette note d\'honoraires ?')) return;
+                    await fetch(`/api/notes_honoraires/${noteId}`, { method: 'DELETE' });
+                    setNotesHonoraires(notesHonoraires.filter((n: any) => n.id !== noteId));
+                  };
+
+                  const STATUS_NOTE_COLORS: Record<string, string> = {
+                    Brouillon: 'bg-zinc-100 text-zinc-500',
+                    Envoyée: 'bg-blue-100 text-blue-700',
+                    Payée: 'bg-green-100 text-green-700',
+                  };
+
+                  return (
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                            <IconReceipt size={16} />
+                            Notes d'Honoraires
+                          </h3>
+                          <p className="text-[10px] text-zinc-400 mt-0.5">Acomptes sur honoraires de maîtrise d'œuvre avec avancement par phase</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setNoteForm(initNoteForm());
+                            setEditingNote(null);
+                            setIsAddingNote(true);
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          <IconPlus size={14} />
+                          Nouvelle note
+                        </button>
+                      </div>
+
+                      {/* KPIs notes */}
+                      {notesHonoraires.length > 0 && (
+                        <div className="px-6 pt-4 pb-2 grid grid-cols-3 gap-3">
+                          {[
+                            { label: 'Montant HT facturé', value: totalNotesHT, color: 'blue' },
+                            { label: 'Montant TTC facturé', value: totalNotesTTC, color: 'indigo' },
+                            { label: 'Restant à facturer', value: Math.max(0, honRevises - totalNotesHT), color: 'amber' },
+                          ].map(kpi => (
+                            <div key={kpi.label} className={cn('rounded-xl p-3 border text-center', {
+                              'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/40': kpi.color === 'blue',
+                              'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/40': kpi.color === 'indigo',
+                              'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-900/40': kpi.color === 'amber',
+                            })}>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{kpi.label}</p>
+                              <p className={cn('text-base font-black mt-1', {
+                                'text-blue-700 dark:text-blue-300': kpi.color === 'blue',
+                                'text-indigo-700 dark:text-indigo-300': kpi.color === 'indigo',
+                                'text-amber-700 dark:text-amber-400': kpi.color === 'amber',
+                              })}>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(kpi.value)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Formulaire nouvelle note */}
+                      {isAddingNote && noteForm && (
+                        <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-5">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Note</label>
+                              <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                value={noteForm.numero} onChange={e => setNoteForm({ ...noteForm, numero: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
+                              <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                value={noteForm.date} onChange={e => setNoteForm({ ...noteForm, date: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-zinc-400 uppercase">TVA (%)</label>
+                              <input type="number" min={0} max={30} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                value={noteForm.tva_rate} onChange={e => setNoteForm({ ...noteForm, tva_rate: parseFloat(e.target.value) || 20 })} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-zinc-400 uppercase">Statut</label>
+                              <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                value={noteForm.status} onChange={e => setNoteForm({ ...noteForm, status: e.target.value })}>
+                                {['Brouillon', 'Envoyée', 'Payée'].map(s => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Objet</label>
+                            <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={noteForm.objet} onChange={e => setNoteForm({ ...noteForm, objet: e.target.value })}
+                              placeholder="ex : Acompte sur honoraires ESQ + APS" />
+                          </div>
+
+                          {/* Avancement par phase */}
+                          <div>
+                            <p className="text-[10px] font-bold text-zinc-400 uppercase mb-3">Avancement par phase — Agence</p>
+                            <div className="space-y-2">
+                              {(noteForm.phases || []).map((phase: any, idx: number) => {
+                                const basePhase = DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
+                                const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
+                                const montantPhaseBase = honRevises * phasePct / 100;
+                                const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
+                                return (
+                                  <div key={phase.phase_id} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
+                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 w-48 flex-shrink-0">{basePhase?.name || phase.phase_name}</span>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      <input type="number" min={0} max={100} step={5}
+                                        className="w-16 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-sm text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                        value={phase.avancement_pct}
+                                        onChange={e => {
+                                          const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+                                          const newPhases = [...noteForm.phases];
+                                          const mp = montantPhaseBase * pct / 100;
+                                          newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
+                                          setNoteForm({ ...noteForm, phases: newPhases });
+                                        }} />
+                                      <span className="text-xs text-zinc-400">%</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 text-xs text-zinc-400 flex-shrink-0">
+                                      <span>→</span>
+                                      <input type="number" min={0}
+                                        className="w-28 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                        value={phase.montant_phase}
+                                        onChange={e => {
+                                          const newPhases = [...noteForm.phases];
+                                          newPhases[idx] = { ...phase, montant_phase: parseFloat(e.target.value) || 0 };
+                                          setNoteForm({ ...noteForm, phases: newPhases });
+                                        }} />
+                                      <span>€ HT</span>
+                                    </div>
+                                    {montantAvancement > 0 && phase.montant_phase === 0 && (
+                                      <button type="button" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
+                                        const newPhases = [...noteForm.phases];
+                                        newPhases[idx] = { ...phase, montant_phase: parseFloat(montantAvancement.toFixed(2)) };
+                                        setNoteForm({ ...noteForm, phases: newPhases });
+                                      }}>Auto</button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="mt-2 flex items-center justify-between text-xs font-bold text-zinc-700 dark:text-zinc-300 px-2">
+                              <span>Total agence HT</span>
+                              <span className="text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}</span>
+                            </div>
+                          </div>
+
+                          {/* Cotraitants */}
+                          {(noteForm.cotraitants_facturation || []).length > 0 && (
+                            <div>
+                              <p className="text-[10px] font-bold text-zinc-400 uppercase mb-3">Cotraitants (hors comptabilité agence)</p>
+                              <div className="space-y-2">
+                                {(noteForm.cotraitants_facturation || []).map((ct: any, idx: number) => (
+                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
+                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{ct.nom || 'Cotraitant'}</span>
+                                    <input type="number" min={0}
+                                      className="w-28 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                      value={ct.montant_ht}
+                                      onChange={e => {
+                                        const ht = parseFloat(e.target.value) || 0;
+                                        const newCts = [...noteForm.cotraitants_facturation];
+                                        newCts[idx] = { ...ct, montant_ht: ht, montant_ttc: ht * (1 + ct.tva_rate / 100) };
+                                        setNoteForm({ ...noteForm, cotraitants_facturation: newCts });
+                                      }} />
+                                    <span className="text-xs text-zinc-400">€ HT</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Sous-traitants */}
+                          {(noteForm.sous_traitants_facturation || []).length > 0 && (
+                            <div>
+                              <p className="text-[10px] font-bold text-zinc-400 uppercase mb-3">Sous-traitants</p>
+                              <div className="space-y-2">
+                                {(noteForm.sous_traitants_facturation || []).map((st: any, idx: number) => (
+                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
+                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{st.nom || 'Sous-traitant'}</span>
+                                    <input type="number" min={0}
+                                      className="w-28 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                      value={st.montant_ht}
+                                      onChange={e => {
+                                        const ht = parseFloat(e.target.value) || 0;
+                                        const newSts = [...noteForm.sous_traitants_facturation];
+                                        newSts[idx] = { ...st, montant_ht: ht, montant_ttc: ht * (1 + st.tva_rate / 100) };
+                                        setNoteForm({ ...noteForm, sous_traitants_facturation: newSts });
+                                      }} />
+                                    <span className="text-xs text-zinc-400">€ HT</span>
+                                    {st.paiement_direct_moa && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold flex-shrink-0">Paiement direct MOA</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-2 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                            <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
+                              {editingNote ? 'Mettre à jour' : 'Créer la note'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Liste des notes */}
+                      {notesHonoraires.length === 0 && !isAddingNote ? (
+                        <div className="p-8 text-center text-zinc-400 italic text-sm">
+                          Aucune note d'honoraires. Cliquez sur "Nouvelle note" pour créer un acompte.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          {notesHonoraires.map((note: any) => {
+                            const phases = (note.phases || []).filter((p: any) => p.montant_phase > 0);
+                            return (
+                              <div key={note.id} className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                      {note.numero && <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{note.numero}</span>}
+                                      <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', STATUS_NOTE_COLORS[note.status] || 'bg-zinc-100 text-zinc-500')}>{note.status}</span>
+                                      {note.date && <span className="text-[10px] text-zinc-400">{new Date(note.date).toLocaleDateString('fr-FR')}</span>}
+                                    </div>
+                                    {note.objet && <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">{note.objet}</p>}
+                                    {phases.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {phases.map((p: any) => (
+                                          <span key={p.phase_id} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
+                                            {p.phase_name.split('—')[0].trim()} {p.avancement_pct}%
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <div className="flex gap-4 mt-1 text-xs text-zinc-400">
+                                      <span className="font-bold text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ht)} HT</span>
+                                      <span>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ttc)} TTC</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button onClick={() => {
+                                      setEditingNote(note);
+                                      setNoteForm({ ...note });
+                                      setIsAddingNote(true);
+                                    }} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconEdit size={14} /></button>
+                                    <button onClick={() => deleteNote(note.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
               </div>
             )}

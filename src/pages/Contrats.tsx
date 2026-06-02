@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   IconPlus, IconX, IconCheck, IconClock, IconSend, IconBan,
   IconFileText, IconTrash, IconPencil, IconDownload, IconFilter,
-  IconContract, IconCurrencyEuro, IconBuildingSkyscraper,
+  IconContract, IconCurrencyEuro, IconBuildingSkyscraper, IconUsers,
+  IconAlertTriangle, IconFileImport,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { ContratMOE, ContratMOEMission, Contact, Project } from '../types';
+import type { ContratMOE, ContratMOEMission, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -270,7 +272,11 @@ function ContratModal({
   onSave: (c: Partial<ContratMOE>) => Promise<void>;
   onClose: () => void;
 }) {
-  const [form, setForm] = useState<Partial<ContratMOE>>(() => contrat || {
+  const [form, setForm] = useState<Partial<ContratMOE>>(() => contrat ? {
+    ...contrat,
+    cotraitants: contrat.cotraitants || [],
+    sous_traitants: contrat.sous_traitants || [],
+  } : {
     type_contrat: 'construction_neuve',
     type_moa: 'prive',
     status: 'Brouillon',
@@ -279,10 +285,12 @@ function ContratModal({
     clause_mediation: true,
     clause_propriete_intellectuelle: true,
     missions_list: DEFAULT_MISSIONS,
+    cotraitants: [],
+    sous_traitants: [],
   });
   const [saving, setSaving] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
-  const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'clauses'>('general');
+  const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'equipe' | 'clauses'>('general');
 
   const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
 
@@ -310,8 +318,31 @@ function ContratModal({
     { id: 'general', label: 'Général' },
     { id: 'missions', label: 'Missions' },
     { id: 'honoraires', label: 'Honoraires' },
+    { id: 'equipe', label: 'Équipe MOE' },
     { id: 'clauses', label: 'Clauses' },
   ] as const;
+
+  // Helpers équipe MOE
+  const addCotraitant = () => {
+    const newC: ContratCotraitant = { id: crypto.randomUUID(), contact_name: '', specialty: '', fee_pct: 0, montant_honoraires: 0 };
+    setForm(f => ({ ...f, cotraitants: [...(f.cotraitants || []), newC] }));
+  };
+  const updateCotraitant = (id: string, key: keyof ContratCotraitant, val: any) => {
+    setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).map(c => c.id === id ? { ...c, [key]: val } : c) }));
+  };
+  const removeCotraitant = (id: string) => {
+    setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).filter(c => c.id !== id) }));
+  };
+  const addSousTraitant = () => {
+    const newS: ContratSousTraitant = { id: crypto.randomUUID(), contact_name: '', specialty: '', montant: 0, paiement_direct_moa: false };
+    setForm(f => ({ ...f, sous_traitants: [...(f.sous_traitants || []), newS] }));
+  };
+  const updateSousTraitant = (id: string, key: keyof ContratSousTraitant, val: any) => {
+    setForm(f => ({ ...f, sous_traitants: (f.sous_traitants || []).map(s => s.id === id ? { ...s, [key]: val } : s) }));
+  };
+  const removeSousTraitant = (id: string) => {
+    setForm(f => ({ ...f, sous_traitants: (f.sous_traitants || []).filter(s => s.id !== id) }));
+  };
 
   return (
     <>
@@ -534,6 +565,116 @@ function ContratModal({
                 </div>
               )}
 
+              {/* TAB: Équipe MOE */}
+              {tab === 'equipe' && (
+                <div className="space-y-6">
+                  {/* Cotraitants */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Cotraitants</p>
+                        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les honoraires cotraitants ne sont pas intégrés à la comptabilité de l'agence.</p>
+                      </div>
+                      <button type="button" onClick={addCotraitant} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700">
+                        <IconPlus size={13} /> Ajouter
+                      </button>
+                    </div>
+                    {(form.cotraitants || []).length === 0 && (
+                      <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun cotraitant</p>
+                    )}
+                    <div className="space-y-2">
+                      {(form.cotraitants || []).map(ct => (
+                        <div key={ct.id} className="p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Contact</label>
+                              <ContactAutocomplete contacts={contacts} value={ct.contact_id || ''} onChange={id => {
+                                const c = contacts.find(c => c.id === id);
+                                const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
+                                updateCotraitant(ct.id, 'contact_id', id);
+                                updateCotraitant(ct.id, 'contact_name', name);
+                              }} onAddNew={() => {}} />
+                            </div>
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Spécialité</label>
+                              <input className={inputCls} style={inputStyle} value={ct.specialty || ''} onChange={e => updateCotraitant(ct.id, 'specialty', e.target.value)} placeholder="ex : Ingénierie structure" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Part honoraires (%)</label>
+                              <input type="number" min={0} max={100} step={0.5} className={inputCls} style={inputStyle} value={ct.fee_pct ?? ''} onChange={e => updateCotraitant(ct.id, 'fee_pct', parseFloat(e.target.value) || 0)} />
+                            </div>
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Montant HT (€)</label>
+                              <input type="number" min={0} className={inputCls} style={inputStyle} value={ct.montant_honoraires ?? ''} onChange={e => updateCotraitant(ct.id, 'montant_honoraires', parseFloat(e.target.value) || 0)} />
+                            </div>
+                          </div>
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => removeCotraitant(ct.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={13} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sous-traitants */}
+                  <div className="pt-4 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Sous-traitants</p>
+                        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les honoraires sous-traitants sont intégrés à la comptabilité sauf si paiement direct par le MOA.</p>
+                      </div>
+                      <button type="button" onClick={addSousTraitant} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700">
+                        <IconPlus size={13} /> Ajouter
+                      </button>
+                    </div>
+                    {(form.sous_traitants || []).length === 0 && (
+                      <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun sous-traitant</p>
+                    )}
+                    <div className="space-y-2">
+                      {(form.sous_traitants || []).map(st => (
+                        <div key={st.id} className="p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Contact</label>
+                              <ContactAutocomplete contacts={contacts} value={st.contact_id || ''} onChange={id => {
+                                const c = contacts.find(c => c.id === id);
+                                const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
+                                updateSousTraitant(st.id, 'contact_id', id);
+                                updateSousTraitant(st.id, 'contact_name', name);
+                              }} onAddNew={() => {}} />
+                            </div>
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Spécialité / Prestation</label>
+                              <input className={inputCls} style={inputStyle} value={st.specialty || ''} onChange={e => updateSousTraitant(st.id, 'specialty', e.target.value)} placeholder="ex : Coordination SPS" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className={labelCls} style={labelStyle}>Montant HT (€)</label>
+                              <input type="number" min={0} className={inputCls} style={inputStyle} value={st.montant ?? ''} onChange={e => updateSousTraitant(st.id, 'montant', parseFloat(e.target.value) || 0)} />
+                            </div>
+                            <div className="flex flex-col justify-end">
+                              <label className="flex items-start gap-2 cursor-pointer">
+                                <input type="checkbox" checked={!!st.paiement_direct_moa} onChange={e => updateSousTraitant(st.id, 'paiement_direct_moa', e.target.checked)} className="w-4 h-4 rounded mt-0.5 flex-shrink-0" />
+                                <span className="text-xs" style={{ color: 'var(--tblr-text)' }}>
+                                  Paiement direct par le Maître d'Ouvrage
+                                  <span className="block text-[10px]" style={{ color: 'var(--tblr-muted)' }}>(hors comptabilité agence)</span>
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => removeSousTraitant(st.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={13} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* TAB: Clauses */}
               {tab === 'clauses' && (
                 <div className="space-y-4">
@@ -603,8 +744,36 @@ function ContratModal({
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+function proposalToContrat(p: any): Partial<ContratMOE> {
+  const cotraitants: ContratCotraitant[] = (p.specialties_list || []).map((s: any) => ({
+    id: crypto.randomUUID(),
+    contact_id: s.contact_id || undefined,
+    contact_name: s.contact_name || s.specialty_name || '',
+    specialty: s.specialty_name || '',
+    fee_pct: 0,
+    montant_honoraires: 0,
+  }));
+  return {
+    type_contrat: 'construction_neuve',
+    type_moa: 'prive',
+    status: 'Brouillon',
+    mode_honoraires: 'forfait',
+    indice_revision: 'BT01',
+    clause_mediation: true,
+    clause_propriete_intellectuelle: true,
+    missions_list: DEFAULT_MISSIONS,
+    intitule_projet: p.title || '',
+    client_id: p.client_id || undefined,
+    budget_previsionnel: p.construction_cost || undefined,
+    montant_honoraires: p.amount || undefined,
+    cotraitants,
+    sous_traitants: [],
+  };
+}
+
 export default function Contrats() {
   const { t } = useTranslation();
+  const location = useLocation();
   const [contrats, setContrats] = useState<ContratMOE[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -634,6 +803,15 @@ export default function Contrats() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const fromProposal = (location.state as any)?.fromProposal;
+    if (fromProposal) {
+      setEditingContrat(proposalToContrat(fromProposal) as ContratMOE);
+      setIsModalOpen(true);
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   const openNew = () => { setEditingContrat(null); setIsModalOpen(true); };
   const openEdit = (c: ContratMOE) => { setEditingContrat(c); setIsModalOpen(true); };
