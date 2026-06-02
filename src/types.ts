@@ -743,6 +743,24 @@ export interface ContratMOEMission {
   incluse: boolean;
 }
 
+export interface ContratCotraitant {
+  id: string;
+  contact_id?: string;
+  contact_name?: string;
+  specialty?: string;
+  fee_pct?: number;
+  montant_honoraires?: number;
+}
+
+export interface ContratSousTraitant {
+  id: string;
+  contact_id?: string;
+  contact_name?: string;
+  specialty?: string;
+  montant?: number;
+  paiement_direct_moa: boolean;
+}
+
 export interface ContratMOE {
   id: string;
   tenant_id?: string;
@@ -765,6 +783,8 @@ export interface ContratMOE {
   date_debut?: string;
   date_fin?: string;
   missions_list?: ContratMOEMission[];
+  cotraitants?: ContratCotraitant[];
+  sous_traitants?: ContratSousTraitant[];
   delai_execution?: number;
   penalites_retard?: number;
   clause_resiliation?: string;
@@ -772,6 +792,51 @@ export interface ContratMOE {
   clause_mediation?: boolean;
   assureur?: string;
   numero_police?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NoteHonorairePhase {
+  phase_id: string;
+  phase_name: string;
+  avancement_pct: number;
+  montant_phase: number;
+}
+
+export interface NoteHonoraireCotraitant {
+  contact_id?: string;
+  nom: string;
+  montant_ht: number;
+  tva_rate: number;
+  montant_ttc: number;
+}
+
+export interface NoteHonoraireSousTraitant {
+  contact_id?: string;
+  nom: string;
+  montant_ht: number;
+  tva_rate: number;
+  montant_ttc: number;
+  paiement_direct_moa: boolean;
+}
+
+export interface NoteHonoraires {
+  id: string;
+  tenant_id?: string;
+  project_id: string;
+  contrat_id?: string;
+  numero?: string;
+  date?: string;
+  objet?: string;
+  status: 'Brouillon' | 'Envoyée' | 'Payée';
+  phases?: NoteHonorairePhase[];
+  montant_ht: number;
+  tva_rate: number;
+  montant_tva: number;
+  montant_ttc: number;
+  cotraitants_facturation?: NoteHonoraireCotraitant[];
+  sous_traitants_facturation?: NoteHonoraireSousTraitant[];
   notes?: string;
   created_at?: string;
   updated_at?: string;

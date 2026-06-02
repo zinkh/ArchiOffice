@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -531,12 +531,19 @@ export default function Proposals() {
                       >
                         <IconFileText size={20} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => navigate('/proposal-generator', { state: { proposal } })}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                         title={t('pdf_generator')}
                       >
                         <IconFileTypePdf size={20} />
+                      </button>
+                      <button
+                        onClick={() => navigate('/contrats', { state: { fromProposal: proposal } })}
+                        className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                        title="Convertir en contrat MOE"
+                      >
+                        <IconContract size={20} />
                       </button>
                       {proposal.status !== 'Accepted' && (
                         <>

@@ -2859,6 +2859,56 @@ async function startServer() {
 
   // ── End Contrats MOE ───────────────────────────────────────────────────────
 
+  // ── Notes d'honoraires ────────────────────────────────────────────────────
+
+  app.get("/api/notes_honoraires", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const projectId = req.query.project_id as string | undefined;
+      let query = supabaseAdmin.from('notes_honoraires').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      if (projectId) query = query.eq('project_id', projectId);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to fetch notes honoraires' }); }
+  });
+
+  app.post("/api/notes_honoraires", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const body = req.body;
+      const id = body.id || crypto.randomUUID();
+      const { id: _id, tenant_id: _tid, created_at: _ca, updated_at: _ua, ...insertData } = body;
+      const { error } = await supabaseAdmin.from('notes_honoraires').insert({ ...insertData, id, tenant_id: tenantId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      if (error) throw error;
+      const { data: created } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).single();
+      res.status(201).json(created);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to create note honoraires: ' + e.message }); }
+  });
+
+  app.put("/api/notes_honoraires/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
+      const { error } = await supabaseAdmin.from('notes_honoraires').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const { data: updated } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).single();
+      res.json(updated);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to update note honoraires: ' + e.message }); }
+  });
+
+  app.delete("/api/notes_honoraires/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('notes_honoraires').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to delete note honoraires' }); }
+  });
+
+  // ── End Notes d'honoraires ────────────────────────────────────────────────
+
   app.get("/api/proposals", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
