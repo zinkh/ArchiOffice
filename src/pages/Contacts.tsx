@@ -1,9 +1,9 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
-import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle } from '@tabler/icons-react';
-import { motion } from 'motion/react';
+import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
-import { fetchJson } from '../lib/api';
+import { fetchJson, apiFetch } from '../lib/api';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
@@ -28,6 +28,13 @@ export default function Contacts() {
   const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
   const [newContact, setNewContact] = useState<Partial<Contact>>({});
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [syncingGoogle, setSyncingGoogle] = useState(false);
+  const [syncingCardDav, setSyncingCardDav] = useState(false);
+  const [cardDavModal, setCardDavModal] = useState(false);
+  const [cardDavUrl, setCardDavUrl] = useState('');
+  const [cardDavUser, setCardDavUser] = useState('');
+  const [cardDavPass, setCardDavPass] = useState('');
 
   // Search, Filter, Sort State
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +44,11 @@ export default function Contacts() {
   // Edit State
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   useEffect(() => {
     fetchContacts();
@@ -48,13 +60,13 @@ export default function Contacts() {
   const fetchContacts = () => {
     fetchJson('/api/contacts')
       .then(setContacts)
-      .catch(err => console.error('Error fetching contacts:', err));
+      .catch(() => showToast('Impossible de charger les contacts', 'error'));
   };
 
   const fetchCategories = () => {
     fetchJson('/api/contact-categories')
       .then(setCategories)
-      .catch(err => console.error('Error fetching categories:', err));
+      .catch(() => showToast('Impossible de charger les catégories', 'error'));
   };
 
   const fetchProjects = () => {
@@ -179,9 +191,8 @@ export default function Contacts() {
           alert(`Failed to save contact: Server returned ${res.status} ${res.statusText}`);
         }
       }
-    } catch (err) {
-      console.error('Error submitting contact:', err);
-      alert('Failed to save contact. Please check the console for details.');
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la sauvegarde du contact', 'error');
     }
   };
 
@@ -190,32 +201,27 @@ export default function Contacts() {
     if (!newCategoryName.trim()) return;
 
     try {
-      const res = await fetch('/api/contact-categories', {
+      await apiFetch('/api/contact-categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: crypto.randomUUID(), name: newCategoryName })
       });
-
-      if (res.ok) {
-        setNewCategoryName('');
-        fetchCategories();
-      }
-    } catch (err) {
-      console.error(err);
+      setNewCategoryName('');
+      fetchCategories();
+      showToast('Catégorie ajoutée');
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la création de la catégorie', 'error');
     }
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this category?')) return;
+    if (!confirm('Supprimer cette catégorie ?')) return;
     try {
-      const res = await fetch(`/api/contact-categories/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchCategories();
-      }
-    } catch (err) {
-      console.error(err);
+      await apiFetch(`/api/contact-categories/${id}`, { method: 'DELETE' });
+      fetchCategories();
+      showToast('Catégorie supprimée');
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la suppression', 'error');
     }
   };
 
@@ -227,16 +233,48 @@ export default function Contacts() {
   };
 
   const handleDeleteContact = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this contact?')) return;
+    if (!confirm('Supprimer ce contact ?')) return;
     try {
-      const res = await fetch(`/api/contacts/${id}`, {
-        method: 'DELETE'
+      await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
+      fetchContacts();
+      showToast('Contact supprimé');
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la suppression', 'error');
+    }
+  };
+
+  const handleGoogleSync = async () => {
+    setSyncingGoogle(true);
+    try {
+      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/google-contacts', { method: 'POST' });
+      fetchContacts();
+      showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour`);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur de synchronisation Google Contacts', 'error');
+    } finally {
+      setSyncingGoogle(false);
+    }
+  };
+
+  const handleCardDavSync = async () => {
+    if (!cardDavUrl || !cardDavUser) {
+      showToast('URL et nom d\'utilisateur requis', 'error');
+      return;
+    }
+    setSyncingCardDav(true);
+    try {
+      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/carddav', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cardDavUrl, username: cardDavUser, password: cardDavPass })
       });
-      if (res.ok) {
-        fetchContacts();
-      }
-    } catch (err) {
-      console.error(err);
+      fetchContacts();
+      setCardDavModal(false);
+      showToast(`CardDAV : ${result.imported} importés, ${result.updated} mis à jour`);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur de synchronisation CardDAV', 'error');
+    } finally {
+      setSyncingCardDav(false);
     }
   };
 
@@ -431,6 +469,25 @@ export default function Contacts() {
 
   return (
     <div className="space-y-6">
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            className="fixed top-4 right-4 z-[200] px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2"
+            style={{
+              background: toast.type === 'error' ? 'var(--tblr-danger)' : 'var(--tblr-success)',
+              color: '#fff'
+            }}
+          >
+            {toast.type === 'error' ? <IconAlertTriangle size={16} /> : null}
+            {toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts')}</h2>
@@ -461,6 +518,25 @@ export default function Contacts() {
           >
             <IconSettings size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_categories_label')}</span>
+          </button>
+          <button
+            onClick={handleGoogleSync}
+            disabled={syncingGoogle}
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+            title="Synchroniser avec Google Contacts"
+          >
+            {syncingGoogle ? <IconRefresh size={14} className="animate-spin md:size-[18px]" /> : <IconRefresh size={14} className="md:size-[18px]" />}
+            <span className="hidden md:inline">Google Contacts</span>
+          </button>
+          <button
+            onClick={() => setCardDavModal(true)}
+            className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+            title="Synchroniser via CardDAV (Nextcloud)"
+          >
+            <IconCloud size={14} className="md:size-[18px]" />
+            <span className="hidden md:inline">CardDAV</span>
           </button>
           <button
             onClick={() => {
@@ -1101,6 +1177,75 @@ export default function Contacts() {
         </div>
       )}
       <MappingModal />
+
+      {/* CardDAV Sync Modal */}
+      {cardDavModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="rounded-xl shadow-xl w-full max-w-md"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+          >
+            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>Synchronisation CardDAV</h3>
+              <button onClick={() => setCardDavModal(false)} style={{ color: 'var(--tblr-muted)' }}>✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+                Connectez votre carnet d'adresses Nextcloud ou tout serveur compatible CardDAV.
+              </p>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>URL du carnet d'adresses</label>
+                <input
+                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder="https://nextcloud.example.com/remote.php/dav/addressbooks/users/alice/contacts/"
+                  value={cardDavUrl}
+                  onChange={e => setCardDavUrl(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Nom d'utilisateur</label>
+                <input
+                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={cardDavUser}
+                  onChange={e => setCardDavUser(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe / Token</label>
+                <input
+                  type="password"
+                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={cardDavPass}
+                  onChange={e => setCardDavPass(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="p-6 flex justify-end gap-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+              <button
+                onClick={() => setCardDavModal(false)}
+                className="px-4 py-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleCardDavSync}
+                disabled={syncingCardDav}
+                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+                style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+              >
+                {syncingCardDav && <IconRefresh size={14} className="animate-spin" />}
+                Synchroniser
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
