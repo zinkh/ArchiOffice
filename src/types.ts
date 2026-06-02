@@ -735,3 +735,44 @@ export interface Meeting {
   photos?: MeetingPhoto[];
   attendees?: MeetingAttendee[];
 }
+
+export interface ContratMOEMission {
+  id: string;
+  name: string;
+  pct?: number;
+  incluse: boolean;
+}
+
+export interface ContratMOE {
+  id: string;
+  tenant_id?: string;
+  numero?: string;
+  type_contrat: 'construction_neuve' | 'rehabilitation' | 'concours' | 'amo' | 'diagnostic' | 'urbanisme';
+  type_moa: 'prive' | 'public' | 'copropriete';
+  status: 'Brouillon' | 'Envoyé' | 'Signé' | 'Résilié';
+  client_id?: string;
+  client_name?: string;
+  project_id?: string;
+  project_name?: string;
+  intitule_projet?: string;
+  adresse_travaux?: string;
+  surface_plancher?: number;
+  budget_previsionnel?: number;
+  mode_honoraires: 'forfait' | 'pourcentage';
+  montant_honoraires?: number;
+  taux_honoraires?: number;
+  indice_revision?: string;
+  date_debut?: string;
+  date_fin?: string;
+  missions_list?: ContratMOEMission[];
+  delai_execution?: number;
+  penalites_retard?: number;
+  clause_resiliation?: string;
+  clause_propriete_intellectuelle?: boolean;
+  clause_mediation?: boolean;
+  assureur?: string;
+  numero_police?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
