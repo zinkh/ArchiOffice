@@ -22,6 +22,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconClipboardList,
+  IconContract,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -46,6 +47,7 @@ export const NAV_ITEMS = [
   { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
   { name: 'settings',       path: '/settings',       icon: IconSettings },
   { name: 'billing',        path: '/billing',        icon: IconCreditCard },
+  { name: 'contrats',       path: '/contrats',       icon: IconContract },
 ];
 
 const NAV_SECTIONS = [
@@ -66,6 +68,7 @@ const NAV_SECTIONS = [
       { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
       { name: 'invoices',  path: '/invoices',  icon: IconFileInvoice },
       { name: 'tenders',   path: '/tenders',   icon: IconClipboardCheck },
+      { name: 'contrats',  path: '/contrats',  icon: IconContract },
     ],
   },
   {

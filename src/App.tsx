@@ -49,6 +49,8 @@ import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
 import Reunions from './pages/Reunions';
 import OrdresDeService from './pages/OrdresDeService';
+import Contrats from './pages/Contrats';
+import GoogleAuthCallback from './pages/GoogleAuthCallback';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -569,6 +571,7 @@ export default function App() {
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfUse />} />
+            <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
@@ -592,6 +595,7 @@ export default function App() {
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/reunions" element={<Reunions />} />
               <Route path="/ordres-de-service" element={<OrdresDeService />} />
+              <Route path="/contrats" element={<Contrats />} />
             </Route>
           </Routes>
         </Router>

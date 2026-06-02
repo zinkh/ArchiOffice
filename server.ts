@@ -1274,6 +1274,44 @@ async function startServer() {
     res.json({ status: "ok", environment: process.env.NODE_ENV });
   });
 
+  // ── Google OAuth2 token exchange (public — no JWT required) ─────────────
+  app.post("/api/auth/google/token", async (req: any, res: any) => {
+    try {
+      const { code, code_verifier, redirect_uri } = req.body;
+      const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId) return res.status(503).json({ error: "VITE_GOOGLE_CLIENT_ID non configuré" });
+      if (!code || !code_verifier || !redirect_uri) {
+        return res.status(400).json({ error: "code, code_verifier et redirect_uri requis" });
+      }
+
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          ...(clientSecret ? { client_secret: clientSecret } : {}),
+          code_verifier,
+          redirect_uri,
+          grant_type: 'authorization_code',
+        }).toString(),
+      });
+
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json();
+        return res.status(400).json({ error: err.error_description || 'Échec de l\'échange de code' });
+      }
+
+      const tokenData = await tokenRes.json();
+      res.json({ access_token: tokenData.access_token });
+    } catch (error: any) {
+      console.error('Google token exchange error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", async (req, res) => {
     const { cabinet_name, slug, admin_name, email, password } = req.body;
@@ -2739,6 +2777,88 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contact categories" }); }
   });
 
+  // ── Contrats MOE ──────────────────────────────────────────────────────────
+
+  app.get("/api/contrats_moe", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('contrats_moe')
+        .select('*, contacts(first_name, last_name, company_name), projects(name)')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const result = (data || []).map((c: any) => {
+        const contact = c.contacts;
+        const client_name = contact
+          ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim())
+          : '';
+        const { contacts: _c, projects: _p, ...rest } = c;
+        return { ...rest, client_name, project_name: c.projects?.name || '' };
+      });
+      res.json(result);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to fetch contrats MOE' }); }
+  });
+
+  app.post("/api/contrats_moe", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const body = req.body;
+      const id = body.id || crypto.randomUUID();
+      const { client_name: _cn, project_name: _pn, ...insertData } = body;
+      const { error } = await supabaseAdmin
+        .from('contrats_moe')
+        .insert({ ...insertData, id, tenant_id: tenantId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      if (error) throw error;
+      const { data: created } = await supabaseAdmin
+        .from('contrats_moe')
+        .select('*, contacts(first_name, last_name, company_name), projects(name)')
+        .eq('id', id).single();
+      const contact = (created as any)?.contacts;
+      const client_name = contact
+        ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim())
+        : '';
+      const { contacts: _c, projects: _p, ...rest } = (created as any) || {};
+      res.status(201).json({ ...rest, client_name, project_name: (created as any)?.projects?.name || '' });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to create contrat MOE: ' + e.message }); }
+  });
+
+  app.put("/api/contrats_moe/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { client_name: _cn, project_name: _pn, id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
+      const { error } = await supabaseAdmin
+        .from('contrats_moe')
+        .update({ ...updateData, updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const { data: updated } = await supabaseAdmin
+        .from('contrats_moe')
+        .select('*, contacts(first_name, last_name, company_name), projects(name)')
+        .eq('id', id).single();
+      const contact = (updated as any)?.contacts;
+      const client_name = contact
+        ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim())
+        : '';
+      const { contacts: _c, projects: _p, ...rest } = (updated as any) || {};
+      res.json({ ...rest, client_name, project_name: (updated as any)?.projects?.name || '' });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to update contrat MOE: ' + e.message }); }
+  });
+
+  app.delete("/api/contrats_moe/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin
+        .from('contrats_moe')
+        .delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to delete contrat MOE' }); }
+  });
+
+  // ── End Contrats MOE ───────────────────────────────────────────────────────
+
   app.get("/api/proposals", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -3027,6 +3147,161 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to delete contact category" });
+    }
+  });
+
+  // ── Google Contacts sync ─────────────────────────────────────────────────
+  app.post("/api/sync/google-contacts", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      // Google People API requires OAuth2. The client initiates the OAuth flow
+      // and passes the access_token in the request body.
+      const { access_token } = req.body;
+      if (!access_token) {
+        return res.status(400).json({ error: "access_token requis. Veuillez d'abord autoriser l'accès à Google Contacts." });
+      }
+
+      // Fetch contacts from Google People API
+      const googleRes = await fetch(
+        'https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses,phoneNumbers,organizations,addresses&pageSize=1000',
+        { headers: { Authorization: `Bearer ${access_token}` } }
+      );
+      if (!googleRes.ok) {
+        return res.status(400).json({ error: "Token Google invalide ou expiré" });
+      }
+      const googleData: any = await googleRes.json();
+      const connections: any[] = googleData.connections || [];
+
+      let imported = 0;
+      let updated = 0;
+
+      for (const person of connections) {
+        const name = person.names?.[0] || {};
+        const email = person.emailAddresses?.[0]?.value || '';
+        const phone = person.phoneNumbers?.[0]?.value || '';
+        const org = person.organizations?.[0] || {};
+        const addr = person.addresses?.[0] || {};
+
+        if (!name.givenName && !name.familyName && !email) continue;
+
+        // Check if contact already exists by email
+        const { data: existing } = await supabaseAdmin
+          .from('contacts')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('email', email)
+          .maybeSingle();
+
+        const contactData = {
+          tenant_id: tenantId,
+          first_name: name.givenName || '',
+          last_name: name.familyName || '',
+          email: email,
+          phone: phone,
+          company_name: org.name || '',
+          job_title: org.title || '',
+          city: addr.city || '',
+          zip: addr.postalCode || '',
+          country: addr.country || '',
+          updated_at: new Date().toISOString()
+        };
+
+        if (existing) {
+          await supabaseAdmin.from('contacts').update(contactData).eq('id', existing.id);
+          updated++;
+        } else {
+          await supabaseAdmin.from('contacts').insert({ ...contactData, id: crypto.randomUUID(), address: '', state: '', ca_amount: 0, created_at: new Date().toISOString() });
+          imported++;
+        }
+      }
+
+      res.json({ imported, updated });
+    } catch (error: any) {
+      console.error('Google Contacts sync error:', error);
+      res.status(500).json({ error: error.message || "Erreur de synchronisation Google Contacts" });
+    }
+  });
+
+  // ── CardDAV sync ─────────────────────────────────────────────────────────
+  app.post("/api/sync/carddav", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { url, username, password } = req.body;
+      if (!url || !username) {
+        return res.status(400).json({ error: "URL et nom d'utilisateur requis" });
+      }
+
+      const auth = Buffer.from(`${username}:${password}`).toString('base64');
+
+      // PROPFIND to list vCards
+      const propfindRes = await fetch(url, {
+        method: 'PROPFIND',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Depth: '1',
+          'Content-Type': 'application/xml',
+        },
+        body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><card:address-data/></d:prop></d:propfind>'
+      });
+
+      if (!propfindRes.ok) {
+        return res.status(400).json({ error: `Erreur CardDAV ${propfindRes.status}: vérifiez l'URL et les identifiants` });
+      }
+
+      const xml = await propfindRes.text();
+
+      // Simple vCard parser — extract FN, EMAIL, TEL, ORG from each vCard block
+      const vcards = xml.match(/BEGIN:VCARD[\s\S]*?END:VCARD/g) || [];
+      const getField = (vcard: string, field: string) => {
+        const m = vcard.match(new RegExp(`(?:^|\\n)${field}[^:]*:([^\\r\\n]*)`, 'i'));
+        return m ? m[1].trim() : '';
+      };
+
+      let imported = 0;
+      let updated = 0;
+
+      for (const vcard of vcards) {
+        const fullName = getField(vcard, 'FN');
+        const email = getField(vcard, 'EMAIL');
+        const phone = getField(vcard, 'TEL');
+        const org = getField(vcard, 'ORG');
+        const nField = getField(vcard, 'N');
+        const nameParts = nField.split(';');
+        const lastName = nameParts[0] || '';
+        const firstName = nameParts[1] || (fullName.split(' ')[0] || '');
+
+        if (!fullName && !email) continue;
+
+        const { data: existing } = await supabaseAdmin
+          .from('contacts')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('email', email)
+          .maybeSingle();
+
+        const contactData = {
+          tenant_id: tenantId,
+          first_name: firstName,
+          last_name: lastName || fullName,
+          email: email,
+          phone: phone,
+          company_name: org.split(';')[0] || '',
+          updated_at: new Date().toISOString()
+        };
+
+        if (existing) {
+          await supabaseAdmin.from('contacts').update(contactData).eq('id', existing.id);
+          updated++;
+        } else {
+          await supabaseAdmin.from('contacts').insert({ ...contactData, id: crypto.randomUUID(), address: '', city: '', zip: '', state: '', country: '', ca_amount: 0, created_at: new Date().toISOString() });
+          imported++;
+        }
+      }
+
+      res.json({ imported, updated });
+    } catch (error: any) {
+      console.error('CardDAV sync error:', error);
+      res.status(500).json({ error: error.message || "Erreur de synchronisation CardDAV" });
     }
   });
 
@@ -5167,9 +5442,8 @@ async function startServer() {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
 
-      const { GoogleGenerativeAI } = await import("@google/genai");
-      const genai = new GoogleGenerativeAI(apiKey);
-      const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const { GoogleGenAI } = await import("@google/genai");
+      const genai = new GoogleGenAI({ apiKey });
 
       const existingList = existing_articles.length > 0 ? `\nArticles déjà présents (à ne pas dupliquer) : ${existing_articles.join(', ')}` : '';
       const prompt = `Tu es un expert en architecture et construction.
@@ -5182,8 +5456,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
 - "unite": unité de mesure (m², ml, u, forfait, etc.)
 - "prescriptionsTechniques": normes et prescriptions techniques applicables (1-2 phrases)`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      const result = await genai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = result.text ?? '';
 
       // Extract JSON from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);

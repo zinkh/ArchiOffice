@@ -18,6 +18,7 @@ import {
   IconFileCode,
   IconChevronRight,
   IconChevronDown,
+  IconChevronUp,
   IconFileText,
   IconFileCheck,
   IconFlag,
@@ -34,6 +35,7 @@ import {
   IconAlertCircle,
   IconAlertTriangle,
   IconFilePlus,
+  IconCurrencyEuro,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -190,6 +192,7 @@ export default function ProjectDetail() {
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [ordresDeService, setOrdresDeService] = useState<OrdreDeService[]>([]);
+  const [linkedContratsMoe, setLinkedContratsMoe] = useState<any[]>([]);
 
   const [newOs, setNewOs] = useState({
     title: '',
@@ -214,7 +217,15 @@ export default function ProjectDetail() {
   const [newOsMoe, setNewOsMoe] = useState({
     title: '',
     os_number: '',
-    montant_devis_presente: ''
+    montant_devis_presente: '',
+    objet: 'extension_mission' as string,
+    description: '',
+    origine_demande: 'maitrise_ouvrage' as string,
+    date: new Date().toISOString().split('T')[0],
+    date_signature: '',
+    incidences_delais_type: 'non' as 'non' | 'oui',
+    incidences_delais_details: '',
+    delai_execution: '' as string,
   });
 
   const [isAddingOs, setIsAddingOs] = useState(false);
@@ -261,6 +272,7 @@ export default function ProjectDetail() {
   // Reception PV form state
   const [showPvForm, setShowPvForm] = useState(false);
   const [editingReceptionId, setEditingReceptionId] = useState<string | null>(null);
+  const [expandedPvId, setExpandedPvId] = useState<string | null>(null);
   const defaultPvForm = () => ({
     reference_pv: '',
     type: 'provisoire' as 'provisoire' | 'definitive',
@@ -272,6 +284,7 @@ export default function ProjectDetail() {
     signataires: [] as { nom: string; role: string }[],
     observations: '',
     pv_valide: false,
+    reserves_list: [] as { id: string; title: string; batiment: string; local: string; lots: string; entreprises: string; due_date: string; status: string }[],
   });
   const [pvForm, setPvForm] = useState(defaultPvForm());
 
@@ -285,6 +298,15 @@ export default function ProjectDetail() {
       setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'HONOS' && id) {
+      fetch('/api/contrats_moe')
+        .then(r => r.json())
+        .then((all: any[]) => setLinkedContratsMoe((all || []).filter((c: any) => c.project_id === id)))
+        .catch(() => {});
+    }
+  }, [activeTab, id]);
 
   useEffect(() => {
     if (id) {
@@ -691,20 +713,137 @@ export default function ProjectDetail() {
           project_id: id,
           os_number: newOsMoe.os_number,
           title: newOsMoe.title,
+          objet: newOsMoe.objet || null,
+          description: newOsMoe.description || null,
+          origine_demande: newOsMoe.origine_demande || null,
+          date: newOsMoe.date || new Date().toISOString().split('T')[0],
+          date_signature: newOsMoe.date_signature || null,
+          incidences_delais_type: newOsMoe.incidences_delais_type,
+          incidences_delais_details: newOsMoe.incidences_delais_details || null,
+          delai_execution: newOsMoe.delai_execution ? Number(newOsMoe.delai_execution) : null,
           montant_devis_presente: Number(newOsMoe.montant_devis_presente) || null,
-          date: new Date().toISOString(),
           status: 'draft',
-          type: 'contrat_moe'
+          type: 'contrat_moe',
         })
       });
       if (res.ok) {
         await fetchOrdresDeService();
-        setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '' });
+        setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '', objet: 'extension_mission', description: '', origine_demande: 'maitrise_ouvrage', date: new Date().toISOString().split('T')[0], date_signature: '', incidences_delais_type: 'non', incidences_delais_details: '', delai_execution: '' });
         setIsAddingOsMoe(false);
       }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const generateAvenantPdf = (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = 210, margin = 20;
+    const TYPE_LABELS: Record<string, string> = {
+      extension_mission: "Extension de mission",
+      modification_programme: "Modification de programme",
+      revision_honoraires: "Révision des honoraires",
+      imprevus: "Imprévus / Aléas",
+      autre: "Autre",
+    };
+    const ORIGINE_LABELS: Record<string, string> = {
+      maitrise_ouvrage: "Maîtrise d'ouvrage", maitrise_oeuvre: "Maîtrise d'œuvre",
+      aleas: "Aléas", autres: "Autres",
+    };
+
+    // Header
+    doc.setFillColor(32, 107, 196);
+    doc.rect(0, 0, W, 30, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text("AVENANT AU CONTRAT DE MAÎTRISE D'ŒUVRE", margin, 12);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`N° Avenant : ${os.os_number}`, margin, 21);
+    doc.text(`Date : ${os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}`, W - margin, 21, { align: 'right' });
+
+    // Sub-header
+    doc.setFillColor(245, 247, 251);
+    doc.rect(0, 30, W, 12, 'F');
+    doc.setTextColor(80, 100, 130); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(`Projet : ${projectName}`, margin, 38);
+    doc.text(TYPE_LABELS[os.objet || ''] || (os.objet || 'Avenant'), W - margin, 38, { align: 'right' });
+
+    let y = 50;
+    const section = (title: string) => {
+      doc.setFillColor(240, 245, 255);
+      doc.rect(margin, y, W - 2 * margin, 7, 'F');
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(32, 107, 196);
+      doc.text(title, margin + 3, y + 5); y += 11;
+    };
+    const row = (label: string, value: string, x = margin, w = W - 2 * margin) => {
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(120, 130, 150);
+      doc.text(label.toUpperCase(), x, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 40);
+      const lines = doc.splitTextToSize(value || '—', w - 2);
+      doc.text(lines, x, y + 5); y += 5 + lines.length * 4 + 3;
+    };
+
+    // Identification
+    section('1. IDENTIFICATION');
+    const col = (W - 2 * margin - 5) / 2;
+    const y0 = y; row('Objet', os.title, margin, col); const y1 = y;
+    y = y0; row('Type d\'avenant', TYPE_LABELS[os.objet || ''] || '—', margin + col + 5, col); y = Math.max(y, y1);
+    const y2 = y; row('Origine de la demande', ORIGINE_LABELS[os.origine_demande || ''] || '—', margin, col); const y3 = y;
+    y = y2; row('Date de l\'avenant', os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—', margin + col + 5, col); y = Math.max(y, y3);
+
+    // Motif
+    if (os.description) { section('2. MOTIF ET DESCRIPTION'); row('Motif détaillé', os.description); }
+
+    // Financier
+    section('3. IMPACT FINANCIER');
+    const montantPres = Number(os.montant_devis_presente) || 0;
+    const montantAcc = Number(os.montant_devis_accepte ?? os.montant_devis_presente) || 0;
+    autoTable(doc, {
+      startY: y, margin: { left: margin, right: margin },
+      head: [['', 'Montant HT']],
+      body: [
+        ['Honoraires initiaux du contrat', honorairesInitiaux > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(honorairesInitiaux) : '—'],
+        ['Cumul avenants précédents', cumulAvenants - montantAcc > 0 ? '+ ' + new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cumulAvenants - montantAcc) : '—'],
+        ['Montant présenté par le MOE', montantPres > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montantPres) : '—'],
+        ['Montant accepté par le MOA', os.status === 'approved' && montantAcc > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montantAcc) : (os.status === 'approved' ? '—' : 'En attente')],
+        ['Nouveaux honoraires révisés', honorairesInitiaux + cumulAvenants > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(honorairesInitiaux + cumulAvenants) : '—'],
+      ],
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
+      columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
+      bodyStyles: { fillColor: false },
+      alternateRowStyles: { fillColor: [248, 250, 255] },
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+
+    // Délais
+    if (os.incidences_delais_type === 'oui') {
+      section('4. IMPACT SUR LES DÉLAIS');
+      row('Incidence sur les délais', os.incidences_delais_details || 'Oui');
+      if (os.delai_execution) row('Prolongation', `${os.delai_execution} jours`);
+    }
+
+    // Signatures
+    if (y > 240) { doc.addPage(); y = 20; }
+    y += 8;
+    doc.setFillColor(245, 247, 251);
+    doc.rect(margin, y, W - 2 * margin, 40, 'F');
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(60, 70, 90);
+    doc.text('SIGNATURES', W / 2, y + 7, { align: 'center' });
+    const sigY = y + 15;
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    ['Le Maître d\'Ouvrage', 'Le Maître d\'Œuvre'].forEach((label, i) => {
+      const x = margin + i * (col + 5);
+      doc.text(label, x + col / 2, sigY, { align: 'center' });
+      doc.text(os.date_signature ? `Signé le : ${new Date(os.date_signature).toLocaleDateString('fr-FR')}` : 'Date et signature :', x + 5, sigY + 12);
+    });
+
+    const n = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(7); doc.setTextColor(160, 170, 185);
+      doc.text(`Avenant N° ${os.os_number} — ${projectName} — Page ${i}/${n}`, W / 2, 292, { align: 'center' });
+    }
+    doc.save(`Avenant_${os.os_number.replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleUpdateOsStatus = async (osId: string, newStatus: OrdreDeService['status'], montantAccepte?: number) => {
@@ -1161,7 +1300,7 @@ export default function ProjectDetail() {
           
           {/* Tab Navigation */}
           <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 mb-6 overflow-x-auto">
-            {['INFOS', 'PRO', 'ACT', 'VISA', 'DET', 'RDT', 'AOR'].map(tab => {
+            {['INFOS', 'HONOS', 'PRO', 'ACT', 'VISA', 'DET', 'RDT', 'AOR'].map(tab => {
               if (['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab) && !project.is_chantier) return null;
               return (
                 <button 
@@ -1178,6 +1317,402 @@ export default function ProjectDetail() {
             })}
           </div>
           <div className="tab-content mt-8">
+            {activeTab === 'HONOS' && (
+              <div className="space-y-8">
+
+                {/* ── Contrat MOE lié ────────────────────────────────────── */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <IconFileText size={16} />
+                        Contrat de Maîtrise d'Œuvre
+                      </h3>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">Contrat(s) associés à ce projet depuis la boîte à outils MOE</p>
+                    </div>
+                    <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all">
+                      <IconPlus size={14} />
+                      Gérer les contrats
+                    </a>
+                  </div>
+                  {linkedContratsMoe.length === 0 ? (
+                    <div className="p-8 text-center text-zinc-400 italic text-sm">
+                      Aucun contrat MOE lié à ce projet.{' '}
+                      <a href="/contrats" className="text-blue-500 hover:underline">Créer un contrat</a> et associez-le à ce projet.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {linkedContratsMoe.map((c: any) => {
+                        const TYPE_LABELS: Record<string, string> = {
+                          construction_neuve: 'Construction neuve', rehabilitation: 'Réhabilitation',
+                          concours: "Concours d'architecture", amo: 'Mission AMO', diagnostic: 'Diagnostic', urbanisme: 'Urbanisme',
+                        };
+                        const STATUS_COLORS: Record<string, string> = {
+                          Brouillon: 'bg-zinc-100 text-zinc-500', Envoyé: 'bg-blue-100 text-blue-700',
+                          Signé: 'bg-green-100 text-green-700', Résilié: 'bg-red-100 text-red-700',
+                        };
+                        const missionsIncluses = (c.missions_list || []).filter((m: any) => m.incluse);
+                        return (
+                          <div key={c.id} className="p-5 flex items-start gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                {c.numero && <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{c.numero}</span>}
+                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider", STATUS_COLORS[c.status] || 'bg-zinc-100 text-zinc-500')}>{c.status}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600">{TYPE_LABELS[c.type_contrat] || c.type_contrat}</span>
+                              </div>
+                              <p className="font-semibold text-zinc-900 dark:text-white text-sm">{c.intitule_projet || c.project_name || '—'}</p>
+                              <div className="flex flex-wrap gap-4 mt-1 text-xs text-zinc-400">
+                                {c.mode_honoraires === 'forfait' && c.montant_honoraires && <span className="text-blue-600 font-bold">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(c.montant_honoraires)} HT</span>}
+                                {c.mode_honoraires === 'pourcentage' && c.taux_honoraires && <span className="text-blue-600 font-bold">{c.taux_honoraires} % des travaux</span>}
+                                {c.indice_revision && <span>Indice : {c.indice_revision}</span>}
+                                {c.date_debut && <span>Du {new Date(c.date_debut).toLocaleDateString('fr-FR')}</span>}
+                                {c.date_fin && <span>au {new Date(c.date_fin).toLocaleDateString('fr-FR')}</span>}
+                              </div>
+                              {missionsIncluses.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {missionsIncluses.map((m: any) => (
+                                    <span key={m.id} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
+                                      {m.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}{m.pct ? ` ${m.pct}%` : ''}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Honoraires MOE ─────────────────────────────────────── */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                      <IconCurrencyEuro size={16} />
+                      Honoraires de Maîtrise d'Œuvre
+                    </h3>
+                  </div>
+                  <div className="p-6 space-y-6">
+                    {/* KPIs */}
+                    {(() => {
+                      const honInit = Number(project.remuneration) || 0;
+                      const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
+                      const cumul = moeAvenants.filter(o => o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                      const honRevises = honInit + cumul;
+                      const encaisses = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + i.amount, 0);
+                      const restant = honRevises - encaisses;
+                      return (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                          {[
+                            { label: 'Honoraires initiaux', value: honInit, color: 'blue', sub: 'Contrat MOE signé' },
+                            { label: 'Cumul avenants', value: cumul, color: cumul >= 0 ? 'green' : 'red', sub: `${moeAvenants.filter(o => o.status === 'approved').length} avenant(s) approuvé(s)` },
+                            { label: 'Honoraires révisés', value: honRevises, color: 'indigo', sub: 'Total contractuel' },
+                            { label: 'Restant à percevoir', value: restant, color: restant > 0 ? 'amber' : 'green', sub: `${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(encaisses)} encaissés` },
+                          ].map(kpi => (
+                            <div key={kpi.label} className={cn('rounded-2xl p-4 border', {
+                              'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/40': kpi.color === 'blue',
+                              'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-900/40': kpi.color === 'green',
+                              'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/40': kpi.color === 'red',
+                              'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/40': kpi.color === 'indigo',
+                              'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-900/40': kpi.color === 'amber',
+                            })}>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">{kpi.label}</p>
+                              <p className={cn('text-xl font-black', {
+                                'text-blue-700 dark:text-blue-300': kpi.color === 'blue',
+                                'text-green-700 dark:text-green-400': kpi.color === 'green',
+                                'text-red-700 dark:text-red-400': kpi.color === 'red',
+                                'text-indigo-700 dark:text-indigo-300': kpi.color === 'indigo',
+                                'text-amber-700 dark:text-amber-400': kpi.color === 'amber',
+                              })}>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(kpi.value)}</p>
+                              <p className="text-[10px] text-zinc-400 mt-0.5">{kpi.sub}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Champ rémunération éditable */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Honoraires initiaux HT (€)</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
+                          <input type="number"
+                            className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                            value={project.remuneration || 0}
+                            onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">€</span>
+                          <input type="number"
+                            className="w-full pl-8 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white font-bold"
+                            value={project.construction_cost || 0}
+                            onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Taux honoraires (%)</label>
+                        <div className="relative">
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">%</span>
+                          <input type="number" readOnly
+                            className="w-full pl-4 pr-8 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm outline-none text-zinc-900 dark:text-white font-bold opacity-70 cursor-default"
+                            value={project.construction_cost && project.remuneration
+                              ? ((project.remuneration / project.construction_cost) * 100).toFixed(2)
+                              : '—'} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Répartition par phases */}
+                    {(() => {
+                      const DEFAULT_PHASES = [
+                        { id: 'esquisse', name: 'ESQ', pct: 10 }, { id: 'aps', name: 'APS', pct: 12 },
+                        { id: 'apd', name: 'APD', pct: 14 }, { id: 'pro', name: 'PRO', pct: 18 },
+                        { id: 'act', name: 'ACT', pct: 7 },  { id: 'visa', name: 'VISA', pct: 7 },
+                        { id: 'det', name: 'DET', pct: 25 }, { id: 'aor', name: 'AOR', pct: 7 },
+                      ];
+                      const honRevises = (Number(project.remuneration) || 0) +
+                        ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                      if (honRevises <= 0) return null;
+                      return (
+                        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-3">Répartition indicative par phase (base mission complète)</p>
+                          <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
+                            {DEFAULT_PHASES.map(phase => (
+                              <div key={phase.id} className="text-center p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-800">
+                                <p className="text-[10px] font-black uppercase text-zinc-400">{phase.name}</p>
+                                <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-1">{phase.pct} %</p>
+                                <p className="text-[10px] text-zinc-500 mt-0.5">{new Intl.NumberFormat('fr-FR', { notation: 'compact', currency: 'EUR', style: 'currency' }).format(honRevises * phase.pct / 100)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* ── Avenants Contrat MOE ───────────────────────────────── */}
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <IconClipboardList size={16} />
+                        Avenants Contrat MOE
+                      </h3>
+                      {(() => {
+                        const moeApprouves = ordresDeService
+                          .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
+                          .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                        const honorairesInitiaux = Number(project.remuneration) || 0;
+                        if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 font-semibold">
+                            Honoraires révisés : {formatCurrency(honorairesInitiaux + moeApprouves)}
+                            {moeApprouves !== 0 && <span className="text-green-600 dark:text-green-400"> ({moeApprouves >= 0 ? '+' : ''}{formatCurrency(moeApprouves)})</span>}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <button
+                      onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
+                    >
+                      <IconPlus size={14} />
+                      Nouvel avenant
+                    </button>
+                  </div>
+                  {isAddingOsMoe && (
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Avenant *</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.os_number} onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
+                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Type d'avenant</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.objet} onChange={e => setNewOsMoe({...newOsMoe, objet: e.target.value})}>
+                            <option value="extension_mission">Extension de mission</option>
+                            <option value="modification_programme">Modification de programme</option>
+                            <option value="revision_honoraires">Révision des honoraires</option>
+                            <option value="imprevus">Imprévus / Aléas</option>
+                            <option value="autre">Autre</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.date} onChange={e => setNewOsMoe({...newOsMoe, date: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Origine</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.origine_demande} onChange={e => setNewOsMoe({...newOsMoe, origine_demande: e.target.value})}>
+                            <option value="maitrise_ouvrage">Maîtrise d'ouvrage</option>
+                            <option value="maitrise_oeuvre">Maîtrise d'œuvre</option>
+                            <option value="aleas">Aléas</option>
+                            <option value="autres">Autres</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Intitulé de l'avenant *</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.title} onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
+                            placeholder="ex: Extension de mission OPC + coordination sécurité" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Motif détaillé</label>
+                          <textarea rows={2} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                            value={newOsMoe.description} onChange={e => setNewOsMoe({...newOsMoe, description: e.target.value})}
+                            placeholder="Contexte, raisons justifiant l'avenant…" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact honoraires HT (€)</label>
+                          <input type="number" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.montant_devis_presente} onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
+                            placeholder="ex: 3 500 (négatif si réduction)" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date signature MOA</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.date_signature} onChange={e => setNewOsMoe({...newOsMoe, date_signature: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact sur délais</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.incidences_delais_type} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_type: e.target.value as 'non' | 'oui'})}>
+                            <option value="non">Sans incidence</option>
+                            <option value="oui">Avec incidence</option>
+                          </select>
+                        </div>
+                        {newOsMoe.incidences_delais_type === 'oui' && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Prolongation (jours)</label>
+                            <input type="number" min={0} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newOsMoe.delai_execution} onChange={e => setNewOsMoe({...newOsMoe, delai_execution: e.target.value})} placeholder="nb de jours" />
+                          </div>
+                        )}
+                      </div>
+                      {newOsMoe.incidences_delais_type === 'oui' && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Justification de l'incidence sur les délais</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.incidences_delais_details} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_details: e.target.value})}
+                            placeholder="ex: Complexification du programme nécessitant une phase PRO étendue" />
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-3">
+                        <button onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">Créer l'avenant</button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Barre récap cumulée */}
+                  {(() => {
+                    const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
+                    const approuves = moeAvenants.filter(o => o.status === 'approved');
+                    const cumul = approuves.reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                    const honInit = Number(project.remuneration) || 0;
+                    if (moeAvenants.length === 0) return null;
+                    return (
+                      <div className="mx-6 mb-4 mt-2 flex items-center gap-6 text-xs px-4 py-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40">
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires initiaux</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
+                        <div className="text-blue-300">+</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Cumul avenants approuvés</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
+                        <div className="text-blue-300">=</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires révisés</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
+                        <div className="ml-auto text-blue-400 text-[10px]">{approuves.length}/{moeAvenants.length} approuvé{approuves.length > 1 ? 's' : ''}</div>
+                      </div>
+                    );
+                  })()}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-4 py-3 text-left">N°</th>
+                          <th className="px-4 py-3 text-left">Type</th>
+                          <th className="px-4 py-3 text-left">Intitulé</th>
+                          <th className="px-4 py-3 text-left">Date</th>
+                          <th className="px-4 py-3 text-right">Présenté HT</th>
+                          <th className="px-4 py-3 text-right">Accepté HT</th>
+                          <th className="px-4 py-3 text-center">Délais</th>
+                          <th className="px-4 py-3 text-center">Statut</th>
+                          <th className="px-4 py-3 text-center">Actions</th>
+                          <th className="px-4 py-3 w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {(() => {
+                          const TYPE_SHORT: Record<string, string> = {
+                            extension_mission: 'Extension mission', modification_programme: 'Modif. programme',
+                            revision_honoraires: 'Révision hon.', imprevus: 'Imprévus', autre: 'Autre',
+                          };
+                          const honorairesInitiaux = Number(project.remuneration) || 0;
+                          const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
+                          const cumulTotal = moeAvenants.filter(o => o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                          return moeAvenants.map((os) => (
+                            <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                              <td className="px-4 py-3 font-mono font-black text-zinc-900 dark:text-white whitespace-nowrap text-xs">Av.{os.os_number}</td>
+                              <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{TYPE_SHORT[os.objet || ''] || os.objet || '—'}</span></td>
+                              <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[180px]">
+                                <p className="truncate font-medium">{os.title}</p>
+                                {os.description && <p className="text-[10px] text-zinc-400 truncate mt-0.5">{os.description}</p>}
+                              </td>
+                              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">
+                                {os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}
+                                {os.date_signature && <div className="text-[10px] text-green-600">Signé le {new Date(os.date_signature).toLocaleDateString('fr-FR')}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300 whitespace-nowrap">{os.montant_devis_presente != null ? formatCurrency(Number(os.montant_devis_presente)) : '—'}</td>
+                              <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
+                                {os.status === 'approved'
+                                  ? <span className={cn(Number(os.montant_devis_accepte ?? os.montant_devis_presente) >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600')}>{formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))}</span>
+                                  : <span className="text-zinc-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {os.incidences_delais_type === 'oui'
+                                  ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
+                                  : <span className="text-zinc-300 text-[10px]">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  {os.status === 'draft' && <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"><IconSend size={11} /> Soumettre</button>}
+                                  {os.status === 'submitted' && (<>
+                                    <button onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"><IconCheck size={11} /> Approuver</button>
+                                    <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"><IconX size={11} /> Rejeter</button>
+                                  </>)}
+                                  {os.status === 'rejected' && <button onClick={() => handleUpdateOsStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"><IconRefresh size={11} /> Rouvrir</button>}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
+                                  <button onClick={() => handleDeleteOs(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                        {ordresDeService.filter(o => o.type === 'contrat_moe').length === 0 && (
+                          <tr><td colSpan={10} className="px-6 py-8 text-center text-zinc-500 italic">Aucun avenant. Cliquez sur "Nouvel avenant" pour commencer.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} /></div>}
             {activeTab === 'INFOS' && (
               <div className="space-y-8">
@@ -2025,168 +2560,6 @@ export default function ProjectDetail() {
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
                           <tr>
                             <td colSpan={9} className="px-6 py-8 text-center text-zinc-500 italic">Aucun ordre de service travaux.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Avenants Contrat de Maîtrise d'Œuvre */}
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                  <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                        <IconClipboardList size={16} />
-                        Avenants Contrat MOE
-                      </h3>
-                      {(() => {
-                        const moeApprouves = ordresDeService
-                          .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
-                          .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
-                        const honorairesInitiaux = Number(project.remuneration) || 0;
-                        if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
-                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 font-semibold">
-                            Honoraires révisés : {formatCurrency(honorairesInitiaux + moeApprouves)}
-                            {moeApprouves !== 0 && <span className="text-green-600 dark:text-green-400"> ({moeApprouves >= 0 ? '+' : ''}{formatCurrency(moeApprouves)})</span>}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                    <button
-                      onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white rounded-xl text-xs font-bold transition-all"
-                    >
-                      <IconPlus size={14} />
-                      Nouvel avenant
-                    </button>
-                  </div>
-                  {isAddingOsMoe && (
-                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Objet de l'avenant</label>
-                          <input
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOsMoe.title}
-                            onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
-                            placeholder="ex: Extension de mission OPC"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Avenant</label>
-                          <input
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOsMoe.os_number}
-                            onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
-                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact honoraires HT</label>
-                          <input
-                            type="number"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOsMoe.montant_devis_presente}
-                            onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
-                            placeholder="ex: 3500"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-3">
-                        <button
-                          onClick={() => setIsAddingOsMoe(false)}
-                          className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                        >
-                          Annuler
-                        </button>
-                        <button
-                          onClick={handleCreateOsMoe}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                        >
-                          Créer l'avenant
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-4 py-3 text-left">N°</th>
-                          <th className="px-4 py-3 text-left">Objet</th>
-                          <th className="px-4 py-3 text-right">Honoraires présentés HT</th>
-                          <th className="px-4 py-3 text-right">Honoraires acceptés HT</th>
-                          <th className="px-4 py-3 text-center">Statut</th>
-                          <th className="px-4 py-3 text-center">Actions</th>
-                          <th className="px-4 py-3 w-8"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {ordresDeService.filter(o => o.type === 'contrat_moe').map((os) => (
-                          <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-4 py-3 font-bold text-zinc-900 dark:text-white whitespace-nowrap">Av. {os.os_number}</td>
-                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200">{os.title}</td>
-                            <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
-                              {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white">
-                              {os.status === 'approved'
-                                ? formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))
-                                : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
-                            <td className="px-4 py-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                {os.status === 'draft' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"
-                                  >
-                                    <IconSend size={11} /> Soumettre
-                                  </button>
-                                )}
-                                {os.status === 'submitted' && (
-                                  <>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"
-                                    >
-                                      <IconCheck size={11} /> Approuver
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"
-                                    >
-                                      <IconX size={11} /> Rejeter
-                                    </button>
-                                  </>
-                                )}
-                                {os.status === 'rejected' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'draft')}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"
-                                  >
-                                    <IconRefresh size={11} /> Rouvrir
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleDeleteOs(os.id)}
-                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                              >
-                                <IconTrash size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {ordresDeService.filter(o => o.type === 'contrat_moe').length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-6 py-8 text-center text-zinc-500 italic">Aucun avenant au contrat MOE.</td>
                           </tr>
                         )}
                       </tbody>
@@ -3275,17 +3648,79 @@ export default function ProjectDetail() {
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Réserves</label>
-                          <div className="flex items-center gap-3 pt-2">
-                            <label className="flex items-center gap-2 text-sm cursor-pointer">
-                              <input type="checkbox" checked={pvForm.has_reserves} onChange={e => setPvForm(prev => ({ ...prev, has_reserves: e.target.checked }))} className="rounded" />
-                              Avec réserves
-                            </label>
-                            {pvForm.has_reserves && (
-                              <input type="number" placeholder="Nb" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reserves_count} onChange={e => setPvForm(prev => ({ ...prev, reserves_count: Number(e.target.value) }))} />
-                            )}
-                          </div>
                         </div>
+                      </div>
+
+                      {/* Liste des réserves */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">
+                            Réserves
+                            {pvForm.reserves_list.length > 0 && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px]">{pvForm.reserves_list.length}</span>
+                            )}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setPvForm(prev => ({
+                              ...prev,
+                              has_reserves: true,
+                              reserves_list: [...prev.reserves_list, { id: crypto.randomUUID(), title: '', batiment: '', local: '', lots: '', entreprises: '', due_date: prev.date_limite_levee || '', status: 'A faire' }]
+                            }))}
+                            className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-700 transition-colors"
+                          >
+                            <IconPlus size={12} /> Ajouter une réserve
+                          </button>
+                        </div>
+                        {pvForm.reserves_list.length === 0 && (
+                          <p className="text-xs text-zinc-400 italic py-1">Aucune réserve. Cliquez sur "Ajouter une réserve" pour saisir la liste.</p>
+                        )}
+                        {pvForm.reserves_list.map((r, idx) => (
+                          <div key={r.id} className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10 p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black text-amber-600 w-5 shrink-0">#{idx + 1}</span>
+                              <input
+                                type="text"
+                                placeholder="Intitulé de la réserve *"
+                                className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+                                value={r.title}
+                                onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, title: e.target.value } : x) }))}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPvForm(prev => ({
+                                  ...prev,
+                                  reserves_list: prev.reserves_list.filter((_, i) => i !== idx),
+                                  has_reserves: prev.reserves_list.length > 1,
+                                }))}
+                                className="p-1.5 text-red-400 hover:text-red-600 transition-colors shrink-0"
+                              >
+                                <IconX size={14} />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 pl-7">
+                              <input type="text" placeholder="Bâtiment" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Local / Zone" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
+                              <div className="space-y-0.5">
+                                <label className="text-[9px] font-bold text-zinc-400 uppercase">Date limite</label>
+                                <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
+                              </div>
+                              <div className="space-y-0.5">
+                                <label className="text-[9px] font-bold text-zinc-400 uppercase">Statut</label>
+                                <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
+                                  <option value="A faire">À faire</option>
+                                  <option value="En cours">En cours</option>
+                                  <option value="Levée">Levée</option>
+                                  <option value="Refusée par l'entreprise">Refusée par l'entreprise</option>
+                                  <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
+                                  <option value="Quitus Transmis">Quitus Transmis</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
 
                       {/* Signataires */}
@@ -3315,12 +3750,13 @@ export default function ProjectDetail() {
                         <button
                           onClick={async () => {
                             try {
+                              const rl = pvForm.reserves_list;
                               const body = {
                                 project_id: id,
                                 date: pvForm.date,
                                 type: pvForm.type,
-                                has_reserves: pvForm.has_reserves,
-                                reserves_count: pvForm.reserves_count,
+                                has_reserves: rl.length > 0,
+                                reserves_count: rl.length,
                                 reference_pv: pvForm.reference_pv,
                                 lieu: pvForm.lieu,
                                 date_limite_levee: pvForm.date_limite_levee,
@@ -3328,12 +3764,32 @@ export default function ProjectDetail() {
                                 observations: pvForm.observations,
                                 pv_valide: pvForm.pv_valide,
                               };
+                              let receptionId = editingReceptionId;
                               if (editingReceptionId) {
                                 const res = await fetch(`/api/receptions/${editingReceptionId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                                 if (res.ok) { const data = await res.json(); setReceptions(prev => prev.map(r => r.id === editingReceptionId ? data : r)); }
+                                // Remove old reserves for this PV then re-create
+                                const existingForPv = reserves.filter(r => r.reception_id === editingReceptionId);
+                                await Promise.all(existingForPv.map(r => fetch(`/api/reserves/${r.id}`, { method: 'DELETE' })));
                               } else {
                                 const res = await fetch('/api/receptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                                if (res.ok) { const data = await res.json(); setReceptions(prev => [...prev, data]); }
+                                if (res.ok) { const data = await res.json(); receptionId = data.id; setReceptions(prev => [...prev, data]); }
+                              }
+                              // Save inline reserves
+                              if (receptionId && rl.length > 0) {
+                                const today = new Date().toISOString().split('T')[0];
+                                const saved = await Promise.all(rl.map(r => fetch('/api/reserves', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    id: r.id, project_id: id, reception_id: receptionId,
+                                    title: r.title || '(sans titre)', batiment: r.batiment, local: r.local,
+                                    lots: JSON.stringify(r.lots ? r.lots.split(',').map((s: string) => s.trim()) : []),
+                                    entreprises: JSON.stringify(r.entreprises ? r.entreprises.split(',').map((s: string) => s.trim()) : []),
+                                    status: r.status || 'A faire', due_date: r.due_date || today, created_at: today,
+                                  }),
+                                }).then(res => res.json())));
+                                setReserves(prev => [...prev.filter(r => r.reception_id !== receptionId), ...saved]);
                               }
                               setShowPvForm(false);
                               setEditingReceptionId(null);
@@ -3366,8 +3822,12 @@ export default function ProjectDetail() {
                         {receptions.map((rec) => {
                           const dlimit = rec.date_limite_levee ? new Date(rec.date_limite_levee) : null;
                           const isUrgent = dlimit && (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
+                          const pvReserves = reserves.filter(r => r.reception_id === rec.id);
+                          const isExpanded = expandedPvId === rec.id;
+                          const reservesLevees = pvReserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length;
                           return (
-                            <tr key={rec.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                            <React.Fragment key={rec.id}>
+                            <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
                               <td className="px-6 py-4 font-mono text-xs font-bold text-zinc-900 dark:text-white">{rec.reference_pv || '—'}</td>
                               <td className="px-6 py-4">
                                 <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
@@ -3377,9 +3837,19 @@ export default function ProjectDetail() {
                               <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(rec.date).toLocaleDateString('fr-FR')}</td>
                               <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{rec.lieu || '—'}</td>
                               <td className="px-6 py-4">
-                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.has_reserves ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
-                                  {rec.has_reserves ? `Avec réserves${rec.reserves_count ? ` (${rec.reserves_count})` : ''}` : 'Sans réserves'}
-                                </span>
+                                {pvReserves.length > 0 ? (
+                                  <button
+                                    onClick={() => setExpandedPvId(isExpanded ? null : rec.id)}
+                                    className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors", "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200")}
+                                  >
+                                    {isExpanded ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
+                                    {pvReserves.length} réserve{pvReserves.length > 1 ? 's' : ''} · {reservesLevees} levée{reservesLevees > 1 ? 's' : ''}
+                                  </button>
+                                ) : (
+                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                    Sans réserves
+                                  </span>
+                                )}
                               </td>
                               <td className="px-6 py-4">
                                 {dlimit ? (
@@ -3401,8 +3871,7 @@ export default function ProjectDetail() {
                                     title="Exporter PDF"
                                     onClick={() => {
                                       const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
-                                      const projectReserves = reserves.filter(r => r.reception_id === rec.id || !r.reception_id);
-                                      generatePvPdf(rec, projectReserves, project?.name || 'Projet', signataires);
+                                      generatePvPdf(rec, pvReserves, project?.name || 'Projet', signataires);
                                     }}
                                     className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                                   >
@@ -3413,6 +3882,7 @@ export default function ProjectDetail() {
                                     title="Modifier"
                                     onClick={() => {
                                       setEditingReceptionId(rec.id);
+                                      const existingReserves = reserves.filter(r => r.reception_id === rec.id);
                                       setPvForm({
                                         reference_pv: rec.reference_pv || '',
                                         type: rec.type,
@@ -3424,6 +3894,16 @@ export default function ProjectDetail() {
                                         signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
                                         observations: rec.observations || '',
                                         pv_valide: rec.pv_valide || false,
+                                        reserves_list: existingReserves.map(r => ({
+                                          id: r.id,
+                                          title: r.title,
+                                          batiment: r.batiment || '',
+                                          local: r.local || '',
+                                          lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
+                                          entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
+                                          due_date: r.due_date || '',
+                                          status: r.status,
+                                        })),
                                       });
                                       setShowPvForm(true);
                                     }}
@@ -3448,6 +3928,101 @@ export default function ProjectDetail() {
                                 </div>
                               </td>
                             </tr>
+                            {/* Panneau dépliable — liste des réserves */}
+                            {isExpanded && pvReserves.length > 0 && (
+                              <tr>
+                                <td colSpan={8} className="px-0 pb-0 pt-0">
+                                  <div className="mx-6 mb-4 rounded-xl border border-amber-200 dark:border-amber-800/40 overflow-hidden">
+                                    <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/40 flex items-center justify-between">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                        Liste des réserves — {rec.reference_pv}
+                                      </span>
+                                      <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                                        {reservesLevees}/{pvReserves.length} levées
+                                      </span>
+                                    </div>
+                                    <table className="w-full text-xs">
+                                      <thead className="bg-amber-50/50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-500 font-bold uppercase text-[9px] tracking-wider">
+                                        <tr>
+                                          <th className="px-4 py-2 text-left w-8">#</th>
+                                          <th className="px-4 py-2 text-left">Intitulé</th>
+                                          <th className="px-4 py-2 text-left">Bâtiment / Local</th>
+                                          <th className="px-4 py-2 text-left">Lot / Entreprise</th>
+                                          <th className="px-4 py-2 text-left">Délai</th>
+                                          <th className="px-4 py-2 text-left">Statut</th>
+                                          <th className="px-4 py-2 text-right w-16"></th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-amber-100 dark:divide-amber-900/20">
+                                        {pvReserves.map((r, idx) => {
+                                          const isLevee = r.status === 'Levée' || r.status === 'Quitus Transmis';
+                                          const isEnRetard = r.due_date && new Date(r.due_date) < new Date() && !isLevee;
+                                          const statusColors: Record<string, string> = {
+                                            'A faire': 'bg-red-100 text-red-700',
+                                            'En cours': 'bg-blue-100 text-blue-700',
+                                            'Levée': 'bg-green-100 text-green-700',
+                                            'Quitus Transmis': 'bg-green-200 text-green-800',
+                                            "Refusée par l'entreprise": 'bg-orange-100 text-orange-700',
+                                            'Levée refusée par le MOE': 'bg-purple-100 text-purple-700',
+                                          };
+                                          return (
+                                            <tr key={r.id} className={cn("transition-colors", isLevee ? "opacity-60" : "hover:bg-amber-50/60 dark:hover:bg-amber-900/10")}>
+                                              <td className="px-4 py-2 font-black text-amber-500">{r.number ?? idx + 1}</td>
+                                              <td className="px-4 py-2 font-medium text-zinc-800 dark:text-zinc-200">{r.title}</td>
+                                              <td className="px-4 py-2 text-zinc-500">
+                                                {[r.batiment, r.local].filter(Boolean).join(' / ') || '—'}
+                                              </td>
+                                              <td className="px-4 py-2 text-zinc-500">
+                                                {(() => {
+                                                  const lots = (() => { try { return JSON.parse(r.lots); } catch { return [r.lots]; } })();
+                                                  const ents = (() => { try { return JSON.parse(r.entreprises); } catch { return [r.entreprises]; } })();
+                                                  return [...(Array.isArray(lots) ? lots : []), ...(Array.isArray(ents) ? ents : [])].filter(Boolean).join(', ') || '—';
+                                                })()}
+                                              </td>
+                                              <td className={cn("px-4 py-2 font-medium", isEnRetard ? "text-red-600 font-bold" : "text-zinc-500")}>
+                                                {r.due_date ? new Date(r.due_date).toLocaleDateString('fr-FR') : '—'}
+                                                {isEnRetard && ' ⚠'}
+                                              </td>
+                                              <td className="px-4 py-2">
+                                                <select
+                                                  value={r.status}
+                                                  onChange={async (e) => {
+                                                    const newStatus = e.target.value;
+                                                    await fetch(`/api/reserves/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status: newStatus }) });
+                                                    setReserves(prev => prev.map(rv => rv.id === r.id ? { ...rv, status: newStatus as Reserve['status'] } : rv));
+                                                  }}
+                                                  className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
+                                                >
+                                                  <option value="A faire">À faire</option>
+                                                  <option value="En cours">En cours</option>
+                                                  <option value="Levée">Levée</option>
+                                                  <option value="Quitus Transmis">Quitus Transmis</option>
+                                                  <option value="Refusée par l'entreprise">Refusée entreprise</option>
+                                                  <option value="Levée refusée par le MOE">Refusée MOE</option>
+                                                </select>
+                                              </td>
+                                              <td className="px-4 py-2 text-right">
+                                                <button
+                                                  onClick={async () => {
+                                                    if (!confirm('Supprimer cette réserve ?')) return;
+                                                    await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
+                                                    setReserves(prev => prev.filter(rv => rv.id !== r.id));
+                                                  }}
+                                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                                                >
+                                                  <IconTrash size={12} />
+                                                </button>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           );
                         })}
                         {receptions.length === 0 && (
