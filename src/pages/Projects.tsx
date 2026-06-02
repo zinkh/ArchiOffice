@@ -2,7 +2,7 @@ import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
-import { fetchJson } from '../lib/api';
+import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
@@ -455,16 +455,12 @@ export default function Projects() {
     if (!newCategoryName.trim()) return;
 
     try {
-      const res = await fetch('/api/project_categories', {
+      await apiFetch('/api/project_categories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: `pcat${Date.now()}`, name: newCategoryName })
+        body: JSON.stringify({ id: `pcat${Date.now()}`, name: newCategoryName }),
       });
-
-      if (res.ok) {
-        setNewCategoryName('');
-        fetchCategories();
-      }
+      setNewCategoryName('');
+      fetchCategories();
     } catch (err) {
       console.error(err);
     }
@@ -473,12 +469,8 @@ export default function Projects() {
   const handleDeleteCategory = async (id: string) => {
     if (!confirm('Are you sure you want to delete this category?')) return;
     try {
-      const res = await fetch(`/api/project_categories/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchCategories();
-      }
+      await apiFetch(`/api/project_categories/${id}`, { method: 'DELETE' });
+      fetchCategories();
     } catch (err) {
       console.error(err);
     }
