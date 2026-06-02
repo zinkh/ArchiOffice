@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   IconPlus, IconX, IconCheck, IconClock, IconSend, IconBan,
   IconFileText, IconTrash, IconPencil, IconDownload, IconFilter,
-  IconFileContract, IconCurrencyEuro, IconBuildingSkyscraper,
+  IconContract, IconCurrencyEuro, IconBuildingSkyscraper,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { fetchJson, apiFetch } from '../lib/api';
@@ -327,7 +327,7 @@ function ContratModal({
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
             <div className="flex items-center gap-3">
-              <IconFileContract size={20} style={{ color: 'var(--tblr-primary)' }} />
+              <IconContract size={20} style={{ color: 'var(--tblr-primary)' }} />
               <h2 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>
                 {contrat?.id ? 'Modifier le contrat' : 'Nouveau contrat MOE'}
               </h2>
@@ -589,8 +589,9 @@ function ContratModal({
 
       {showContactModal && (
         <ContactModal
+          isOpen={showContactModal}
           onClose={() => setShowContactModal(false)}
-          onSaved={async (c) => {
+          onSuccess={(c) => {
             set('client_id', c.id);
             setShowContactModal(false);
           }}
@@ -676,7 +677,7 @@ export default function Contrats() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: '#e8f0fb' }}>
-              <IconFileContract size={18} style={{ color: '#206bc4' }} />
+              <IconContract size={18} style={{ color: '#206bc4' }} />
             </div>
             <div>
               <h1 className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>Contrats MOE</h1>
@@ -738,7 +739,7 @@ export default function Contrats() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-center">
-            <IconFileContract size={40} className="mb-3 opacity-30" style={{ color: 'var(--tblr-muted)' }} />
+            <IconContract size={40} className="mb-3 opacity-30" style={{ color: 'var(--tblr-muted)' }} />
             <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>Aucun contrat</p>
             <p className="text-sm mt-1" style={{ color: 'var(--tblr-muted)' }}>Créez votre premier contrat de maîtrise d'œuvre</p>
             <button onClick={openNew} className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">

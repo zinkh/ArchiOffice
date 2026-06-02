@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson, apiFetch } from '../lib/api';
+import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
@@ -246,7 +247,12 @@ export default function Contacts() {
   const handleGoogleSync = async () => {
     setSyncingGoogle(true);
     try {
-      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/google-contacts', { method: 'POST' });
+      const access_token = await requestGoogleAccessToken();
+      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/google-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token })
+      });
       fetchContacts();
       showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour`);
     } catch (err: any) {

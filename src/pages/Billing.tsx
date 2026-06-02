@@ -137,8 +137,8 @@ export default function Billing() {
     }
   };
 
-  const currentPlanId = (status?.plan || 'trial') as PlanId;
-  const currentPlanIdx = PLAN_ORDER.indexOf(currentPlanId);
+  const currentPlanId = (status?.plan || 'trial') as PlanId | 'expired';
+  const currentPlanIdx = PLAN_ORDER.indexOf(currentPlanId as PlanId);
 
   const daysLeft = status?.trial_ends_at
     ? Math.max(0, Math.ceil((new Date(status.trial_ends_at).getTime() - Date.now()) / 86400000))

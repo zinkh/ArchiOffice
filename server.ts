@@ -1274,6 +1274,44 @@ async function startServer() {
     res.json({ status: "ok", environment: process.env.NODE_ENV });
   });
 
+  // ── Google OAuth2 token exchange (public — no JWT required) ─────────────
+  app.post("/api/auth/google/token", async (req: any, res: any) => {
+    try {
+      const { code, code_verifier, redirect_uri } = req.body;
+      const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId) return res.status(503).json({ error: "VITE_GOOGLE_CLIENT_ID non configuré" });
+      if (!code || !code_verifier || !redirect_uri) {
+        return res.status(400).json({ error: "code, code_verifier et redirect_uri requis" });
+      }
+
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          ...(clientSecret ? { client_secret: clientSecret } : {}),
+          code_verifier,
+          redirect_uri,
+          grant_type: 'authorization_code',
+        }).toString(),
+      });
+
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json();
+        return res.status(400).json({ error: err.error_description || 'Échec de l\'échange de code' });
+      }
+
+      const tokenData = await tokenRes.json();
+      res.json({ access_token: tokenData.access_token });
+    } catch (error: any) {
+      console.error('Google token exchange error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", async (req, res) => {
     const { cabinet_name, slug, admin_name, email, password } = req.body;
@@ -5404,9 +5442,8 @@ async function startServer() {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
 
-      const { GoogleGenerativeAI } = await import("@google/genai");
-      const genai = new GoogleGenerativeAI(apiKey);
-      const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const { GoogleGenAI } = await import("@google/genai");
+      const genai = new GoogleGenAI({ apiKey });
 
       const existingList = existing_articles.length > 0 ? `\nArticles déjà présents (à ne pas dupliquer) : ${existing_articles.join(', ')}` : '';
       const prompt = `Tu es un expert en architecture et construction.
@@ -5419,8 +5456,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
 - "unite": unité de mesure (m², ml, u, forfait, etc.)
 - "prescriptionsTechniques": normes et prescriptions techniques applicables (1-2 phrases)`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      const result = await genai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = result.text ?? '';
 
       // Extract JSON from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);
