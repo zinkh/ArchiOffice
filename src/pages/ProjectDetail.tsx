@@ -18,6 +18,7 @@ import {
   IconFileCode,
   IconChevronRight,
   IconChevronDown,
+  IconChevronUp,
   IconFileText,
   IconFileCheck,
   IconFlag,
@@ -261,6 +262,7 @@ export default function ProjectDetail() {
   // Reception PV form state
   const [showPvForm, setShowPvForm] = useState(false);
   const [editingReceptionId, setEditingReceptionId] = useState<string | null>(null);
+  const [expandedPvId, setExpandedPvId] = useState<string | null>(null);
   const defaultPvForm = () => ({
     reference_pv: '',
     type: 'provisoire' as 'provisoire' | 'definitive',
@@ -272,6 +274,7 @@ export default function ProjectDetail() {
     signataires: [] as { nom: string; role: string }[],
     observations: '',
     pv_valide: false,
+    reserves_list: [] as { id: string; title: string; batiment: string; local: string; lots: string; entreprises: string; due_date: string; status: string }[],
   });
   const [pvForm, setPvForm] = useState(defaultPvForm());
 
@@ -3275,17 +3278,79 @@ export default function ProjectDetail() {
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Réserves</label>
-                          <div className="flex items-center gap-3 pt-2">
-                            <label className="flex items-center gap-2 text-sm cursor-pointer">
-                              <input type="checkbox" checked={pvForm.has_reserves} onChange={e => setPvForm(prev => ({ ...prev, has_reserves: e.target.checked }))} className="rounded" />
-                              Avec réserves
-                            </label>
-                            {pvForm.has_reserves && (
-                              <input type="number" placeholder="Nb" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reserves_count} onChange={e => setPvForm(prev => ({ ...prev, reserves_count: Number(e.target.value) }))} />
-                            )}
-                          </div>
                         </div>
+                      </div>
+
+                      {/* Liste des réserves */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">
+                            Réserves
+                            {pvForm.reserves_list.length > 0 && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px]">{pvForm.reserves_list.length}</span>
+                            )}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setPvForm(prev => ({
+                              ...prev,
+                              has_reserves: true,
+                              reserves_list: [...prev.reserves_list, { id: crypto.randomUUID(), title: '', batiment: '', local: '', lots: '', entreprises: '', due_date: prev.date_limite_levee || '', status: 'A faire' }]
+                            }))}
+                            className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-700 transition-colors"
+                          >
+                            <IconPlus size={12} /> Ajouter une réserve
+                          </button>
+                        </div>
+                        {pvForm.reserves_list.length === 0 && (
+                          <p className="text-xs text-zinc-400 italic py-1">Aucune réserve. Cliquez sur "Ajouter une réserve" pour saisir la liste.</p>
+                        )}
+                        {pvForm.reserves_list.map((r, idx) => (
+                          <div key={r.id} className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10 p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black text-amber-600 w-5 shrink-0">#{idx + 1}</span>
+                              <input
+                                type="text"
+                                placeholder="Intitulé de la réserve *"
+                                className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+                                value={r.title}
+                                onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, title: e.target.value } : x) }))}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPvForm(prev => ({
+                                  ...prev,
+                                  reserves_list: prev.reserves_list.filter((_, i) => i !== idx),
+                                  has_reserves: prev.reserves_list.length > 1,
+                                }))}
+                                className="p-1.5 text-red-400 hover:text-red-600 transition-colors shrink-0"
+                              >
+                                <IconX size={14} />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 pl-7">
+                              <input type="text" placeholder="Bâtiment" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Local / Zone" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
+                              <div className="space-y-0.5">
+                                <label className="text-[9px] font-bold text-zinc-400 uppercase">Date limite</label>
+                                <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
+                              </div>
+                              <div className="space-y-0.5">
+                                <label className="text-[9px] font-bold text-zinc-400 uppercase">Statut</label>
+                                <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
+                                  <option value="A faire">À faire</option>
+                                  <option value="En cours">En cours</option>
+                                  <option value="Levée">Levée</option>
+                                  <option value="Refusée par l'entreprise">Refusée par l'entreprise</option>
+                                  <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
+                                  <option value="Quitus Transmis">Quitus Transmis</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
 
                       {/* Signataires */}
@@ -3315,12 +3380,13 @@ export default function ProjectDetail() {
                         <button
                           onClick={async () => {
                             try {
+                              const rl = pvForm.reserves_list;
                               const body = {
                                 project_id: id,
                                 date: pvForm.date,
                                 type: pvForm.type,
-                                has_reserves: pvForm.has_reserves,
-                                reserves_count: pvForm.reserves_count,
+                                has_reserves: rl.length > 0,
+                                reserves_count: rl.length,
                                 reference_pv: pvForm.reference_pv,
                                 lieu: pvForm.lieu,
                                 date_limite_levee: pvForm.date_limite_levee,
@@ -3328,12 +3394,32 @@ export default function ProjectDetail() {
                                 observations: pvForm.observations,
                                 pv_valide: pvForm.pv_valide,
                               };
+                              let receptionId = editingReceptionId;
                               if (editingReceptionId) {
                                 const res = await fetch(`/api/receptions/${editingReceptionId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                                 if (res.ok) { const data = await res.json(); setReceptions(prev => prev.map(r => r.id === editingReceptionId ? data : r)); }
+                                // Remove old reserves for this PV then re-create
+                                const existingForPv = reserves.filter(r => r.reception_id === editingReceptionId);
+                                await Promise.all(existingForPv.map(r => fetch(`/api/reserves/${r.id}`, { method: 'DELETE' })));
                               } else {
                                 const res = await fetch('/api/receptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                                if (res.ok) { const data = await res.json(); setReceptions(prev => [...prev, data]); }
+                                if (res.ok) { const data = await res.json(); receptionId = data.id; setReceptions(prev => [...prev, data]); }
+                              }
+                              // Save inline reserves
+                              if (receptionId && rl.length > 0) {
+                                const today = new Date().toISOString().split('T')[0];
+                                const saved = await Promise.all(rl.map(r => fetch('/api/reserves', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    id: r.id, project_id: id, reception_id: receptionId,
+                                    title: r.title || '(sans titre)', batiment: r.batiment, local: r.local,
+                                    lots: JSON.stringify(r.lots ? r.lots.split(',').map((s: string) => s.trim()) : []),
+                                    entreprises: JSON.stringify(r.entreprises ? r.entreprises.split(',').map((s: string) => s.trim()) : []),
+                                    status: r.status || 'A faire', due_date: r.due_date || today, created_at: today,
+                                  }),
+                                }).then(res => res.json())));
+                                setReserves(prev => [...prev.filter(r => r.reception_id !== receptionId), ...saved]);
                               }
                               setShowPvForm(false);
                               setEditingReceptionId(null);
@@ -3366,8 +3452,12 @@ export default function ProjectDetail() {
                         {receptions.map((rec) => {
                           const dlimit = rec.date_limite_levee ? new Date(rec.date_limite_levee) : null;
                           const isUrgent = dlimit && (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
+                          const pvReserves = reserves.filter(r => r.reception_id === rec.id);
+                          const isExpanded = expandedPvId === rec.id;
+                          const reservesLevees = pvReserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length;
                           return (
-                            <tr key={rec.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                            <React.Fragment key={rec.id}>
+                            <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
                               <td className="px-6 py-4 font-mono text-xs font-bold text-zinc-900 dark:text-white">{rec.reference_pv || '—'}</td>
                               <td className="px-6 py-4">
                                 <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
@@ -3377,9 +3467,19 @@ export default function ProjectDetail() {
                               <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(rec.date).toLocaleDateString('fr-FR')}</td>
                               <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{rec.lieu || '—'}</td>
                               <td className="px-6 py-4">
-                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.has_reserves ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
-                                  {rec.has_reserves ? `Avec réserves${rec.reserves_count ? ` (${rec.reserves_count})` : ''}` : 'Sans réserves'}
-                                </span>
+                                {pvReserves.length > 0 ? (
+                                  <button
+                                    onClick={() => setExpandedPvId(isExpanded ? null : rec.id)}
+                                    className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors", "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200")}
+                                  >
+                                    {isExpanded ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
+                                    {pvReserves.length} réserve{pvReserves.length > 1 ? 's' : ''} · {reservesLevees} levée{reservesLevees > 1 ? 's' : ''}
+                                  </button>
+                                ) : (
+                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                    Sans réserves
+                                  </span>
+                                )}
                               </td>
                               <td className="px-6 py-4">
                                 {dlimit ? (
@@ -3401,8 +3501,7 @@ export default function ProjectDetail() {
                                     title="Exporter PDF"
                                     onClick={() => {
                                       const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
-                                      const projectReserves = reserves.filter(r => r.reception_id === rec.id || !r.reception_id);
-                                      generatePvPdf(rec, projectReserves, project?.name || 'Projet', signataires);
+                                      generatePvPdf(rec, pvReserves, project?.name || 'Projet', signataires);
                                     }}
                                     className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                                   >
@@ -3413,6 +3512,7 @@ export default function ProjectDetail() {
                                     title="Modifier"
                                     onClick={() => {
                                       setEditingReceptionId(rec.id);
+                                      const existingReserves = reserves.filter(r => r.reception_id === rec.id);
                                       setPvForm({
                                         reference_pv: rec.reference_pv || '',
                                         type: rec.type,
@@ -3424,6 +3524,16 @@ export default function ProjectDetail() {
                                         signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
                                         observations: rec.observations || '',
                                         pv_valide: rec.pv_valide || false,
+                                        reserves_list: existingReserves.map(r => ({
+                                          id: r.id,
+                                          title: r.title,
+                                          batiment: r.batiment || '',
+                                          local: r.local || '',
+                                          lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
+                                          entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
+                                          due_date: r.due_date || '',
+                                          status: r.status,
+                                        })),
                                       });
                                       setShowPvForm(true);
                                     }}
@@ -3448,6 +3558,101 @@ export default function ProjectDetail() {
                                 </div>
                               </td>
                             </tr>
+                            {/* Panneau dépliable — liste des réserves */}
+                            {isExpanded && pvReserves.length > 0 && (
+                              <tr>
+                                <td colSpan={8} className="px-0 pb-0 pt-0">
+                                  <div className="mx-6 mb-4 rounded-xl border border-amber-200 dark:border-amber-800/40 overflow-hidden">
+                                    <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/40 flex items-center justify-between">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                        Liste des réserves — {rec.reference_pv}
+                                      </span>
+                                      <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                                        {reservesLevees}/{pvReserves.length} levées
+                                      </span>
+                                    </div>
+                                    <table className="w-full text-xs">
+                                      <thead className="bg-amber-50/50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-500 font-bold uppercase text-[9px] tracking-wider">
+                                        <tr>
+                                          <th className="px-4 py-2 text-left w-8">#</th>
+                                          <th className="px-4 py-2 text-left">Intitulé</th>
+                                          <th className="px-4 py-2 text-left">Bâtiment / Local</th>
+                                          <th className="px-4 py-2 text-left">Lot / Entreprise</th>
+                                          <th className="px-4 py-2 text-left">Délai</th>
+                                          <th className="px-4 py-2 text-left">Statut</th>
+                                          <th className="px-4 py-2 text-right w-16"></th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-amber-100 dark:divide-amber-900/20">
+                                        {pvReserves.map((r, idx) => {
+                                          const isLevee = r.status === 'Levée' || r.status === 'Quitus Transmis';
+                                          const isEnRetard = r.due_date && new Date(r.due_date) < new Date() && !isLevee;
+                                          const statusColors: Record<string, string> = {
+                                            'A faire': 'bg-red-100 text-red-700',
+                                            'En cours': 'bg-blue-100 text-blue-700',
+                                            'Levée': 'bg-green-100 text-green-700',
+                                            'Quitus Transmis': 'bg-green-200 text-green-800',
+                                            "Refusée par l'entreprise": 'bg-orange-100 text-orange-700',
+                                            'Levée refusée par le MOE': 'bg-purple-100 text-purple-700',
+                                          };
+                                          return (
+                                            <tr key={r.id} className={cn("transition-colors", isLevee ? "opacity-60" : "hover:bg-amber-50/60 dark:hover:bg-amber-900/10")}>
+                                              <td className="px-4 py-2 font-black text-amber-500">{r.number ?? idx + 1}</td>
+                                              <td className="px-4 py-2 font-medium text-zinc-800 dark:text-zinc-200">{r.title}</td>
+                                              <td className="px-4 py-2 text-zinc-500">
+                                                {[r.batiment, r.local].filter(Boolean).join(' / ') || '—'}
+                                              </td>
+                                              <td className="px-4 py-2 text-zinc-500">
+                                                {(() => {
+                                                  const lots = (() => { try { return JSON.parse(r.lots); } catch { return [r.lots]; } })();
+                                                  const ents = (() => { try { return JSON.parse(r.entreprises); } catch { return [r.entreprises]; } })();
+                                                  return [...(Array.isArray(lots) ? lots : []), ...(Array.isArray(ents) ? ents : [])].filter(Boolean).join(', ') || '—';
+                                                })()}
+                                              </td>
+                                              <td className={cn("px-4 py-2 font-medium", isEnRetard ? "text-red-600 font-bold" : "text-zinc-500")}>
+                                                {r.due_date ? new Date(r.due_date).toLocaleDateString('fr-FR') : '—'}
+                                                {isEnRetard && ' ⚠'}
+                                              </td>
+                                              <td className="px-4 py-2">
+                                                <select
+                                                  value={r.status}
+                                                  onChange={async (e) => {
+                                                    const newStatus = e.target.value;
+                                                    await fetch(`/api/reserves/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status: newStatus }) });
+                                                    setReserves(prev => prev.map(rv => rv.id === r.id ? { ...rv, status: newStatus as Reserve['status'] } : rv));
+                                                  }}
+                                                  className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
+                                                >
+                                                  <option value="A faire">À faire</option>
+                                                  <option value="En cours">En cours</option>
+                                                  <option value="Levée">Levée</option>
+                                                  <option value="Quitus Transmis">Quitus Transmis</option>
+                                                  <option value="Refusée par l'entreprise">Refusée entreprise</option>
+                                                  <option value="Levée refusée par le MOE">Refusée MOE</option>
+                                                </select>
+                                              </td>
+                                              <td className="px-4 py-2 text-right">
+                                                <button
+                                                  onClick={async () => {
+                                                    if (!confirm('Supprimer cette réserve ?')) return;
+                                                    await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
+                                                    setReserves(prev => prev.filter(rv => rv.id !== r.id));
+                                                  }}
+                                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                                                >
+                                                  <IconTrash size={12} />
+                                                </button>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           );
                         })}
                         {receptions.length === 0 && (
