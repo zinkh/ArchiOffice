@@ -215,7 +215,15 @@ export default function ProjectDetail() {
   const [newOsMoe, setNewOsMoe] = useState({
     title: '',
     os_number: '',
-    montant_devis_presente: ''
+    montant_devis_presente: '',
+    objet: 'extension_mission' as string,
+    description: '',
+    origine_demande: 'maitrise_ouvrage' as string,
+    date: new Date().toISOString().split('T')[0],
+    date_signature: '',
+    incidences_delais_type: 'non' as 'non' | 'oui',
+    incidences_delais_details: '',
+    delai_execution: '' as string,
   });
 
   const [isAddingOs, setIsAddingOs] = useState(false);
@@ -694,20 +702,137 @@ export default function ProjectDetail() {
           project_id: id,
           os_number: newOsMoe.os_number,
           title: newOsMoe.title,
+          objet: newOsMoe.objet || null,
+          description: newOsMoe.description || null,
+          origine_demande: newOsMoe.origine_demande || null,
+          date: newOsMoe.date || new Date().toISOString().split('T')[0],
+          date_signature: newOsMoe.date_signature || null,
+          incidences_delais_type: newOsMoe.incidences_delais_type,
+          incidences_delais_details: newOsMoe.incidences_delais_details || null,
+          delai_execution: newOsMoe.delai_execution ? Number(newOsMoe.delai_execution) : null,
           montant_devis_presente: Number(newOsMoe.montant_devis_presente) || null,
-          date: new Date().toISOString(),
           status: 'draft',
-          type: 'contrat_moe'
+          type: 'contrat_moe',
         })
       });
       if (res.ok) {
         await fetchOrdresDeService();
-        setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '' });
+        setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '', objet: 'extension_mission', description: '', origine_demande: 'maitrise_ouvrage', date: new Date().toISOString().split('T')[0], date_signature: '', incidences_delais_type: 'non', incidences_delais_details: '', delai_execution: '' });
         setIsAddingOsMoe(false);
       }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const generateAvenantPdf = (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = 210, margin = 20;
+    const TYPE_LABELS: Record<string, string> = {
+      extension_mission: "Extension de mission",
+      modification_programme: "Modification de programme",
+      revision_honoraires: "Révision des honoraires",
+      imprevus: "Imprévus / Aléas",
+      autre: "Autre",
+    };
+    const ORIGINE_LABELS: Record<string, string> = {
+      maitrise_ouvrage: "Maîtrise d'ouvrage", maitrise_oeuvre: "Maîtrise d'œuvre",
+      aleas: "Aléas", autres: "Autres",
+    };
+
+    // Header
+    doc.setFillColor(32, 107, 196);
+    doc.rect(0, 0, W, 30, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text("AVENANT AU CONTRAT DE MAÎTRISE D'ŒUVRE", margin, 12);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`N° Avenant : ${os.os_number}`, margin, 21);
+    doc.text(`Date : ${os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}`, W - margin, 21, { align: 'right' });
+
+    // Sub-header
+    doc.setFillColor(245, 247, 251);
+    doc.rect(0, 30, W, 12, 'F');
+    doc.setTextColor(80, 100, 130); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(`Projet : ${projectName}`, margin, 38);
+    doc.text(TYPE_LABELS[os.objet || ''] || (os.objet || 'Avenant'), W - margin, 38, { align: 'right' });
+
+    let y = 50;
+    const section = (title: string) => {
+      doc.setFillColor(240, 245, 255);
+      doc.rect(margin, y, W - 2 * margin, 7, 'F');
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(32, 107, 196);
+      doc.text(title, margin + 3, y + 5); y += 11;
+    };
+    const row = (label: string, value: string, x = margin, w = W - 2 * margin) => {
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(120, 130, 150);
+      doc.text(label.toUpperCase(), x, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 40);
+      const lines = doc.splitTextToSize(value || '—', w - 2);
+      doc.text(lines, x, y + 5); y += 5 + lines.length * 4 + 3;
+    };
+
+    // Identification
+    section('1. IDENTIFICATION');
+    const col = (W - 2 * margin - 5) / 2;
+    const y0 = y; row('Objet', os.title, margin, col); const y1 = y;
+    y = y0; row('Type d\'avenant', TYPE_LABELS[os.objet || ''] || '—', margin + col + 5, col); y = Math.max(y, y1);
+    const y2 = y; row('Origine de la demande', ORIGINE_LABELS[os.origine_demande || ''] || '—', margin, col); const y3 = y;
+    y = y2; row('Date de l\'avenant', os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—', margin + col + 5, col); y = Math.max(y, y3);
+
+    // Motif
+    if (os.description) { section('2. MOTIF ET DESCRIPTION'); row('Motif détaillé', os.description); }
+
+    // Financier
+    section('3. IMPACT FINANCIER');
+    const montantPres = Number(os.montant_devis_presente) || 0;
+    const montantAcc = Number(os.montant_devis_accepte ?? os.montant_devis_presente) || 0;
+    autoTable(doc, {
+      startY: y, margin: { left: margin, right: margin },
+      head: [['', 'Montant HT']],
+      body: [
+        ['Honoraires initiaux du contrat', honorairesInitiaux > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(honorairesInitiaux) : '—'],
+        ['Cumul avenants précédents', cumulAvenants - montantAcc > 0 ? '+ ' + new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cumulAvenants - montantAcc) : '—'],
+        ['Montant présenté par le MOE', montantPres > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montantPres) : '—'],
+        ['Montant accepté par le MOA', os.status === 'approved' && montantAcc > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(montantAcc) : (os.status === 'approved' ? '—' : 'En attente')],
+        ['Nouveaux honoraires révisés', honorairesInitiaux + cumulAvenants > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(honorairesInitiaux + cumulAvenants) : '—'],
+      ],
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
+      columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
+      bodyStyles: { fillColor: false },
+      alternateRowStyles: { fillColor: [248, 250, 255] },
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+
+    // Délais
+    if (os.incidences_delais_type === 'oui') {
+      section('4. IMPACT SUR LES DÉLAIS');
+      row('Incidence sur les délais', os.incidences_delais_details || 'Oui');
+      if (os.delai_execution) row('Prolongation', `${os.delai_execution} jours`);
+    }
+
+    // Signatures
+    if (y > 240) { doc.addPage(); y = 20; }
+    y += 8;
+    doc.setFillColor(245, 247, 251);
+    doc.rect(margin, y, W - 2 * margin, 40, 'F');
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(60, 70, 90);
+    doc.text('SIGNATURES', W / 2, y + 7, { align: 'center' });
+    const sigY = y + 15;
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    ['Le Maître d\'Ouvrage', 'Le Maître d\'Œuvre'].forEach((label, i) => {
+      const x = margin + i * (col + 5);
+      doc.text(label, x + col / 2, sigY, { align: 'center' });
+      doc.text(os.date_signature ? `Signé le : ${new Date(os.date_signature).toLocaleDateString('fr-FR')}` : 'Date et signature :', x + 5, sigY + 12);
+    });
+
+    const n = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(7); doc.setTextColor(160, 170, 185);
+      doc.text(`Avenant N° ${os.os_number} — ${projectName} — Page ${i}/${n}`, W / 2, 292, { align: 'center' });
+    }
+    doc.save(`Avenant_${os.os_number.replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleUpdateOsStatus = async (osId: string, newStatus: OrdreDeService['status'], montantAccepte?: number) => {
@@ -2065,131 +2190,229 @@ export default function ProjectDetail() {
                     </button>
                   </div>
                   {isAddingOsMoe && (
-                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-5">
+                      {/* Ligne 1 — Identification */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Objet de l'avenant</label>
-                          <input
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOsMoe.title}
-                            onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
-                            placeholder="ex: Extension de mission OPC"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Avenant</label>
-                          <input
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">N° Avenant *</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.os_number}
                             onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
-                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`}
-                          />
+                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact honoraires HT</label>
-                          <input
-                            type="number"
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOsMoe.montant_devis_presente}
-                            onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
-                            placeholder="ex: 3500"
-                          />
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Type d'avenant</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.objet} onChange={e => setNewOsMoe({...newOsMoe, objet: e.target.value})}>
+                            <option value="extension_mission">Extension de mission</option>
+                            <option value="modification_programme">Modification de programme</option>
+                            <option value="revision_honoraires">Révision des honoraires</option>
+                            <option value="imprevus">Imprévus / Aléas</option>
+                            <option value="autre">Autre</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.date} onChange={e => setNewOsMoe({...newOsMoe, date: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Origine</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.origine_demande} onChange={e => setNewOsMoe({...newOsMoe, origine_demande: e.target.value})}>
+                            <option value="maitrise_ouvrage">Maîtrise d'ouvrage</option>
+                            <option value="maitrise_oeuvre">Maîtrise d'œuvre</option>
+                            <option value="aleas">Aléas</option>
+                            <option value="autres">Autres</option>
+                          </select>
                         </div>
                       </div>
+
+                      {/* Ligne 2 — Objet + Motif */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Intitulé de l'avenant *</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.title} onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
+                            placeholder="ex: Extension de mission OPC + coordination sécurité" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Motif détaillé</label>
+                          <textarea rows={2} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                            value={newOsMoe.description} onChange={e => setNewOsMoe({...newOsMoe, description: e.target.value})}
+                            placeholder="Contexte, raisons justifiant l'avenant…" />
+                        </div>
+                      </div>
+
+                      {/* Ligne 3 — Honoraires + Délais */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact honoraires HT (€)</label>
+                          <input type="number" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.montant_devis_presente} onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
+                            placeholder="ex: 3 500 (négatif si réduction)" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Date signature MOA</label>
+                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.date_signature} onChange={e => setNewOsMoe({...newOsMoe, date_signature: e.target.value})} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Impact sur délais</label>
+                          <select className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.incidences_delais_type} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_type: e.target.value as 'non' | 'oui'})}>
+                            <option value="non">Sans incidence</option>
+                            <option value="oui">Avec incidence</option>
+                          </select>
+                        </div>
+                        {newOsMoe.incidences_delais_type === 'oui' && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Prolongation (jours)</label>
+                            <input type="number" min={0} className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newOsMoe.delai_execution} onChange={e => setNewOsMoe({...newOsMoe, delai_execution: e.target.value})} placeholder="nb de jours" />
+                          </div>
+                        )}
+                      </div>
+                      {newOsMoe.incidences_delais_type === 'oui' && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase">Justification de l'incidence sur les délais</label>
+                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newOsMoe.incidences_delais_details} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_details: e.target.value})}
+                            placeholder="ex: Complexification du programme nécessitant une phase PRO étendue" />
+                        </div>
+                      )}
+
                       <div className="flex justify-end gap-3">
-                        <button
-                          onClick={() => setIsAddingOsMoe(false)}
-                          className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                        >
-                          Annuler
-                        </button>
-                        <button
-                          onClick={handleCreateOsMoe}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                        >
-                          Créer l'avenant
-                        </button>
+                        <button onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">Créer l'avenant</button>
                       </div>
                     </div>
                   )}
+                  {/* Barre récap cumulée */}
+                  {(() => {
+                    const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
+                    const approuves = moeAvenants.filter(o => o.status === 'approved');
+                    const cumul = approuves.reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                    const honInit = Number(project.remuneration) || 0;
+                    if (moeAvenants.length === 0) return null;
+                    return (
+                      <div className="mx-6 mb-4 mt-2 flex items-center gap-6 text-xs px-4 py-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40">
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires initiaux</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
+                        <div className="text-blue-300">+</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Cumul avenants approuvés</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
+                        <div className="text-blue-300">=</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires révisés</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
+                        <div className="ml-auto text-blue-400 text-[10px]">{approuves.length}/{moeAvenants.length} approuvé{approuves.length > 1 ? 's' : ''}</div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 font-bold uppercase text-[10px] tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left">N°</th>
-                          <th className="px-4 py-3 text-left">Objet</th>
-                          <th className="px-4 py-3 text-right">Honoraires présentés HT</th>
-                          <th className="px-4 py-3 text-right">Honoraires acceptés HT</th>
+                          <th className="px-4 py-3 text-left">Type</th>
+                          <th className="px-4 py-3 text-left">Intitulé</th>
+                          <th className="px-4 py-3 text-left">Date</th>
+                          <th className="px-4 py-3 text-right">Présenté HT</th>
+                          <th className="px-4 py-3 text-right">Accepté HT</th>
+                          <th className="px-4 py-3 text-center">Délais</th>
                           <th className="px-4 py-3 text-center">Statut</th>
                           <th className="px-4 py-3 text-center">Actions</th>
-                          <th className="px-4 py-3 w-8"></th>
+                          <th className="px-4 py-3 w-16"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {ordresDeService.filter(o => o.type === 'contrat_moe').map((os) => (
-                          <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-4 py-3 font-bold text-zinc-900 dark:text-white whitespace-nowrap">Av. {os.os_number}</td>
-                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200">{os.title}</td>
-                            <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
-                              {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
+                        {(() => {
+                          const TYPE_SHORT: Record<string, string> = {
+                            extension_mission: 'Extension mission',
+                            modification_programme: 'Modif. programme',
+                            revision_honoraires: 'Révision hon.',
+                            imprevus: 'Imprévus',
+                            autre: 'Autre',
+                          };
+                          const honorairesInitiaux = Number(project.remuneration) || 0;
+                          const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
+                          const cumulTotal = moeAvenants.filter(o => o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                          return moeAvenants.map((os) => (
+                          <tr key={os.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
+                            <td className="px-4 py-3 font-mono font-black text-zinc-900 dark:text-white whitespace-nowrap text-xs">Av.{os.os_number}</td>
+                            <td className="px-4 py-3">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">
+                                {TYPE_SHORT[os.objet || ''] || os.objet || '—'}
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white">
+                            <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[180px]">
+                              <p className="truncate font-medium">{os.title}</p>
+                              {os.description && <p className="text-[10px] text-zinc-400 truncate mt-0.5">{os.description}</p>}
+                            </td>
+                            <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">
+                              {os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}
+                              {os.date_signature && <div className="text-[10px] text-green-600">Signé le {new Date(os.date_signature).toLocaleDateString('fr-FR')}</div>}
+                            </td>
+                            <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                              {os.montant_devis_presente != null ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white whitespace-nowrap">
                               {os.status === 'approved'
-                                ? formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))
-                                : '—'}
+                                ? <span className={cn(Number(os.montant_devis_accepte ?? os.montant_devis_presente) >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600')}>
+                                    {formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))}
+                                  </span>
+                                : <span className="text-zinc-300">—</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {os.incidences_delais_type === 'oui'
+                                ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
+                                : <span className="text-zinc-300 text-[10px]">—</span>}
                             </td>
                             <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center gap-1">
                                 {os.status === 'draft' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"
-                                  >
+                                  <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all">
                                     <IconSend size={11} /> Soumettre
                                   </button>
                                 )}
                                 {os.status === 'submitted' && (
                                   <>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"
-                                    >
+                                    <button onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all">
                                       <IconCheck size={11} /> Approuver
                                     </button>
-                                    <button
-                                      onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
-                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"
-                                    >
+                                    <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all">
                                       <IconX size={11} /> Rejeter
                                     </button>
                                   </>
                                 )}
                                 {os.status === 'rejected' && (
-                                  <button
-                                    onClick={() => handleUpdateOsStatus(os.id, 'draft')}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"
-                                  >
+                                  <button onClick={() => handleUpdateOsStatus(os.id, 'draft')}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all">
                                     <IconRefresh size={11} /> Rouvrir
                                   </button>
                                 )}
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleDeleteOs(os.id)}
-                                className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
-                              >
-                                <IconTrash size={14} />
-                              </button>
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button title="Exporter PDF avenant"
+                                  onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)}
+                                  className="p-1 text-zinc-300 hover:text-blue-500 transition-colors">
+                                  <IconFileDownload size={14} />
+                                </button>
+                                <button onClick={() => handleDeleteOs(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors">
+                                  <IconTrash size={14} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
-                        ))}
+                          ));
+                        })()}
                         {ordresDeService.filter(o => o.type === 'contrat_moe').length === 0 && (
                           <tr>
-                            <td colSpan={7} className="px-6 py-8 text-center text-zinc-500 italic">Aucun avenant au contrat MOE.</td>
+                            <td colSpan={10} className="px-6 py-8 text-center text-zinc-500 italic">Aucun avenant. Cliquez sur "Nouvel avenant" pour commencer.</td>
                           </tr>
                         )}
                       </tbody>
