@@ -1,6 +1,27 @@
 -- Migration: Notes d'honoraires, cotraitants et sous-traitants dans les contrats MOE
 
--- Ajouter les cotraitants et sous-traitants aux contrats MOE
+-- Corriger le type de client_id dans contrats_moe si la colonne est uuid
+-- (contacts.id est TEXT dans le schéma de référence)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'contrats_moe'
+      AND column_name = 'client_id'
+      AND data_type = 'uuid'
+  ) THEN
+    -- Supprimer la contrainte FK existante
+    ALTER TABLE contrats_moe DROP CONSTRAINT IF EXISTS contrats_moe_client_id_fkey;
+    -- Convertir la colonne en text
+    ALTER TABLE contrats_moe ALTER COLUMN client_id TYPE TEXT USING client_id::text;
+    -- Recréer la contrainte FK avec le bon type
+    ALTER TABLE contrats_moe
+      ADD CONSTRAINT contrats_moe_client_id_fkey
+      FOREIGN KEY (client_id) REFERENCES contacts(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Ajouter les colonnes équipe MOE aux contrats
 ALTER TABLE contrats_moe ADD COLUMN IF NOT EXISTS cotraitants jsonb DEFAULT '[]';
 ALTER TABLE contrats_moe ADD COLUMN IF NOT EXISTS sous_traitants jsonb DEFAULT '[]';
 
@@ -33,6 +54,7 @@ CREATE TABLE IF NOT EXISTS notes_honoraires (
 -- RLS
 ALTER TABLE notes_honoraires ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "tenant_isolation_notes_honoraires" ON notes_honoraires;
 CREATE POLICY "tenant_isolation_notes_honoraires"
   ON notes_honoraires
   USING (tenant_id IN (
