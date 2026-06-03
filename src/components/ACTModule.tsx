@@ -8,7 +8,6 @@ import {
 } from '@tabler/icons-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
@@ -262,7 +261,8 @@ function generateRAO(
 
 // ── Excel Comparatif ──────────────────────────────────────────────────────────
 
-function generateComparatifExcel(lots: ProjectLot[], consultation: Consultation, projectName: string) {
+async function generateComparatifExcel(lots: ProjectLot[], consultation: Consultation, projectName: string) {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const rows: (string | number | undefined)[][] = [];
   const styles: { row: number; col: number; style: string }[] = [];

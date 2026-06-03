@@ -208,7 +208,7 @@ export default function Projects() {
     const managers = ['All', ...Array.from(new Set(projects.map(p => p.project_manager).filter(Boolean)))];
     const currentIndex = managers.indexOf(filterProjectManager);
     const nextIndex = (currentIndex + 1) % managers.length;
-    setFilterProjectManager(managers[nextIndex]);
+    setFilterProjectManager(managers[nextIndex] ?? 'All');
   };
 
   const fetchProjects = async () => {

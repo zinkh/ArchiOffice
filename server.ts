@@ -80,7 +80,7 @@ async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
     const props = response.data.features[0].properties;
 
     // Convert AAAAMMJJ to ISO string
-    let datapproIso = null;
+    let datapproIso: string | null = null;
     if (props.datappro && props.datappro.length === 8) {
       const year = props.datappro.substring(0, 4);
       const month = props.datappro.substring(4, 6);
@@ -2479,7 +2479,7 @@ async function startServer() {
       await supabaseAdmin.from('profiles').upsert({ id, tenant_id: tenantId, name, email, role: role || 'Member', system_role: system_role || 'user' });
       // Send email
       let emailSent = false;
-      let emailError = null;
+      let emailError: string | null = null;
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       const smtpHost = (settings as any)?.smtpHost || process.env.SMTP_HOST;
       const smtpPort = (settings as any)?.smtpPort || process.env.SMTP_PORT || '587';
@@ -2528,7 +2528,7 @@ async function startServer() {
           emailError = err.message;
         }
       } else {
-        const missing = [];
+        const missing: string[] = [];
         if (!smtpHost) missing.push('smtpHost');
         if (!smtpUser) missing.push('smtpUser');
         if (!smtpPass) missing.push('smtpPass');

@@ -24,7 +24,6 @@ jobs:
 
       - name: Type check
         run: npm run lint
-        continue-on-error: true  # pre-existing errors in vite.config.ts / TermsOfUse.tsx
 
       - name: Build
         run: npm run build
