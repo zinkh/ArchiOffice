@@ -8,6 +8,7 @@ import {
 } from '@tabler/icons-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
@@ -69,6 +70,23 @@ interface Attribution {
   montant: number;
 }
 
+interface ComparatifArticle {
+  id: string;
+  code: string;
+  titre: string;
+  unite?: string;
+  quantite?: number;
+  estimatif?: number;
+  prix: Record<string, number>;
+  is_section_header?: boolean;
+  is_subtotal?: boolean;
+}
+
+interface ComparatifLot {
+  lot_id: string;
+  articles: ComparatifArticle[];
+}
+
 interface Consultation {
   dce_documents: DCEDocument[];
   entreprises: EntrepriseConsultee[];
@@ -77,6 +95,7 @@ interface Consultation {
   questions: QuestionReponse[];
   offres: Offre[];
   attributions: Attribution[];
+  comparatif: ComparatifLot[];
 }
 
 type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'analyse';
@@ -115,6 +134,7 @@ const EMPTY_CONSULTATION: Consultation = {
   questions: [],
   offres: [],
   attributions: [],
+  comparatif: [],
 };
 
 function fmt(n?: number) {
@@ -240,6 +260,104 @@ function generateRAO(
   doc.save(`RAO_${projectName.replace(/\s+/g, '_')}_${lotId ? `Lot${lotId}` : 'Global'}.pdf`);
 }
 
+// ── Excel Comparatif ──────────────────────────────────────────────────────────
+
+function generateComparatifExcel(lots: ProjectLot[], consultation: Consultation, projectName: string) {
+  const wb = XLSX.utils.book_new();
+  const rows: (string | number | undefined)[][] = [];
+  const styles: { row: number; col: number; style: string }[] = [];
+
+  const entreprises = consultation.entreprises;
+
+  rows.push([projectName]);
+  rows.push([`Date : ${new Date().toLocaleDateString('fr-FR')}`]);
+  rows.push([]);
+  const headerRow: (string | number | undefined)[] = ['Code', 'Titre', 'Estimatif HT (€)', ...entreprises.map(e => e.nom)];
+  rows.push(headerRow);
+
+  for (const lot of lots) {
+    const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
+    const lotRow: (string | number | undefined)[] = [`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', ...entreprises.map(() => undefined)];
+    rows.push(lotRow);
+
+    if (cl && cl.articles.length > 0) {
+      for (const article of cl.articles) {
+        if (article.is_section_header) {
+          rows.push([article.code || '', article.titre, '', ...entreprises.map(() => undefined)]);
+        } else if (article.is_subtotal) {
+          const subtotalRow: (string | number | undefined)[] = ['', article.titre, ''];
+          for (const e of entreprises) {
+            const val = article.prix[e.id];
+            subtotalRow.push(val != null ? val : undefined);
+          }
+          rows.push(subtotalRow);
+        } else {
+          const articleRow: (string | number | undefined)[] = [
+            article.code || '',
+            article.titre,
+            article.estimatif != null ? article.estimatif : undefined,
+          ];
+          for (const e of entreprises) {
+            const val = article.prix[e.id];
+            articleRow.push(val != null ? val : undefined);
+          }
+          rows.push(articleRow);
+        }
+      }
+    }
+
+    // Sous-total lot depuis offres
+    const lotOffresRow: (string | number | undefined)[] = ['', 'Sous-total du lot HT', ''];
+    for (const e of entreprises) {
+      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
+      lotOffresRow.push(offre && offre.montant_base ? offre.montant_base : undefined);
+    }
+    rows.push(lotOffresRow);
+    rows.push([]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Column widths
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 45 }, { wch: 16 },
+    ...entreprises.map(() => ({ wch: 18 })),
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Comparaison');
+
+  // Per-company sheets
+  for (const e of entreprises) {
+    const eRows: (string | number | undefined)[][] = [];
+    eRows.push([e.nom]);
+    eRows.push([]);
+    eRows.push(['Code', 'Désignation', 'Estimatif HT', 'Offre HT']);
+
+    for (const lot of lots) {
+      const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
+      eRows.push([`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', '']);
+      if (cl) {
+        for (const article of cl.articles) {
+          if (!article.is_section_header && !article.is_subtotal) {
+            const val = article.prix[e.id];
+            eRows.push([article.code || '', article.titre, article.estimatif ?? '', val ?? '']);
+          }
+        }
+      }
+      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
+      eRows.push(['', 'Total lot HT', '', offre?.montant_base ?? '']);
+      eRows.push([]);
+    }
+
+    const ews = XLSX.utils.aoa_to_sheet(eRows);
+    ews['!cols'] = [{ wch: 12 }, { wch: 45 }, { wch: 16 }, { wch: 18 }];
+    const sheetName = e.nom.substring(0, 31).replace(/[\\/:*?[\]]/g, '_');
+    XLSX.utils.book_append_sheet(wb, ews, sheetName);
+  }
+
+  XLSX.writeFile(wb, `Comparatif_${projectName.replace(/\s+/g, '_')}.xlsx`);
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 interface ACTModuleProps {
@@ -264,6 +382,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
   const [showQRForm, setShowQRForm] = useState(false);
   const [qrForm, setQrForm] = useState({ entreprise_id: '', question: '', reponse: '', publique: false });
   const [repondreId, setRepondreId] = useState<string | null>(null);
+
+  // Comparatif
+  const [showComparatif, setShowComparatif] = useState(false);
+  const [expandedComparatifLots, setExpandedComparatifLots] = useState<Set<string>>(new Set());
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -912,6 +1034,235 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             );
           })}
           {lots.length === 0 && <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-8 text-center text-zinc-400 italic">Aucun lot défini. Créez les lots en phase 1.</div>}
+
+          {/* ── Comparatif détaillé ──────────────────────────────────────── */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <IconScale size={15} /> Comparatif détaillé des offres
+                </h3>
+                <p className="text-[10px] text-zinc-400 mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    // Auto-fill lot totals from offres into comparatif
+                    const comp: ComparatifLot[] = lots.map(lot => {
+                      const existing = (consultation.comparatif || []).find(cl => cl.lot_id === lot.id);
+                      const articles: ComparatifArticle[] = existing?.articles || [];
+                      // Ensure a sous-total-lot row exists
+                      const hasTotalRow = articles.some(a => a.is_subtotal && a.code === '__lot_total__');
+                      const totalRow: ComparatifArticle = hasTotalRow
+                        ? articles.find(a => a.is_subtotal && a.code === '__lot_total__')!
+                        : { id: crypto.randomUUID(), code: '__lot_total__', titre: 'Sous-total du lot HT', is_subtotal: true, prix: {} };
+                      // Fill prices from offres
+                      const newPrix: Record<string, number> = { ...totalRow.prix };
+                      consultation.offres.filter(o => o.lot_id === lot.id).forEach(o => {
+                        if (o.montant_base) newPrix[o.entreprise_id] = o.montant_base;
+                      });
+                      const newTotalRow = { ...totalRow, prix: newPrix };
+                      const filtered = articles.filter(a => !(a.is_subtotal && a.code === '__lot_total__'));
+                      return { lot_id: lot.id, articles: [...filtered, newTotalRow] };
+                    });
+                    update({ ...consultation, comparatif: comp });
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                >
+                  <IconCheck size={13} /> Auto-remplir totaux
+                </button>
+                <button
+                  onClick={() => generateComparatifExcel(lots, consultation, projectName)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all"
+                >
+                  <IconDownload size={13} /> Export Excel
+                </button>
+                <button
+                  onClick={() => setShowComparatif(!showComparatif)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition-all"
+                >
+                  {showComparatif ? <IconX size={13} /> : <IconEye size={13} />}
+                  {showComparatif ? 'Masquer' : 'Afficher'}
+                </button>
+              </div>
+            </div>
+
+            {showComparatif && (
+              <div className="p-5 space-y-6">
+                {lots.length === 0 && <p className="text-sm text-zinc-400 italic text-center py-4">Aucun lot défini.</p>}
+                {lots.map(lot => {
+                  const cl: ComparatifLot = (consultation.comparatif || []).find(c => c.lot_id === lot.id) || { lot_id: lot.id, articles: [] };
+                  const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
+                  const isExpanded = expandedComparatifLots.has(lot.id);
+
+                  const updateCL = (newArticles: ComparatifArticle[]) => {
+                    const newComp = (consultation.comparatif || []).filter(c => c.lot_id !== lot.id);
+                    newComp.push({ lot_id: lot.id, articles: newArticles });
+                    update({ ...consultation, comparatif: newComp });
+                  };
+
+                  const updateArticle = (idx: number, patch: Partial<ComparatifArticle>) => {
+                    const arts = [...cl.articles];
+                    arts[idx] = { ...arts[idx], ...patch };
+                    updateCL(arts);
+                  };
+
+                  const updatePrix = (idx: number, entrepriseId: string, val: number) => {
+                    const arts = [...cl.articles];
+                    arts[idx] = { ...arts[idx], prix: { ...arts[idx].prix, [entrepriseId]: val } };
+                    updateCL(arts);
+                  };
+
+                  const removeArticle = (idx: number) => {
+                    updateCL(cl.articles.filter((_, i) => i !== idx));
+                  };
+
+                  const addSection = () => {
+                    const art: ComparatifArticle = { id: crypto.randomUUID(), code: '', titre: 'Nouvelle section', is_section_header: true, prix: {} };
+                    updateCL([...cl.articles, art]);
+                  };
+
+                  const addArticle = () => {
+                    const art: ComparatifArticle = { id: crypto.randomUUID(), code: '', titre: '', estimatif: undefined, prix: {} };
+                    updateCL([...cl.articles, art]);
+                  };
+
+                  const addSubtotal = () => {
+                    const art: ComparatifArticle = { id: crypto.randomUUID(), code: '', titre: 'Sous-total HT', is_subtotal: true, prix: {} };
+                    updateCL([...cl.articles, art]);
+                  };
+
+                  return (
+                    <div key={lot.id} className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+                      <div
+                        className="flex items-center justify-between px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        onClick={() => setExpandedComparatifLots(prev => {
+                          const next = new Set(prev);
+                          next.has(lot.id) ? next.delete(lot.id) : next.add(lot.id);
+                          return next;
+                        })}
+                      >
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? <IconChevronRight size={14} className="rotate-90 transition-transform" /> : <IconChevronRight size={14} className="transition-transform" />}
+                          <span className="text-xs font-black text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30">Lot {lot.lot_number}</span>
+                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{lot.lot_title}</span>
+                          <span className="text-[10px] text-zinc-400">({cl.articles.length} lignes)</span>
+                        </div>
+                        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                          <button onClick={addSection} className="px-2 py-1 text-[10px] font-bold rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-300">+ Section</button>
+                          <button onClick={addArticle} className="px-2 py-1 text-[10px] font-bold rounded bg-blue-100 text-blue-700 hover:bg-blue-200">+ Article</button>
+                          <button onClick={addSubtotal} className="px-2 py-1 text-[10px] font-bold rounded bg-amber-100 text-amber-700 hover:bg-amber-200">+ Sous-total</button>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs" style={{ minWidth: `${300 + entreprisesLot.length * 140}px` }}>
+                            <thead className="bg-zinc-100 dark:bg-zinc-800">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-bold text-zinc-500 w-20">Code</th>
+                                <th className="px-3 py-2 text-left font-bold text-zinc-500">Désignation</th>
+                                <th className="px-3 py-2 text-right font-bold text-zinc-500 w-28">Estimatif HT</th>
+                                {entreprisesLot.map(e => (
+                                  <th key={e.id} className="px-3 py-2 text-right font-bold text-zinc-700 dark:text-zinc-300 w-36 whitespace-nowrap">{e.nom}</th>
+                                ))}
+                                <th className="w-8"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                              {cl.articles.map((article, idx) => {
+                                if (article.is_section_header) {
+                                  return (
+                                    <tr key={article.id} className="bg-blue-50 dark:bg-blue-900/10">
+                                      <td className="px-3 py-2">
+                                        <input className="w-full bg-transparent text-[10px] font-bold text-blue-600 outline-none border-b border-blue-200 dark:border-blue-800"
+                                          value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="Réf." />
+                                      </td>
+                                      <td colSpan={2 + entreprisesLot.length} className="px-3 py-2">
+                                        <input className="w-full bg-transparent text-xs font-bold text-blue-700 dark:text-blue-300 uppercase outline-none"
+                                          value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} />
+                                      </td>
+                                      <td className="px-2 py-2 text-right">
+                                        <button onClick={() => removeArticle(idx)} className="p-0.5 text-zinc-300 hover:text-red-500"><IconTrash size={11} /></button>
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+                                if (article.is_subtotal) {
+                                  return (
+                                    <tr key={article.id} className="bg-amber-50 dark:bg-amber-900/10 font-bold">
+                                      <td className="px-3 py-2 text-zinc-400 text-[10px]">{article.code !== '__lot_total__' ? article.code : ''}</td>
+                                      <td className="px-3 py-2">
+                                        <input className="w-full bg-transparent text-xs font-bold text-amber-700 dark:text-amber-400 outline-none"
+                                          value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} readOnly={article.code === '__lot_total__'} />
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-zinc-400">—</td>
+                                      {entreprisesLot.map(e => (
+                                        <td key={e.id} className="px-3 py-2 text-right">
+                                          <input type="number" min={0} step={100}
+                                            className="w-full text-right px-1.5 py-1 border border-amber-200 dark:border-amber-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-amber-400 text-xs font-bold"
+                                            value={article.prix[e.id] ?? ''}
+                                            onChange={ev => updatePrix(idx, e.id, parseFloat(ev.target.value) || 0)}
+                                            placeholder="—" />
+                                        </td>
+                                      ))}
+                                      <td className="px-2 py-2 text-right">
+                                        {article.code !== '__lot_total__' && (
+                                          <button onClick={() => removeArticle(idx)} className="p-0.5 text-zinc-300 hover:text-red-500"><IconTrash size={11} /></button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+                                return (
+                                  <tr key={article.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
+                                    <td className="px-3 py-2">
+                                      <input className="w-full text-[10px] px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
+                                        value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="1.3.1" />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <input className="w-full text-xs px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
+                                        value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} placeholder="Désignation de l'article" />
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <input type="number" min={0} step={100}
+                                        className="w-full text-right px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
+                                        value={article.estimatif ?? ''}
+                                        onChange={e => updateArticle(idx, { estimatif: parseFloat(e.target.value) || undefined })}
+                                        placeholder="—" />
+                                    </td>
+                                    {entreprisesLot.map(e => (
+                                      <td key={e.id} className="px-3 py-2">
+                                        <input type="number" min={0} step={100}
+                                          className="w-full text-right px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
+                                          value={article.prix[e.id] ?? ''}
+                                          onChange={ev => updatePrix(idx, e.id, parseFloat(ev.target.value) || 0)}
+                                          placeholder="—" />
+                                      </td>
+                                    ))}
+                                    <td className="px-2 py-2 text-right">
+                                      <button onClick={() => removeArticle(idx)} className="p-0.5 text-zinc-300 hover:text-red-500"><IconTrash size={11} /></button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {cl.articles.length === 0 && (
+                                <tr>
+                                  <td colSpan={4 + entreprisesLot.length} className="px-4 py-6 text-center text-zinc-400 italic">
+                                    Cliquez sur "+ Section", "+ Article" ou "+ Sous-total" pour construire le comparatif de ce lot.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
