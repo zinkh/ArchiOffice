@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS contrats_moe (
   status TEXT NOT NULL DEFAULT 'Brouillon',
 
   -- Parties
-  client_id UUID REFERENCES contacts(id) ON DELETE SET NULL,
+  client_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
 
   -- Projet

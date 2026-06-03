@@ -19,7 +19,6 @@ import type { Project } from '../types';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 import { loadImageAsDataUrl } from '../lib/imageUtils';
 
 interface GroupedProjects {
@@ -222,6 +221,7 @@ export default function References() {
   };
 
   const exportToExcel = async () => {
+    const XLSX = await import('xlsx');
     const selectedProjects = filteredProjects.filter(p => selectedIds.has(p.id));
     let agencyName = '';
     try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }

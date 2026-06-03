@@ -1068,7 +1068,7 @@ export default function Contacts() {
                     value={newContact.affaires?.split(',').filter(Boolean) || []}
                     onChange={e => {
                       const options = e.target.selectedOptions;
-                      const values = [];
+                      const values: string[] = [];
                       for (let i = 0; i < options.length; i++) {
                         values.push(options[i].value);
                       }
@@ -1090,7 +1090,7 @@ export default function Contacts() {
                     value={newContact.candidatures?.split(',').filter(Boolean) || []}
                     onChange={e => {
                       const options = e.target.selectedOptions;
-                      const values = [];
+                      const values: string[] = [];
                       for (let i = 0; i < options.length; i++) {
                         values.push(options[i].value);
                       }

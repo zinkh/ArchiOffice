@@ -80,7 +80,7 @@ async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
     const props = response.data.features[0].properties;
 
     // Convert AAAAMMJJ to ISO string
-    let datapproIso = null;
+    let datapproIso: string | null = null;
     if (props.datappro && props.datappro.length === 8) {
       const year = props.datappro.substring(0, 4);
       const month = props.datappro.substring(4, 6);
@@ -2479,7 +2479,7 @@ async function startServer() {
       await supabaseAdmin.from('profiles').upsert({ id, tenant_id: tenantId, name, email, role: role || 'Member', system_role: system_role || 'user' });
       // Send email
       let emailSent = false;
-      let emailError = null;
+      let emailError: string | null = null;
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       const smtpHost = (settings as any)?.smtpHost || process.env.SMTP_HOST;
       const smtpPort = (settings as any)?.smtpPort || process.env.SMTP_PORT || '587';
@@ -2528,7 +2528,7 @@ async function startServer() {
           emailError = err.message;
         }
       } else {
-        const missing = [];
+        const missing: string[] = [];
         if (!smtpHost) missing.push('smtpHost');
         if (!smtpUser) missing.push('smtpUser');
         if (!smtpPass) missing.push('smtpPass');
@@ -5027,14 +5027,15 @@ async function startServer() {
   app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { companies, lots, scoring_criteria, weights } = req.body;
+      const { companies, lots, scoring_criteria, weights, consultation, act_phase } = req.body;
       const { data: existing } = await supabaseAdmin.from('act_data').select('id').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      const payload = { companies, lots, scoring_criteria, weights, consultation, act_phase, updated_at: new Date().toISOString() };
       if (existing) {
-        const { data, error } = await supabaseAdmin.from('act_data').update({ companies, lots, scoring_criteria, weights }).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
+        const { data, error } = await supabaseAdmin.from('act_data').update(payload).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
         if (error) throw error;
         res.json(data);
       } else {
-        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, companies, lots, scoring_criteria, weights }).select().single();
+        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, ...payload }).select().single();
         if (error) throw error;
         res.status(201).json(data);
       }

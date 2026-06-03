@@ -18,7 +18,6 @@ import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 
-import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
 const DEFAULT_MISSIONS = [
@@ -1372,9 +1371,10 @@ const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMiles
   );
 };
 
-const exportToXlsx = (proposal: Partial<Proposal>, contacts: Contact[]) => {
+const exportToXlsx = async (proposal: Partial<Proposal>, contacts: Contact[]) => {
   if (!proposal.fee_distribution) return;
   try {
+    const XLSX = await import('xlsx');
     const data = JSON.parse(proposal.fee_distribution);
     const specialties = proposal.specialties_list || [];
     const selectedContacts = specialties.map(s => {

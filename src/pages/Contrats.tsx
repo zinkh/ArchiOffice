@@ -192,7 +192,7 @@ function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   // Clauses
   if (y > 240) { doc.addPage(); y = 20; }
   sectionTitle('6. CLAUSES PARTICULIÈRES');
-  const clauses = [];
+  const clauses: string[][] = [];
   if (contrat.clause_mediation) clauses.push(['Médiation', 'En cas de litige, les parties s\'engagent à recourir à la médiation avant toute procédure judiciaire.']);
   if (contrat.clause_propriete_intellectuelle) clauses.push(['Propriété intellectuelle', 'Les plans, documents et créations produits par le MOE demeurent sa propriété intellectuelle. Leur utilisation est soumise au respect du droit d\'auteur.']);
   if (contrat.clause_resiliation) clauses.push(['Résiliation', contrat.clause_resiliation]);

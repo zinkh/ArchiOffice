@@ -253,7 +253,7 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       const fetchWeather = async () => {
         setWeatherLoading(true);
         try {
-          const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address)}&date=${newReportDate}`);
+          const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address ?? '')}&date=${newReportDate}`);
           if (res.ok) {
             const data = await res.json();
             setFetchedWeather(data);
