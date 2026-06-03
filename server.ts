@@ -5027,14 +5027,15 @@ async function startServer() {
   app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { companies, lots, scoring_criteria, weights } = req.body;
+      const { companies, lots, scoring_criteria, weights, consultation, act_phase } = req.body;
       const { data: existing } = await supabaseAdmin.from('act_data').select('id').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
+      const payload = { companies, lots, scoring_criteria, weights, consultation, act_phase, updated_at: new Date().toISOString() };
       if (existing) {
-        const { data, error } = await supabaseAdmin.from('act_data').update({ companies, lots, scoring_criteria, weights }).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
+        const { data, error } = await supabaseAdmin.from('act_data').update(payload).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
         if (error) throw error;
         res.json(data);
       } else {
-        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, companies, lots, scoring_criteria, weights }).select().single();
+        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, ...payload }).select().single();
         if (error) throw error;
         res.status(201).json(data);
       }
