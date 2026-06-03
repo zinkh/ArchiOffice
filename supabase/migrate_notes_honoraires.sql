@@ -29,7 +29,7 @@ ALTER TABLE contrats_moe ADD COLUMN IF NOT EXISTS sous_traitants jsonb DEFAULT '
 CREATE TABLE IF NOT EXISTS notes_honoraires (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   tenant_id uuid REFERENCES tenants(id) ON DELETE CASCADE,
-  project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+  project_id text REFERENCES projects(id) ON DELETE CASCADE,
   contrat_id uuid REFERENCES contrats_moe(id) ON DELETE SET NULL,
   numero text,
   date date,
