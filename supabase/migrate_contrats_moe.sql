@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS contrats_moe (
 
   -- Parties
   client_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
 
   -- Projet
   intitule_projet TEXT,
