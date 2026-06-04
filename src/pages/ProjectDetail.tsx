@@ -2041,7 +2041,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} /></div>}
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} /></div>}
             {activeTab === 'INFOS' && (
               <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
