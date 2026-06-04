@@ -2,9 +2,9 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard, IconDeviceFloppy,
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
-  IconLayoutSidebarLeft, IconArrowsMaximize, IconArrowsMinimize,
+  IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush,
-  IconMath, IconX, IconCheck,
+  IconX, IconCheck,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne } from '../../types/dpgf';
@@ -389,7 +389,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Volet arbre',
           actions: [
-            { id: 'toggleTree', label: 'Arbre', icon: <IconLayoutSidebarLeft size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
+            { id: 'toggleTree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
           ],
         },
         {

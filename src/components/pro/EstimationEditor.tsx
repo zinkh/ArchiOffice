@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
-  IconLayoutSidebarLeft, IconArrowsMaximize, IconArrowsMinimize,
+  IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutColumns, IconRefresh, IconX, IconDeviceFloppy,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
@@ -164,7 +164,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {
           label: 'Volet arbre',
           actions: [
-            { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebarLeft size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
+            { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
           ],
         },
         {
