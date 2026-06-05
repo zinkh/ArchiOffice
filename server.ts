@@ -2879,6 +2879,10 @@ async function startServer() {
       const body = req.body;
       const id = body.id || crypto.randomUUID();
       const { id: _id, tenant_id: _tid, created_at: _ca, updated_at: _ua, ...insertData } = body;
+      // Auto-generate numero if not provided
+      if (!insertData.numero) {
+        insertData.numero = await getNextDocNumber(tenantId, 'num_prefix_honoraires', 'notes_honoraires', 'NH');
+      }
       const { error } = await supabaseAdmin.from('notes_honoraires').insert({ ...insertData, id, tenant_id: tenantId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
       if (error) throw error;
       const { data: created } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).single();
@@ -2924,6 +2928,16 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch proposals" }); }
   });
 
+  // ── Numbering helper ──────────────────────────────────────────────────────
+  const getNextDocNumber = async (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string): Promise<string> => {
+    const year = new Date().getFullYear();
+    const { data: s } = await supabaseAdmin.from('settings').select(settingCol).eq('tenant_id', tenantId).single();
+    const prefix = (s as any)?.[settingCol] || defaultPrefix;
+    const { count } = await supabaseAdmin.from(countTable).select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+    const seq = String((count || 0) + 1).padStart(3, '0');
+    return `${prefix}-${year}-${seq}`;
+  };
+
   app.post("/api/proposals", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -2933,10 +2947,7 @@ async function startServer() {
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
       // Auto-generate readable reference if not provided
       if (!proposalData.reference) {
-        const year = new Date().getFullYear();
-        const { count } = await supabaseAdmin.from('proposals').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
-        const seq = String((count || 0) + 1).padStart(3, '0');
-        proposalData.reference = `DEVIS-${year}-${seq}`;
+        proposalData.reference = await getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
       }
       const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
       if (insErr) throw insErr;
@@ -3103,8 +3114,11 @@ async function startServer() {
         }
       }
 
+      // Auto-generate invoice_number if not provided
+      const finalInvoiceNumber = invoice_number || await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC');
+
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
-        id, tenant_id: tenantId, invoice_number: invoice_number || null, project_id,
+        id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id,
         amount: amount || 0, tax_amount: tax_amount || 0, total_amount: total_amount || 0,
         status: status || 'Draft', due_date: due_date || null,
         issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
@@ -4393,6 +4407,9 @@ async function startServer() {
     senderOption: 'sender_option', defaultEmailTemplate: 'default_email_template',
     logoUrl: 'logo_url', smtpHost: 'smtp_host', smtpPort: 'smtp_port',
     smtpUser: 'smtp_user', smtpPass: 'smtp_pass',
+    numPrefixDevis: 'num_prefix_devis',
+    numPrefixFacture: 'num_prefix_facture',
+    numPrefixHonoraires: 'num_prefix_honoraires',
   };
   const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -4423,7 +4440,7 @@ async function startServer() {
         snakeData[col] = v;
       }
       // Only keep valid table columns (include id for PRIMARY KEY on insert)
-      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id']);
+      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires']);
       const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }

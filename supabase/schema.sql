@@ -405,7 +405,10 @@ CREATE TABLE IF NOT EXISTS settings (
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
   zoho_client_id TEXT, zoho_client_secret TEXT, zoho_org_id TEXT,
   zoho_data_center TEXT, zoho_refresh_token TEXT,
-  zoho_books_org_id TEXT
+  zoho_books_org_id TEXT,
+  num_prefix_devis TEXT DEFAULT 'DEVIS',
+  num_prefix_facture TEXT DEFAULT 'FAC',
+  num_prefix_honoraires TEXT DEFAULT 'NH'
 );
 
 -- Project Templates
