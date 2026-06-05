@@ -2208,7 +2208,7 @@ export default function ProjectDetail() {
                               </div>
                               <div className="bg-white dark:bg-zinc-900 relative">
                                 <GoogleMap address={project.address} />
-                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">Google Maps</div>
+                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm">OpenStreetMap</div>
                               </div>
                             </div>
                           </div>

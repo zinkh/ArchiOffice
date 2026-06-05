@@ -56,29 +56,44 @@ export const GeoportailMap = ({ address, banId }: { address: string; banId?: str
 };
 
 export const GoogleMap = ({ address }: { address: string }) => {
-  const [debouncedAddress, setDebouncedAddress] = useState(address);
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // If address is very short, don't update immediately to avoid rapid iframe reloads
-    if (address.length < 5) return;
-
-    const timer = setTimeout(() => {
-      setDebouncedAddress(address);
-    }, 1500); // 1.5s delay to allow typing
-
-    return () => clearTimeout(timer);
+    if (!address || address.length < 5) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.features?.length > 0) {
+          const [lon, lat] = data.features[0].geometry.coordinates;
+          setCoords({ lat, lon });
+        }
+      } catch { /* ignore */ } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 1500);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [address]);
 
-  // Only show map if we have a valid debounced address
-  if (!debouncedAddress || debouncedAddress.length < 5) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
+  if (!address || address.length < 5)
+    return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Entrez une adresse valide</div>;
+  if (loading)
+    return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Chargement...</div>;
+  if (!coords)
+    return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Adresse introuvable</div>;
 
+  const delta = 0.003;
+  const bbox = `${coords.lon - delta},${coords.lat - delta},${coords.lon + delta},${coords.lat + delta}`;
   return (
     <iframe
-      src={`https://maps.google.com/maps?q=${encodeURIComponent(debouncedAddress)}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+      src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${coords.lat},${coords.lon}`}
       className="w-full h-full border-0"
-      title="Google Map"
+      title="OpenStreetMap"
       loading="lazy"
-      allow="geolocation"
     />
   );
 };
