@@ -145,12 +145,16 @@ export default function Proposals() {
       })) 
     }),
     construction_cost: 0,
+    ratio_rehab: 0,
+    ratio_extension: 0,
     complexity_rate: 1,
     base_fee_percent: 0,
     vat_rate: 20,
     decimal_precision: 2
   };
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
+  const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -199,10 +203,11 @@ export default function Proposals() {
 
   const handleSubmitProposal = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     try {
       const url = editingProposal ? `/api/proposals/${editingProposal.id}` : '/api/proposals';
       const method = editingProposal ? 'PUT' : 'POST';
-      
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -218,21 +223,30 @@ export default function Proposals() {
         setIsModalOpen(false);
         setEditingProposal(null);
         setNewProposal(initialProposalState);
+        setCostMode('manual');
+      } else {
+        const errBody = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+        setSubmitError(errBody.error || `Erreur HTTP ${res.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setSubmitError(err.message || 'Erreur réseau');
     }
   };
 
   const handleEditClick = (proposal: Proposal) => {
     setEditingProposal(proposal);
     setNewProposal(proposal);
+    setCostMode((proposal.ratio_rehab || proposal.ratio_extension) ? 'ratio' : 'manual');
+    setSubmitError(null);
     setIsModalOpen(true);
   };
 
   const handleOpenCreateModal = () => {
     setEditingProposal(null);
     setNewProposal(initialProposalState);
+    setCostMode('manual');
+    setSubmitError(null);
     setIsModalOpen(true);
   };
 
@@ -338,6 +352,19 @@ export default function Proposals() {
 
   const vatAmount = (newProposal.amount || 0) * ((newProposal.vat_rate || 0) / 100);
   const totalTTC = (newProposal.amount || 0) + vatAmount;
+
+  // Auto-calculate construction_cost from ratio fields when in ratio mode
+  useEffect(() => {
+    if (costMode !== 'ratio') return;
+    const surfExist = parseFloat(newProposal.surface_plancher as string) || 0;
+    const surfExt = parseFloat(newProposal.surface_plancher_ext as string) || 0;
+    const ratioRehab = newProposal.ratio_rehab || 0;
+    const ratioExt = newProposal.ratio_extension || 0;
+    const computed = surfExist * ratioRehab + surfExt * ratioExt;
+    if (Math.abs(computed - (newProposal.construction_cost || 0)) > 0.01) {
+      setNewProposal(prev => ({ ...prev, construction_cost: Number(computed.toFixed(2)) }));
+    }
+  }, [costMode, newProposal.surface_plancher, newProposal.surface_plancher_ext, newProposal.ratio_rehab, newProposal.ratio_extension]);
 
   // Auto-calculate amount if factors change
   useEffect(() => {
@@ -832,11 +859,75 @@ export default function Proposals() {
                     <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">07</span>
                     Honoraires
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <FormField label="Montant des travaux (€)" type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
-                    <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
-                    <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                  {/* Mode selector for Montant des travaux */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
+                    <button
+                      type="button"
+                      onClick={() => setCostMode('manual')}
+                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                    >
+                      Saisie manuelle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCostMode('ratio')}
+                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                    >
+                      Calcul par ratio
+                    </button>
                   </div>
+                  {costMode === 'manual' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <FormField label="Montant des travaux (€)" type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
+                      <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
+                      <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                    </div>
+                  ) : (
+                    <div className="space-y-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                        Montant des travaux = Surface existante × Ratio réhabilitation + Surface extension/neuf × Ratio extension
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
+                          <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
+                            {newProposal.surface_plancher || '0'} m²
+                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                          </div>
+                        </div>
+                        <FormField
+                          label="Ratio réhab (€/m²)"
+                          type="number"
+                          value={newProposal.ratio_rehab}
+                          onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
+                        />
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
+                          <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
+                            {newProposal.surface_plancher_ext || '0'} m²
+                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                          </div>
+                        </div>
+                        <FormField
+                          label="Ratio extension (€/m²)"
+                          type="number"
+                          value={newProposal.ratio_extension}
+                          onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_extension: Number(v)}))}
+                        />
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
+                        <span className="text-sm font-bold text-blue-700 dark:text-blue-400">
+                          {(newProposal.construction_cost || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-blue-100 dark:border-blue-900/30">
+                        <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
+                        <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
@@ -1044,6 +1135,11 @@ export default function Proposals() {
                 )}
               </form>
 
+              {submitError && (
+                <div className="px-6 py-3 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
+                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">⚠ {submitError}</p>
+                </div>
+              )}
               <div className="p-6 flex gap-3" style={{ borderTop: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                 <button
                   type="button"

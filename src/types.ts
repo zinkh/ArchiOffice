@@ -561,6 +561,8 @@ export interface Proposal {
   custom_architect?: string;
   custom_client?: string;
   construction_cost?: number;
+  ratio_rehab?: number;
+  ratio_extension?: number;
   complexity_rate?: number;
   base_fee_percent?: number;
   exe_fee_percent?: number;

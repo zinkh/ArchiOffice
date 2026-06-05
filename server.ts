@@ -910,7 +910,7 @@ if (false as any) {
       'client_address_2', 'client_address_3', 'client_postbox', 'client_city', 'client_state',
       'client_postcode', 'client_country', 'client_email', 'client_phone', 'client_fax',
       'ed_report_header', 'custom_building', 'custom_architect', 'custom_client', 'fee_distribution',
-      'construction_cost', 'complexity_rate', 'base_fee_percent', 'exe_fee_percent', 'comp_fee_percent', 'vat_rate', 'decimal_precision'
+      'construction_cost', 'ratio_rehab', 'ratio_extension', 'complexity_rate', 'base_fee_percent', 'exe_fee_percent', 'comp_fee_percent', 'vat_rate', 'decimal_precision'
     ] },
     { table: 'ordres_de_service', columns: [
       'march_number', 'lot', 'maitrise_oeuvre_adresse', 'entreprise', 'origine_demande',
@@ -2930,7 +2930,14 @@ async function startServer() {
       const p = req.body;
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { specialties_list, client_name: _cn, ...proposalData } = p;
+      const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
+      // Auto-generate readable reference if not provided
+      if (!proposalData.reference) {
+        const year = new Date().getFullYear();
+        const { count } = await supabaseAdmin.from('proposals').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+        const seq = String((count || 0) + 1).padStart(3, '0');
+        proposalData.reference = `DEVIS-${year}-${seq}`;
+      }
       const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
       if (insErr) throw insErr;
       if (specialties_list && Array.isArray(specialties_list)) {
@@ -2957,7 +2964,7 @@ async function startServer() {
       // Fetch old proposal to check status transition
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
-      const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, ...updateData } = p;
+      const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, construction_cost_num: _ccn2, ...updateData } = p;
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 
