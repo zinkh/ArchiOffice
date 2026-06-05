@@ -8,6 +8,7 @@ export interface Ligne {
   prixTotal: number;
   articleCctpId?: string;
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
+  children?: Ligne[];
 }
 
 export interface Chapitre {
