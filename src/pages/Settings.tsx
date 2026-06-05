@@ -168,6 +168,9 @@ export default function Settings() {
     zoho_org_id: '',
     zoho_data_center: 'com',
     zoho_books_org_id: '',
+    numPrefixDevis: 'DEVIS',
+    numPrefixFacture: 'FAC',
+    numPrefixHonoraires: 'NH',
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -606,6 +609,64 @@ export default function Settings() {
                 }} />
               {settings.logoUrl && <img src={settings.logoUrl} alt="Logo" className="w-24 h-24 object-contain mt-2 rounded-lg p-1" style={{ border: '1px solid var(--tblr-border)' }} />}
             </div>
+          </div>
+
+          {/* ── Numérotation des documents ── */}
+          <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Numérotation des documents</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Choisissez le préfixe pour chaque type de document. Le numéro généré aura la forme <strong>PRÉFIXE-ANNÉE-NNN</strong>.
+              </p>
+            </div>
+            {([
+              { label: 'Devis / Propositions', key: 'numPrefixDevis' as const, presets: ['DEVIS', 'DEV', 'PROP'] },
+              { label: 'Factures', key: 'numPrefixFacture' as const, presets: ['FAC', 'Facture', 'F'] },
+              { label: 'Notes d\'honoraires', key: 'numPrefixHonoraires' as const, presets: ['NH', 'NOTE-H', 'HONOS'] },
+            ] as const).map(({ label, key, presets }) => {
+              const year = new Date().getFullYear();
+              const prefix = settings[key] || presets[0];
+              const preview = `${prefix}-${year}-001`;
+              return (
+                <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {presets.map(p => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setSettings({ ...settings, [key]: p })}
+                          className="px-2.5 py-1 rounded text-xs font-bold transition-colors"
+                          style={settings[key] === p
+                            ? { background: 'var(--tblr-primary)', color: '#fff' }
+                            : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Préfixe personnalisé</label>
+                    <input
+                      className="w-full p-2 rounded-lg text-sm font-mono"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      placeholder="Ex: MON-PREFIX"
+                      value={settings[key]}
+                      onChange={e => setSettings({ ...settings, [key]: e.target.value })}
+                      maxLength={20}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Aperçu</label>
+                    <div className="p-2 rounded-lg text-sm font-mono font-bold" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                      {preview}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* ── SMTP ── */}

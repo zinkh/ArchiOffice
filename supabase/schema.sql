@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   client_email TEXT, client_phone TEXT, client_fax TEXT,
   ed_report_header TEXT, custom_building TEXT, custom_architect TEXT,
   custom_client TEXT, fee_distribution TEXT, construction_cost_num NUMERIC,
+  construction_cost NUMERIC DEFAULT 0, ratio_rehab NUMERIC DEFAULT 0, ratio_extension NUMERIC DEFAULT 0,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
   comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER
 );
@@ -404,7 +405,10 @@ CREATE TABLE IF NOT EXISTS settings (
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
   zoho_client_id TEXT, zoho_client_secret TEXT, zoho_org_id TEXT,
   zoho_data_center TEXT, zoho_refresh_token TEXT,
-  zoho_books_org_id TEXT
+  zoho_books_org_id TEXT,
+  num_prefix_devis TEXT DEFAULT 'DEVIS',
+  num_prefix_facture TEXT DEFAULT 'FAC',
+  num_prefix_honoraires TEXT DEFAULT 'NH'
 );
 
 -- Project Templates
