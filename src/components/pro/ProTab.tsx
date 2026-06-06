@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
+import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne } from '../../types/dpgf';
 import {
-  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar,
+  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
 } from '@tabler/icons-react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -93,6 +94,18 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [showTree, setShowTree] = useState(true);
   const toggleTree = () => setShowTree(v => !v);
 
+  // ── Browser print with page isolation ───────────────────────────────────────
+  const handlePrint = useCallback(() => {
+    document.body.classList.add('printing-pro');
+    window.print();
+  }, []);
+
+  useEffect(() => {
+    const cleanup = () => document.body.classList.remove('printing-pro');
+    window.addEventListener('afterprint', cleanup);
+    return () => window.removeEventListener('afterprint', cleanup);
+  }, []);
+
   // ── Load DPGF ───────────────────────────────────────────────────────────────
   useEffect(() => {
     setDpgfLoading(true);
@@ -173,11 +186,26 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
 
+  const PRINT_TITLES: Record<SubTab, string> = {
+    CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
+    DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
+    ESTIMATION: 'Estimation Prévisionnelle',
+  };
+
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+
+      {/* Print decorations — invisible on screen, fixed header/footer when printing */}
+      {dpgf && (
+        <PrintPageDecorations
+          title={PRINT_TITLES[activeSubTab]}
+          subtitle={projectName}
+          reference={`v${dpgf.version}`}
+        />
+      )}
 
       {/* ── Sub-tab navigation ──────────────────────────────────────────────── */}
-      <div className="flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+      <div className="no-print flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shrink-0">
         <div className="flex">
           {TABS.map(tab => (
             <button
@@ -209,11 +237,21 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           </button>
         )}
 
-        {/* Save status — always visible */}
-        <div className="ml-auto flex items-center gap-2 px-3">
+        {/* Save status + print + split — always visible on the right */}
+        <div className="ml-auto flex items-center gap-2 px-3 no-print">
           {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
           {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
           {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
+
+          {/* Print button */}
+          <button
+            onClick={handlePrint}
+            title="Imprimer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border transition-colors bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:border-blue-300 hover:text-blue-600"
+          >
+            <IconPrinter size={14} />
+            Imprimer
+          </button>
 
           {/* Split view toggle — only for DPGF / ESTIMATION */}
           {canSplit && (

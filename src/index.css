@@ -218,12 +218,142 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--tblr-muted); }
 
 /* ──────────────────────────────────────────────────
-   Print
+   Print — @page margin boxes + page decorations
 ────────────────────────────────────────────────── */
+
+/*
+  @page applies only during printing.
+  Sets A4 dimensions, margins that leave room for the fixed header/footer,
+  and injects page numbers into the bottom-right margin box via CSS counters.
+  (Supported in Chromium/Edge; Firefox shows page numbers via its own UI.)
+*/
+@page {
+  size: A4;
+  margin: 22mm 12mm 16mm 12mm;
+}
+
+@page {
+  @bottom-right {
+    content: "Page " counter(page) " / " counter(pages);
+    font-size: 8pt;
+    color: #9ca3af;
+    font-family: Arial, Helvetica, sans-serif;
+    vertical-align: middle;
+  }
+}
+
+/* Hidden on screen — shown only in @media print below */
+.print-page-header,
+.print-page-footer {
+  display: none;
+}
+
 @media print {
+  /* ── Isolate site reports ── */
   body * { visibility: hidden; }
   #printable-report, #printable-report * { visibility: visible; }
   #printable-report { position: absolute; left: 0; top: 0; width: 100%; }
+
+  /* ── Isolate PRO module (CCTP / DPGF / Estimation) ── */
+  body.printing-pro * { visibility: hidden; }
+  body.printing-pro #printable-pro,
+  body.printing-pro #printable-pro * { visibility: visible; }
+  body.printing-pro #printable-pro { position: absolute; left: 0; top: 0; width: 100%; }
+
+  /* ── Print page decorations — always visible, override isolation ── */
+  .print-page-header,
+  .print-page-header *,
+  .print-page-footer,
+  .print-page-footer * {
+    visibility: visible !important;
+  }
+
+  /* Fixed header: title left · date right */
+  .print-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 20mm;
+    padding: 5mm 12mm 3mm;
+    border-bottom: 0.75pt solid #cbd5e1;
+    background: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
+    box-sizing: border-box;
+    z-index: 99999;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-page-header__left {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5mm;
+  }
+
+  .print-page-header__title {
+    font-size: 9pt;
+    font-weight: 700;
+    color: #1e3a5f;
+    letter-spacing: 0.01em;
+  }
+
+  .print-page-header__sub {
+    font-size: 8pt;
+    color: #6b7280;
+  }
+
+  .print-page-header__right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1mm;
+    font-size: 7.5pt;
+    color: #6b7280;
+    font-family: Arial, Helvetica, sans-serif;
+    text-align: right;
+  }
+
+  /* Fixed footer: brand left · reference right */
+  .print-page-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 12mm;
+    padding: 0 12mm;
+    border-top: 0.5pt solid #e5e7eb;
+    background: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 8pt;
+    color: #9ca3af;
+    box-sizing: border-box;
+    z-index: 99999;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-page-footer__brand {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 7.5pt;
+    color: #6b7280;
+  }
+
+  .print-page-footer__ref {
+    font-style: italic;
+    font-size: 7pt;
+  }
+
+  /* Hide UI chrome when printing PRO or site reports */
+  body.printing-pro .no-print { display: none !important; }
 }
 
 /* ──────────────────────────────────────────────────
