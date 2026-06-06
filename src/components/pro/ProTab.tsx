@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
@@ -31,20 +31,39 @@ const EMPTY_DPGF = (projectId: string): DPGF => ({
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+const lsKey = (id: string) => `archioffice_dpgf_${id}`;
+
+function lsSave(projectId: string, data: DPGF): void {
+  try { localStorage.setItem(lsKey(projectId), JSON.stringify(data)); } catch { /* quota */ }
+}
+
+function lsLoad(projectId: string): DPGF | null {
+  try {
+    const raw = localStorage.getItem(lsKey(projectId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 async function fetchDPGF(projectId: string): Promise<DPGF | null> {
   try {
     const res = await fetch(`/api/projects/${projectId}/dpgf`);
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data: DPGF = await res.json();
+      lsSave(projectId, data); // keep localStorage in sync
+      return data;
+    }
   } catch { /* ignore */ }
-  return null;
+  // API unavailable — fall back to localStorage
+  return lsLoad(projectId);
 }
 
 async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
-  await fetch(`/api/projects/${projectId}/dpgf`, {
+  const res = await fetch(`/api/projects/${projectId}/dpgf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+  if (!res.ok) throw new Error('save failed');
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -52,10 +71,14 @@ async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
-  // Shared DPGF state — used by both DPGF and ESTIMATION tabs
+  // Shared DPGF state — used by CCTP, DPGF, and ESTIMATION tabs
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
   const [dpgfLoading, setDpgfLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Tracks the JSON of the last persisted state to skip no-op saves
+  const lastSavedJson = useRef<string | null>(null);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Split view state (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
@@ -73,8 +96,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   // ── Load DPGF ───────────────────────────────────────────────────────────────
   useEffect(() => {
     setDpgfLoading(true);
+    lastSavedJson.current = null;
     fetchDPGF(projectId).then(data => {
-      setDpgf(data ?? EMPTY_DPGF(projectId));
+      const loaded = data ?? EMPTY_DPGF(projectId);
+      // Record the loaded state so auto-save doesn't fire immediately
+      lastSavedJson.current = JSON.stringify(loaded);
+      setDpgf(loaded);
       setDpgfLoading(false);
     });
   }, [projectId]);
@@ -89,12 +116,42 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     });
   }, [splitView, rightProjectId]);
 
-  // ── Save ────────────────────────────────────────────────────────────────────
+  // ── Auto-save on change (debounced 2 s) + immediate localStorage backup ─────
+  useEffect(() => {
+    if (!dpgf) return;
+    const json = JSON.stringify(dpgf);
+    if (json === lastSavedJson.current) return; // nothing changed
+
+    // Write to localStorage immediately so nothing is lost on navigation
+    lsSave(projectId, dpgf);
+
+    // Debounce the API call
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      setSaveStatus('saving');
+      try {
+        await saveDPGFApi(projectId, dpgf);
+        lastSavedJson.current = json;
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch {
+        setSaveStatus('error');
+      }
+    }, 2000);
+
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [dpgf, projectId]);
+
+  // ── Manual save (ribbon button) ─────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!dpgf) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setSaveStatus('saving');
     try {
       await saveDPGFApi(projectId, dpgf);
+      lastSavedJson.current = JSON.stringify(dpgf);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
@@ -152,12 +209,14 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           </button>
         )}
 
-        {/* Split view toggle — only for DPGF / ESTIMATION */}
-        {canSplit && (
-          <div className="ml-auto flex items-center gap-2 px-3">
-            {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
-            {saveStatus === 'saved' && <span className="text-xs text-green-600">✓ Enregistré</span>}
-            {saveStatus === 'error' && <span className="text-xs text-red-600">Erreur</span>}
+        {/* Save status — always visible */}
+        <div className="ml-auto flex items-center gap-2 px-3">
+          {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
+          {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
+          {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
+
+          {/* Split view toggle — only for DPGF / ESTIMATION */}
+          {canSplit && (
             <button
               onClick={() => setSplitView(v => !v)}
               title={splitView ? 'Vue simple' : 'Vue divisée (deux projets)'}
@@ -170,8 +229,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
               <IconLayoutColumns size={15} />
               {splitView ? 'Vue divisée' : 'Diviser'}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
