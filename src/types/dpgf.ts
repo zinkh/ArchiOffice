@@ -9,6 +9,8 @@ export interface Ligne {
   articleCctpId?: string;
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
+  cctpOnly?: boolean;
+  cctpDescription?: string;
 }
 
 export interface Chapitre {
@@ -16,6 +18,8 @@ export interface Chapitre {
   numero: string;
   titre: string;
   lignes: Ligne[];
+  cctpOnly?: boolean;
+  cctpDescription?: string;
 }
 
 export interface Lot {

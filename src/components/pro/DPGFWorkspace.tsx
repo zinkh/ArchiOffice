@@ -120,10 +120,13 @@ interface DPGFWorkspaceProps {
   projectName?: string;
   onDropExternal?: (ligne: Ligne) => void;
   onDragStart?: (ligne: Ligne) => void;
+  showTree?: boolean;
+  onToggleTree?: () => void;
 }
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, onSave, projectName, onDropExternal, onDragStart,
+  showTree: showTreeProp, onToggleTree,
 }) => {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -131,7 +134,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
   );
   const [expandedLignes, setExpandedLignes] = useState<Set<string>>(new Set());
-  const [showTree, setShowTree] = useState(true);
+  const [localShowTree, setLocalShowTree] = useState(true);
+  const showTree = showTreeProp !== undefined ? showTreeProp : localShowTree;
+  const toggleTree = onToggleTree ?? (() => setLocalShowTree(v => !v));
   const [selectedLotId, setSelectedLotId] = useState<string | null>(dpgf.lots[0]?.id ?? null);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [clipboard, setClipboard] = useState<Ligne | null>(null);
@@ -145,10 +150,12 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     flatRows.push({ kind: 'lot', depth: 0, lotIdx: li, lot });
     if (expandedLots.has(lot.id)) {
       lot.chapitres.forEach((chap, ci) => {
+        if (chap.cctpOnly) return;
         flatRows.push({ kind: 'chapitre', depth: 1, lotIdx: li, chapIdx: ci, lot, chapitre: chap });
         if (expandedChaps.has(chap.id)) {
           const pushLignes = (lignes: Ligne[], pathPrefix: number[], depth: number) => {
             lignes.forEach((ligne, lgi) => {
+              if (ligne.cctpOnly) return;
               const lignePath = [...pathPrefix, lgi];
               flatRows.push({ kind: 'ligne', depth, lotIdx: li, chapIdx: ci, lignePath, lot, chapitre: chap, ligne });
               if (ligne.children && ligne.children.length > 0 && expandedLignes.has(ligne.id) && depth < MAX_ARTICLE_DEPTH) {
@@ -510,7 +517,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Volet arbre',
           actions: [
-            { id: 'toggleTree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
+            { id: 'toggleTree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: toggleTree, active: showTree },
           ],
         },
         {
