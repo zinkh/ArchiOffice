@@ -244,7 +244,8 @@
 
 /* Hidden on screen — shown only in @media print below */
 .print-page-header,
-.print-page-footer {
+.print-page-footer,
+.print-page-qr {
   display: none;
 }
 
@@ -350,6 +351,39 @@
   .print-page-footer__ref {
     font-style: italic;
     font-size: 7pt;
+  }
+
+  /* QR code — hidden on screen, bottom-right corner of every printed page */
+  .print-page-qr,
+  .print-page-qr * { visibility: visible !important; }
+
+  .print-page-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1mm;
+    position: fixed;
+    bottom: 14mm;  /* just above the footer line */
+    right: 12mm;
+    z-index: 99999;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-page-qr__img {
+    display: block;
+    width: 20mm;
+    height: 20mm;
+    border: 0.5pt solid #e2e8f0;
+    border-radius: 1mm;
+  }
+
+  .print-page-qr__label {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 6pt;
+    color: #9ca3af;
+    text-align: center;
+    letter-spacing: 0.03em;
   }
 
   /* Hide UI chrome when printing PRO or site reports */

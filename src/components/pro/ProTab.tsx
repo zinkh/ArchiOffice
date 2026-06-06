@@ -195,12 +195,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   return (
     <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
 
-      {/* Print decorations — invisible on screen, fixed header/footer when printing */}
+      {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
       {dpgf && (
         <PrintPageDecorations
           title={PRINT_TITLES[activeSubTab]}
           subtitle={projectName}
           reference={`v${dpgf.version}`}
+          projectUrl={`${window.location.origin}/projects/${projectId}`}
         />
       )}
 
