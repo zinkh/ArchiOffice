@@ -90,6 +90,20 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     setSelection(null);
   };
 
+  // ── Toggle DPGF visibility ────────────────────────────────────────────────
+  const toggleDpgfVisibility = () => {
+    if (!selection || selection.kind === 'lot') return;
+    mutateDPGF(d => {
+      if (selection.kind === 'chapitre') {
+        const chap = d.lots[selection.lotIdx].chapitres[selection.chapIdx];
+        chap.cctpOnly = !chap.cctpOnly;
+      } else {
+        const ligne = d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx];
+        ligne.cctpOnly = !ligne.cctpOnly;
+      }
+    });
+  };
+
   // ── Update description ────────────────────────────────────────────────────
   const updateDescription = (desc: string) => {
     if (!selection) return;
@@ -316,6 +330,21 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                       <IconTag size={9} />
                       CCTP uniquement
                     </span>
+                  )}
+
+                  {/* DPGF visibility toggle — not applicable to lots */}
+                  {selection && selection.kind !== 'lot' && (
+                    <label className="ml-auto flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={!isSelCctpOnly}
+                        onChange={toggleDpgfVisibility}
+                        className="w-3.5 h-3.5 accent-blue-600 cursor-pointer"
+                      />
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Visible dans le DPGF
+                      </span>
+                    </label>
                   )}
                 </div>
 

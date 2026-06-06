@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
+import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne } from '../../types/dpgf';
 import {
-  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar,
+  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
 } from '@tabler/icons-react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -31,20 +32,39 @@ const EMPTY_DPGF = (projectId: string): DPGF => ({
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+const lsKey = (id: string) => `archioffice_dpgf_${id}`;
+
+function lsSave(projectId: string, data: DPGF): void {
+  try { localStorage.setItem(lsKey(projectId), JSON.stringify(data)); } catch { /* quota */ }
+}
+
+function lsLoad(projectId: string): DPGF | null {
+  try {
+    const raw = localStorage.getItem(lsKey(projectId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 async function fetchDPGF(projectId: string): Promise<DPGF | null> {
   try {
     const res = await fetch(`/api/projects/${projectId}/dpgf`);
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data: DPGF = await res.json();
+      lsSave(projectId, data); // keep localStorage in sync
+      return data;
+    }
   } catch { /* ignore */ }
-  return null;
+  // API unavailable — fall back to localStorage
+  return lsLoad(projectId);
 }
 
 async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
-  await fetch(`/api/projects/${projectId}/dpgf`, {
+  const res = await fetch(`/api/projects/${projectId}/dpgf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+  if (!res.ok) throw new Error('save failed');
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -52,10 +72,14 @@ async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
-  // Shared DPGF state — used by both DPGF and ESTIMATION tabs
+  // Shared DPGF state — used by CCTP, DPGF, and ESTIMATION tabs
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
   const [dpgfLoading, setDpgfLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Tracks the JSON of the last persisted state to skip no-op saves
+  const lastSavedJson = useRef<string | null>(null);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Split view state (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
@@ -70,11 +94,27 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [showTree, setShowTree] = useState(true);
   const toggleTree = () => setShowTree(v => !v);
 
+  // ── Browser print with page isolation ───────────────────────────────────────
+  const handlePrint = useCallback(() => {
+    document.body.classList.add('printing-pro');
+    window.print();
+  }, []);
+
+  useEffect(() => {
+    const cleanup = () => document.body.classList.remove('printing-pro');
+    window.addEventListener('afterprint', cleanup);
+    return () => window.removeEventListener('afterprint', cleanup);
+  }, []);
+
   // ── Load DPGF ───────────────────────────────────────────────────────────────
   useEffect(() => {
     setDpgfLoading(true);
+    lastSavedJson.current = null;
     fetchDPGF(projectId).then(data => {
-      setDpgf(data ?? EMPTY_DPGF(projectId));
+      const loaded = data ?? EMPTY_DPGF(projectId);
+      // Record the loaded state so auto-save doesn't fire immediately
+      lastSavedJson.current = JSON.stringify(loaded);
+      setDpgf(loaded);
       setDpgfLoading(false);
     });
   }, [projectId]);
@@ -89,12 +129,42 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     });
   }, [splitView, rightProjectId]);
 
-  // ── Save ────────────────────────────────────────────────────────────────────
+  // ── Auto-save on change (debounced 2 s) + immediate localStorage backup ─────
+  useEffect(() => {
+    if (!dpgf) return;
+    const json = JSON.stringify(dpgf);
+    if (json === lastSavedJson.current) return; // nothing changed
+
+    // Write to localStorage immediately so nothing is lost on navigation
+    lsSave(projectId, dpgf);
+
+    // Debounce the API call
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      setSaveStatus('saving');
+      try {
+        await saveDPGFApi(projectId, dpgf);
+        lastSavedJson.current = json;
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch {
+        setSaveStatus('error');
+      }
+    }, 2000);
+
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [dpgf, projectId]);
+
+  // ── Manual save (ribbon button) ─────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!dpgf) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setSaveStatus('saving');
     try {
       await saveDPGFApi(projectId, dpgf);
+      lastSavedJson.current = JSON.stringify(dpgf);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
@@ -116,11 +186,27 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
 
+  const PRINT_TITLES: Record<SubTab, string> = {
+    CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
+    DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
+    ESTIMATION: 'Estimation Prévisionnelle',
+  };
+
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+
+      {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
+      {dpgf && (
+        <PrintPageDecorations
+          title={PRINT_TITLES[activeSubTab]}
+          subtitle={projectName}
+          reference={`v${dpgf.version}`}
+          projectUrl={`${window.location.origin}/projects/${projectId}`}
+        />
+      )}
 
       {/* ── Sub-tab navigation ──────────────────────────────────────────────── */}
-      <div className="flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+      <div className="no-print flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shrink-0">
         <div className="flex">
           {TABS.map(tab => (
             <button
@@ -152,12 +238,24 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           </button>
         )}
 
-        {/* Split view toggle — only for DPGF / ESTIMATION */}
-        {canSplit && (
-          <div className="ml-auto flex items-center gap-2 px-3">
-            {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
-            {saveStatus === 'saved' && <span className="text-xs text-green-600">✓ Enregistré</span>}
-            {saveStatus === 'error' && <span className="text-xs text-red-600">Erreur</span>}
+        {/* Save status + print + split — always visible on the right */}
+        <div className="ml-auto flex items-center gap-2 px-3 no-print">
+          {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
+          {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
+          {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
+
+          {/* Print button */}
+          <button
+            onClick={handlePrint}
+            title="Imprimer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border transition-colors bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:border-blue-300 hover:text-blue-600"
+          >
+            <IconPrinter size={14} />
+            Imprimer
+          </button>
+
+          {/* Split view toggle — only for DPGF / ESTIMATION */}
+          {canSplit && (
             <button
               onClick={() => setSplitView(v => !v)}
               title={splitView ? 'Vue simple' : 'Vue divisée (deux projets)'}
@@ -170,8 +268,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
               <IconLayoutColumns size={15} />
               {splitView ? 'Vue divisée' : 'Diviser'}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
