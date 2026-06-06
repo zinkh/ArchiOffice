@@ -2063,13 +2063,14 @@ export default function ProjectDetail() {
                           </label>
                         </div>
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-                        <div className="absolute inset-x-0 bottom-0 p-8 space-y-4">
-                          <input 
+                        <div className="absolute inset-x-0 bottom-0 p-4 sm:p-8 space-y-3">
+                          <p className="text-xs font-bold text-white/60 uppercase tracking-widest">NOM DE L'OPÉRATION</p>
+                          <input
                             type="text"
-                            className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
+                            className="w-full bg-transparent border-b-2 border-white/40 hover:border-white/60 focus:border-white/90 text-2xl sm:text-4xl font-bold text-white placeholder:text-white/40 focus:outline-none pb-1 transition-colors"
                             value={project.name}
                             onChange={e => setProject({...project, name: e.target.value})}
-                            placeholder="Project Name"
+                            placeholder={t('projects_name_placeholder')}
                           />
                           <div className="flex flex-wrap items-center gap-4">
                             <ContactAutocomplete 
