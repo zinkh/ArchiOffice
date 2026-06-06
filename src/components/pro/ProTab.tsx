@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CCTPEditor } from './CCTPEditor';
-import { LotsManager } from './LotsManager';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { DPGF, Ligne } from '../../types/dpgf';
 import {
-  IconLayoutColumns, IconX, IconChevronDown,
+  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar,
 } from '@tabler/icons-react';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type SubTab = 'LOTS' | 'CCTP' | 'DPGF' | 'ESTIMATION';
+type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION';
 
 interface ProTabProps {
   projectId: string;
@@ -51,7 +50,7 @@ async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('LOTS');
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
   // Shared DPGF state — used by both DPGF and ESTIMATION tabs
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
@@ -66,6 +65,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
+
+  // Shared tree panel state for DPGF / ESTIMATION
+  const [showTree, setShowTree] = useState(true);
+  const toggleTree = () => setShowTree(v => !v);
 
   // ── Load DPGF ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -106,7 +109,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
   const TABS: { id: SubTab; label: string }[] = [
-    { id: 'LOTS', label: 'LOTS' },
     { id: 'CCTP', label: 'CCTP' },
     { id: 'DPGF', label: 'DPGF' },
     { id: 'ESTIMATION', label: 'ESTIMATION' },
@@ -135,6 +137,21 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           ))}
         </div>
 
+        {/* Tree toggle — only for DPGF / ESTIMATION */}
+        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION') && (
+          <button
+            onClick={toggleTree}
+            title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
+            className={`ml-3 p-1.5 rounded transition-colors border ${
+              showTree
+                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
+                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
+            }`}
+          >
+            <IconLayoutSidebar size={16} />
+          </button>
+        )}
+
         {/* Split view toggle — only for DPGF / ESTIMATION */}
         {canSplit && (
           <div className="ml-auto flex items-center gap-2 px-3">
@@ -160,17 +177,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
       {/* ── Content ────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex">
 
-        {/* LOTS */}
-        {activeSubTab === 'LOTS' && (
-          <div className="flex-1 overflow-auto p-4">
-            <LotsManager projectId={projectId} />
-          </div>
-        )}
-
         {/* CCTP */}
         {activeSubTab === 'CCTP' && (
-          <div className="flex-1 overflow-auto p-4">
-            <CCTPEditor projectId={projectId} />
+          <div className="flex-1 overflow-hidden">
+            {dpgfLoading ? (
+              <div className="flex items-center gap-2 p-8 text-zinc-500">
+                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                Chargement…
+              </div>
+            ) : dpgf ? (
+              <CCTPEditor dpgf={dpgf} onChange={setDpgf} onSave={handleSave} />
+            ) : null}
           </div>
         )}
 
@@ -187,6 +204,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                   onChange={setDpgf}
                   onSave={handleSave}
                   projectName={projectName}
+                  showTree={showTree}
+                  onToggleTree={toggleTree}
                   onDragStart={ligne => setDraggedLigne(ligne)}
                   onDropExternal={ligne => {
                     // Dropped from right panel — find last chapitre in last lot
@@ -221,6 +240,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                     onChange={setRightDpgf}
                     onSave={handleRightSave}
                     projectName={`Projet ${rightProjectId}`}
+                    showTree={showTree}
+                    onToggleTree={toggleTree}
                     onDragStart={ligne => setDraggedLigne(ligne)}
                   />
                 ) : null}
@@ -242,6 +263,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                   onChange={setDpgf}
                   onSave={handleSave}
                   projectName={projectName}
+                  showTree={showTree}
+                  onToggleTree={toggleTree}
                   onDragStart={ligne => setDraggedLigne(ligne)}
                 />
               ) : null}
@@ -266,6 +289,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                     onChange={setRightDpgf}
                     onSave={handleRightSave}
                     projectName={`Projet ${rightProjectId}`}
+                    showTree={showTree}
+                    onToggleTree={toggleTree}
                     onDragStart={ligne => setDraggedLigne(ligne)}
                   />
                 ) : null}

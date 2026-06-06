@@ -18,9 +18,10 @@ interface EstimationEditorProps {
   onChange: (dpgf: DPGF) => void;
   onSave: () => void;
   projectName?: string;
-  /** External ligne dropped from another panel */
   externalDrop?: import('../../types/dpgf').Ligne | null;
   onDragStart?: (ligne: import('../../types/dpgf').Ligne) => void;
+  showTree?: boolean;
+  onToggleTree?: () => void;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -51,12 +52,15 @@ function recomputeDPGF(dpgf: DPGF): DPGF {
 
 export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   dpgf, onChange, onSave, projectName, externalDrop, onDragStart,
+  showTree: showTreeProp, onToggleTree,
 }) => {
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
   );
-  const [showTree, setShowTree] = useState(true);
+  const [localShowTree, setLocalShowTree] = useState(true);
+  const showTree = showTreeProp !== undefined ? showTreeProp : localShowTree;
+  const toggleTree = onToggleTree ?? (() => setLocalShowTree(v => !v));
   const [selectedLotId, setSelectedLotId] = useState<string | null>(dpgf.lots[0]?.id ?? null);
   const [colSet, setColSet] = useState<ColSet>('detail');
   const [editCell, setEditCell] = useState<{ rowId: string; field: string; value: string } | null>(null);
@@ -164,7 +168,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {
           label: 'Volet arbre',
           actions: [
-            { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
+            { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: toggleTree, active: showTree },
           ],
         },
         {
