@@ -68,6 +68,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        '@zinkh/archioffice-agents/client': path.resolve(__dirname, 'packages/archioffice-agents/src/client/index.ts'),
+        '@zinkh/archioffice-agents': path.resolve(__dirname, 'packages/archioffice-agents/src/types.ts'),
       },
     },
     server: {

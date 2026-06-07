@@ -23,6 +23,7 @@ import {
   IconChevronRight,
   IconClipboardList,
   IconContract,
+  IconRobot,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -42,6 +43,7 @@ export const NAV_ITEMS = [
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
   { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
+  { name: 'agents',         path: '/agents',         icon: IconRobot },
   { name: 'team',           path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
   { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
@@ -87,6 +89,7 @@ const NAV_SECTIONS = [
     key: 'administration',
     label: 'Administration',
     items: [
+      { name: 'agents',    path: '/agents',    icon: IconRobot },
       { name: 'team',      path: '/team',      icon: IconUsers },
       { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
       { name: 'settings',  path: '/settings',  icon: IconSettings },

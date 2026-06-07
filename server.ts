@@ -5546,6 +5546,12 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     }
   });
 
+  // ── Agents IA ─────────────────────────────────────────────────────────────
+  // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
+  const { registerAgentRoutes } = await import('@zinkh/archioffice-agents/server');
+  registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan);
+
+
   // ── Meetings ──────────────────────────────────────────────────────────────
 
   app.get("/api/meetings", async (req: any, res: any) => {

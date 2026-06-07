@@ -722,6 +722,65 @@ export interface MeetingPhoto {
   uploaded_at: string;
 }
 
+// ── Agents IA ──────────────────────────────────────────────────────────────
+
+export type AgentContextScope = 'meetings' | 'contacts' | 'projects' | 'documents' | 'tasks';
+
+export interface Agent {
+  id: string;
+  tenant_id: string | null;
+  slug: string;
+  name: string;
+  role_title: string;
+  avatar_initials: string;
+  avatar_color: string;
+  tone?: string;
+  directives?: string;
+  system_prompt_override?: string;
+  context_scopes: AgentContextScope[];
+  is_active: boolean;
+  is_system_template: boolean;
+  created_at: string;
+}
+
+export interface AgentConversation {
+  id: string;
+  tenant_id: string;
+  agent_id: string;
+  user_id: string;
+  title?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentMessage {
+  id: string;
+  conversation_id: string;
+  tenant_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface AgentTokenUsage {
+  id: string;
+  tenant_id: string;
+  agent_id: string;
+  user_id: string;
+  conversation_id: string;
+  tokens_used: number;
+  cost_eur_cents?: number;
+  created_at: string;
+}
+
+export interface AgentChatResponse {
+  reply: string;
+  tokens_used: number;
+  remaining_balance: number;
+}
+
+// ── Meetings ────────────────────────────────────────────────────────────────
+
 export interface Meeting {
   id: string;
   tenant_id?: string;
