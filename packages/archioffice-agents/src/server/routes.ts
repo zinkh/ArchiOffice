@@ -165,19 +165,22 @@ export function registerAgentRoutes(
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) return res.status(503).json({ error: 'Gemini API key not configured' });
 
-      const { GoogleGenerativeAI } = await import('@google/genai');
-      const genai = new GoogleGenerativeAI(apiKey);
-      const model = genai.getGenerativeModel({ model: 'gemini-2.5-flash', systemInstruction: systemPrompt });
+      const { GoogleGenAI } = await import('@google/genai');
+      const genai = new GoogleGenAI({ apiKey });
 
       const geminiHistory = ((history as any) || []).map((m: any) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
       }));
 
-      const chat = model.startChat({ history: geminiHistory });
-      const result = await chat.sendMessage(message);
-      const reply = result.response.text();
-      const tokensUsed = (result.response as any).usageMetadata?.totalTokenCount ?? 0;
+      const chat = genai.chats.create({
+        model: 'gemini-2.5-flash',
+        config: { systemInstruction: systemPrompt },
+        history: geminiHistory,
+      });
+      const result = await chat.sendMessage({ message });
+      const reply = result.text ?? '';
+      const tokensUsed = (result as any).usageMetadata?.totalTokenCount ?? 0;
 
       if (tokensUsed > 0) {
         await supabaseAdmin.from('tenants').update({ agent_token_balance: Math.max(0, balance - tokensUsed) }).eq('id', tenantId);
