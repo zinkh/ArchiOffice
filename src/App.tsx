@@ -51,9 +51,8 @@ import Reunions from './pages/Reunions';
 import OrdresDeService from './pages/OrdresDeService';
 import Contrats from './pages/Contrats';
 import GoogleAuthCallback from './pages/GoogleAuthCallback';
-import Agents from './pages/Agents';
-import AgentConfig from './pages/AgentConfig';
-import { AgentChatProvider } from './components/AgentChat';
+// Agent UI — @zinkh/archioffice-agents (licence propriétaire)
+import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agents/client';
 
 function SyncStatus() {
   const { t } = useTranslation();

@@ -16,9 +16,10 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "@zinkh/archioffice-agents/server": ["./packages/archioffice-agents/src/server/index.ts"],
+      "@zinkh/archioffice-agents/client": ["./packages/archioffice-agents/src/client/index.ts"],
+      "@zinkh/archioffice-agents": ["./packages/archioffice-agents/src/types.ts"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
