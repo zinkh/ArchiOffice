@@ -51,6 +51,9 @@ import Reunions from './pages/Reunions';
 import OrdresDeService from './pages/OrdresDeService';
 import Contrats from './pages/Contrats';
 import GoogleAuthCallback from './pages/GoogleAuthCallback';
+import Agents from './pages/Agents';
+import AgentConfig from './pages/AgentConfig';
+import { AgentChatProvider } from './components/AgentChat';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -531,6 +534,7 @@ function ProtectedLayout() {
   }
 
   return (
+    <AgentChatProvider>
     <div
       className="flex min-h-screen font-sans overflow-x-hidden"
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
@@ -557,6 +561,7 @@ function ProtectedLayout() {
         </footer>
       </div>
     </div>
+    </AgentChatProvider>
   );
 }
 
@@ -596,6 +601,8 @@ export default function App() {
               <Route path="/reunions" element={<Reunions />} />
               <Route path="/ordres-de-service" element={<OrdresDeService />} />
               <Route path="/contrats" element={<Contrats />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/agents/:id/edit" element={<AgentConfig />} />
             </Route>
           </Routes>
         </Router>
