@@ -1120,7 +1120,9 @@ async function startServer() {
   // Without this, a reverse proxy redirect on asset requests changes the origin
   // (http → https), causing the browser to apply CORS and block the scripts.
   app.use((req, res, next) => {
-    if (req.protocol !== 'https' && req.headers['x-forwarded-proto'] !== 'https') {
+    // Only redirect when a proxy explicitly says the inbound connection was HTTP.
+    // Checking x-forwarded-proto directly avoids breaking localhost dev (no proxy → header absent).
+    if (req.headers['x-forwarded-proto'] === 'http') {
       return res.redirect(301, `https://${req.headers.host}${req.url}`);
     }
     next();
