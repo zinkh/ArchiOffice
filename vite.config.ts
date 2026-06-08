@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import {defineConfig, loadEnv} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -66,11 +67,17 @@ export default defineConfig(({mode}) => {
       }),
     ],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-        '@zinkh/archioffice-agents/client': path.resolve(__dirname, 'packages/archioffice-agents/src/client/index.ts'),
-        '@zinkh/archioffice-agents': path.resolve(__dirname, 'packages/archioffice-agents/src/types.ts'),
-      },
+      alias: (() => {
+        const localPkg = path.resolve(__dirname, 'packages/archioffice-agents/src');
+        const hasLocal = fs.existsSync(localPkg);
+        return {
+          '@': path.resolve(__dirname, '.'),
+          ...(hasLocal ? {
+            '@zinkh/archioffice-agents/client': path.resolve(localPkg, 'client/index.ts'),
+            '@zinkh/archioffice-agents': path.resolve(localPkg, 'types.ts'),
+          } : {}),
+        };
+      })(),
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
