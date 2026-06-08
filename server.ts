@@ -5445,6 +5445,73 @@ async function startServer() {
 
   // ─── End Stancer Billing ───────────────────────────────────────────────────
 
+  // ─── Super-Admin Dashboard ────────────────────────────────────────────────
+
+  function requireSuperAdmin(req: any, res: any, next: any) {
+    const adminEmail = process.env.SUPER_ADMIN_EMAIL;
+    if (!adminEmail || req.user?.email !== adminEmail) {
+      return res.status(403).json({ error: 'Accès réservé au super-administrateur' });
+    }
+    next();
+  }
+
+  app.get('/api/admin/stats', requireSuperAdmin, async (_req: any, res: any) => {
+    try {
+      const [{ data: tenants }, { data: revenue }] = await Promise.all([
+        supabaseAdmin.from('tenants').select('id, plan, trial_ends_at'),
+        supabaseAdmin.from('billing_events').select('amount, created_at').eq('status', 'paid'),
+      ]);
+      const now = Date.now();
+      const stats = {
+        total:      tenants?.length ?? 0,
+        trial:      tenants?.filter(t => t.plan === 'trial').length ?? 0,
+        starter:    tenants?.filter(t => t.plan === 'starter').length ?? 0,
+        pro:        tenants?.filter(t => t.plan === 'pro').length ?? 0,
+        enterprise: tenants?.filter(t => t.plan === 'enterprise').length ?? 0,
+        expired:    tenants?.filter(t => t.plan === 'trial' && t.trial_ends_at && new Date(t.trial_ends_at).getTime() < now).length ?? 0,
+        totalRevenue: ((revenue ?? []).reduce((s, e) => s + (e.amount ?? 0), 0) / 100),
+      };
+      const monthlyRevenue: Record<string, number> = {};
+      for (const e of revenue ?? []) {
+        const month = (e.created_at as string).slice(0, 7);
+        monthlyRevenue[month] = (monthlyRevenue[month] ?? 0) + (e.amount ?? 0) / 100;
+      }
+      res.json({ stats, monthlyRevenue });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/tenants', requireSuperAdmin, async (_req: any, res: any) => {
+    try {
+      const { data: tenants, error } = await supabaseAdmin
+        .from('tenants')
+        .select('id, slug, name, plan, trial_ends_at, created_at, stancer_customer_id')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const enriched = await Promise.all((tenants ?? []).map(async (t) => {
+        const [{ count: userCount }, { count: projectCount }] = await Promise.all([
+          supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
+          supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
+        ]);
+        return { ...t, user_count: userCount ?? 0, project_count: projectCount ?? 0 };
+      }));
+      res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/tenants/:id/plan', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { plan } = req.body;
+      if (!['trial', 'starter', 'pro', 'enterprise'].includes(plan)) {
+        return res.status(400).json({ error: 'Plan invalide' });
+      }
+      const { error } = await supabaseAdmin.from('tenants').update({ plan }).eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Super-Admin Dashboard ────────────────────────────────────────────
+
   // ─── Project Members (per-project access control) ─────────────────────────
   app.get("/api/projects/:id/members", async (req: any, res: any) => {
     try {

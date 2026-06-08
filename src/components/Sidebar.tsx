@@ -24,6 +24,7 @@ import {
   IconClipboardList,
   IconContract,
   IconRobot,
+  IconShieldLock,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -109,10 +110,12 @@ function loadCollapsed(): Record<string, boolean> {
   }
 }
 
+const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL as string | undefined;
+
 export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
-  const { tenantPlan, isTrialExpired, trialEndsAt } = useUser();
+  const { tenantPlan, isTrialExpired, trialEndsAt, currentUser } = useUser();
   const { settings } = useSettings();
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
@@ -124,6 +127,8 @@ export function Sidebar() {
   const toggleSection = (key: string) => {
     setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const isSuperAdmin = SUPER_ADMIN_EMAIL && currentUser?.email === SUPER_ADMIN_EMAIL;
 
   const daysLeft = trialEndsAt && tenantPlan === 'trial'
     ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
@@ -221,6 +226,24 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Super-admin link */}
+      {isSuperAdmin && (
+        <div className="px-2 pb-1 border-t pt-2" style={{ borderColor: 'var(--tblr-border)' }}>
+          <Link
+            to="/admin"
+            className={cn(
+              'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+              location.pathname === '/admin'
+                ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+            )}
+          >
+            <IconShieldLock size={16} className={location.pathname === '/admin' ? 'text-[var(--tblr-primary)]' : ''} />
+            <span>Super Admin</span>
+          </Link>
+        </div>
+      )}
 
       {/* Trial / expired banner */}
       {(isTrialExpired || (tenantPlan === 'trial' && daysLeft !== null && daysLeft <= 7)) && (

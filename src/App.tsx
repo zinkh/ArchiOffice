@@ -51,6 +51,7 @@ import Reunions from './pages/Reunions';
 import OrdresDeService from './pages/OrdresDeService';
 import Contrats from './pages/Contrats';
 import GoogleAuthCallback from './pages/GoogleAuthCallback';
+import AdminDashboard from './pages/AdminDashboard';
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agents/client';
 
@@ -602,6 +603,7 @@ export default function App() {
               <Route path="/contrats" element={<Contrats />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
+              <Route path="/admin" element={<AdminDashboard />} />
             </Route>
           </Routes>
         </Router>
