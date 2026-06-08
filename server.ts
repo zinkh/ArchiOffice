@@ -1115,6 +1115,17 @@ function sanitizeFilename(name: string): string {
 async function startServer() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
+
+  // Redirect HTTP → HTTPS so the HTML page and all its assets share the same origin.
+  // Without this, a reverse proxy redirect on asset requests changes the origin
+  // (http → https), causing the browser to apply CORS and block the scripts.
+  app.use((req, res, next) => {
+    if (req.protocol !== 'https' && req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    next();
+  });
+
   // Serve legacy /uploads/ files (existing DB rows that still point to /tmp paths)
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
