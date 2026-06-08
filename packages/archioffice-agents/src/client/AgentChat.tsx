@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
-import type { Agent, AgentMessage } from '../types.js';
+import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
 
 // ── Context ──────────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ export function useAgentChat() {
   return useContext(AgentChatContext);
 }
 
-// ── Avatar helper ─────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function AgentAvatar({ agent, size = 32 }: { agent: Agent; size?: number }) {
   return (
@@ -31,57 +31,186 @@ function AgentAvatar({ agent, size = 32 }: { agent: Agent; size?: number }) {
   );
 }
 
-// ── Message bubble ────────────────────────────────────────────────────────────
+function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
+  const icons: Record<string, React.ReactNode> = {
+    excel: <IconFileSpreadsheet size={20} color="#217346" />,
+    csv: <IconFileTypeCsv size={20} color="#217346" />,
+    docx: <IconFileText size={20} color="#2b5797" />,
+  };
 
-function MessageBubble({ msg, agentColor }: { msg: AgentMessage; agentColor: string }) {
+  const download = () => {
+    const bytes = Uint8Array.from(atob(artifact.data), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: artifact.mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = artifact.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl mt-2 border cursor-pointer hover:opacity-80 transition-opacity"
+      style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
+      onClick={download}
+      title={`Télécharger ${artifact.filename}`}
+    >
+      {icons[artifact.type] ?? <IconFileText size={20} />}
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{artifact.filename}</div>
+        <div className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+          {artifact.type === 'excel' ? 'Fichier Excel' : artifact.type === 'csv' ? 'Fichier CSV' : 'Document Word'}
+        </div>
+      </div>
+      <IconDownload size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />
+    </div>
+  );
+}
+
+function MessageBubble({ msg, agentColor }: { msg: AgentMessage & { artifact?: AgentArtifact }; agentColor: string }) {
   const isUser = msg.role === 'user';
   return (
     <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
-        <div
-          className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5"
-          style={{ background: agentColor }}
-        >
+        <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5" style={{ background: agentColor }}>
           <IconRobot size={13} color="white" />
         </div>
       )}
-      <div
-        className="max-w-[80%] px-3 py-2 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap"
-        style={
-          isUser
-            ? { background: 'var(--tblr-primary)', color: 'white' }
-            : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }
-        }
-      >
-        {msg.content}
+      <div className="max-w-[82%]">
+        <div
+          className="px-3 py-2 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap"
+          style={
+            isUser
+              ? { background: 'var(--tblr-primary)', color: 'white' }
+              : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }
+          }
+        >
+          {msg.content}
+        </div>
+        {msg.artifact && <ArtifactCard artifact={msg.artifact} />}
       </div>
+    </div>
+  );
+}
+
+// ── Document picker ───────────────────────────────────────────────────────────
+
+interface DocMeta { id: string; name: string; phase?: string }
+
+function DocumentPicker({ attached, onAttach, onDetach }: {
+  attached: DocMeta[];
+  onAttach: (doc: DocMeta) => void;
+  onDetach: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useState<DocMeta[]>([]);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    apiFetch('/api/documents?limit=30').then((d: any) => setDocs(d?.data ?? d ?? [])).catch(() => {});
+  }, [open]);
+
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)]"
+        title="Joindre un document"
+        style={{ color: attached.length > 0 ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
+      >
+        <IconPaperclip size={15} />
+        {attached.length > 0 && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-white" style={{ background: 'var(--tblr-primary)' }}>
+            {attached.length}
+          </span>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className="absolute bottom-full mb-2 left-0 w-72 rounded-xl shadow-xl border overflow-hidden z-10"
+            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
+          >
+            <div className="px-3 py-2 border-b text-[11px] font-semibold uppercase tracking-wider" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+              Documents disponibles
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {docs.length === 0 && <p className="px-3 py-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>Aucun document.</p>}
+              {docs.map(doc => {
+                const isAttached = attached.some(a => a.id === doc.id);
+                return (
+                  <button
+                    key={doc.id}
+                    onClick={() => { isAttached ? onDetach(doc.id) : onAttach(doc); setOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left hover:bg-[var(--tblr-surface-2)] transition-colors"
+                    style={{ color: isAttached ? 'var(--tblr-primary)' : 'var(--tblr-text)' }}
+                  >
+                    <IconFileText size={13} />
+                    <span className="truncate flex-1">{doc.name}</span>
+                    {doc.phase && <span className="text-[10px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{doc.phase}</span>}
+                    {isAttached && <span className="text-[10px] font-semibold" style={{ color: 'var(--tblr-primary)' }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Attached chips */}
+      {attached.length > 0 && (
+        <div className="absolute bottom-full mb-2 left-8 flex flex-wrap gap-1" style={{ display: open ? 'none' : 'flex' }}>
+          {attached.map(doc => (
+            <div key={doc.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+              <IconFileText size={10} />
+              <span className="max-w-[100px] truncate">{doc.name}</span>
+              <button onClick={() => onDetach(doc.id)} className="hover:opacity-70">
+                <IconClose size={9} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Main provider + panel ─────────────────────────────────────────────────────
 
-export function AgentChatProvider({ children }: { children: React.ReactNode; }) {
+export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact })[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
+  const [attachedDocs, setAttachedDocs] = useState<{ id: string; name: string }[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const activeAgent: Agent | null = agents.find((a: Agent) => a.id === activeAgentId) ?? null;
+  const activeAgent: Agent | null = agents.find(a => a.id === activeAgentId) ?? null;
 
   useEffect(() => {
     apiFetch('/api/agents')
       .then((data: Agent[]) => {
-        const active = data.filter((a: Agent) => a.is_active);
+        const active = data.filter(a => a.is_active);
         setAgents(active);
         if (!activeAgentId && active.length > 0) setActiveAgentId(active[0].id);
       })
@@ -131,27 +260,30 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
       conversation_id: '',
       tenant_id: '',
       role: 'user',
-      content: input.trim(),
+      content: input.trim() + (attachedDocs.length > 0 ? `\n\n📎 Documents joints : ${attachedDocs.map(d => d.name).join(', ')}` : ''),
       created_at: new Date().toISOString(),
     };
-    setMessages((prev: AgentMessage[]) => [...prev, userMsg]);
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
+    const docsToSend = [...attachedDocs];
+    setAttachedDocs([]);
     setLoading(true);
     setErrorMsg(null);
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ message: userMsg.content }),
+        body: JSON.stringify({ message: input.trim(), document_ids: docsToSend.map(d => d.id) }),
       });
-      const assistantMsg: AgentMessage = {
+      const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
         id: crypto.randomUUID(),
         conversation_id: '',
         tenant_id: '',
         role: 'assistant',
         content: res.reply,
+        artifact: res.artifact,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev: AgentMessage[]) => [...prev, assistantMsg]);
+      setMessages(prev => [...prev, assistantMsg]);
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
     } catch (e: any) {
       const errText: string = e?.message ?? t('agent_chat_error');
@@ -162,7 +294,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
       } else {
         setErrorMsg(errText);
       }
-      setMessages((prev: AgentMessage[]) => prev.filter((m: AgentMessage) => m.id !== userMsg.id));
+      setMessages(prev => prev.filter(m => m.id !== userMsg.id));
     } finally {
       setLoading(false);
       setTimeout(() => textareaRef.current?.focus(), 50);
@@ -191,7 +323,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
 
       {/* Floating trigger */}
       <button
-        onClick={() => setIsOpen((o: boolean) => !o)}
+        onClick={() => setIsOpen(o => !o)}
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
         style={{ background: 'var(--tblr-primary)', color: 'white' }}
         title={t('agents')}
@@ -210,8 +342,8 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="fixed bottom-20 right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
             style={{
-              width: 'min(400px, calc(100vw - 24px))',
-              height: 'min(600px, calc(100vh - 100px))',
+              width: 'min(420px, calc(100vw - 24px))',
+              height: 'min(640px, calc(100vh - 100px))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             }}
@@ -225,7 +357,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
               <div className="flex-1 min-w-0">
                 {agents.length > 1 ? (
                   <button
-                    onClick={() => setAgentSelectorOpen((o: boolean) => !o)}
+                    onClick={() => setAgentSelectorOpen(o => !o)}
                     className="flex items-center gap-1 font-semibold text-[14px] hover:opacity-70 transition-opacity"
                     style={{ color: 'var(--tblr-text)' }}
                   >
@@ -285,6 +417,9 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
                   {activeAgent && <AgentAvatar agent={activeAgent} size={48} />}
                   <p className="text-[13px] text-center" style={{ color: 'var(--tblr-muted)' }}>{t('agent_chat_empty')}</p>
+                  <p className="text-[11px] text-center" style={{ color: 'var(--tblr-muted)' }}>
+                    💡 Joignez un document avec 📎 pour l'analyser
+                  </p>
                 </div>
               )}
               {messages.map(msg => (
@@ -330,6 +465,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
                 </div>
               )}
               <div className="flex gap-2 items-end">
+                <DocumentPicker
+                  attached={attachedDocs}
+                  onAttach={doc => setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc])}
+                  onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))}
+                />
                 <textarea
                   ref={textareaRef}
                   rows={1}

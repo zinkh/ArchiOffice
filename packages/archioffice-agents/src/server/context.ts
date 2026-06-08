@@ -1,10 +1,13 @@
 import type { AgentContext } from '../types.js';
 
+const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
   userId: string,
-  scopes: string[]
+  scopes: string[],
+  attachedDocumentIds: string[] = []
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -20,6 +23,7 @@ export async function buildAgentContext(
     upcomingMeetings: [],
     recentDocuments: [],
     tasks: [],
+    documentContents: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -49,7 +53,7 @@ export async function buildAgentContext(
   }
   if (scopes.includes('documents')) {
     fetches.push(
-      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at')
+      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at, file_url')
         .eq('tenant_id', tenantId).order('uploaded_at', { ascending: false }).limit(15)
         .then((r: any) => { ctx.recentDocuments = r.data || []; })
     );
@@ -64,5 +68,35 @@ export async function buildAgentContext(
   }
 
   await Promise.all(fetches);
+
+  // RAG — fetch content of explicitly attached documents
+  if (attachedDocumentIds.length > 0) {
+    const { data: docs } = await supabaseAdmin
+      .from('documents')
+      .select('id, name, file_url')
+      .eq('tenant_id', tenantId)
+      .in('id', attachedDocumentIds);
+
+    const contentFetches = ((docs as any[]) || []).map(async (doc: any) => {
+      try {
+        const res = await fetch(doc.file_url);
+        if (!res.ok) return;
+        const contentType = res.headers.get('content-type') ?? '';
+        // Only inject text-based content
+        if (!contentType.includes('text') && !contentType.includes('json') && !contentType.includes('csv') && !contentType.includes('xml')) return;
+        const text = await res.text();
+        ctx.documentContents.push({
+          id: doc.id,
+          name: doc.name,
+          content: text.slice(0, MAX_DOC_BYTES),
+        });
+      } catch {
+        // skip unreadable documents silently
+      }
+    });
+
+    await Promise.all(contentFetches);
+  }
+
   return ctx;
 }
