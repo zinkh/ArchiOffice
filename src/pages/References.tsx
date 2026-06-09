@@ -564,8 +564,8 @@ export default function References() {
       return true;
     }).sort((a, b) => {
       if (!sortConfig) return 0;
-      const av = a[sortConfig.key], bv = b[sortConfig.key];
-      if (av === undefined || bv === undefined) return 0;
+      const av = a[sortConfig.key] ?? '';
+      const bv = b[sortConfig.key] ?? '';
       if (av < bv) return sortConfig.direction === 'asc' ? -1 : 1;
       if (av > bv) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
