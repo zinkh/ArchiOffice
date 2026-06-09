@@ -5455,6 +5455,11 @@ async function startServer() {
     next();
   }
 
+  app.get('/api/admin/is-admin', async (req: any, res: any) => {
+    const adminEmail = process.env.SUPER_ADMIN_EMAIL;
+    res.json({ isAdmin: !!(adminEmail && req.user?.email === adminEmail) });
+  });
+
   app.get('/api/admin/stats', requireSuperAdmin, async (_req: any, res: any) => {
     try {
       const [{ data: tenants }, { data: revenue }] = await Promise.all([
