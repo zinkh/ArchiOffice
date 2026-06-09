@@ -4446,23 +4446,42 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const data = req.body;
-      // Convert camelCase → snake_case and keep already-snake fields
+      // Convert camelCase → snake_case
       const snakeData: any = {};
       for (const [k, v] of Object.entries(data)) {
         const col = toSnake[k] ?? k;
         snakeData[col] = v;
       }
-      // Only keep valid table columns (include id for PRIMARY KEY on insert)
-      const validCols = new Set(['id','agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires']);
+      // Only keep valid table columns (exclude id — managed separately)
+      const validCols = new Set(['agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires']);
       const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
 
-      // Use upsert to avoid race conditions and duplicate-row issues
-      const { id: _id, ...dataWithoutId } = filteredData;
-      const upsertPayload = { ...dataWithoutId, id: tenantId, tenant_id: tenantId };
-      const { error } = await supabaseAdmin.from('settings').upsert(upsertPayload, { onConflict: 'tenant_id' });
-      if (error) throw error;
+      // Check if row already exists for this tenant
+      const { data: existing } = await supabaseAdmin
+        .from('settings')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      let saveError: any;
+      if (existing) {
+        // Row exists — update without touching id or tenant_id
+        const { error } = await supabaseAdmin
+          .from('settings')
+          .update(filteredData)
+          .eq('tenant_id', tenantId);
+        saveError = error;
+      } else {
+        // No row yet — insert with a fresh id
+        const { error } = await supabaseAdmin
+          .from('settings')
+          .insert({ ...filteredData, id: crypto.randomUUID(), tenant_id: tenantId });
+        saveError = error;
+      }
+
+      if (saveError) throw saveError;
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating settings:", error);
@@ -5581,15 +5600,15 @@ async function startServer() {
     try {
       const { data: tenants, error } = await supabaseAdmin
         .from('tenants')
-        .select('id, slug, name, plan, trial_ends_at, created_at, stancer_customer_id')
+        .select('id, slug, name, plan, trial_ends_at, created_at')
         .order('created_at', { ascending: false });
       if (error) throw error;
       const enriched = await Promise.all((tenants ?? []).map(async (t) => {
-        const [{ count: userCount }, { count: projectCount }] = await Promise.all([
+        const [profilesRes, projectsRes] = await Promise.all([
           supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
           supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
         ]);
-        return { ...t, user_count: userCount ?? 0, project_count: projectCount ?? 0 };
+        return { ...t, user_count: profilesRes.count ?? 0, project_count: projectsRes.count ?? 0 };
       }));
       res.json(enriched);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
