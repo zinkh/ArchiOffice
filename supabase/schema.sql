@@ -460,6 +460,18 @@ CREATE TABLE IF NOT EXISTS articles_type (
   designation TEXT, unite TEXT, prix_unitaire NUMERIC, categorie TEXT
 );
 
+CREATE TABLE IF NOT EXISTS project_members (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL DEFAULT 'member',
+  tenant_id  UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_tenant_id  ON project_members(tenant_id);
+
 -- ============================================================
 -- 4. ROW LEVEL SECURITY
 -- ============================================================

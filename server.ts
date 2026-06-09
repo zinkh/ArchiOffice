@@ -5525,7 +5525,11 @@ async function startServer() {
         .select('*, profiles(id, name, email, role, avatar)')
         .eq('project_id', req.params.id)
         .eq('tenant_id', tenantId);
-      if (error) throw error;
+      // 42P01 = table does not exist (migration not yet applied) → return empty list
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
       res.json((data || []).map((m: any) => ({ ...m, ...m.profiles })));
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch project members" }); }
   });
@@ -5538,7 +5542,10 @@ async function startServer() {
       const { data, error } = await supabaseAdmin.from('project_members').insert({
         id: crypto.randomUUID(), project_id: req.params.id, user_id, role: role || 'member', tenant_id: tenantId
       }).select().single();
-      if (error) throw error;
+      if (error) {
+        if ((error as any).code === '42P01') return res.status(503).json({ error: "Migration project_members non appliquée" });
+        throw error;
+      }
       res.status(201).json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to add project member" }); }
   });
@@ -5551,7 +5558,10 @@ async function startServer() {
         .eq('project_id', req.params.id)
         .eq('user_id', req.params.userId)
         .eq('tenant_id', tenantId);
-      if (error) throw error;
+      if (error) {
+        if ((error as any).code === '42P01') { res.json({ success: true }); return; }
+        throw error;
+      }
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to remove project member" }); }
   });
