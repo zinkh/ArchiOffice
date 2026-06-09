@@ -35,7 +35,15 @@ export interface AgentMessage {
   tenant_id: string;
   role: 'user' | 'assistant';
   content: string;
+  artifact?: AgentArtifact;
   created_at: string;
+}
+
+export interface AgentArtifact {
+  type: 'excel' | 'docx' | 'csv';
+  filename: string;
+  data: string; // base64
+  mimeType: string;
 }
 
 export interface AgentTokenUsage {
@@ -53,6 +61,7 @@ export interface AgentChatResponse {
   reply: string;
   tokens_used: number;
   remaining_balance: number;
+  artifact?: AgentArtifact;
 }
 
 // Internal server-side types
@@ -79,6 +88,7 @@ export interface AgentContext {
   projects: { id: string; name: string; status: string; client: string; start_date: string; end_date: string }[];
   contacts: { id: string; first_name: string; last_name: string; company_name: string; email: string }[];
   upcomingMeetings: { id: string; title: string; date: string; project_id: string }[];
-  recentDocuments: { id: string; name: string; project_id: string; phase: string; uploaded_at: string }[];
+  recentDocuments: { id: string; name: string; project_id: string; phase: string; uploaded_at: string; file_url: string }[];
   tasks: { id: string; title: string; status: string; due_date: string; project_id: string }[];
+  documentContents: { id: string; name: string; content: string }[];
 }
