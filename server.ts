@@ -4453,7 +4453,7 @@ async function startServer() {
         snakeData[col] = v;
       }
       // Only keep valid table columns (exclude id — managed separately)
-      const validCols = new Set(['agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires']);
+      const validCols = new Set(['agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires','maf_enabled','maf_numero_adherent','maf_taux_contrat_permil','maf_declaration_year']);
       const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
@@ -5973,6 +5973,305 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── MAF — Déclaration des activités professionnelles ───────────────────────
+
+  // Taux fixes MAF 2025 (‰, hors taxe d'assurance et fonds de solidarité)
+  const MAF_TAUX_FIXES: Record<string, number> = {
+    violet: 0.3593,
+    orange_clair: 1.3047,
+    orange_fonce: 1.3047,
+    bleu: 3.0065,
+  };
+
+  function computeMafAssiette(entry: any, project: any): number {
+    const inter = entry.intercalaire ?? 'jaune';
+    if (['violet','orange_clair','orange_fonce','bleu','rose','tabac','gris','puc'].includes(inter)) {
+      return parseFloat(entry.honoraires_ht ?? 0);
+    }
+    if (inter === 'vert') {
+      const surface = parseFloat(project?.surface_plancher ?? 0);
+      const cat = (project?.categorie_projet ?? '').toLowerCase();
+      const coutM2 = cat.includes('maison') ? 1714 : 1654;
+      const M = coutM2 * surface;
+      const T = parseFloat(project?.taux_mission ?? 30) / 100;
+      const P = parseFloat(project?.part_interet ?? 100) / 100;
+      return M * T * P;
+    }
+    const A = parseFloat(entry.montant_cumul_fin_annee ?? 0);
+    const B = parseFloat(entry.montant_cumul_annee_precedente ?? 0);
+    const M = A - B;
+    const T = parseFloat(project?.taux_mission ?? 100) / 100;
+    const P = parseFloat(project?.part_interet ?? 100) / 100;
+    return M * T * P;
+  }
+
+  // GET /api/maf/v1/config
+  app.get('/api/maf/v1/config', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data } = await supabaseAdmin
+        .from('settings')
+        .select('maf_enabled,maf_numero_adherent,maf_taux_contrat_permil,maf_declaration_year')
+        .eq('tenant_id', tenantId)
+        .single();
+      res.json(data ?? {});
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/maf/v1/config
+  app.put('/api/maf/v1/config', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const allowed = ['maf_enabled','maf_numero_adherent','maf_taux_contrat_permil','maf_declaration_year'];
+      const payload: any = {};
+      for (const k of allowed) { if (k in req.body) payload[k] = req.body[k]; }
+      await supabaseAdmin.from('settings').upsert({ ...payload, tenant_id: tenantId }, { onConflict: 'tenant_id' });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/maf/v1/entries?year=2025&intercalaire=jaune
+  app.get('/api/maf/v1/entries', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const year = parseInt(req.query.year as string) || 2025;
+      let q = supabaseAdmin
+        .from('maf_project_data')
+        .select('*, project:projects(id,name,client,categorie_projet,surface_plancher,type_projet,taux_mission,part_interet,doc_date,date_fin_reelle,date_depot_pc,num_permis_construire,sismicite,retrait_argiles,bet_structure,etude_sol,mission_bim,type_moa,nature_travaux_maf,budget,adresse_terrain,cp_ville_terrain,type_et_cat,cotraitants)')
+        .eq('tenant_id', tenantId)
+        .eq('declaration_year', year)
+        .order('created_at', { ascending: true });
+      if (req.query.intercalaire) q = q.eq('intercalaire', req.query.intercalaire);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/maf/v1/entries
+  app.post('/api/maf/v1/entries', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('maf_project_data')
+        .insert({ ...req.body, tenant_id: tenantId })
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/maf/v1/entries/:id
+  app.put('/api/maf/v1/entries/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data, error } = await supabaseAdmin
+        .from('maf_project_data')
+        .update(req.body)
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/maf/v1/entries/:id
+  app.delete('/api/maf/v1/entries/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { error } = await supabaseAdmin
+        .from('maf_project_data')
+        .delete()
+        .eq('id', id)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/maf/v1/summary?year=2025
+  app.get('/api/maf/v1/summary', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const year = parseInt(req.query.year as string) || 2025;
+
+      const [{ data: cfg }, { data: entries }] = await Promise.all([
+        supabaseAdmin.from('settings').select('maf_numero_adherent,maf_taux_contrat_permil').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('maf_project_data')
+          .select('*, project:projects(id,name,categorie_projet,surface_plancher,taux_mission,part_interet)')
+          .eq('tenant_id', tenantId)
+          .eq('declaration_year', year),
+      ]);
+
+      const tauxContrat = parseFloat((cfg as any)?.maf_taux_contrat_permil ?? 0);
+      const intercalaires: Record<string, any> = {};
+      let cotisationTotale = 0;
+
+      for (const e of (entries ?? [])) {
+        const inter = e.intercalaire;
+        const tauxPermil = MAF_TAUX_FIXES[inter] ?? tauxContrat;
+        const assiette = computeMafAssiette(e, (e as any).project);
+        const cotisation = (assiette * tauxPermil) / 1000;
+        cotisationTotale += cotisation;
+        if (!intercalaires[inter]) {
+          intercalaires[inter] = { entries: [], totalAssiette: 0, cotisationEstimee: 0, tauxPermil };
+        }
+        intercalaires[inter].entries.push({ ...e, assiette, cotisationEstimee: cotisation });
+        intercalaires[inter].totalAssiette += assiette;
+        intercalaires[inter].cotisationEstimee += cotisation;
+      }
+
+      res.json({
+        year,
+        numeroAdherent: (cfg as any)?.maf_numero_adherent ?? null,
+        intercalaires,
+        cotisationTotaleEstimee: cotisationTotale,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/maf/v1/export-pdf?year=2025
+  app.get('/api/maf/v1/export-pdf', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const year = parseInt(req.query.year as string) || 2025;
+
+      const [{ data: cfg }, { data: settingsData }, { data: entries }] = await Promise.all([
+        supabaseAdmin.from('settings').select('maf_numero_adherent,maf_taux_contrat_permil,agency_name').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('settings').select('agency_name').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('maf_project_data')
+          .select('*, project:projects(id,name,categorie_projet,surface_plancher,taux_mission,part_interet,type_et_cat,client)')
+          .eq('tenant_id', tenantId)
+          .eq('declaration_year', year),
+      ]);
+
+      const tauxContrat = parseFloat((cfg as any)?.maf_taux_contrat_permil ?? 0);
+      const agencyName = (settingsData as any)?.agency_name ?? 'Cabinet';
+      const numAdh = (cfg as any)?.maf_numero_adherent ?? '-';
+
+      // Build PDF using jsPDF
+      const { jsPDF } = await import('jspdf');
+      const autoTable = (await import('jspdf-autotable')).default;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      // Cover page
+      doc.setFillColor(220, 53, 69);
+      doc.rect(0, 0, 210, 40, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Déclaration MAF', 14, 22);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Activités professionnelles ${year} — Cotisation avant le 31 mars ${year + 1}`, 14, 32);
+
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+      doc.text(`Cabinet : ${agencyName}`, 14, 52);
+      doc.text(`N° adhérent MAF : ${numAdh}`, 14, 58);
+      doc.text(`Année : ${year}`, 14, 64);
+
+      // Summary table
+      const summaryRows: any[] = [];
+      let totalAssiette = 0;
+      let totalCotis = 0;
+      const LABELS: Record<string, string> = {
+        jaune: 'Missions MOE (intercalaire jaune)',
+        vert: 'Projet architectural PC (intercalaire vert)',
+        ami: 'Accompagnement Maison Individuelle',
+        grand_chantier: 'Grands Chantiers',
+        violet: 'Missions sans travaux (intercalaire violet)',
+        orange_clair: 'AMO / Relevés (intercalaire orange clair)',
+        orange_fonce: 'Conventions spéciales (intercalaire orange foncé)',
+        bleu: 'BIM Manager sans MOE (intercalaire bleu)',
+        rose: 'Ouvrages non soumis (intercalaire rose)',
+        tabac: 'Dossiers autorisation (intercalaire tabac)',
+        gris: 'VIR / Vente immeuble (intercalaire gris)',
+        puc: 'Police Unique de Chantier',
+      };
+
+      const grouped: Record<string, { assiette: number; cotis: number; count: number }> = {};
+      for (const e of (entries ?? [])) {
+        const inter = e.intercalaire;
+        const tauxPermil = MAF_TAUX_FIXES[inter] ?? tauxContrat;
+        const assiette = computeMafAssiette(e, (e as any).project);
+        const cotis = (assiette * tauxPermil) / 1000;
+        if (!grouped[inter]) grouped[inter] = { assiette: 0, cotis: 0, count: 0 };
+        grouped[inter].assiette += assiette;
+        grouped[inter].cotis += cotis;
+        grouped[inter].count += 1;
+        totalAssiette += assiette;
+        totalCotis += cotis;
+      }
+
+      for (const [inter, vals] of Object.entries(grouped)) {
+        summaryRows.push([
+          LABELS[inter] ?? inter,
+          vals.count.toString(),
+          vals.assiette.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €',
+          (MAF_TAUX_FIXES[inter] ?? tauxContrat).toFixed(4) + ' ‰',
+          vals.cotis.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €',
+        ]);
+      }
+      summaryRows.push([
+        { content: 'TOTAL', styles: { fontStyle: 'bold' } },
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: totalAssiette.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €', styles: { fontStyle: 'bold' } },
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: totalCotis.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €', styles: { fontStyle: 'bold' } },
+      ]);
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Récapitulatif de la déclaration', 14, 76);
+
+      autoTable(doc, {
+        startY: 80,
+        head: [['Intercalaire', 'Nb missions', 'Assiette', 'Taux (‰)', 'Cotisation estimée']],
+        body: summaryRows,
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [220, 53, 69], textColor: 255 },
+        margin: { left: 14, right: 14 },
+      });
+
+      const buf = doc.output('arraybuffer');
+      res.set('Content-Type', 'application/pdf');
+      res.set('Content-Disposition', `attachment; filename="declaration-maf-${year}.pdf"`);
+      res.send(Buffer.from(buf));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/maf/v1/submit — Enterprise only (stub)
+  app.post('/api/maf/v1/submit', async (req: any, res: any) => {
+    res.status(501).json({
+      error: 'not_implemented',
+      message: 'L\'automatisation de la déclaration MAF est disponible avec le plan Enterprise. Contactez-nous pour en savoir plus.',
+      doc: '/api/maf/v1/spec',
+    });
+  });
+
+  // GET /api/maf/v1/spec — OpenAPI spec
+  app.get('/api/maf/v1/spec', (_req: any, res: any) => {
+    res.json({
+      openapi: '3.0.0',
+      info: { title: 'ArchiOffice MAF API', version: '1.0.0' },
+      servers: [{ url: '/api/maf/v1' }],
+      paths: {
+        '/config': { get: {}, put: {} },
+        '/entries': { get: {}, post: {} },
+        '/entries/{id}': { put: {}, delete: {} },
+        '/summary': { get: {} },
+        '/export-pdf': { get: {} },
+        '/submit': { post: { description: 'Enterprise only — soumet la déclaration à maf.fr' } },
+      },
+    });
   });
 
   const distPath = path.join(process.cwd(), "dist");

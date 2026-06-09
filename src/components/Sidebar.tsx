@@ -25,6 +25,7 @@ import {
   IconContract,
   IconRobot,
   IconShieldLock,
+  IconShieldCheck,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -52,6 +53,7 @@ export const NAV_ITEMS = [
   { name: 'settings',       path: '/settings',       icon: IconSettings },
   { name: 'billing',        path: '/billing',        icon: IconCreditCard },
   { name: 'contrats',       path: '/contrats',       icon: IconContract },
+  { name: 'maf_declaration', path: '/maf-declaration', icon: IconShieldCheck },
 ];
 
 const NAV_SECTIONS = [
@@ -130,6 +132,8 @@ export function Sidebar() {
       .then(r => setIsSuperAdmin(r.isAdmin))
       .catch(() => setIsSuperAdmin(false));
   }, [currentUser?.email]);
+
+  const mafEnabled = !!(settings as any)?.maf_enabled;
 
   const toggleSection = (key: string) => {
     setCollapsed((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
@@ -225,6 +229,25 @@ export function Sidebar() {
                       </Link>
                     );
                   })}
+                  {/* MAF declaration — shown only when plugin is enabled */}
+                  {section.key === 'finances' && mafEnabled && (() => {
+                    const isActive = location.pathname === '/maf-declaration';
+                    return (
+                      <Link
+                        key="/maf-declaration"
+                        to="/maf-declaration"
+                        className={cn(
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          isActive
+                            ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                            : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                        )}
+                      >
+                        <IconShieldCheck size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
+                        <span>{t('maf_declaration')}</span>
+                      </Link>
+                    );
+                  })()}
                 </div>
               )}
             </div>

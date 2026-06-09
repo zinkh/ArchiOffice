@@ -14,7 +14,7 @@ import { apiFetch } from '../lib/api';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
-type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication';
+type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication' | 'compliance';
 type PluginStatus = 'active' | 'coming_soon';
 
 interface PluginDef {
@@ -129,11 +129,23 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-indigo-600',
     iconLabel: 'MT',
   },
+  {
+    id: 'maf',
+    name: 'Déclaration MAF',
+    vendor: 'Mutuelle des Architectes Français',
+    description: 'Préparez votre déclaration annuelle MAF (activités 2025, cotisation avant le 31 mars 2026). Calcul M × T × P intégré dans vos propositions.',
+    category: 'compliance',
+    status: 'active',
+    iconBg: 'bg-red-50',
+    iconColor: 'text-red-600',
+    iconLabel: 'MAF',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
   { id: 'all', label: 'Tous' },
   { id: 'accounting', label: 'Comptabilité' },
+  { id: 'compliance', label: 'Conformité' },
   { id: 'storage', label: 'Stockage' },
   { id: 'crm', label: 'CRM' },
   { id: 'communication', label: 'Communication' },
@@ -172,6 +184,10 @@ export default function Settings() {
     numPrefixDevis: 'DEVIS',
     numPrefixFacture: 'FAC',
     numPrefixHonoraires: 'NH',
+    maf_enabled: false,
+    maf_numero_adherent: '',
+    maf_taux_contrat_permil: '',
+    maf_declaration_year: 2025,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -368,6 +384,7 @@ export default function Settings() {
   const getPluginConnectionState = (id: string): boolean => {
     if (id === 'zoho_invoice') return !!(zohoStatus?.connected);
     if (id === 'zoho_books') return !!(zohoBooksStatus?.connected);
+    if (id === 'maf') return !!(settings as any).maf_enabled;
     return false;
   };
 
@@ -545,6 +562,66 @@ export default function Settings() {
               </button>
             </>
           )}
+        </div>
+      </div>
+    );
+
+    if (pluginId === 'maf') return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Activer le plugin MAF</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>Affiche la déclaration MAF dans le menu et le calcul dans les propositions</div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={!!(settings as any).maf_enabled}
+              onChange={e => setSettings({ ...settings, maf_enabled: e.target.checked } as any)}
+            />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>N° d'adhérent MAF</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="ex. 24561"
+              value={(settings as any).maf_numero_adherent || ''}
+              onChange={e => setSettings({ ...settings, maf_numero_adherent: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Taux de cotisation contractuel (‰)</label>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="ex. 2.4752"
+              value={(settings as any).maf_taux_contrat_permil || ''}
+              onChange={e => setSettings({ ...settings, maf_taux_contrat_permil: e.target.value } as any)}
+            />
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Taux figurant sur votre contrat MAF — utilisé pour l'estimation des cotisations intercalaires jaune/vert/AMI.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Année de déclaration</label>
+            <input
+              type="number"
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              value={(settings as any).maf_declaration_year || 2025}
+              onChange={e => setSettings({ ...settings, maf_declaration_year: parseInt(e.target.value) || 2025 } as any)}
+            />
+          </div>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#fff4e6', border: '1px solid #ffd8a8', color: '#c05500' }}>
+          <p className="font-bold mb-1">Déclaration MAF — Activités professionnelles</p>
+          <p>La déclaration annuelle doit être validée et clôturée sur <strong>maf.fr</strong> avant le 31 mars. ArchiOffice vous aide à préparer vos données et calcule vos assiettes de cotisation.</p>
         </div>
       </div>
     );

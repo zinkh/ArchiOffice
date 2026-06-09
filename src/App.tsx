@@ -52,6 +52,7 @@ import OrdresDeService from './pages/OrdresDeService';
 import Contrats from './pages/Contrats';
 import GoogleAuthCallback from './pages/GoogleAuthCallback';
 import AdminDashboard from './pages/AdminDashboard';
+import MafDeclaration from './pages/MafDeclaration';
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agents/client';
 
@@ -604,6 +605,7 @@ export default function App() {
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
               <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/maf-declaration" element={<MafDeclaration />} />
             </Route>
           </Routes>
         </Router>
