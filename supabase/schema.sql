@@ -472,6 +472,23 @@ CREATE TABLE IF NOT EXISTS project_members (
 CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_members_tenant_id  ON project_members(tenant_id);
 
+CREATE TABLE IF NOT EXISTS custom_references (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  name        TEXT NOT NULL,
+  client      TEXT,
+  category    TEXT,
+  end_date    DATE,
+  surface     NUMERIC,
+  budget      NUMERIC,
+  status      TEXT DEFAULT 'Completed',
+  description TEXT,
+  image_url   TEXT,
+  location    TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_custom_references_tenant_id ON custom_references(tenant_id);
+
 -- ============================================================
 -- 4. ROW LEVEL SECURITY
 -- ============================================================

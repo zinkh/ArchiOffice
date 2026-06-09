@@ -5445,6 +5445,98 @@ async function startServer() {
 
   // ─── End Stancer Billing ───────────────────────────────────────────────────
 
+  // ─── Custom References (références hors projets) ──────────────────────────
+
+  app.get('/api/references/custom', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('custom_references')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('end_date', { ascending: false });
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/references/custom', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location } = req.body;
+      if (!name) return res.status(400).json({ error: 'name requis' });
+      const { data, error } = await supabaseAdmin
+        .from('custom_references')
+        .insert({ tenant_id: tenantId, name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status: status || 'Completed', description, image_url, location })
+        .select()
+        .single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/references/custom/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location } = req.body;
+      const { data, error } = await supabaseAdmin
+        .from('custom_references')
+        .update({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status, description, image_url, location })
+        .eq('id', req.params.id)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/references/custom/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin
+        .from('custom_references')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/references/custom/bulk', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { items } = req.body as { items: any[] };
+      if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'No items provided' });
+      const rows = items.map(({ name, client, category, end_date, surface, budget, status, description, image_url, location }) => ({
+        id: crypto.randomUUID(),
+        tenant_id: tenantId,
+        name: name || 'Sans titre',
+        client: client || '',
+        category: category || '',
+        end_date: end_date || null,
+        surface: surface != null ? Number(surface) : null,
+        budget: budget != null ? Number(budget) : null,
+        status: status || 'Completed',
+        description: description || '',
+        image_url: image_url || null,
+        location: location || '',
+      }));
+      const { data, error } = await supabaseAdmin.from('custom_references').insert(rows).select();
+      if (error) {
+        if (error.code === '42P01') return res.json([]);
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Custom References ────────────────────────────────────────────────
+
   // ─── Super-Admin Dashboard ────────────────────────────────────────────────
 
   function requireSuperAdmin(req: any, res: any, next: any) {
