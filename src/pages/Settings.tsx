@@ -10,6 +10,7 @@ import {
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
+import { apiFetch } from '../lib/api';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -229,23 +230,20 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+    apiFetch('/api/settings')
       .then(s => {
         if (s && !s.error) {
-          setSettings(prev => ({ ...prev, ...s }));
+          setSettings((prev: any) => ({ ...prev, ...s }));
           db.settings.put(s).catch(() => {});
         }
       })
       .catch(() => {});
     if (currentUser?.system_role === 'admin') {
-      fetch('/api/zoho/status')
-        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      apiFetch('/api/zoho/status')
         .then(s => { setZohoStatus(s); setZohoBooksStatus(s); })
         .catch(() => {});
-      fetch('/api/zoho/callback-url')
-        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-        .then(d => setZohoCallbackUrl(d.url))
+      apiFetch('/api/zoho/callback-url')
+        .then((d: any) => setZohoCallbackUrl(d.url))
         .catch(() => {});
     }
     if (currentUser) {
@@ -278,7 +276,7 @@ export default function Settings() {
   const handleZohoDisconnect = async () => {
     setIsDisconnectingZoho(true);
     try {
-      await fetch('/api/zoho/disconnect', { method: 'DELETE' });
+      await apiFetch('/api/zoho/disconnect', { method: 'DELETE' });
       setZohoStatus(prev => ({ ...prev!, connected: false }));
       setZohoBooksStatus(prev => ({ ...prev!, connected: false }));
       setZohoNotice({ type: 'success', message: t('zoho_disconnected') });
@@ -293,15 +291,10 @@ export default function Settings() {
     setIsSyncingZoho(true);
     setZohoNotice(null);
     try {
-      const res = await fetch('/api/zoho/sync', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setZohoNotice({ type: 'success', message: `Synchronisation réussie — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.` });
-      } else {
-        setZohoNotice({ type: 'error', message: data.error || 'Erreur de synchronisation.' });
-      }
-    } catch {
-      setZohoNotice({ type: 'error', message: 'Erreur de synchronisation.' });
+      const data = await apiFetch<any>('/api/zoho/sync', { method: 'POST' });
+      setZohoNotice({ type: 'success', message: `Synchronisation réussie — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.` });
+    } catch (e: any) {
+      setZohoNotice({ type: 'error', message: e.message || 'Erreur de synchronisation.' });
     } finally {
       setIsSyncingZoho(false);
     }
@@ -311,15 +304,10 @@ export default function Settings() {
     setIsSyncingZohoBooks(true);
     setZohoBooksNotice(null);
     try {
-      const res = await fetch('/api/zoho-books/sync', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setZohoBooksNotice({ type: 'success', message: `Synchronisation Zoho Books réussie — ${data.synced ?? 0} entrées synchronisées.` });
-      } else {
-        setZohoBooksNotice({ type: 'error', message: data.error || 'Erreur de synchronisation Zoho Books.' });
-      }
-    } catch {
-      setZohoBooksNotice({ type: 'error', message: 'Erreur de synchronisation Zoho Books.' });
+      const data = await apiFetch<any>('/api/zoho-books/sync', { method: 'POST' });
+      setZohoBooksNotice({ type: 'success', message: `Synchronisation Zoho Books réussie — ${data.synced ?? 0} entrées synchronisées.` });
+    } catch (e: any) {
+      setZohoBooksNotice({ type: 'error', message: e.message || 'Erreur de synchronisation Zoho Books.' });
     } finally {
       setIsSyncingZohoBooks(false);
     }
@@ -329,24 +317,18 @@ export default function Settings() {
     setIsTestingSmtp(true);
     setSmtpTestResult(null);
     try {
-      const res = await fetch('/api/test-smtp', {
+      await apiFetch('/api/test-smtp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ smtpHost: settings.smtpHost, smtpPort: settings.smtpPort, smtpUser: settings.smtpUser, smtpPass: settings.smtpPass })
       });
-      const data = await res.json();
-      if (res.ok) {
-        setSmtpTestResult({ success: true, message: 'Test email sent successfully to ' + settings.smtpUser });
-      } else {
-        let msg = data.error || 'Failed to send test email';
-        if (msg.includes('534-5.7.9')) msg = "Erreur Gmail : un mot de passe d'application est requis.";
-        else if (msg.includes('535-5.7.8')) msg = "Erreur d'authentification : identifiants incorrects.";
-        else if (msg.includes('ECONNREFUSED')) msg = "Connexion refusée : vérifiez l'hôte SMTP et le port.";
-        else if (msg.includes('ETIMEDOUT')) msg = "Délai dépassé : le serveur SMTP ne répond pas.";
-        setSmtpTestResult({ success: false, message: msg });
-      }
+      setSmtpTestResult({ success: true, message: 'Test email sent successfully to ' + settings.smtpUser });
     } catch (err: any) {
-      setSmtpTestResult({ success: false, message: err.message });
+      let msg = err.message || 'Failed to send test email';
+      if (msg.includes('534-5.7.9')) msg = "Erreur Gmail : un mot de passe d'application est requis.";
+      else if (msg.includes('535-5.7.8')) msg = "Erreur d'authentification : identifiants incorrects.";
+      else if (msg.includes('ECONNREFUSED')) msg = "Connexion refusée : vérifiez l'hôte SMTP et le port.";
+      else if (msg.includes('ETIMEDOUT')) msg = "Délai dépassé : le serveur SMTP ne répond pas.";
+      setSmtpTestResult({ success: false, message: msg });
     } finally {
       setIsTestingSmtp(false);
     }
@@ -356,20 +338,17 @@ export default function Settings() {
     setIsSaving(true);
     try {
       if (currentUser?.system_role === 'admin') {
-        const res = await fetch('/api/settings', {
+        await apiFetch('/api/settings', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings)
+          body: JSON.stringify(settings),
         });
-        if (!res.ok) throw new Error(`Settings save failed: ${res.status}`);
         await db.settings.put(settings);
       }
       if (currentUser) {
         const updatedUser = { ...currentUser, ...userSettings } as any;
-        await fetch(`/api/team/${currentUser.id}`, {
+        await apiFetch(`/api/team/${currentUser.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userSettings)
+          body: JSON.stringify(userSettings),
         });
         setCurrentUser(updatedUser);
       }
