@@ -8,8 +8,6 @@ import {
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
-const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL as string | undefined;
-
 const PLAN_LABELS: Record<string, string> = {
   trial: 'Essai', starter: 'Starter', pro: 'Pro', enterprise: 'Entreprise',
 };
@@ -106,8 +104,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterPlan, setFilterPlan] = useState('');
-
-  const isSuperAdmin = SUPER_ADMIN_EMAIL && currentUser?.email === SUPER_ADMIN_EMAIL;
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,9 +124,15 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!isSuperAdmin) { navigate('/'); return; }
-    load();
-  }, [isSuperAdmin, load, navigate]);
+    if (!currentUser) return;
+    apiFetch<{ isAdmin: boolean }>('/api/admin/is-admin')
+      .then(r => {
+        setIsSuperAdmin(r.isAdmin);
+        if (r.isAdmin) load();
+        else navigate('/');
+      })
+      .catch(() => navigate('/'));
+  }, [currentUser?.email]);
 
   function handlePlanChange(tenantId: string, plan: string) {
     setTenants((prev: TenantRow[]) => prev.map((t: TenantRow) => t.id === tenantId ? { ...t, plan } : t));
@@ -143,7 +146,7 @@ export default function AdminDashboard() {
 
   const now = Date.now();
 
-  if (!isSuperAdmin) return null;
+  if (isSuperAdmin === null) return null;
 
   return (
     <div className="space-y-6">

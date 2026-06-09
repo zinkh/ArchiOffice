@@ -41,14 +41,14 @@ export default defineConfig(({mode}) => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-          // Cache app shell and static assets
+          // Cache app shell and static assets only
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-          // Network-first for API calls (never cache)
+          // Exclude all API routes from service worker interception entirely.
+          // Using NetworkOnly would still intercept the request and emit a
+          // "no-response" SW error when the network fails; no registered route
+          // means the browser handles /api/ natively with its own error path.
+          navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
-            {
-              urlPattern: /^https:\/\/archimanager\.fr\/api\//,
-              handler: 'NetworkOnly',
-            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
               handler: 'StaleWhileRevalidate',

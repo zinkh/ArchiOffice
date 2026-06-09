@@ -29,6 +29,7 @@ import {
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
+import { apiFetch } from '../lib/api';
 
 // ── All nav items (still exported for Header mobile menu)
 export const NAV_ITEMS = [
@@ -110,8 +111,6 @@ function loadCollapsed(): Record<string, boolean> {
   }
 }
 
-const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL as string | undefined;
-
 export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
@@ -119,16 +118,22 @@ export function Sidebar() {
   const { settings } = useSettings();
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch {}
   }, [collapsed]);
 
-  const toggleSection = (key: string) => {
-    setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+  useEffect(() => {
+    if (!currentUser) return;
+    apiFetch<{ isAdmin: boolean }>('/api/admin/is-admin')
+      .then(r => setIsSuperAdmin(r.isAdmin))
+      .catch(() => setIsSuperAdmin(false));
+  }, [currentUser?.email]);
 
-  const isSuperAdmin = SUPER_ADMIN_EMAIL && currentUser?.email === SUPER_ADMIN_EMAIL;
+  const toggleSection = (key: string) => {
+    setCollapsed((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const daysLeft = trialEndsAt && tenantPlan === 'trial'
     ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
