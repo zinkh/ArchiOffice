@@ -7,7 +7,7 @@ import type { PlanId } from '../lib/billing';
 import {
   IconCheck, IconLoader2, IconAlertTriangle, IconCreditCard,
   IconRocket, IconCircleCheck, IconRefresh, IconExternalLink,
-  IconChevronRight, IconClock,
+  IconChevronRight, IconClock, IconBolt,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -20,6 +20,16 @@ interface BillingStatus {
     users: { used: number; limit: number };
     documents: { used: number; limit: number };
   };
+  ai_credits?: {
+    balance_eur_cents: number;
+    included_monthly_cents: number;
+  };
+}
+
+interface CreditPack {
+  id: string;
+  amount_cents: number;
+  label: string;
 }
 
 interface BillingEvent {
@@ -86,6 +96,8 @@ export default function Billing() {
   const [history, setHistory] = useState<BillingEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState<PlanId | null>(null);
+  const [checkingTopup, setCheckingTopup] = useState<string | null>(null);
+  const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const fetchStatus = async () => {
@@ -102,12 +114,24 @@ export default function Billing() {
     if (Array.isArray(data)) setHistory(data);
   };
 
+  const fetchCreditPacks = async () => {
+    const res = await fetch('/api/billing/credits/packs');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data)) setCreditPacks(data);
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('payment_status') === 'success') {
-      setNotice({ type: 'success', msg: 'Paiement reçu ! Votre abonnement va être activé sous quelques instants.' });
+      const type = params.get('type');
+      if (type === 'credit') {
+        setNotice({ type: 'success', msg: 'Paiement reçu ! Vos crédits IA vont être crédités sous quelques instants.' });
+      } else {
+        setNotice({ type: 'success', msg: 'Paiement reçu ! Votre abonnement va être activé sous quelques instants.' });
+      }
     }
-    Promise.all([fetchStatus(), fetchHistory()]).finally(() => setLoading(false));
+    Promise.all([fetchStatus(), fetchHistory(), fetchCreditPacks()]).finally(() => setLoading(false));
   }, [location.search]);
 
   const handleCheckout = async (planId: PlanId) => {
@@ -134,6 +158,29 @@ export default function Billing() {
       setNotice({ type: 'error', msg: 'Impossible de contacter le serveur de paiement.' });
     } finally {
       setCheckingOut(null);
+    }
+  };
+
+  const handleCreditTopup = async (packId: string) => {
+    setCheckingTopup(packId);
+    try {
+      const res = await fetch('/api/billing/credits/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack_id: packId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setNotice({ type: 'error', msg: data.error || 'Erreur lors du paiement' });
+        return;
+      }
+      if (data.payment_url) {
+        window.location.href = data.payment_url;
+      }
+    } catch {
+      setNotice({ type: 'error', msg: 'Impossible de contacter le serveur de paiement.' });
+    } finally {
+      setCheckingTopup(null);
     }
   };
 
@@ -219,6 +266,59 @@ export default function Billing() {
             <UsageBar label="Projets" used={status.usage.projects.used} limit={status.usage.projects.limit} />
             <UsageBar label="Utilisateurs" used={status.usage.users.used} limit={status.usage.users.limit} />
             <UsageBar label="Documents" used={status.usage.documents.used} limit={status.usage.documents.limit} />
+          </div>
+        )}
+      </div>
+
+      {/* AI Credits section */}
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <IconBolt size={18} className="text-amber-500" />
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Crédits IA</h2>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
+          <div className="flex-1">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-1">Solde disponible</p>
+            <p className="text-3xl font-bold text-zinc-900 dark:text-white">
+              {((status?.ai_credits?.balance_eur_cents ?? 0) / 100).toFixed(2)} €
+            </p>
+            {(status?.ai_credits?.included_monthly_cents ?? 0) > 0 && (
+              <p className="text-xs text-zinc-400 mt-1">
+                Inclus ce mois : {((status!.ai_credits!.included_monthly_cents) / 100).toFixed(2)} € (plan {status?.plan})
+              </p>
+            )}
+          </div>
+          <div className="text-xs text-zinc-400 dark:text-zinc-500 max-w-xs">
+            Les crédits IA sont utilisés lors des appels à l'assistant IA (agents, suggestions d'articles).
+            Tarif : 0,40 € / M tokens input · 1,65 € / M tokens output.
+          </div>
+        </div>
+
+        {creditPacks.length > 0 && (
+          <div>
+            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">Recharger des crédits</p>
+            <div className="flex flex-wrap gap-3">
+              {creditPacks.map((pack) => (
+                <button
+                  key={pack.id}
+                  onClick={() => handleCreditTopup(pack.id)}
+                  disabled={checkingTopup !== null}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20',
+                    'text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  {checkingTopup === pack.id
+                    ? <IconLoader2 size={14} className="animate-spin" />
+                    : <IconBolt size={14} />
+                  }
+                  + {pack.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -326,7 +426,9 @@ export default function Billing() {
                   )} />
                   <div>
                     <span className="font-medium text-zinc-900 dark:text-white capitalize">
-                      {PLANS[evt.plan_id as PlanId]?.name || evt.plan_id}
+                      {evt.event_type === 'credit_topup_created' || evt.event_type === 'credit_topup_paid'
+                        ? 'Crédits IA'
+                        : PLANS[evt.plan_id as PlanId]?.name || evt.plan_id}
                     </span>
                     <span className="text-zinc-400 ml-2">
                       {new Date(evt.created_at).toLocaleDateString('fr-FR')}

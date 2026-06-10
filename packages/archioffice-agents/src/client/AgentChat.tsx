@@ -106,7 +106,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
     }
     try {
       const bal = await apiFetch('/api/agents/token-balance');
-      setTokenBalance(bal.balance);
+      setTokenBalance(bal.balance_eur_cents ?? bal.balance ?? null);
     } catch {}
   }, []);
 
@@ -326,7 +326,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode; }) 
             <div className="shrink-0 border-t px-3 py-2" style={{ borderColor: 'var(--tblr-border)' }}>
               {tokenBalance !== null && (
                 <div className="text-[10px] mb-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
-                  {tokenBalance.toLocaleString('fr-FR')} tokens restants
+                  {(tokenBalance / 100).toFixed(2)} € de crédits IA restants
                 </div>
               )}
               <div className="flex gap-2 items-end">

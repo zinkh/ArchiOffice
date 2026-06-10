@@ -1196,6 +1196,66 @@ async function startServer() {
     expired:    { projects: 0,   users: 0,   documents: 0   },
   };
 
+  // ─── AI Token Pricing ────────────────────────────────────────────────────────
+  const AI_PRICE_EUR_PER_M_INPUT  = parseFloat(process.env.AI_PRICE_INPUT_PER_M  || '0.40');
+  const AI_PRICE_EUR_PER_M_OUTPUT = parseFloat(process.env.AI_PRICE_OUTPUT_PER_M || '1.65');
+
+  function calcCostEurCents(inputTokens: number, outputTokens: number): number {
+    const cost = (inputTokens / 1_000_000) * AI_PRICE_EUR_PER_M_INPUT
+               + (outputTokens / 1_000_000) * AI_PRICE_EUR_PER_M_OUTPUT;
+    return Math.max(1, Math.ceil(cost * 100));
+  }
+
+  // Monthly AI credit included per plan (EUR cents). Topped up once per month.
+  const PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number> = {
+    trial: 0, starter: 50, pro: 200, enterprise: 1000,
+  };
+
+  // Prepaid credit packs
+  const AI_CREDIT_PACKS: Record<string, { amount_cents: number; label: string }> = {
+    pack_10: { amount_cents: 1000, label: '10 €' },
+    pack_25: { amount_cents: 2500, label: '25 €' },
+    pack_50: { amount_cents: 5000, label: '50 €' },
+  };
+
+  // Top up plan monthly allowance on first AI call of each month
+  async function maybeRefreshMonthlyCredits(tenantId: string, plan: string): Promise<void> {
+    const included = PLAN_AI_MONTHLY_CREDIT_CENTS[plan] ?? 0;
+    const { data: tenant } = await supabaseAdmin.from('tenants')
+      .select('ai_credit_last_refresh').eq('id', tenantId).single();
+    const lastRefresh = (tenant as any)?.ai_credit_last_refresh;
+    const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    if (!lastRefresh || lastRefresh < firstOfMonth) {
+      if (included > 0) {
+        await supabaseAdmin.rpc('increment_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
+      }
+      await supabaseAdmin.from('tenants')
+        .update({ ai_credit_last_refresh: new Date().toISOString() }).eq('id', tenantId);
+    }
+  }
+
+  // Deduct cost from tenant balance and log usage
+  async function deductAiCredit(params: {
+    tenantId: string; userId: string;
+    agentId: string | null; conversationId: string | null;
+    endpointType: 'agent' | 'suggest_articles';
+    inputTokens: number; outputTokens: number;
+  }): Promise<{ newBalance: number; costCents: number }> {
+    const costCents = calcCostEurCents(params.inputTokens, params.outputTokens);
+    await supabaseAdmin.rpc('deduct_ai_credits', { p_tenant_id: params.tenantId, p_amount_cents: costCents });
+    const { data: t } = await supabaseAdmin.from('tenants')
+      .select('ai_credit_balance_eur_cents').eq('id', params.tenantId).single();
+    const newBalance = (t as any)?.ai_credit_balance_eur_cents ?? 0;
+    await supabaseAdmin.from('agent_token_usage').insert({
+      tenant_id: params.tenantId, agent_id: params.agentId,
+      user_id: params.userId, conversation_id: params.conversationId,
+      tokens_used: params.inputTokens + params.outputTokens,
+      input_tokens: params.inputTokens, output_tokens: params.outputTokens,
+      cost_eur_cents: costCents, endpoint_type: params.endpointType,
+    });
+    return { newBalance, costCents };
+  }
+
   async function getTenantPlan(tenantId: string): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
     const { data } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at').eq('id', tenantId).single();
     if (!data) return { plan: 'trial', trial_ends_at: null, is_expired: false };
@@ -5308,8 +5368,9 @@ async function startServer() {
   app.get('/api/billing/status', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: tenant } = await supabaseAdmin.from('tenants').select('plan, trial_ends_at, stancer_customer_id').eq('id', tenantId).single();
-      const [{ count: pc }, { count: uc }, { count: dc }] = await Promise.all([
+      const { data: tenant } = await supabaseAdmin.from('tenants')
+        .select('plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents').eq('id', tenantId).single();
+      const [projectsRes, usersRes, docsRes] = await Promise.all([
         supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
         supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
         supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
@@ -5325,9 +5386,13 @@ async function startServer() {
         trial_ends_at,
         is_expired: !!is_expired,
         usage: {
-          projects:  { used: pc ?? 0, limit: limits.projects },
-          users:     { used: uc ?? 0, limit: limits.users },
-          documents: { used: dc ?? 0, limit: limits.documents },
+          projects:  { used: projectsRes.count ?? 0, limit: limits.projects },
+          users:     { used: usersRes.count ?? 0, limit: limits.users },
+          documents: { used: docsRes.count ?? 0, limit: limits.documents },
+        },
+        ai_credits: {
+          balance_eur_cents: (tenant as any)?.ai_credit_balance_eur_cents ?? 0,
+          included_monthly_cents: PLAN_AI_MONTHLY_CREDIT_CENTS[effectivePlan] ?? 0,
         },
       });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -5418,15 +5483,27 @@ async function startServer() {
           .maybeSingle();
 
         if (billingEvent) {
-          const { tenant_id, plan_id } = billingEvent as any;
-          const renewalDate = new Date();
-          renewalDate.setMonth(renewalDate.getMonth() + 1);
-          await supabaseAdmin.from('tenants').update({
-            plan: plan_id,
-            trial_ends_at: renewalDate.toISOString(),
-          }).eq('id', tenant_id);
-          await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
-          console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+          const { tenant_id, plan_id, event_type, credit_pack_id } = billingEvent as any;
+
+          if (event_type === 'credit_topup_created') {
+            // Credit top-up: add EUR cents to tenant balance
+            const pack = AI_CREDIT_PACKS[credit_pack_id];
+            if (pack) {
+              await supabaseAdmin.rpc('increment_ai_credits', { p_tenant_id: tenant_id, p_amount_cents: pack.amount_cents });
+              console.log(`[Stancer webhook] AI credits +${pack.amount_cents} cents for tenant ${tenant_id}`);
+            }
+            await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
+          } else {
+            // Plan activation
+            const renewalDate = new Date();
+            renewalDate.setMonth(renewalDate.getMonth() + 1);
+            await supabaseAdmin.from('tenants').update({
+              plan: plan_id,
+              trial_ends_at: renewalDate.toISOString(),
+            }).eq('id', tenant_id);
+            await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
+            console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+          }
         }
       }
 
@@ -5460,6 +5537,69 @@ async function startServer() {
         .limit(20);
       res.json(data || []);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/billing/credits/packs — available top-up packs
+  app.get('/api/billing/credits/packs', (_req: any, res: any) => {
+    res.json(Object.entries(AI_CREDIT_PACKS).map(([id, p]) => ({ id, amount_cents: p.amount_cents, label: p.label })));
+  });
+
+  // POST /api/billing/credits/checkout — buy a credit pack via Stancer
+  app.post('/api/billing/credits/checkout', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { pack_id } = req.body;
+      const pack = AI_CREDIT_PACKS[pack_id];
+      if (!pack) return res.status(400).json({ error: 'Pack invalide' });
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, stancer_customer_id').eq('id', tenantId).single();
+
+      let customerId = (tenant as any)?.stancer_customer_id;
+      if (!customerId) {
+        const customer = await stancerFetch('/customers', {
+          method: 'POST',
+          body: { name: (tenant as any)?.name || 'Client', email: req.user.email },
+        });
+        customerId = customer.id;
+        if (customerId) {
+          await supabaseAdmin.from('tenants').update({ stancer_customer_id: customerId }).eq('id', tenantId);
+        }
+      }
+
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const returnUrl = `${proto}://${host}/billing?payment_status=success&type=credit&pack=${pack_id}`;
+
+      const paymentBody: any = {
+        amount: pack.amount_cents,
+        currency: 'eur',
+        description: `ArchiOffice Crédits IA — ${pack.label}`,
+        return_url: returnUrl,
+      };
+      if (customerId) paymentBody.customer = customerId;
+
+      const payment = await stancerFetch('/payments', { method: 'POST', body: paymentBody });
+      if (!payment.id) {
+        console.error('[Stancer credits checkout]', payment);
+        return res.status(502).json({ error: 'Erreur Stancer lors de la création du paiement' });
+      }
+
+      await supabaseAdmin.from('billing_events').insert({
+        tenant_id: tenantId,
+        event_type: 'credit_topup_created',
+        stancer_payment_id: payment.id,
+        credit_pack_id: pack_id,
+        plan_id: null,
+        amount: pack.amount_cents,
+        status: 'pending',
+      });
+
+      const pubKey = process.env.STANCER_PUBLIC_KEY || '';
+      res.json({ payment_id: payment.id, payment_url: `https://payment.stancer.com/${pubKey}/${payment.id}` });
+    } catch (e: any) {
+      console.error('[Credits checkout error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ─── End Stancer Billing ───────────────────────────────────────────────────
@@ -5573,11 +5713,14 @@ async function startServer() {
 
   app.get('/api/admin/stats', requireSuperAdmin, async (_req: any, res: any) => {
     try {
-      const [{ data: tenants }, { data: revenue }] = await Promise.all([
+      const [{ data: tenants }, { data: revenue }, { data: aiRevenue }] = await Promise.all([
         supabaseAdmin.from('tenants').select('id, plan, trial_ends_at'),
-        supabaseAdmin.from('billing_events').select('amount, created_at').eq('status', 'paid'),
+        supabaseAdmin.from('billing_events').select('amount, created_at, event_type').eq('status', 'paid'),
+        supabaseAdmin.from('billing_events').select('amount, created_at').eq('status', 'paid').eq('event_type', 'credit_topup_created'),
       ]);
       const now = Date.now();
+      const thisMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 7);
+      const planRevenue = (revenue ?? []).filter((e: any) => e.event_type !== 'credit_topup_created');
       const stats = {
         total:      tenants?.length ?? 0,
         trial:      tenants?.filter(t => t.plan === 'trial').length ?? 0,
@@ -5585,10 +5728,12 @@ async function startServer() {
         pro:        tenants?.filter(t => t.plan === 'pro').length ?? 0,
         enterprise: tenants?.filter(t => t.plan === 'enterprise').length ?? 0,
         expired:    tenants?.filter(t => t.plan === 'trial' && t.trial_ends_at && new Date(t.trial_ends_at).getTime() < now).length ?? 0,
-        totalRevenue: ((revenue ?? []).reduce((s, e) => s + (e.amount ?? 0), 0) / 100),
+        totalRevenue:    (planRevenue.reduce((s: number, e: any) => s + (e.amount ?? 0), 0) / 100),
+        totalAiRevenue:  ((aiRevenue ?? []).reduce((s, e) => s + (e.amount ?? 0), 0) / 100),
+        aiRevenueThisMonth: ((aiRevenue ?? []).filter((e: any) => (e.created_at as string).slice(0, 7) === thisMonth).reduce((s, e) => s + (e.amount ?? 0), 0) / 100),
       };
       const monthlyRevenue: Record<string, number> = {};
-      for (const e of revenue ?? []) {
+      for (const e of planRevenue) {
         const month = (e.created_at as string).slice(0, 7);
         monthlyRevenue[month] = (monthlyRevenue[month] ?? 0) + (e.amount ?? 0) / 100;
       }
@@ -5600,7 +5745,7 @@ async function startServer() {
     try {
       const { data: tenants, error } = await supabaseAdmin
         .from('tenants')
-        .select('id, slug, name, plan, trial_ends_at, created_at')
+        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents')
         .order('created_at', { ascending: false });
       if (error) throw error;
       const enriched = await Promise.all((tenants ?? []).map(async (t) => {
@@ -5717,11 +5862,24 @@ async function startServer() {
   // ─── AI: CCTP Article Suggestions ──────────────────────────────────────────
   app.post("/api/ai/suggest-articles", async (req: any, res: any) => {
     try {
+      const tenantId = await getTenantId(req.user.id);
       const { lot_name, existing_articles = [] } = req.body;
       if (!lot_name) return res.status(400).json({ error: "lot_name is required" });
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
+
+      // Refresh monthly allowance if needed, then check balance
+      const { plan } = await getTenantPlan(tenantId);
+      await maybeRefreshMonthlyCredits(tenantId, plan);
+
+      const { data: tenantData } = await supabaseAdmin.from('tenants')
+        .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
+      const billingMode = (tenantData as any)?.agent_billing_mode ?? 'prepaid';
+      const balance = (tenantData as any)?.ai_credit_balance_eur_cents ?? 0;
+      if (billingMode === 'prepaid' && balance <= 0) {
+        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+      }
 
       const { GoogleGenAI } = await import("@google/genai");
       const genai = new GoogleGenAI({ apiKey });
@@ -5740,6 +5898,18 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const result = await genai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
       const text = result.text ?? '';
 
+      // Track token usage and deduct cost
+      const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
+      const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+      if (inputTokens + outputTokens > 0) {
+        await deductAiCredit({
+          tenantId, userId: req.user.id,
+          agentId: null, conversationId: null,
+          endpointType: 'suggest_articles',
+          inputTokens, outputTokens,
+        });
+      }
+
       // Extract JSON from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) return res.status(500).json({ error: "Invalid AI response format" });
@@ -5755,7 +5925,11 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
   const { registerAgentRoutes } = await import('@zinkh/archioffice-agents/server');
-  registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan);
+  registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
+    deductAiCredit,
+    maybeRefreshMonthlyCredits,
+    PLAN_AI_MONTHLY_CREDIT_CENTS,
+  });
 
 
   // ── Meetings ──────────────────────────────────────────────────────────────
