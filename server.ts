@@ -5387,14 +5387,27 @@ async function startServer() {
 
         if (billingEvent) {
           const { tenant_id, plan_id } = billingEvent as any;
-          const renewalDate = new Date();
-          renewalDate.setMonth(renewalDate.getMonth() + 1);
-          await supabaseAdmin.from('tenants').update({
-            plan: plan_id,
-            trial_ends_at: renewalDate.toISOString(),
-          }).eq('id', tenant_id);
           await supabaseAdmin.from('billing_events').update({ status: 'paid' }).eq('id', (billingEvent as any).id);
-          console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+
+          if (plan_id && plan_id.startsWith('tokens_')) {
+            // Token pack purchase — credit tokens
+            const pack = TOKEN_PACKS[plan_id];
+            if (pack) {
+              const { data: t } = await supabaseAdmin.from('tenants').select('agent_token_balance').eq('id', tenant_id).single();
+              const current = (t as any)?.agent_token_balance ?? 0;
+              await supabaseAdmin.from('tenants').update({ agent_token_balance: current + pack.tokens }).eq('id', tenant_id);
+              console.log(`[Stancer webhook] +${pack.tokens} tokens credited to tenant ${tenant_id}`);
+            }
+          } else {
+            // Plan subscription
+            const renewalDate = new Date();
+            renewalDate.setMonth(renewalDate.getMonth() + 1);
+            await supabaseAdmin.from('tenants').update({
+              plan: plan_id,
+              trial_ends_at: renewalDate.toISOString(),
+            }).eq('id', tenant_id);
+            console.log(`[Stancer webhook] Plan ${plan_id} activated for tenant ${tenant_id}`);
+          }
         }
       }
 
@@ -5431,6 +5444,137 @@ async function startServer() {
   });
 
   // ─── End Stancer Billing ───────────────────────────────────────────────────
+
+  // ─── Agent Token Packs ────────────────────────────────────────────────────
+
+  const TOKEN_PACKS: Record<string, { tokens: number; amount: number; label: string }> = {
+    tokens_500k:  { tokens: 500_000,   amount: 990,  label: 'Pack 500k tokens' },
+    tokens_2m:   { tokens: 2_000_000,  amount: 2990, label: 'Pack 2M tokens' },
+    tokens_5m:   { tokens: 5_000_000,  amount: 5990, label: 'Pack 5M tokens' },
+  };
+
+  // POST /api/billing/tokens/checkout — initiate Stancer payment for a token pack
+  app.post('/api/billing/tokens/checkout', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { pack_id } = req.body;
+      const pack = TOKEN_PACKS[pack_id];
+      if (!pack) return res.status(400).json({ error: 'Pack invalide' });
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, stancer_customer_id, plan').eq('id', tenantId).single();
+      if ((tenant as any)?.plan !== 'enterprise') {
+        return res.status(403).json({ error: 'Les tokens agents sont réservés au plan Enterprise.' });
+      }
+
+      let customerId = (tenant as any)?.stancer_customer_id;
+      if (!customerId) {
+        const customer = await stancerFetch('/customers', {
+          method: 'POST',
+          body: { name: (tenant as any)?.name || 'Client', email: req.user.email },
+        });
+        customerId = customer.id;
+        if (customerId) await supabaseAdmin.from('tenants').update({ stancer_customer_id: customerId }).eq('id', tenantId);
+      }
+
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const returnUrl = `${proto}://${host}/billing?payment_status=tokens_success&pack=${pack_id}`;
+
+      const paymentBody: any = {
+        amount: pack.amount,
+        currency: 'eur',
+        description: `ArchiOffice ${pack.label}`,
+        return_url: returnUrl,
+      };
+      if (customerId) paymentBody.customer = customerId;
+
+      const payment = await stancerFetch('/payments', { method: 'POST', body: paymentBody });
+      if (!payment.id) return res.status(502).json({ error: 'Erreur Stancer lors de la création du paiement' });
+
+      await supabaseAdmin.from('billing_events').insert({
+        tenant_id: tenantId,
+        event_type: 'token_pack_checkout',
+        stancer_payment_id: payment.id,
+        plan_id: pack_id,
+        amount: pack.amount,
+        status: 'pending',
+      });
+
+      const pubKey = process.env.STANCER_PUBLIC_KEY || '';
+      res.json({ payment_id: payment.id, payment_url: `https://payment.stancer.com/${pubKey}/${payment.id}` });
+    } catch (e: any) {
+      console.error('[Token checkout error]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/tokens/credit — admin manually credits tokens to their tenant
+  app.post('/api/billing/tokens/credit', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', req.user.id).single();
+      if ((profile as any)?.role !== 'admin') return res.status(403).json({ error: 'Réservé aux administrateurs' });
+
+      const { tokens, note } = req.body;
+      if (!Number.isInteger(tokens) || tokens <= 0) return res.status(400).json({ error: 'Nombre de tokens invalide' });
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('agent_token_balance').eq('id', tenantId).single();
+      const current = (tenant as any)?.agent_token_balance ?? 0;
+      const newBalance = current + tokens;
+
+      await supabaseAdmin.from('tenants').update({ agent_token_balance: newBalance }).eq('id', tenantId);
+      await supabaseAdmin.from('agent_token_usage').insert({
+        tenant_id: tenantId,
+        agent_id: null,
+        user_id: req.user.id,
+        conversation_id: null,
+        tokens_used: -tokens, // negative = credit
+        cost_eur_cents: 0,
+      });
+
+      console.log(`[Token credit] tenant=${tenantId} +${tokens} tokens (${note || 'admin credit'}) by user=${req.user.id}`);
+      res.json({ ok: true, new_balance: newBalance });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/billing/tokens/usage — monthly usage breakdown by agent
+  app.get('/api/billing/tokens/usage', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const { data: usage } = await supabaseAdmin
+        .from('agent_token_usage')
+        .select('tokens_used, created_at, agent_id, agents(name, avatar_color, avatar_initials)')
+        .eq('tenant_id', tenantId)
+        .gte('created_at', firstOfMonth)
+        .gt('tokens_used', 0)
+        .order('created_at', { ascending: false });
+
+      // Group by agent
+      const byAgent: Record<string, { name: string; color: string; initials: string; tokens: number }> = {};
+      for (const row of (usage as any[]) || []) {
+        const agent = (row.agents as any);
+        const key = row.agent_id ?? 'unknown';
+        if (!byAgent[key]) byAgent[key] = { name: agent?.name ?? 'Inconnu', color: agent?.avatar_color ?? '#999', initials: agent?.avatar_initials ?? '?', tokens: 0 };
+        byAgent[key].tokens += row.tokens_used;
+      }
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('agent_token_balance, agent_billing_mode').eq('id', tenantId).single();
+      res.json({
+        balance: (tenant as any)?.agent_token_balance ?? 0,
+        billing_mode: (tenant as any)?.agent_billing_mode ?? 'prepaid',
+        monthly_by_agent: Object.values(byAgent).sort((a: any, b: any) => b.tokens - a.tokens),
+        monthly_total: Object.values(byAgent).reduce((s: any, a: any) => s + a.tokens, 0),
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Extend webhook to handle token pack payments
+  // (already handled above in the Stancer webhook — we detect plan_id starting with "tokens_")
+
+  // ─── End Agent Token Packs ─────────────────────────────────────────────────
 
   // ─── Project Members (per-project access control) ─────────────────────────
   app.get("/api/projects/:id/members", async (req: any, res: any) => {

@@ -7,7 +7,7 @@ import type { PlanId } from '../lib/billing';
 import {
   IconCheck, IconLoader2, IconAlertTriangle, IconCreditCard,
   IconRocket, IconCircleCheck, IconRefresh, IconExternalLink,
-  IconChevronRight, IconClock,
+  IconChevronRight, IconClock, IconRobot, IconCoins, IconPlus,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -30,6 +30,19 @@ interface BillingEvent {
   status: string;
   created_at: string;
 }
+
+interface TokenUsage {
+  balance: number;
+  billing_mode: 'prepaid' | 'pay_per_use';
+  monthly_total: number;
+  monthly_by_agent: { name: string; color: string; initials: string; tokens: number }[];
+}
+
+const TOKEN_PACKS = [
+  { id: 'tokens_500k',  label: '500 000 tokens', tokens: 500_000,   price: '9,90 €',  color: 'bg-blue-600 hover:bg-blue-700' },
+  { id: 'tokens_2m',   label: '2 000 000 tokens', tokens: 2_000_000, price: '29,90 €', color: 'bg-violet-600 hover:bg-violet-700', highlight: true },
+  { id: 'tokens_5m',   label: '5 000 000 tokens', tokens: 5_000_000, price: '59,90 €', color: 'bg-amber-600 hover:bg-amber-700' },
+];
 
 function UsageBar({ label, used, limit }: { label: string; used: number; limit: number }) {
   const unlimited = limit >= 999;
@@ -87,6 +100,11 @@ export default function Billing() {
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState<PlanId | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [checkingOutPack, setCheckingOutPack] = useState<string | null>(null);
+  const [creditTokens, setCreditTokens] = useState('');
+  const [creditNote, setCreditNote] = useState('');
+  const [crediting, setCrediting] = useState(false);
 
   const fetchStatus = async () => {
     const res = await fetch('/api/billing/status');
@@ -102,13 +120,64 @@ export default function Billing() {
     if (Array.isArray(data)) setHistory(data);
   };
 
+  const fetchTokenUsage = async () => {
+    try {
+      const res = await fetch('/api/billing/tokens/usage');
+      if (res.ok) setTokenUsage(await res.json());
+    } catch {}
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('payment_status') === 'success') {
       setNotice({ type: 'success', msg: 'Paiement reçu ! Votre abonnement va être activé sous quelques instants.' });
     }
-    Promise.all([fetchStatus(), fetchHistory()]).finally(() => setLoading(false));
+    if (params.get('payment_status') === 'tokens_success') {
+      setNotice({ type: 'success', msg: 'Paiement reçu ! Vos tokens vont être crédités sous quelques instants.' });
+    }
+    Promise.all([fetchStatus(), fetchHistory(), fetchTokenUsage()]).finally(() => setLoading(false));
   }, [location.search]);
+
+  const handleTokenCheckout = async (packId: string) => {
+    setCheckingOutPack(packId);
+    try {
+      const res = await fetch('/api/billing/tokens/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack_id: packId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setNotice({ type: 'error', msg: data.error || 'Erreur lors du paiement' }); return; }
+      if (data.payment_url) window.location.href = data.payment_url;
+    } catch {
+      setNotice({ type: 'error', msg: 'Impossible de contacter le serveur de paiement.' });
+    } finally {
+      setCheckingOutPack(null);
+    }
+  };
+
+  const handleCreditTokens = async () => {
+    const amount = parseInt(creditTokens, 10);
+    if (!amount || amount <= 0) return;
+    setCrediting(true);
+    try {
+      const res = await fetch('/api/billing/tokens/credit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokens: amount, note: creditNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setNotice({ type: 'error', msg: data.error }); return; }
+      setNotice({ type: 'success', msg: `${amount.toLocaleString('fr-FR')} tokens crédités. Nouveau solde : ${data.new_balance.toLocaleString('fr-FR')}` });
+      setCreditTokens('');
+      setCreditNote('');
+      fetchTokenUsage();
+    } catch {
+      setNotice({ type: 'error', msg: 'Erreur lors du crédit de tokens.' });
+    } finally {
+      setCrediting(false);
+    }
+  };
 
   const handleCheckout = async (planId: PlanId) => {
     if (planId === 'enterprise') {
@@ -222,6 +291,148 @@ export default function Billing() {
           </div>
         )}
       </div>
+
+      {/* Agent Tokens section — only for enterprise */}
+      {(status?.plan === 'enterprise' || tokenUsage) && (
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+          <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+            <h2 className="font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+              <IconRobot size={18} />
+              Tokens Agents IA
+            </h2>
+            {tokenUsage && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
+                {tokenUsage.billing_mode === 'prepaid' ? 'Prépayé' : 'À l\'usage'}
+              </span>
+            )}
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Balance */}
+            {tokenUsage && (
+              <div className="flex items-start justify-between gap-6 flex-wrap">
+                <div>
+                  <p className="text-sm text-zinc-500 mb-1">Solde actuel</p>
+                  <p className="text-3xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                    <IconCoins size={24} className="text-amber-500" />
+                    {tokenUsage.balance.toLocaleString('fr-FR')}
+                    <span className="text-base font-normal text-zinc-400">tokens</span>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-zinc-500 mb-1">Consommés ce mois</p>
+                  <p className="text-xl font-semibold text-zinc-700 dark:text-zinc-300">
+                    {tokenUsage.monthly_total.toLocaleString('fr-FR')}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Balance gauge */}
+            {tokenUsage && tokenUsage.balance + tokenUsage.monthly_total > 0 && (
+              <div>
+                <div className="flex justify-between text-xs text-zinc-500 mb-1">
+                  <span>Utilisation du pack</span>
+                  <span>{Math.round((tokenUsage.monthly_total / (tokenUsage.balance + tokenUsage.monthly_total)) * 100)}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-amber-400 transition-all"
+                    style={{ width: `${Math.min(100, Math.round((tokenUsage.monthly_total / (tokenUsage.balance + tokenUsage.monthly_total)) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Usage by agent */}
+            {tokenUsage && tokenUsage.monthly_by_agent.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">Par agent ce mois</p>
+                <div className="space-y-2">
+                  {tokenUsage.monthly_by_agent.map((a, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0" style={{ background: a.color }}>
+                        {a.initials}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="text-zinc-700 dark:text-zinc-300 truncate">{a.name}</span>
+                          <span className="text-zinc-500 shrink-0 ml-2">{a.tokens.toLocaleString('fr-FR')}</span>
+                        </div>
+                        <div className="h-1 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.round((a.tokens / tokenUsage.monthly_total) * 100)}%`, background: a.color }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Token packs */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Recharger</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {TOKEN_PACKS.map(pack => (
+                  <div key={pack.id} className={cn('relative rounded-xl border p-4 flex flex-col gap-2', pack.highlight ? 'border-violet-300 dark:border-violet-700' : 'border-zinc-200 dark:border-zinc-700')}>
+                    {pack.highlight && (
+                      <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-violet-600 text-white text-[10px] font-semibold rounded-full whitespace-nowrap">
+                        Le plus populaire
+                      </span>
+                    )}
+                    <div>
+                      <p className="font-semibold text-zinc-900 dark:text-white text-sm">{pack.label}</p>
+                      <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1">{pack.price}</p>
+                    </div>
+                    <p className="text-[11px] text-zinc-400">{(pack.price.replace(',', '.').replace(' €', '').replace('€', '')).trim()} € TTC · {(pack.tokens / 1_000_000).toFixed(pack.tokens < 1_000_000 ? 1 : 0)}M tokens</p>
+                    <button
+                      onClick={() => handleTokenCheckout(pack.id)}
+                      disabled={checkingOutPack !== null}
+                      className={cn('mt-auto w-full py-1.5 px-3 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-1.5 transition-colors', pack.color)}
+                    >
+                      {checkingOutPack === pack.id ? <IconLoader2 size={14} className="animate-spin" /> : <IconCoins size={14} />}
+                      Acheter
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Admin credit */}
+            {(currentUser as any)?.role === 'admin' && (
+              <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3 flex items-center gap-1.5">
+                  <IconPlus size={12} /> Crédit manuel (admin)
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="number"
+                    value={creditTokens}
+                    onChange={e => setCreditTokens(e.target.value)}
+                    placeholder="Nombre de tokens"
+                    className="flex-1 min-w-[140px] px-3 py-1.5 rounded-lg border text-sm bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white outline-none focus:border-blue-400"
+                  />
+                  <input
+                    type="text"
+                    value={creditNote}
+                    onChange={e => setCreditNote(e.target.value)}
+                    placeholder="Motif (optionnel)"
+                    className="flex-1 min-w-[140px] px-3 py-1.5 rounded-lg border text-sm bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white outline-none focus:border-blue-400"
+                  />
+                  <button
+                    onClick={handleCreditTokens}
+                    disabled={!creditTokens || crediting}
+                    className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                  >
+                    {crediting ? <IconLoader2 size={14} className="animate-spin" /> : <IconPlus size={14} />}
+                    Créditer
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Plan cards */}
       <div>
