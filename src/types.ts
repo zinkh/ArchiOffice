@@ -921,6 +921,10 @@ export interface MafProjectData {
   cotisationProvisionnelle?: number;
   tauxCotisationPermil?: number;
   notes?: string;
+  statut?: 'brouillon' | 'declaree';
+  sourceSituationId?: string;
+  sourceSituationDate?: string;
+  sourceSituationNumero?: number;
   createdAt?: string;
   updatedAt?: string;
   // Champs projet joints (lecture seule, depuis projects)

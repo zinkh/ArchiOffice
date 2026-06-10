@@ -64,3 +64,17 @@ CREATE POLICY "tenant_isolation" ON maf_project_data
 
 CREATE INDEX IF NOT EXISTS maf_project_data_tenant_year
   ON maf_project_data(tenant_id, declaration_year);
+
+-- ── 4. Statut de la déclaration par ligne ────────────────────────────────────
+ALTER TABLE maf_project_data
+  ADD COLUMN IF NOT EXISTS statut TEXT NOT NULL DEFAULT 'brouillon';
+  -- 'brouillon' | 'declaree'
+  -- Quand statut = 'declaree' la ligne est verrouillée en écriture
+  -- et son montant_cumul_fin_annee sert de B pour l'année suivante
+
+-- ── 5. Lien vers la situation source (traçabilité) ───────────────────────────
+ALTER TABLE maf_project_data
+  ADD COLUMN IF NOT EXISTS source_situation_id TEXT,
+  ADD COLUMN IF NOT EXISTS source_situation_date DATE,
+  ADD COLUMN IF NOT EXISTS source_situation_numero INTEGER;
+  -- Renseignés automatiquement lors du calcul "depuis les situations"

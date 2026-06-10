@@ -6257,6 +6257,100 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     });
   });
 
+  // GET /api/maf/v1/situations-cumul — Calcul A depuis les situations de travaux
+  app.get('/api/maf/v1/situations-cumul', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, year } = req.query as { project_id: string; year: string };
+      if (!project_id || !year) return res.status(400).json({ error: 'project_id and year required' });
+      const yearNum = parseInt(year);
+      const endOfYear = `${yearNum}-12-31`;
+
+      // Toutes les situations validées/payées jusqu'au 31/12 de l'année
+      const { data: situations } = await supabaseAdmin
+        .from('situations')
+        .select('id, numero_situation, date_situation, etat')
+        .eq('tenant_id', tenantId)
+        .eq('project_id', project_id)
+        .in('etat', ['Validée', 'Payée'])
+        .lte('date_situation', endOfYear)
+        .order('numero_situation', { ascending: true });
+
+      let montantCumulFinAnnee = 0;
+      let lastSituation: any = null;
+
+      if (situations?.length) {
+        // Agréger les montant_situation de tous les détails
+        const ids = situations.map((s: any) => s.id);
+        const { data: details } = await supabaseAdmin
+          .from('detail_situations')
+          .select('montant_situation')
+          .eq('tenant_id', tenantId)
+          .in('situation_id', ids);
+        montantCumulFinAnnee = details?.reduce((sum: number, d: any) => sum + (Number(d.montant_situation) || 0), 0) ?? 0;
+        lastSituation = situations[situations.length - 1];
+      }
+
+      // B = montant_cumul_fin_annee déclaré pour l'année N-1 sur ce projet (intercalaires avec travaux)
+      const { data: prevEntry } = await supabaseAdmin
+        .from('maf_project_data')
+        .select('montant_cumul_fin_annee')
+        .eq('tenant_id', tenantId)
+        .eq('project_id', project_id)
+        .eq('declaration_year', yearNum - 1)
+        .in('intercalaire', ['jaune', 'ami', 'grand_chantier'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const montantCumulAnneePrecedente = Number(prevEntry?.montant_cumul_fin_annee ?? 0);
+
+      res.json({
+        montantCumulFinAnnee,
+        montantCumulAnneePrecedente,
+        situationCount: situations?.length ?? 0,
+        source: lastSituation ? {
+          situationId: lastSituation.id,
+          situationNumero: lastSituation.numero_situation,
+          situationDate: lastSituation.date_situation,
+        } : null,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PATCH /api/maf/v1/entries/:id/statut — Changer le statut (brouillon ↔ declaree)
+  app.patch('/api/maf/v1/entries/:id/statut', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { statut } = req.body as { statut: 'brouillon' | 'declaree' };
+      if (!['brouillon', 'declaree'].includes(statut)) return res.status(400).json({ error: 'statut invalide' });
+      const { data, error } = await supabaseAdmin
+        .from('maf_project_data')
+        .update({ statut, updated_at: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single();
+      if (error) return res.status(400).json({ error: error.message });
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/maf/v1/suivi — Toutes les années pour traçabilité pluriannuelle
+  app.get('/api/maf/v1/suivi', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('maf_project_data')
+        .select('*, project:projects(id, name, client, taux_mission, part_interet, categorie_projet, surface_plancher)')
+        .eq('tenant_id', tenantId)
+        .order('declaration_year', { ascending: false })
+        .order('created_at', { ascending: false });
+      if (error) return res.status(400).json({ error: error.message });
+      res.json(data ?? []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // GET /api/maf/v1/spec — OpenAPI spec
   app.get('/api/maf/v1/spec', (_req: any, res: any) => {
     res.json({
