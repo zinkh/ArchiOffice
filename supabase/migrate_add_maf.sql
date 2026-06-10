@@ -28,7 +28,7 @@ ALTER TABLE settings
 CREATE TABLE IF NOT EXISTS maf_project_data (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   declaration_year INTEGER NOT NULL DEFAULT 2025,
 
   intercalaire TEXT NOT NULL DEFAULT 'jaune',
