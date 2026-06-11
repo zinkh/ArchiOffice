@@ -1125,6 +1125,28 @@ async function startServer() {
     if (req.headers['x-forwarded-proto'] === 'http') {
       return res.redirect(301, `https://${req.headers.host}${req.url}`);
     }
+    // Canonicalize www → non-www so all assets and the HTML share the same origin.
+    // Without this, loading archimanager.fr then fetching www.archimanager.fr assets
+    // (or vice-versa) is a cross-origin request and the browser blocks it with CORS.
+    const host = req.headers.host || '';
+    if (host.startsWith('www.')) {
+      const canonical = host.slice(4);
+      return res.redirect(301, `https://${canonical}${req.url}`);
+    }
+    next();
+  });
+
+  // CORS headers for /api routes — needed if the frontend is ever served from a
+  // different origin (e.g. local dev against production API, or future mobile app).
+  app.use('/api', (req: any, res: any, next: any) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
   });
 
