@@ -1,6 +1,7 @@
 import type { AgentRow } from '../types.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
+import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
@@ -151,8 +152,9 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: agentId } = req.params;
-      const { message } = req.body;
+      const { message, document_ids } = req.body;
       if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+      const attachedDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
 
       const { plan } = await getTenantPlan(tenantId);
       if (plan !== 'enterprise') {
@@ -184,7 +186,7 @@ export function registerAgentRoutes(
       const convId = (conv as any).id;
 
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, (agent as any).context_scopes || []);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, (agent as any).context_scopes || [], attachedDocumentIds);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
       const apiKey = process.env.GEMINI_API_KEY;
@@ -204,10 +206,15 @@ export function registerAgentRoutes(
         history: geminiHistory,
       });
       const result = await chat.sendMessage({ message });
-      const reply = result.text ?? '';
+      const rawText = result.text ?? '';
 
       const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
       const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+
+      // Extract structured artifact if the model embedded one in the response
+      const { cleanText, spec } = parseArtifactFromText(rawText);
+      const reply = cleanText;
+      const artifact = spec ? generateArtifact(spec) : undefined;
 
       let newBalance = balance;
       let costCents = 0;
@@ -245,6 +252,7 @@ export function registerAgentRoutes(
         tokens_used: inputTokens + outputTokens,
         cost_eur_cents: costCents,
         remaining_balance: newBalance,
+        ...(artifact ? { artifact } : {}),
       });
     } catch (e: any) {
       console.error('[agent chat error]', e.message);
