@@ -22,12 +22,14 @@ const PLAN_COLORS: Record<string, string> = {
 interface Stats {
   total: number; trial: number; starter: number; pro: number;
   enterprise: number; expired: number; totalRevenue: number;
+  totalAiRevenue?: number; aiRevenueThisMonth?: number;
 }
 
 interface TenantRow {
   id: string; slug: string; name: string; plan: string;
   trial_ends_at: string | null; created_at: string;
   user_count: number; project_count: number;
+  ai_credit_balance_eur_cents?: number;
 }
 
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -174,7 +176,7 @@ export default function AdminDashboard() {
       )}
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         <KpiCard label="Cabinets" value={stats?.total ?? '—'} />
         <KpiCard label="Essai" value={stats?.trial ?? '—'} sub={`${stats?.expired ?? 0} expirés`} />
         <KpiCard label="Starter" value={stats?.starter ?? '—'} />
@@ -183,6 +185,14 @@ export default function AdminDashboard() {
         <KpiCard
           label="Revenus totaux"
           value={stats ? `${stats.totalRevenue.toFixed(0)} €` : '—'}
+        />
+        <KpiCard
+          label="Revenus IA total"
+          value={stats?.totalAiRevenue != null ? `${(stats.totalAiRevenue / 100).toFixed(0)} €` : '—'}
+        />
+        <KpiCard
+          label="Revenus IA ce mois"
+          value={stats?.aiRevenueThisMonth != null ? `${(stats.aiRevenueThisMonth / 100).toFixed(0)} €` : '—'}
         />
       </div>
 
@@ -252,7 +262,7 @@ export default function AdminDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b" style={{ borderColor: 'var(--tblr-border)' }}>
-                  {['Cabinet', 'Plan', 'Utilisateurs', 'Projets', 'Essai expire', 'Créé le', 'Changer plan'].map(h => (
+                  {['Cabinet', 'Plan', 'Utilisateurs', 'Projets', 'Crédits IA', 'Essai expire', 'Créé le', 'Changer plan'].map(h => (
                     <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
                       {h}
                     </th>
@@ -262,7 +272,7 @@ export default function AdminDashboard() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-10 text-sm" style={{ color: 'var(--tblr-muted)' }}>
+                    <td colSpan={8} className="text-center py-10 text-sm" style={{ color: 'var(--tblr-muted)' }}>
                       Aucun cabinet trouvé
                     </td>
                   </tr>
@@ -291,6 +301,11 @@ export default function AdminDashboard() {
                           <IconBuildingSkyscraper size={13} style={{ color: 'var(--tblr-muted)' }} />{t.project_count}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-[12px] font-mono" style={{ color: 'var(--tblr-text)' }}>
+                        {t.ai_credit_balance_eur_cents != null
+                          ? `${(t.ai_credit_balance_eur_cents / 100).toFixed(2)} €`
+                          : <span style={{ color: 'var(--tblr-muted)' }}>—</span>}
+                      </td>
                       <td className="px-4 py-3">
                         {t.plan === 'trial' ? (
                           <span className={cn('text-[12px]', trialExpired ? 'text-red-500 font-semibold' : '')} style={trialExpired ? {} : { color: 'var(--tblr-muted)' }}>
@@ -318,7 +333,7 @@ export default function AdminDashboard() {
         {!loading && (
           <div className="px-4 py-2 border-t text-[11px]" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
             <IconCreditCard size={11} className="inline mr-1" />
-            {filtered.length} cabinet{filtered.length !== 1 ? 's' : ''} affiché{filtered.length !== 1 ? 's' : ''}
+              {filtered.length} cabinet{filtered.length !== 1 ? 's' : ''} affiché{filtered.length !== 1 ? 's' : ''}
             {tenants.length !== filtered.length && ` sur ${tenants.length}`}
           </div>
         )}

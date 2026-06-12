@@ -67,6 +67,15 @@ export async function buildAgentContext(
     );
   }
 
+  // Fetch specific documents attached to this message (overrides scope-based recentDocuments)
+  if (attachedDocumentIds.length > 0) {
+    fetches.push(
+      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at, file_url')
+        .eq('tenant_id', tenantId).in('id', attachedDocumentIds)
+        .then((r: any) => { ctx.recentDocuments = r.data || []; })
+    );
+  }
+
   await Promise.all(fetches);
 
   // RAG — fetch content of explicitly attached documents

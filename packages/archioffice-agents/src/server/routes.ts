@@ -5,12 +5,25 @@ import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
+type DeductAiCreditFn = (params: {
+  tenantId: string; userId: string;
+  agentId: string | null; conversationId: string | null;
+  endpointType: 'agent' | 'suggest_articles';
+  inputTokens: number; outputTokens: number;
+}) => Promise<{ newBalance: number; costCents: number }>;
+
+interface BillingHelpers {
+  deductAiCredit: DeductAiCreditFn;
+  maybeRefreshMonthlyCredits: (tenantId: string, plan: string) => Promise<void>;
+  PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
+}
 
 export function registerAgentRoutes(
   app: any,
   supabaseAdmin: any,
   getTenantId: GetTenantId,
-  getTenantPlan: GetTenantPlan
+  getTenantPlan: GetTenantPlan,
+  billing?: BillingHelpers
 ): void {
 
   // GET /api/agent-templates
@@ -85,11 +98,17 @@ export function registerAgentRoutes(
   app.get('/api/agents/token-balance', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: tenant } = await supabaseAdmin.from('tenants').select('agent_token_balance, agent_billing_mode').eq('id', tenantId).single();
+      const { data: tenant } = await supabaseAdmin.from('tenants')
+        .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
       const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      const { data: usage } = await supabaseAdmin.from('agent_token_usage').select('tokens_used').eq('tenant_id', tenantId).gte('created_at', firstOfMonth);
-      const monthlyUsed = ((usage as any) || []).reduce((sum: number, r: any) => sum + r.tokens_used, 0);
-      res.json({ balance: (tenant as any)?.agent_token_balance ?? 0, billing_mode: (tenant as any)?.agent_billing_mode ?? 'prepaid', monthly_used: monthlyUsed });
+      const { data: usage } = await supabaseAdmin.from('agent_token_usage')
+        .select('cost_eur_cents').eq('tenant_id', tenantId).gte('created_at', firstOfMonth);
+      const monthlyUsedCents = ((usage as any) || []).reduce((sum: number, r: any) => sum + (r.cost_eur_cents ?? 0), 0);
+      res.json({
+        balance_eur_cents: (tenant as any)?.ai_credit_balance_eur_cents ?? 0,
+        billing_mode: (tenant as any)?.agent_billing_mode ?? 'prepaid',
+        monthly_used_cents: monthlyUsedCents,
+      });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -142,11 +161,17 @@ export function registerAgentRoutes(
         return res.status(403).json({ error: 'Plan Enterprise requis pour accéder aux agents IA.', code: 'ENTERPRISE_REQUIRED' });
       }
 
-      const { data: tenantData } = await supabaseAdmin.from('tenants').select('agent_token_balance, agent_billing_mode').eq('id', tenantId).single();
+      // Refresh monthly allowance if billing helpers available
+      if (billing) {
+        await billing.maybeRefreshMonthlyCredits(tenantId, plan);
+      }
+
+      const { data: tenantData } = await supabaseAdmin.from('tenants')
+        .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
       const billingMode = (tenantData as any)?.agent_billing_mode ?? 'prepaid';
-      const balance = (tenantData as any)?.agent_token_balance ?? 0;
+      const balance = (tenantData as any)?.ai_credit_balance_eur_cents ?? 0;
       if (billingMode === 'prepaid' && balance <= 0) {
-        return res.status(402).json({ error: 'Solde de tokens épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
       }
 
       const { data: agent, error: agentErr } = await supabaseAdmin.from('agents').select('*').eq('id', agentId).eq('tenant_id', tenantId).eq('is_active', true).single();
@@ -182,15 +207,35 @@ export function registerAgentRoutes(
       });
       const result = await chat.sendMessage({ message });
       const rawText = result.text ?? '';
-      const tokensUsed = (result as any).usageMetadata?.totalTokenCount ?? 0;
 
-      // Parse and generate artifact if present
+      const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
+      const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+
       const { cleanText, spec } = parseArtifactFromText(rawText);
       const reply = cleanText;
       const artifact = spec ? generateArtifact(spec) : undefined;
 
-      if (tokensUsed > 0) {
-        await supabaseAdmin.from('tenants').update({ agent_token_balance: Math.max(0, balance - tokensUsed) }).eq('id', tenantId);
+      let newBalance = balance;
+      let costCents = 0;
+
+      if ((inputTokens + outputTokens) > 0 && billing) {
+        const deducted = await billing.deductAiCredit({
+          tenantId, userId: req.user.id,
+          agentId, conversationId: convId,
+          endpointType: 'agent',
+          inputTokens, outputTokens,
+        });
+        newBalance = deducted.newBalance;
+        costCents = deducted.costCents;
+      } else if ((inputTokens + outputTokens) > 0) {
+        await supabaseAdmin.from('tenants')
+          .update({ agent_token_balance: Math.max(0, ((tenantData as any)?.agent_token_balance ?? 0) - (inputTokens + outputTokens)) })
+          .eq('id', tenantId);
+        await supabaseAdmin.from('agent_token_usage').insert({
+          tenant_id: tenantId, agent_id: agentId,
+          user_id: req.user.id, conversation_id: convId,
+          tokens_used: inputTokens + outputTokens,
+        });
       }
 
       await supabaseAdmin.from('agent_messages').insert([
@@ -200,11 +245,13 @@ export function registerAgentRoutes(
 
       await supabaseAdmin.from('agent_conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId);
 
-      if (tokensUsed > 0) {
-        await supabaseAdmin.from('agent_token_usage').insert({ tenant_id: tenantId, agent_id: agentId, user_id: req.user.id, conversation_id: convId, tokens_used: tokensUsed });
-      }
-
-      res.json({ reply, tokens_used: tokensUsed, remaining_balance: Math.max(0, balance - tokensUsed), artifact });
+      res.json({
+        reply,
+        tokens_used: inputTokens + outputTokens,
+        cost_eur_cents: costCents,
+        remaining_balance: newBalance,
+        ...(artifact ? { artifact } : {}),
+      });
     } catch (e: any) {
       console.error('[agent chat error]', e.message);
       res.status(500).json({ error: `Erreur lors de la communication avec l'agent : ${e.message}` });
