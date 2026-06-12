@@ -21,6 +21,7 @@ export async function buildAgentContext(
     upcomingMeetings: [],
     recentDocuments: [],
     tasks: [],
+    documentContents: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -50,7 +51,7 @@ export async function buildAgentContext(
   }
   if (scopes.includes('documents')) {
     fetches.push(
-      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at')
+      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at, file_url')
         .eq('tenant_id', tenantId).order('uploaded_at', { ascending: false }).limit(15)
         .then((r: any) => { ctx.recentDocuments = r.data || []; })
     );
@@ -67,7 +68,7 @@ export async function buildAgentContext(
   // Fetch specific documents attached to this message (overrides scope-based recentDocuments)
   if (attachedDocumentIds.length > 0) {
     fetches.push(
-      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at')
+      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at, file_url')
         .eq('tenant_id', tenantId).in('id', attachedDocumentIds)
         .then((r: any) => { ctx.recentDocuments = r.data || []; })
     );
