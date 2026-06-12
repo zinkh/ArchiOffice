@@ -53,6 +53,14 @@ export interface AgentChatResponse {
   reply: string;
   tokens_used: number;
   remaining_balance: number;
+  artifact?: AgentArtifact;
+}
+
+export interface AgentArtifact {
+  type: 'excel' | 'csv' | 'docx';
+  filename: string;
+  data: string; // base64
+  mimeType: string;
 }
 
 // Internal server-side types
