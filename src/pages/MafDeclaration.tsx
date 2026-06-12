@@ -270,15 +270,15 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
                     disabled={isLocked}
                     onChange={v => setForm((f: any) => ({ ...f, retraitArgiles: v }))} />
                   <FormCheckbox label="Appel à un BET de structure"
-                    checked={!!(form as any).betStructure ?? !!linkedProject?.bet_structure}
+                    checked={!!((form as any).betStructure ?? linkedProject?.bet_structure)}
                     disabled={isLocked}
                     onChange={v => setForm((f: any) => ({ ...f, betStructure: v }))} />
                   <FormCheckbox label="Étude de sol"
-                    checked={!!(form as any).etudeSol ?? !!linkedProject?.etude_sol}
+                    checked={!!((form as any).etudeSol ?? linkedProject?.etude_sol)}
                     disabled={isLocked}
                     onChange={v => setForm((f: any) => ({ ...f, etudeSol: v }))} />
                   <FormCheckbox label="Mission réalisée sous BIM"
-                    checked={!!(form as any).missionBim ?? !!linkedProject?.mission_bim}
+                    checked={!!((form as any).missionBim ?? linkedProject?.mission_bim)}
                     disabled={isLocked}
                     onChange={v => setForm((f: any) => ({ ...f, missionBim: v }))} />
                   <FormField label="Adresse du chantier"
