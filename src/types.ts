@@ -167,6 +167,20 @@ export interface Project {
   date_modification?: string;
   site_postcode?: string;
   site_city?: string;
+  // MAF fields
+  doc_date?: string;
+  date_fin_reelle?: string;
+  date_depot_pc?: string;
+  num_permis_construire?: string;
+  sismicite?: string;
+  retrait_argiles?: string;
+  bet_structure?: boolean;
+  etude_sol?: boolean;
+  mission_bim?: boolean;
+  type_moa?: string;
+  nature_travaux_maf?: string;
+  taux_mission?: number;
+  part_interet?: number;
 }
 
 export interface OrdreDeService {
@@ -880,6 +894,64 @@ export interface NoteHonoraireSousTraitant {
   tva_rate: number;
   montant_ttc: number;
   paiement_direct_moa: boolean;
+}
+
+// ─── MAF — Déclaration des activités professionnelles ────────────────────────
+
+export type MafIntercalaire =
+  | 'jaune' | 'vert' | 'ami' | 'grand_chantier'
+  | 'violet' | 'orange_clair' | 'orange_fonce'
+  | 'bleu' | 'rose' | 'tabac' | 'gris' | 'puc';
+
+export interface MafProjectData {
+  id: string;
+  tenantId: string;
+  projectId?: string;
+  declarationYear: number;
+  intercalaire: MafIntercalaire;
+  // Financier annuel
+  montantCumulFinAnnee?: number;
+  montantCumulAnneePrecedente?: number;
+  // Honoraires
+  honorairesHt?: number;
+  // Cas particuliers
+  pucAssureur?: string;
+  conventionSpeciale?: string;
+  accordGarantieMaf?: boolean;
+  cotisationProvisionnelle?: number;
+  tauxCotisationPermil?: number;
+  notes?: string;
+  statut?: 'brouillon' | 'declaree';
+  sourceSituationId?: string;
+  sourceSituationDate?: string;
+  sourceSituationNumero?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  // Champs projet joints (lecture seule, depuis projects)
+  project?: Partial<Project>;
+}
+
+export interface MafCostResult {
+  montantM: number;
+  assiette: number;
+  cotisationEstimee: number;
+  intercalaire: MafIntercalaire;
+  label: string;
+  tauxPermil: number;
+}
+
+export interface MafSummaryIntercalaire {
+  entries: (MafProjectData & { project?: Partial<Project> })[];
+  totalAssiette: number;
+  cotisationEstimee: number;
+  tauxPermil: number;
+}
+
+export interface MafSummary {
+  year: number;
+  numeroAdherent?: string;
+  intercalaires: Partial<Record<MafIntercalaire, MafSummaryIntercalaire>>;
+  cotisationTotaleEstimee: number;
 }
 
 export interface NoteHonoraires {

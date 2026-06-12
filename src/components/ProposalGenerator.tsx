@@ -150,11 +150,24 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
   const [isGenerating, setIsGenerating] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
   const [agencyName, setAgencyName] = useState('');
+  const [mafPluginEnabled, setMafPluginEnabled] = useState(false);
+  const [showMafCost, setShowMafCost] = useState(false);
+  const [mafTauxContratPermil, setMafTauxContratPermil] = useState(0);
+  const [mafTauxMission, setMafTauxMission] = useState(100);
+  const [mafPartInteret, setMafPartInteret] = useState(100);
+  const [mafIsMaisonInd, setMafIsMaisonInd] = useState(false);
 
   useEffect(() => {
     fetch('/api/settings')
       .then(r => r.ok ? r.json() : null)
-      .then(s => { if (s && !s.error) { if (s.logoUrl) setLogoUrl(s.logoUrl); if (s.agencyName) setAgencyName(s.agencyName); } })
+      .then(s => {
+        if (s && !s.error) {
+          if (s.logoUrl) setLogoUrl(s.logoUrl);
+          if (s.agencyName) setAgencyName(s.agencyName);
+          if (s.maf_enabled) setMafPluginEnabled(true);
+          if (s.maf_taux_contrat_permil) setMafTauxContratPermil(parseFloat(s.maf_taux_contrat_permil) || 0);
+        }
+      })
       .catch(() => {});
   }, []);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -248,6 +261,15 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
   };
 
   const { discount, totalHT, tva, totalTTC } = calculateFinancials();
+
+  const mafCotisationEstimee = (() => {
+    if (!showMafCost || !mafTauxContratPermil) return null;
+    const worksHT = parseFloat(data.project.estimatedWorksCost) || 0;
+    if (!worksHT) return null;
+    const montantM = mafIsMaisonInd ? 1714 * worksHT : worksHT;
+    const assiette = montantM * (mafTauxMission / 100) * (mafPartInteret / 100);
+    return assiette * mafTauxContratPermil / 1000;
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden">
@@ -485,6 +507,13 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                     <span>Total TTC :</span>
                     <span>{totalTTC.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
                   </div>
+                  {mafCotisationEstimee !== null && (
+                    <div className="mt-3 p-2 rounded text-[8pt]" style={{ background: '#fff4e6', border: '1px solid #f59e0b', color: '#92400e' }}>
+                      <div className="font-semibold">Coût assurance MAF estimé :</div>
+                      <div className="font-bold text-[10pt]">{mafCotisationEstimee.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € HT</div>
+                      <div className="text-[7pt] opacity-75 mt-0.5">Assiette M×T×P — taux {mafTauxContratPermil} ‰</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer Legal */}
@@ -734,6 +763,61 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   </div>
                 </div>
               </section>
+
+              {/* MAF Insurance Cost */}
+              {mafPluginEnabled && (
+                <section className="space-y-4">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Assurance MAF</h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="showMafCost"
+                      checked={showMafCost}
+                      onChange={e => setShowMafCost(e.target.checked)}
+                      className="w-4 h-4 text-orange-500 rounded border-zinc-300 focus:ring-orange-500"
+                    />
+                    <label htmlFor="showMafCost" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Afficher le coût assurance MAF</label>
+                  </div>
+                  {showMafCost && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-zinc-500">Taux de mission T (%)</label>
+                        <select
+                          value={mafTauxMission}
+                          onChange={e => setMafTauxMission(parseInt(e.target.value))}
+                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                        >
+                          <option value={30}>30 % — Mission PC seule</option>
+                          <option value={60}>60 % — Mission partielle</option>
+                          <option value={100}>100 % — Mission complète</option>
+                          <option value={110}>110 % — Mission complète + OPC</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-zinc-500">Part d'intérêt P (%)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={mafPartInteret}
+                          onChange={e => setMafPartInteret(parseFloat(e.target.value) || 100)}
+                          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="md:col-span-2 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="mafMaisonInd"
+                          checked={mafIsMaisonInd}
+                          onChange={e => setMafIsMaisonInd(e.target.checked)}
+                          className="w-4 h-4 text-orange-500 rounded border-zinc-300"
+                        />
+                        <label htmlFor="mafMaisonInd" className="text-xs text-zinc-600 dark:text-zinc-400">Maison individuelle (coût moyen MAF 1 714 €/m²)</label>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
 
               {/* Missions */}
               <section className="space-y-4">

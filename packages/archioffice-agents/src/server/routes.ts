@@ -211,7 +211,6 @@ export function registerAgentRoutes(
       const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
       const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
 
-      // Extract structured artifact if the model embedded one in the response
       const { cleanText, spec } = parseArtifactFromText(rawText);
       const reply = cleanText;
       const artifact = spec ? generateArtifact(spec) : undefined;
@@ -229,7 +228,6 @@ export function registerAgentRoutes(
         newBalance = deducted.newBalance;
         costCents = deducted.costCents;
       } else if ((inputTokens + outputTokens) > 0) {
-        // Fallback: legacy raw token deduction if no billing helpers
         await supabaseAdmin.from('tenants')
           .update({ agent_token_balance: Math.max(0, ((tenantData as any)?.agent_token_balance ?? 0) - (inputTokens + outputTokens)) })
           .eq('id', tenantId);

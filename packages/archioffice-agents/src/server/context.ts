@@ -1,5 +1,7 @@
 import type { AgentContext } from '../types.js';
 
+const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
@@ -75,5 +77,35 @@ export async function buildAgentContext(
   }
 
   await Promise.all(fetches);
+
+  // RAG — fetch content of explicitly attached documents
+  if (attachedDocumentIds.length > 0) {
+    const { data: docs } = await supabaseAdmin
+      .from('documents')
+      .select('id, name, file_url')
+      .eq('tenant_id', tenantId)
+      .in('id', attachedDocumentIds);
+
+    const contentFetches = ((docs as any[]) || []).map(async (doc: any) => {
+      try {
+        const res = await fetch(doc.file_url);
+        if (!res.ok) return;
+        const contentType = res.headers.get('content-type') ?? '';
+        // Only inject text-based content
+        if (!contentType.includes('text') && !contentType.includes('json') && !contentType.includes('csv') && !contentType.includes('xml')) return;
+        const text = await res.text();
+        ctx.documentContents.push({
+          id: doc.id,
+          name: doc.name,
+          content: text.slice(0, MAX_DOC_BYTES),
+        });
+      } catch {
+        // skip unreadable documents silently
+      }
+    });
+
+    await Promise.all(contentFetches);
+  }
+
   return ctx;
 }
