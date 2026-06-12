@@ -4,7 +4,8 @@ export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
   userId: string,
-  scopes: string[]
+  scopes: string[],
+  attachedDocumentIds: string[] = []
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -60,6 +61,15 @@ export async function buildAgentContext(
         .eq('tenant_id', tenantId).neq('status', 'done')
         .order('due_date', { ascending: true }).limit(20)
         .then((r: any) => { ctx.tasks = r.data || []; })
+    );
+  }
+
+  // Fetch specific documents attached to this message (overrides scope-based recentDocuments)
+  if (attachedDocumentIds.length > 0) {
+    fetches.push(
+      supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at')
+        .eq('tenant_id', tenantId).in('id', attachedDocumentIds)
+        .then((r: any) => { ctx.recentDocuments = r.data || []; })
     );
   }
 
