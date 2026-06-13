@@ -1456,11 +1456,11 @@ async function startServer() {
       const { slug } = req.params;
       const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name, slug').eq('slug', slug).single();
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
-      const { data: settings } = await supabaseAdmin.from('settings').select('logo_url, agency_name').eq('tenant_id', tenant.id).single();
+      const { data: settings } = await supabaseAdmin.from('settings').select('"logoUrl", "agencyName"').eq('tenant_id', tenant.id).single();
       res.json({
         slug: tenant.slug,
-        name: (settings as any)?.agency_name || tenant.name,
-        logoUrl: (settings as any)?.logo_url || null,
+        name: (settings as any)?.agencyName || tenant.name,
+        logoUrl: (settings as any)?.logoUrl || null,
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -4497,27 +4497,30 @@ async function startServer() {
     }
   });
 
-  // camelCase (frontend) ↔ snake_case (Supabase settings table)
-  const toSnake: Record<string, string> = {
-    agencyName: 'agency_name', vatNumber: 'vat_number',
-    senderOption: 'sender_option', defaultEmailTemplate: 'default_email_template',
-    logoUrl: 'logo_url', smtpHost: 'smtp_host', smtpPort: 'smtp_port',
-    smtpUser: 'smtp_user', smtpPass: 'smtp_pass',
-    numPrefixDevis: 'num_prefix_devis',
-    numPrefixFacture: 'num_prefix_facture',
-    numPrefixHonoraires: 'num_prefix_honoraires',
+  // The production settings table uses camelCase for its original columns and
+  // snake_case for columns added via later migrations. The mappings below
+  // reflect the actual column names that exist in the database.
+  //
+  // Frontend key → DB column name (only entries where they differ)
+  const toDbCol: Record<string, string> = {
+    numPrefixDevis:       'num_prefix_devis',
+    numPrefixFacture:     'num_prefix_facture',
+    numPrefixHonoraires:  'num_prefix_honoraires',
   };
-  const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
+  // DB column name → frontend key (for GET responses)
+  const toFrontend: Record<string, string> = Object.fromEntries(
+    Object.entries(toDbCol).map(([k, v]) => [v, k])
+  );
 
   app.get("/api/settings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!settings) { res.json({ tenant_id: tenantId }); return; }
-      // Return camelCase keys expected by the frontend
+      // Return keys in the form the frontend expects
       const out: any = {};
       for (const [k, v] of Object.entries(settings)) {
-        out[toCamel[k] ?? k] = v;
+        out[toFrontend[k] ?? k] = v;
       }
       res.json(out);
     } catch (error) {
@@ -4529,15 +4532,23 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const data = req.body;
-      // Convert camelCase → snake_case
-      const snakeData: any = {};
+      // Map frontend keys → actual DB column names
+      const dbData: any = {};
       for (const [k, v] of Object.entries(data)) {
-        const col = toSnake[k] ?? k;
-        snakeData[col] = v;
+        dbData[toDbCol[k] ?? k] = v;
       }
-      // Only keep valid table columns (exclude id — managed separately)
-      const validCols = new Set(['agency_name','address','phone','email','siret','vat_number','currency','language','sender_option','default_email_template','logo_url','seller_iban','seller_bic','smtp_host','smtp_port','smtp_user','smtp_pass','zoho_client_id','zoho_client_secret','zoho_org_id','zoho_data_center','zoho_refresh_token','zoho_books_org_id','num_prefix_devis','num_prefix_facture','num_prefix_honoraires','maf_enabled','maf_numero_adherent','maf_taux_contrat_permil','maf_declaration_year']);
-      const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
+      // Allowlist: only columns that actually exist in the settings table
+      const validCols = new Set([
+        'agencyName', 'address', 'phone', 'email', 'siret', 'vatNumber',
+        'currency', 'language', 'senderOption', 'defaultEmailTemplate', 'logoUrl',
+        'seller_iban', 'seller_bic',
+        'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass',
+        'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token',
+        'zoho_books_org_id',
+        'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires',
+        'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
+      ]);
+      const filteredData: any = Object.fromEntries(Object.entries(dbData).filter(([k]) => validCols.has(k)));
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
 
