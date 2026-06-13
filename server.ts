@@ -1150,14 +1150,6 @@ async function startServer() {
     next();
   });
 
-  // Redirect archimanager.fr (bare domain) → www.archimanager.fr
-  app.use((req: any, res: any, next: any) => {
-    const host = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-    if (host === 'archimanager.fr') {
-      return res.redirect(301, `https://www.archimanager.fr${req.url}`);
-    }
-    next();
-  });
 
   // Serve legacy /uploads/ files (existing DB rows that still point to /tmp paths)
   app.use('/uploads', express.static(uploadDir));
