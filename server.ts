@@ -6087,11 +6087,19 @@ async function startServer() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       const enriched = await Promise.all((tenants ?? []).map(async (t) => {
-        const [profilesRes, projectsRes] = await Promise.all([
+        const [profilesRes, projectsRes, ownerRes] = await Promise.all([
           supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
           supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
+          supabaseAdmin.from('profiles').select('email, name').eq('tenant_id', t.id).eq('system_role', 'admin').limit(1),
         ]);
-        return { ...t, user_count: profilesRes.count ?? 0, project_count: projectsRes.count ?? 0 };
+        const owner = ownerRes.data?.[0];
+        return {
+          ...t,
+          user_count: profilesRes.count ?? 0,
+          project_count: projectsRes.count ?? 0,
+          owner_email: owner?.email ?? null,
+          owner_name: owner?.name ?? null,
+        };
       }));
       res.json(enriched);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -6104,6 +6112,62 @@ async function startServer() {
         return res.status(400).json({ error: 'Plan invalide' });
       }
       const { error } = await supabaseAdmin.from('tenants').update({ plan }).eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/tenants/:id/trial', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { days } = req.body;
+      if (typeof days !== 'number' || days < 1 || days > 365) {
+        return res.status(400).json({ error: 'Durée invalide (1-365 jours)' });
+      }
+      const newDate = new Date(Date.now() + days * 86_400_000).toISOString();
+      const { error } = await supabaseAdmin.from('tenants').update({ trial_ends_at: newDate, plan: 'trial' }).eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ ok: true, trial_ends_at: newDate });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/tenants', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { name, slug, adminEmail, adminName, plan = 'trial' } = req.body;
+      if (!name || !slug || !adminEmail || !adminName) {
+        return res.status(400).json({ error: 'name, slug, adminEmail et adminName sont requis' });
+      }
+      const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const { data: existing } = await supabaseAdmin.from('tenants').select('id').eq('slug', cleanSlug).maybeSingle();
+      if (existing) return res.status(400).json({ error: `Le slug "${cleanSlug}" est déjà utilisé` });
+
+      const tenantId = crypto.randomUUID();
+      const trialEndsAt = new Date(Date.now() + 14 * 86_400_000).toISOString();
+      const { error: tenantErr } = await supabaseAdmin.from('tenants').insert({ id: tenantId, slug: cleanSlug, name, plan, trial_ends_at: trialEndsAt });
+      if (tenantErr) throw tenantErr;
+
+      const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-4).toUpperCase() + '!';
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+        email: adminEmail, password: tempPassword, user_metadata: { name: adminName }, email_confirm: true,
+      });
+      if (authErr || !authData?.user) throw authErr ?? new Error('Création utilisateur échouée');
+
+      await supabaseAdmin.from('profiles').upsert({
+        id: authData.user.id, tenant_id: tenantId, name: adminName, email: adminEmail,
+        role: 'Admin', system_role: 'admin',
+      });
+
+      res.status(201).json({ tenantId, slug: cleanSlug, tempPassword });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/tenants/:id', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', id);
+      for (const p of profiles ?? []) {
+        await supabaseAdmin.auth.admin.deleteUser(p.id).catch(() => {});
+      }
+      const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
       if (error) throw error;
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
