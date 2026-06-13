@@ -15,7 +15,18 @@ ALTER TABLE agent_token_usage
 -- Backfill cost_eur_cents (colonne existante, toujours NULL jusqu'ici)
 UPDATE agent_token_usage SET cost_eur_cents = 0 WHERE cost_eur_cents IS NULL;
 
--- 3. Lien pack de crédits dans billing_events
+-- 3. Table billing_events (créée si absente) + colonne credit_pack_id
+CREATE TABLE IF NOT EXISTS billing_events (
+  id                 UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id          UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  event_type         TEXT NOT NULL,
+  stancer_payment_id TEXT,
+  plan_id            TEXT,
+  amount             INTEGER,
+  status             TEXT DEFAULT 'pending',
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE billing_events
   ADD COLUMN IF NOT EXISTS credit_pack_id TEXT;
 
