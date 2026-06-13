@@ -193,6 +193,7 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Zoho Invoice
@@ -352,26 +353,35 @@ export default function Settings() {
 
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveError(null);
+    const deadline = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Délai dépassé (30s). Vérifiez votre connexion et réessayez.')), 30_000)
+    );
     try {
-      if (currentUser?.system_role === 'admin') {
-        await apiFetch('/api/settings', {
-          method: 'PUT',
-          body: JSON.stringify(settings),
-        });
-        await db.settings.put(settings);
-      }
-      if (currentUser) {
-        const updatedUser = { ...currentUser, ...userSettings } as any;
-        await apiFetch(`/api/team/${currentUser.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(userSettings),
-        });
-        setCurrentUser(updatedUser);
-      }
+      await Promise.race([
+        (async () => {
+          if (currentUser?.system_role === 'admin') {
+            await apiFetch('/api/settings', {
+              method: 'PUT',
+              body: JSON.stringify(settings),
+            });
+            db.settings.put(settings).catch(() => {});
+          }
+          if (currentUser) {
+            await apiFetch(`/api/team/${currentUser.id}`, {
+              method: 'PUT',
+              body: JSON.stringify(userSettings),
+            });
+            setCurrentUser({ ...currentUser, ...userSettings } as any);
+          }
+        })(),
+        deadline,
+      ]);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('[Settings save]', err);
+      setSaveError(err?.message || 'Erreur lors de la sauvegarde.');
     } finally {
       setIsSaving(false);
     }
@@ -989,6 +999,13 @@ export default function Settings() {
           placeholder={t('default_email_template')} value={userSettings.defaultEmailTemplate ?? ''}
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
+
+      {/* Save error */}
+      {saveError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          {saveError}
+        </div>
+      )}
 
       {/* Save button */}
       <button
