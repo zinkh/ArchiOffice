@@ -20,11 +20,12 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
   const [query, setQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // Find the selected contact to display its name
   const selectedContact = contacts.find(c => c.id === value);
-  
+
   useEffect(() => {
     if (selectedContact) {
       setQuery(`${selectedContact.first_name} ${selectedContact.last_name}${selectedContact.company_name ? ` (${selectedContact.company_name})` : ''}`);
@@ -35,13 +36,17 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-        setShowSuggestions(false);
-        if (selectedContact) {
-          setQuery(`${selectedContact.first_name} ${selectedContact.last_name}${selectedContact.company_name ? ` (${selectedContact.company_name})` : ''}`);
-        } else {
-          setQuery('');
-        }
+      const target = event.target as Node;
+      // Ignore clicks inside the input wrapper OR inside the portal dropdown
+      if (
+        (wrapperRef.current && wrapperRef.current.contains(target)) ||
+        (dropdownRef.current && dropdownRef.current.contains(target))
+      ) return;
+      setShowSuggestions(false);
+      if (selectedContact) {
+        setQuery(`${selectedContact.first_name} ${selectedContact.last_name}${selectedContact.company_name ? ` (${selectedContact.company_name})` : ''}`);
+      } else {
+        setQuery('');
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -108,6 +113,7 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
 
       {showSuggestions && dropdownPos && createPortal(
         <div
+          ref={dropdownRef}
           style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
           className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl max-h-60 overflow-y-auto"
         >
