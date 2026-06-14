@@ -466,6 +466,19 @@ function ContratModal({
               {/* TAB: Missions */}
               {tab === 'missions' && (
                 <div className="space-y-2">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Préréglages :</span>
+                    <button type="button" onClick={() => setForm(f => ({ ...f, missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: ['esquisse','aps','apd','pro','act','visa','aor'].includes(m.id) })) }))}
+                      className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                      style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                      Base sans Exé
+                    </button>
+                    <button type="button" onClick={() => setForm(f => ({ ...f, missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: ['esquisse','aps','apd','pro','act','visa','det','aor'].includes(m.id) })) }))}
+                      className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                      style={{ borderColor: 'var(--tblr-border)', color: '#4263eb' }}>
+                      Base avec Exé
+                    </button>
+                  </div>
                   <p className="text-xs mb-3" style={{ color: 'var(--tblr-muted)' }}>
                     Cochez les missions incluses dans ce contrat et indiquez la part des honoraires pour chacune.
                   </p>
@@ -579,43 +592,61 @@ function ContratModal({
                         <IconPlus size={13} /> Ajouter
                       </button>
                     </div>
-                    {(form.cotraitants || []).length === 0 && (
+                    {(form.cotraitants || []).length === 0 ? (
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun cotraitant</p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr style={{ background: 'var(--tblr-surface-2)' }}>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '35%' }}>Contact</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Spécialité</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Part (%)</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '20%' }}>Montant HT (€)</th>
+                              <th className="w-8" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(form.cotraitants || []).map((ct, i) => (
+                              <tr key={ct.id} className={i % 2 === 0 ? '' : ''} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                                <td className="px-2 py-1.5">
+                                  <ContactAutocomplete contacts={contacts} value={ct.contact_id || ''} onChange={id => {
+                                    const c = contacts.find(c => c.id === id);
+                                    const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
+                                    updateCotraitant(ct.id, 'contact_id', id);
+                                    updateCotraitant(ct.id, 'contact_name', name);
+                                  }} onAddNew={() => {}} inputClassName="text-xs py-1" />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input className="w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.specialty || ''} onChange={e => updateCotraitant(ct.id, 'specialty', e.target.value)} placeholder="ex : Structure" />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input type="number" min={0} max={100} step={0.5} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.fee_pct ?? ''} onChange={e => updateCotraitant(ct.id, 'fee_pct', parseFloat(e.target.value) || 0)} />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input type="number" min={0} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.montant_honoraires ?? ''} onChange={e => updateCotraitant(ct.id, 'montant_honoraires', parseFloat(e.target.value) || 0)} />
+                                </td>
+                                <td className="px-1 py-1.5 text-center">
+                                  <button type="button" onClick={() => removeCotraitant(ct.id)} className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ borderTop: '2px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                              <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Total cotraitants</td>
+                              <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: 'var(--tblr-primary)' }}>
+                                {(form.cotraitants || []).reduce((s, c) => s + (c.fee_pct || 0), 0)} %
+                              </td>
+                              <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: 'var(--tblr-primary)' }}>
+                                {fmt((form.cotraitants || []).reduce((s, c) => s + (c.montant_honoraires || 0), 0))}
+                              </td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     )}
-                    <div className="space-y-2">
-                      {(form.cotraitants || []).map(ct => (
-                        <div key={ct.id} className="p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Contact</label>
-                              <ContactAutocomplete contacts={contacts} value={ct.contact_id || ''} onChange={id => {
-                                const c = contacts.find(c => c.id === id);
-                                const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
-                                updateCotraitant(ct.id, 'contact_id', id);
-                                updateCotraitant(ct.id, 'contact_name', name);
-                              }} onAddNew={() => {}} />
-                            </div>
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Spécialité</label>
-                              <input className={inputCls} style={inputStyle} value={ct.specialty || ''} onChange={e => updateCotraitant(ct.id, 'specialty', e.target.value)} placeholder="ex : Ingénierie structure" />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Part honoraires (%)</label>
-                              <input type="number" min={0} max={100} step={0.5} className={inputCls} style={inputStyle} value={ct.fee_pct ?? ''} onChange={e => updateCotraitant(ct.id, 'fee_pct', parseFloat(e.target.value) || 0)} />
-                            </div>
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Montant HT (€)</label>
-                              <input type="number" min={0} className={inputCls} style={inputStyle} value={ct.montant_honoraires ?? ''} onChange={e => updateCotraitant(ct.id, 'montant_honoraires', parseFloat(e.target.value) || 0)} />
-                            </div>
-                          </div>
-                          <div className="flex justify-end">
-                            <button type="button" onClick={() => removeCotraitant(ct.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={13} /></button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
                   {/* Sous-traitants */}
@@ -629,48 +660,58 @@ function ContratModal({
                         <IconPlus size={13} /> Ajouter
                       </button>
                     </div>
-                    {(form.sous_traitants || []).length === 0 && (
+                    {(form.sous_traitants || []).length === 0 ? (
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun sous-traitant</p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr style={{ background: 'var(--tblr-surface-2)' }}>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '30%' }}>Contact</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Spécialité / Prestation</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '18%' }}>Montant HT (€)</th>
+                              <th className="text-center px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Paiement direct MOA</th>
+                              <th className="w-8" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(form.sous_traitants || []).map((st, i) => (
+                              <tr key={st.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                                <td className="px-2 py-1.5">
+                                  <ContactAutocomplete contacts={contacts} value={st.contact_id || ''} onChange={id => {
+                                    const c = contacts.find(c => c.id === id);
+                                    const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
+                                    updateSousTraitant(st.id, 'contact_id', id);
+                                    updateSousTraitant(st.id, 'contact_name', name);
+                                  }} onAddNew={() => {}} inputClassName="text-xs py-1" />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input className="w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400" style={inputStyle} value={st.specialty || ''} onChange={e => updateSousTraitant(st.id, 'specialty', e.target.value)} placeholder="ex : SPS" />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input type="number" min={0} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-indigo-400" style={inputStyle} value={st.montant ?? ''} onChange={e => updateSousTraitant(st.id, 'montant', parseFloat(e.target.value) || 0)} />
+                                </td>
+                                <td className="px-2 py-1.5 text-center">
+                                  <input type="checkbox" checked={!!st.paiement_direct_moa} onChange={e => updateSousTraitant(st.id, 'paiement_direct_moa', e.target.checked)} className="w-4 h-4 rounded" title="Paiement direct par le Maître d'Ouvrage (hors comptabilité agence)" />
+                                </td>
+                                <td className="px-1 py-1.5 text-center">
+                                  <button type="button" onClick={() => removeSousTraitant(st.id)} className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ borderTop: '2px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                              <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Total sous-traitants</td>
+                              <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: '#4263eb' }}>
+                                {fmt((form.sous_traitants || []).reduce((s, c) => s + (c.montant || 0), 0))}
+                              </td>
+                              <td colSpan={2} />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     )}
-                    <div className="space-y-2">
-                      {(form.sous_traitants || []).map(st => (
-                        <div key={st.id} className="p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Contact</label>
-                              <ContactAutocomplete contacts={contacts} value={st.contact_id || ''} onChange={id => {
-                                const c = contacts.find(c => c.id === id);
-                                const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
-                                updateSousTraitant(st.id, 'contact_id', id);
-                                updateSousTraitant(st.id, 'contact_name', name);
-                              }} onAddNew={() => {}} />
-                            </div>
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Spécialité / Prestation</label>
-                              <input className={inputCls} style={inputStyle} value={st.specialty || ''} onChange={e => updateSousTraitant(st.id, 'specialty', e.target.value)} placeholder="ex : Coordination SPS" />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className={labelCls} style={labelStyle}>Montant HT (€)</label>
-                              <input type="number" min={0} className={inputCls} style={inputStyle} value={st.montant ?? ''} onChange={e => updateSousTraitant(st.id, 'montant', parseFloat(e.target.value) || 0)} />
-                            </div>
-                            <div className="flex flex-col justify-end">
-                              <label className="flex items-start gap-2 cursor-pointer">
-                                <input type="checkbox" checked={!!st.paiement_direct_moa} onChange={e => updateSousTraitant(st.id, 'paiement_direct_moa', e.target.checked)} className="w-4 h-4 rounded mt-0.5 flex-shrink-0" />
-                                <span className="text-xs" style={{ color: 'var(--tblr-text)' }}>
-                                  Paiement direct par le Maître d'Ouvrage
-                                  <span className="block text-[10px]" style={{ color: 'var(--tblr-muted)' }}>(hors comptabilité agence)</span>
-                                </span>
-                              </label>
-                            </div>
-                          </div>
-                          <div className="flex justify-end">
-                            <button type="button" onClick={() => removeSousTraitant(st.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={13} /></button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </div>
               )}

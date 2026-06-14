@@ -6189,16 +6189,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await supabaseAdmin.from('project_members')
-        .select('*, profiles(id, name, email, role, avatar)')
+        .select('*')
         .eq('project_id', req.params.id)
         .eq('tenant_id', tenantId);
-      // 42P01 = table does not exist (migration not yet applied) → return empty list
-      if (error) {
-        if ((error as any).code === '42P01') { res.json([]); return; }
-        throw error;
-      }
-      res.json((data || []).map((m: any) => ({ ...m, ...m.profiles })));
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch project members" }); }
+      if (error) { res.json([]); return; }
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.json([]); }
   });
 
   app.post("/api/projects/:id/members", async (req: any, res: any) => {
