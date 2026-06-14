@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+const CADASTRE_MIN_ZOOM = 13;
+
 const MAP_STYLE = (lon: number, lat: number): any => ({
   version: 8,
   sources: {
@@ -18,11 +20,12 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
       ],
       tileSize: 256,
       attribution: '&copy; IGN',
+      minzoom: CADASTRE_MIN_ZOOM,
     },
   },
   layers: [
     { id: 'osm-layer', type: 'raster', source: 'osm' },
-    { id: 'cadastre-layer', type: 'raster', source: 'cadastre', paint: { 'raster-opacity': 0.7 } },
+    { id: 'cadastre-layer', type: 'raster', source: 'cadastre', paint: { 'raster-opacity': 0.7 }, minzoom: CADASTRE_MIN_ZOOM },
   ],
   center: [lon, lat],
   zoom: 17,
@@ -33,6 +36,7 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
   const [contextLost, setContextLost] = useState(false);
+  const [zoom, setZoom] = useState(17);
 
   const initMap = useCallback(() => {
     if (!mapContainer.current) return;
@@ -52,8 +56,11 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
       marker.current = new maplibregl.Marker({ color: '#3b82f6', scale: 0.8 })
         .setLngLat([lon, lat])
         .addTo(instance);
+      setZoom(Math.round(instance.getZoom()));
       setTimeout(() => instance.resize(), 100);
     });
+
+    instance.on('zoomend', () => setZoom(Math.round(instance.getZoom())));
 
     // Handle WebGL context loss — show a reload button
     instance.getCanvas().addEventListener('webglcontextlost', () => {
@@ -96,6 +103,13 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
+      {zoom < CADASTRE_MIN_ZOOM && !contextLost && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
+            Zoomez pour afficher le cadastre (niveau {CADASTRE_MIN_ZOOM}+)
+          </div>
+        </div>
+      )}
       {contextLost && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/80 text-white text-sm gap-3 rounded-xl">
           <span>Contexte WebGL perdu</span>
