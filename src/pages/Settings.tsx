@@ -140,6 +140,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-red-600',
     iconLabel: 'MAF',
   },
+  {
+    id: 'ragic',
+    name: 'Ragic',
+    vendor: 'Ragic Inc.',
+    description: 'Synchronisez vos contacts, projets, factures et propositions avec vos feuilles Ragic. Synchronisation bidirectionnelle par tenant.',
+    category: 'crm',
+    status: 'active',
+    iconBg: 'bg-teal-50',
+    iconColor: 'text-teal-600',
+    iconLabel: 'Ra',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -188,6 +199,12 @@ export default function Settings() {
     maf_numero_adherent: '',
     maf_taux_contrat_permil: '',
     maf_declaration_year: 2025,
+    ragic_api_key: '',
+    ragic_account: '',
+    ragic_sheet_contacts: '',
+    ragic_sheet_projects: '',
+    ragic_sheet_invoices: '',
+    ragic_sheet_proposals: '',
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -202,6 +219,12 @@ export default function Settings() {
   const [isDisconnectingZoho, setIsDisconnectingZoho] = useState(false);
   const [zohoNotice, setZohoNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
+
+  // Ragic
+  const [ragicStatus, setRagicStatus] = useState<{ connected: boolean } | null>(null);
+  const [isSyncingRagic, setIsSyncingRagic] = useState(false);
+  const [isDisconnectingRagic, setIsDisconnectingRagic] = useState(false);
+  const [ragicNotice, setRagicNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Zoho Books (shares same OAuth token as Invoice)
   const [zohoBooksStatus, setZohoBooksStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
@@ -262,6 +285,9 @@ export default function Settings() {
       apiFetch('/api/zoho/callback-url')
         .then((d: any) => setZohoCallbackUrl(d.url))
         .catch(() => {});
+      apiFetch('/api/ragic/status')
+        .then(s => setRagicStatus(s))
+        .catch(() => {});
     }
     if (currentUser) {
       setUserSettings({
@@ -289,6 +315,47 @@ export default function Settings() {
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
+
+  const handleRagicSync = async () => {
+    setIsSyncingRagic(true);
+    setRagicNotice(null);
+    try {
+      await handleSave();
+      const data = await apiFetch<any>('/api/ragic/sync', { method: 'POST' });
+      const r = data.results ?? {};
+      const total = Object.values(r).reduce((acc: any, v: any) => ({
+        pushed: acc.pushed + (v.pushed ?? 0),
+        pulled: acc.pulled + (v.pulled ?? 0),
+      }), { pushed: 0, pulled: 0 }) as any;
+      const errors = Object.values(r).flatMap((v: any) => v.errors ?? []);
+      const msg = `Synchronisation réussie — ${total.pushed} envoyés, ${total.pulled} importés.`;
+      setRagicNotice({ type: errors.length > 0 ? 'error' : 'success', message: errors.length > 0 ? `${msg} Erreurs : ${errors.slice(0, 3).join(', ')}` : msg });
+      setRagicStatus({ connected: true });
+    } catch (e: any) {
+      setRagicNotice({ type: 'error', message: e.message || 'Erreur de synchronisation Ragic.' });
+    } finally {
+      setIsSyncingRagic(false);
+    }
+  };
+
+  const handleRagicDisconnect = async () => {
+    setIsDisconnectingRagic(true);
+    try {
+      await apiFetch('/api/ragic/disconnect', { method: 'DELETE' });
+      setRagicStatus({ connected: false });
+      setSettings((prev: any) => ({
+        ...prev,
+        ragic_api_key: '', ragic_account: '',
+        ragic_sheet_contacts: '', ragic_sheet_projects: '',
+        ragic_sheet_invoices: '', ragic_sheet_proposals: '',
+      }));
+      setRagicNotice({ type: 'success', message: 'Ragic déconnecté avec succès.' });
+    } catch {
+      setRagicNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
+    } finally {
+      setIsDisconnectingRagic(false);
+    }
+  };
 
   const handleZohoDisconnect = async () => {
     setIsDisconnectingZoho(true);
@@ -395,6 +462,7 @@ export default function Settings() {
     if (id === 'zoho_invoice') return !!(zohoStatus?.connected);
     if (id === 'zoho_books') return !!(zohoBooksStatus?.connected);
     if (id === 'maf') return !!(settings as any).maf_enabled;
+    if (id === 'ragic') return !!(ragicStatus?.connected);
     return false;
   };
 
@@ -632,6 +700,101 @@ export default function Settings() {
         <div className="p-3 rounded-lg text-xs" style={{ background: '#fff4e6', border: '1px solid #ffd8a8', color: '#c05500' }}>
           <p className="font-bold mb-1">Déclaration MAF — Activités professionnelles</p>
           <p>La déclaration annuelle doit être validée et clôturée sur <strong>maf.fr</strong> avant le 31 mars. ArchiOffice vous aide à préparer vos données et calcule vos assiettes de cotisation.</p>
+        </div>
+      </div>
+    );
+
+    if (pluginId === 'ragic') return (
+      <div className="space-y-4">
+        {ragicNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={ragicNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {ragicNotice.message}
+          </div>
+        )}
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#e6fcf5', border: '1px solid #96f2d7', color: '#087f5b' }}>
+          <p className="font-bold mb-1">Configuration Ragic</p>
+          <p>Créez un compte sur <strong>ragic.com</strong>, puis allez dans <strong>Profil → Clé API</strong> pour obtenir votre clé. Pour chaque feuille, copiez le chemin depuis l'URL : <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>moncompte.ragic.com/<strong>onglet/index</strong></code>.</p>
+          <p className="mt-1">Les colonnes de vos feuilles Ragic doivent porter les mêmes noms que les champs ArchiOffice (ex. <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>first_name</code>, <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>last_name</code>, <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>email</code>…).</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Clé API Ragic</label>
+            <input
+              type="password"
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="••••••••••••••••••••••••"
+              value={(settings as any).ragic_api_key || ''}
+              onChange={e => setSettings({ ...settings, ragic_api_key: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Compte Ragic (sous-domaine)</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="ex. moncabinet"
+              value={(settings as any).ragic_account || ''}
+              onChange={e => setSettings({ ...settings, ragic_account: e.target.value } as any)}
+            />
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Sous-domaine de votre URL Ragic : <strong>moncabinet</strong>.ragic.com</p>
+          </div>
+        </div>
+        <div>
+          <h4 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>Chemins des feuilles (laisser vide pour ignorer)</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {([
+              { key: 'ragic_sheet_contacts', label: 'Contacts', placeholder: 'ex. crm/contacts/0' },
+              { key: 'ragic_sheet_projects', label: 'Projets', placeholder: 'ex. projets/liste/0' },
+              { key: 'ragic_sheet_invoices', label: 'Factures', placeholder: 'ex. compta/factures/0' },
+              { key: 'ragic_sheet_proposals', label: 'Propositions', placeholder: 'ex. compta/devis/0' },
+            ] as const).map(({ key, label, placeholder }) => (
+              <div key={key}>
+                <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm font-mono"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder={placeholder}
+                  value={(settings as any)[key] || ''}
+                  onChange={e => setSettings({ ...settings, [key]: e.target.value } as any)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>URL Webhook entrant</p>
+          <code className="block px-2 py-1.5 rounded border text-xs font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+            {`${window.location.origin}/api/ragic/webhook?entity=contacts&tenant=VOTRE_TENANT_ID&secret=VOTRE_CLE_API`}
+          </code>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Configurez cette URL dans Ragic → <strong>Formulaire → Webhook</strong> pour recevoir les mises à jour en temps réel. Remplacez <code className="font-mono">entity</code> par contacts, projects, invoices ou proposals.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <a href="https://www.ragic.com/intl/en/doc-api" target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+            <IconExternalLink size={13} /> Documentation API Ragic
+          </a>
+          <button
+            type="button"
+            disabled={!(settings as any).ragic_api_key || !(settings as any).ragic_account || isSyncingRagic}
+            onClick={handleRagicSync}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: '#0ca678', color: '#fff' }}>
+            {isSyncingRagic ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} Synchroniser maintenant
+          </button>
+          {ragicStatus?.connected && (
+            <button
+              type="button"
+              disabled={isDisconnectingRagic}
+              onClick={handleRagicDisconnect}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+              {isDisconnectingRagic ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
+            </button>
+          )}
         </div>
       </div>
     );
