@@ -4548,7 +4548,12 @@ async function startServer() {
         'ragic_api_key', 'ragic_account',
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',
       ]);
-      const filteredData: any = Object.fromEntries(Object.entries(snakeData).filter(([k]) => validCols.has(k)));
+      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year']);
+      const filteredData: any = Object.fromEntries(
+        Object.entries(snakeData)
+          .filter(([k]) => validCols.has(k))
+          .map(([k, v]) => [k, numericCols.has(k) && v === '' ? null : v])
+      );
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
 
