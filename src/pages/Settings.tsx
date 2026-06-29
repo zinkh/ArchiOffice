@@ -151,6 +151,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-teal-600',
     iconLabel: 'Ra',
   },
+  {
+    id: 'odoo',
+    name: 'Odoo',
+    vendor: 'Odoo S.A.',
+    description: 'Synchronisez contacts, projets, factures et devis avec votre instance Odoo. Compatible Odoo 14+ (Community et Enterprise).',
+    category: 'accounting',
+    status: 'active',
+    iconBg: 'bg-purple-50',
+    iconColor: 'text-purple-700',
+    iconLabel: 'Od',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -205,6 +216,10 @@ export default function Settings() {
     ragic_sheet_projects: '',
     ragic_sheet_invoices: '',
     ragic_sheet_proposals: '',
+    odoo_url: '',
+    odoo_db: '',
+    odoo_username: '',
+    odoo_api_key: '',
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -225,6 +240,13 @@ export default function Settings() {
   const [isSyncingRagic, setIsSyncingRagic] = useState(false);
   const [isDisconnectingRagic, setIsDisconnectingRagic] = useState(false);
   const [ragicNotice, setRagicNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Odoo
+  const [odooStatus, setOdooStatus] = useState<{ connected: boolean } | null>(null);
+  const [isSyncingOdoo, setIsSyncingOdoo] = useState(false);
+  const [isTestingOdoo, setIsTestingOdoo] = useState(false);
+  const [isDisconnectingOdoo, setIsDisconnectingOdoo] = useState(false);
+  const [odooNotice, setOdooNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Zoho Books (shares same OAuth token as Invoice)
   const [zohoBooksStatus, setZohoBooksStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
@@ -287,6 +309,9 @@ export default function Settings() {
         .catch(() => {});
       apiFetch('/api/ragic/status')
         .then(s => setRagicStatus(s))
+        .catch(() => {});
+      apiFetch('/api/odoo/status')
+        .then(s => setOdooStatus(s))
         .catch(() => {});
     }
     if (currentUser) {
@@ -354,6 +379,58 @@ export default function Settings() {
       setRagicNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
     } finally {
       setIsDisconnectingRagic(false);
+    }
+  };
+
+  const handleOdooTest = async () => {
+    setIsTestingOdoo(true);
+    setOdooNotice(null);
+    try {
+      await handleSave();
+      const data = await apiFetch<any>('/api/odoo/test', { method: 'POST' });
+      setOdooStatus({ connected: true });
+      setOdooNotice({ type: 'success', message: `Connexion réussie — ${data.company}` });
+    } catch (e: any) {
+      setOdooStatus({ connected: false });
+      setOdooNotice({ type: 'error', message: e.message || 'Connexion échouée. Vérifiez vos identifiants.' });
+    } finally {
+      setIsTestingOdoo(false);
+    }
+  };
+
+  const handleOdooSync = async () => {
+    setIsSyncingOdoo(true);
+    setOdooNotice(null);
+    try {
+      await handleSave();
+      const data = await apiFetch<any>('/api/odoo/sync', { method: 'POST' });
+      const r = data.results ?? {};
+      const total = Object.values(r).reduce((acc: any, v: any) => ({
+        pushed: acc.pushed + (v.pushed ?? 0),
+        pulled: acc.pulled + (v.pulled ?? 0),
+      }), { pushed: 0, pulled: 0 }) as any;
+      const errors = Object.values(r).flatMap((v: any) => v.errors ?? []);
+      const msg = `Synchronisation réussie — ${total.pushed} envoyés, ${total.pulled} importés.`;
+      setOdooNotice({ type: errors.length > 0 ? 'error' : 'success', message: errors.length > 0 ? `${msg} Erreurs : ${errors.slice(0, 3).join(' | ')}` : msg });
+      setOdooStatus({ connected: true });
+    } catch (e: any) {
+      setOdooNotice({ type: 'error', message: e.message || 'Erreur de synchronisation Odoo.' });
+    } finally {
+      setIsSyncingOdoo(false);
+    }
+  };
+
+  const handleOdooDisconnect = async () => {
+    setIsDisconnectingOdoo(true);
+    try {
+      await apiFetch('/api/odoo/disconnect', { method: 'DELETE' });
+      setOdooStatus({ connected: false });
+      setSettings((prev: any) => ({ ...prev, odoo_url: '', odoo_db: '', odoo_username: '', odoo_api_key: '' }));
+      setOdooNotice({ type: 'success', message: 'Odoo déconnecté avec succès.' });
+    } catch {
+      setOdooNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
+    } finally {
+      setIsDisconnectingOdoo(false);
     }
   };
 
@@ -463,6 +540,7 @@ export default function Settings() {
     if (id === 'zoho_books') return !!(zohoBooksStatus?.connected);
     if (id === 'maf') return !!(settings as any).maf_enabled;
     if (id === 'ragic') return !!(ragicStatus?.connected);
+    if (id === 'odoo') return !!(odooStatus?.connected);
     return false;
   };
 
@@ -700,6 +778,104 @@ export default function Settings() {
         <div className="p-3 rounded-lg text-xs" style={{ background: '#fff4e6', border: '1px solid #ffd8a8', color: '#c05500' }}>
           <p className="font-bold mb-1">Déclaration MAF — Activités professionnelles</p>
           <p>La déclaration annuelle doit être validée et clôturée sur <strong>maf.fr</strong> avant le 31 mars. ArchiOffice vous aide à préparer vos données et calcule vos assiettes de cotisation.</p>
+        </div>
+      </div>
+    );
+
+    if (pluginId === 'odoo') return (
+      <div className="space-y-4">
+        {odooNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={odooNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {odooNotice.message}
+          </div>
+        )}
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#f3f0ff', border: '1px solid #d0bfff', color: '#5f3dc4' }}>
+          <p className="font-bold mb-1">Configuration Odoo</p>
+          <p>Compatible Odoo 14+ (Community et Enterprise). Générez votre clé API dans Odoo → <strong>Paramètres → Technique → Clés API</strong>. La clé API remplace le mot de passe pour l'authentification.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>URL Odoo</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="https://moncabinet.odoo.com"
+              value={(settings as any).odoo_url || ''}
+              onChange={e => setSettings({ ...settings, odoo_url: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Base de données</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="moncabinet"
+              value={(settings as any).odoo_db || ''}
+              onChange={e => setSettings({ ...settings, odoo_db: e.target.value } as any)}
+            />
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Nom de la base Odoo (visible dans l'URL ou dans Paramètres → Base de données)</p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Identifiant (email)</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="admin@moncabinet.com"
+              value={(settings as any).odoo_username || ''}
+              onChange={e => setSettings({ ...settings, odoo_username: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Clé API</label>
+            <input
+              type="password"
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="••••••••••••••••••••••••"
+              value={(settings as any).odoo_api_key || ''}
+              onChange={e => setSettings({ ...settings, odoo_api_key: e.target.value } as any)}
+            />
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Générée dans Odoo → Paramètres → Technique → Clés API</p>
+          </div>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Correspondance des modèles Odoo</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            <span>Contacts → <code className="font-mono">res.partner</code></span>
+            <span>Projets → <code className="font-mono">project.project</code></span>
+            <span>Factures → <code className="font-mono">account.move</code></span>
+            <span>Propositions → <code className="font-mono">sale.order</code></span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            disabled={!(settings as any).odoo_url || !(settings as any).odoo_api_key || !(settings as any).odoo_username || !(settings as any).odoo_db || isTestingOdoo}
+            onClick={handleOdooTest}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+            {isTestingOdoo ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester la connexion
+          </button>
+          <button
+            type="button"
+            disabled={!odooStatus?.connected || isSyncingOdoo}
+            onClick={handleOdooSync}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: '#6741d9', color: '#fff' }}>
+            {isSyncingOdoo ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} Synchroniser maintenant
+          </button>
+          {odooStatus?.connected && (
+            <button
+              type="button"
+              disabled={isDisconnectingOdoo}
+              onClick={handleOdooDisconnect}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+              {isDisconnectingOdoo ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
+            </button>
+          )}
         </div>
       </div>
     );
