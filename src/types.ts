@@ -612,6 +612,8 @@ export interface Invoice {
   currency?: string;
   vat_rate?: number;
   items?: InvoiceItem[];
+  superpdp_id?: number;
+  superpdp_status?: string;
 }
 
 export interface InvoiceItem {
