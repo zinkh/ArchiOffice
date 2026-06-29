@@ -162,6 +162,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-purple-700',
     iconLabel: 'Od',
   },
+  {
+    id: 'superpdp',
+    name: 'Super PDP',
+    vendor: 'Super PDP SAS',
+    description: 'Envoyez vos factures électroniques au Portail Public de Facturation (PPF) via Super PDP, Partenaire de Dématérialisation agréé. Conformité réforme française de la facturation électronique.',
+    category: 'accounting',
+    status: 'active',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-700',
+    iconLabel: 'PDP',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -220,6 +231,9 @@ export default function Settings() {
     odoo_db: '',
     odoo_username: '',
     odoo_api_key: '',
+    superpdp_client_id: '',
+    superpdp_client_secret: '',
+    superpdp_sandbox: true,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -247,6 +261,12 @@ export default function Settings() {
   const [isTestingOdoo, setIsTestingOdoo] = useState(false);
   const [isDisconnectingOdoo, setIsDisconnectingOdoo] = useState(false);
   const [odooNotice, setOdooNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // SuperPDP
+  const [superpdpStatus, setSuperpdpStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
+  const [isTestingSuperpdp, setIsTestingSuperpdp] = useState(false);
+  const [isDisconnectingSuperpdp, setIsDisconnectingSuperpdp] = useState(false);
+  const [superpdpNotice, setSuperpdpNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Zoho Books (shares same OAuth token as Invoice)
   const [zohoBooksStatus, setZohoBooksStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
@@ -312,6 +332,9 @@ export default function Settings() {
         .catch(() => {});
       apiFetch('/api/odoo/status')
         .then(s => setOdooStatus(s))
+        .catch(() => {});
+      apiFetch('/api/superpdp/status')
+        .then(s => setSuperpdpStatus(s))
         .catch(() => {});
     }
     if (currentUser) {
@@ -434,6 +457,37 @@ export default function Settings() {
     }
   };
 
+  const handleSuperpdpTest = async () => {
+    setIsTestingSuperpdp(true);
+    try {
+      const res = await apiFetch<{ connected: boolean; company?: string; error?: string }>('/api/superpdp/test', { method: 'POST' });
+      if (res.connected) {
+        setSuperpdpStatus({ connected: true });
+        setSuperpdpNotice({ type: 'success', message: `Connecté${res.company ? ` — ${res.company}` : ''}.` });
+      } else {
+        setSuperpdpNotice({ type: 'error', message: res.error || 'Connexion échouée.' });
+      }
+    } catch (e: any) {
+      setSuperpdpNotice({ type: 'error', message: e.message });
+    } finally {
+      setIsTestingSuperpdp(false);
+    }
+  };
+
+  const handleSuperpdpDisconnect = async () => {
+    setIsDisconnectingSuperpdp(true);
+    try {
+      await apiFetch('/api/superpdp/disconnect', { method: 'DELETE' });
+      setSuperpdpStatus({ connected: false });
+      setSettings((prev: any) => ({ ...prev, superpdp_client_id: '', superpdp_client_secret: '' }));
+      setSuperpdpNotice({ type: 'success', message: 'Super PDP déconnecté avec succès.' });
+    } catch {
+      setSuperpdpNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
+    } finally {
+      setIsDisconnectingSuperpdp(false);
+    }
+  };
+
   const handleZohoDisconnect = async () => {
     setIsDisconnectingZoho(true);
     try {
@@ -541,6 +595,7 @@ export default function Settings() {
     if (id === 'maf') return !!(settings as any).maf_enabled;
     if (id === 'ragic') return !!(ragicStatus?.connected);
     if (id === 'odoo') return !!(odooStatus?.connected);
+    if (id === 'superpdp') return !!(superpdpStatus?.connected);
     return false;
   };
 
@@ -969,6 +1024,81 @@ export default function Settings() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
               style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
               {isDisconnectingRagic ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
+            </button>
+          )}
+        </div>
+      </div>
+    );
+
+    if (pluginId === 'superpdp') return (
+      <div className="space-y-4">
+        {superpdpNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={superpdpNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {superpdpNotice.message}
+          </div>
+        )}
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#e7f5ff', border: '1px solid #a5d8ff', color: '#1971c2' }}>
+          <p className="font-bold mb-1">Réforme française de la facturation électronique</p>
+          <p>Super PDP est un Partenaire de Dématérialisation (PDP) agréé par la DGFiP. Il transmet vos factures B2B au Portail Public de Facturation (PPF) selon la norme EN 16931. Créez un compte sur <strong>superpdp.tech</strong>, puis récupérez votre <strong>Client ID</strong> et <strong>Client Secret</strong> dans votre espace client.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client ID OAuth2</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="votre-client-id"
+              value={(settings as any).superpdp_client_id || ''}
+              onChange={e => setSettings({ ...settings, superpdp_client_id: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client Secret OAuth2</label>
+            <input
+              type="password"
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="••••••••"
+              value={(settings as any).superpdp_client_secret || ''}
+              onChange={e => setSettings({ ...settings, superpdp_client_secret: e.target.value } as any)}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="superpdp_sandbox"
+            checked={(settings as any).superpdp_sandbox ?? true}
+            onChange={e => setSettings({ ...settings, superpdp_sandbox: e.target.checked } as any)}
+            className="rounded"
+          />
+          <label htmlFor="superpdp_sandbox" className="text-sm" style={{ color: 'var(--tblr-text)' }}>
+            Mode sandbox (test) — décochez pour passer en production
+          </label>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1">Champs utilisés pour le vendeur (depuis vos Paramètres)</p>
+          <p>Nom agence · Adresse · Email · SIRET · N° TVA. Complétez ces champs dans l'onglet <strong>Général</strong> avant d'envoyer des factures.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="button"
+            disabled={isTestingSuperpdp}
+            onClick={handleSuperpdpTest}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: '#e7f5ff', color: '#1971c2' }}>
+            {isTestingSuperpdp ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester la connexion
+          </button>
+          {superpdpStatus?.connected && (
+            <button
+              type="button"
+              disabled={isDisconnectingSuperpdp}
+              onClick={handleSuperpdpDisconnect}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+              {isDisconnectingSuperpdp ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
             </button>
           )}
         </div>

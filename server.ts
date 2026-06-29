@@ -4548,6 +4548,7 @@ async function startServer() {
         'ragic_api_key', 'ragic_account',
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',
         'odoo_url', 'odoo_db', 'odoo_username', 'odoo_api_key',
+        'superpdp_client_id', 'superpdp_client_secret', 'superpdp_sandbox',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year']);
       const filteredData: any = Object.fromEntries(
@@ -5835,6 +5836,218 @@ async function startServer() {
   });
 
   // ─── End Odoo Integration ───────────────────────────────────────────────────
+
+  // ─── SuperPDP Integration ────────────────────────────────────────────────────
+  const SUPERPDP_BASE = 'https://api.superpdp.tech';
+
+  async function superpdpToken(clientId: string, clientSecret: string): Promise<string> {
+    const params = new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret });
+    const r = await fetch(`${SUPERPDP_BASE}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+    if (!r.ok) throw new Error(`SuperPDP token error ${r.status}: ${await r.text()}`);
+    const json = await r.json() as any;
+    return json.access_token as string;
+  }
+
+  async function superpdpFetch(token: string, path: string, opts: RequestInit = {}): Promise<any> {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(opts.headers as any || {}) };
+    const r = await fetch(`${SUPERPDP_BASE}${path}`, { ...opts, headers });
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`SuperPDP API error ${r.status}: ${body}`);
+    }
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return r.json();
+    return r.text();
+  }
+
+  function buildEnInvoice(invoice: any, items: any[], settings: any): any {
+    const vatRate = invoice.vat_rate ?? 20;
+    const amountHT = parseFloat(invoice.amount ?? 0);
+    const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
+    const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
+
+    const sellerName = invoice.seller_name || settings.agency_name || 'Architecte';
+    const sellerAddress = invoice.seller_address || settings.address || '';
+    const sellerSiret = invoice.seller_siret || settings.siret || '';
+    const sellerVat = invoice.seller_vat_number || settings.vat_number || '';
+    const sellerEmail = settings.email || '';
+
+    const lines = items.length > 0 ? items.map((item: any, idx: number) => {
+      const qty = parseFloat(item.quantity ?? 1);
+      const unitPrice = parseFloat(item.unit_price ?? 0);
+      const netAmount = qty * unitPrice;
+      return {
+        identifier: String(idx + 1),
+        invoiced_quantity: String(qty),
+        invoiced_quantity_code: 'C62',
+        net_amount: netAmount.toFixed(2),
+        item_information: { name: item.description || 'Prestation' },
+        price_details: { item_net_price: unitPrice.toFixed(2) },
+        vat_information: { vat_category_code: 'S', vat_category_rate: String(vatRate) },
+      };
+    }) : [{
+      identifier: '1',
+      invoiced_quantity: '1',
+      invoiced_quantity_code: 'C62',
+      net_amount: amountHT.toFixed(2),
+      item_information: { name: invoice.description || 'Honoraires d\'architecture' },
+      price_details: { item_net_price: amountHT.toFixed(2) },
+      vat_information: { vat_category_code: 'S', vat_category_rate: String(vatRate) },
+    }];
+
+    return {
+      number: invoice.invoice_number || invoice.id,
+      issue_date: invoice.issue_date || new Date().toISOString().slice(0, 10),
+      type_code: '380',
+      currency_code: 'EUR',
+      process_control: { specification_identifier: 'urn:cen.eu:en16931:2017' },
+      payment_due_date: invoice.due_date || undefined,
+      seller: {
+        name: sellerName,
+        electronic_address: { value: sellerEmail || 'contact@cabinet.fr', scheme: 'EM' },
+        postal_address: { address_line1: sellerAddress, country_code: 'FR' },
+        ...(sellerVat ? { vat_identifier: sellerVat } : {}),
+        ...(sellerSiret ? { legal_registration_identifier: { value: sellerSiret, scheme: '0002' } } : {}),
+      },
+      buyer: {
+        name: invoice.client_name || invoice.mission_name || 'Client',
+        postal_address: { country_code: 'FR' },
+      },
+      totals: {
+        sum_invoice_lines_amount: amountHT.toFixed(2),
+        total_without_vat: amountHT.toFixed(2),
+        total_vat_amount: { value: taxAmount.toFixed(2) },
+        total_with_vat: totalTTC.toFixed(2),
+        amount_due_for_payment: totalTTC.toFixed(2),
+      },
+      vat_break_down: [{
+        vat_category_code: 'S',
+        vat_category_rate: String(vatRate),
+        vat_category_taxable_amount: amountHT.toFixed(2),
+        vat_category_tax_amount: taxAmount.toFixed(2),
+      }],
+      lines,
+    };
+  }
+
+  // GET /api/superpdp/status
+  app.get('/api/superpdp/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret,superpdp_sandbox').eq('tenant_id', tenantId).single();
+      const connected = !!(s as any)?.superpdp_client_id && !!(s as any)?.superpdp_client_secret;
+      res.json({ connected, sandbox: (s as any)?.superpdp_sandbox ?? true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/superpdp/disconnect
+  app.delete('/api/superpdp/disconnect', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      await supabaseAdmin.from('settings').update({ superpdp_client_id: null, superpdp_client_secret: null }).eq('tenant_id', tenantId);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/superpdp/test — verify credentials by fetching company info
+  app.post('/api/superpdp/test', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Configuration incomplète' });
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const company = await superpdpFetch(token, '/v1.beta/companies/me');
+      res.json({ connected: true, company: company?.formal_name || company?.name || 'SuperPDP' });
+    } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
+  });
+
+  // POST /api/superpdp/send/:invoiceId — send one invoice to SuperPDP
+  app.post('/api/superpdp/send/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+
+      const [settingsRes, invoiceRes, itemsRes] = await Promise.all([
+        supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoices').select('*').eq('id', invoiceId).eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoice_items').select('*').eq('invoice_id', invoiceId).eq('tenant_id', tenantId),
+      ]);
+      const cfg = settingsRes.data as any;
+      const invoice = invoiceRes.data as any;
+      const items = itemsRes.data || [];
+
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'SuperPDP non configuré' });
+      if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const enInvoice = buildEnInvoice(invoice, items, cfg);
+
+      // Convert en16931 JSON → CII XML
+      const ciiXml = await superpdpFetch(token, '/v1.beta/invoices/convert?from=en16931&to=cii', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/xml' },
+        body: JSON.stringify(enInvoice),
+      });
+
+      // Send CII XML to SuperPDP
+      const externalId = invoiceId.slice(0, 36);
+      const sent = await superpdpFetch(token, `/v1.beta/invoices?external_id=${encodeURIComponent(externalId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/xml' },
+        body: typeof ciiXml === 'string' ? ciiXml : JSON.stringify(ciiXml),
+      });
+
+      const superpdpId = sent?.id;
+      const superpdpStatus = sent?.events?.[sent.events.length - 1]?.status_code || 'api:uploaded';
+      await supabaseAdmin.from('invoices').update({ superpdp_id: superpdpId, superpdp_status: superpdpStatus }).eq('id', invoiceId);
+
+      res.json({ success: true, superpdp_id: superpdpId, status: superpdpStatus });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/superpdp/events/:invoiceId — get lifecycle events for an invoice
+  app.get('/api/superpdp/events/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'SuperPDP non configuré' });
+
+      const { data: inv } = await supabaseAdmin.from('invoices').select('superpdp_id,superpdp_status').eq('id', invoiceId).eq('tenant_id', tenantId).single();
+      const superpdpId = (inv as any)?.superpdp_id;
+      if (!superpdpId) return res.status(404).json({ error: 'Facture non envoyée via SuperPDP' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const events = await superpdpFetch(token, `/v1.beta/invoice_events?invoice_id=${superpdpId}`);
+
+      // Update local status with latest event
+      const latest = events?.data?.[events.data.length - 1]?.status_code;
+      if (latest) await supabaseAdmin.from('invoices').update({ superpdp_status: latest }).eq('id', invoiceId);
+
+      res.json({ events: events?.data || [], latest_status: latest });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/superpdp/invoices — list all invoices from SuperPDP
+  app.get('/api/superpdp/invoices', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'SuperPDP non configuré' });
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const result = await superpdpFetch(token, '/v1.beta/invoices?direction=out&limit=100');
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End SuperPDP Integration ────────────────────────────────────────────────
 
   // ─── Project Templates ─────────────────────────────────────────────────────
   app.get("/api/project-templates", async (req: any, res: any) => {
