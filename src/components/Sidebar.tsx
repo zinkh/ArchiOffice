@@ -26,6 +26,7 @@ import {
   IconRobot,
   IconShieldLock,
   IconShieldCheck,
+  IconCloudUpload,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -121,6 +122,7 @@ export function Sidebar() {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [superpdpConnected, setSuperpdpConnected] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch {}
@@ -131,6 +133,9 @@ export function Sidebar() {
     apiFetch<{ isAdmin: boolean }>('/api/admin/is-admin')
       .then(r => setIsSuperAdmin(r.isAdmin))
       .catch(() => setIsSuperAdmin(false));
+    apiFetch<{ connected: boolean }>('/api/superpdp/status')
+      .then(r => setSuperpdpConnected(!!r.connected))
+      .catch(() => {});
   }, [currentUser?.email]);
 
   const mafEnabled = !!(settings as any)?.maf_enabled;
@@ -229,6 +234,25 @@ export function Sidebar() {
                       </Link>
                     );
                   })}
+                  {/* Super PDP portal — shown only when connected */}
+                  {section.key === 'finances' && superpdpConnected && (() => {
+                    const isActive = location.pathname === '/superpdp';
+                    return (
+                      <Link
+                        key="/superpdp"
+                        to="/superpdp"
+                        className={cn(
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          isActive
+                            ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                            : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                        )}
+                      >
+                        <IconCloudUpload size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
+                        <span>Portail PDP</span>
+                      </Link>
+                    );
+                  })()}
                   {/* MAF declaration — shown only when plugin is enabled */}
                   {section.key === 'finances' && mafEnabled && (() => {
                     const isActive = location.pathname === '/maf-declaration';

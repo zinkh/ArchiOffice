@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -33,6 +33,14 @@ function statusStyle(status: string): React.CSSProperties {
   }
 }
 
+function pdpStatusLabel(status: string): { label: string; style: React.CSSProperties } {
+  if (status.startsWith('fr:2')) return { label: status.replace('fr:', 'PPF '), style: { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } };
+  if (status === 'api:uploaded' || status === 'api:validated') return { label: 'PDP envoyé', style: { background: '#e7f5ff', color: '#1971c2', border: '1px solid #a5d8ff' } };
+  if (status === 'api:sent') return { label: 'PDP transmis', style: { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } };
+  if (status === 'api:rejected' || status === 'fr:210' || status === 'fr:213') return { label: 'PDP refusé', style: { background: '#ffe3e3', color: '#c92a2a', border: '1px solid #ffc9c9' } };
+  return { label: `PDP: ${status}`, style: { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' } };
+}
+
 export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -48,6 +56,9 @@ export default function Invoices() {
   const [zohoConnected, setZohoConnected] = useState(false);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
   const [zohoSyncResult, setZohoSyncResult] = useState<{ pushed: number; pulled: number; errors: string[] } | null>(null);
+  const [superpdpConnected, setSuperpdpConnected] = useState(false);
+  const [sendingToPdp, setSendingToPdp] = useState<string | null>(null);
+  const [pdpNotice, setPdpNotice] = useState<{ invoiceId: string; type: 'success' | 'error'; message: string } | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -85,6 +96,7 @@ export default function Invoices() {
     };
     loadData();
     fetch('/api/zoho/status').then(r => r.json()).then(s => setZohoConnected(!!s.connected)).catch(() => {});
+    fetch('/api/superpdp/status').then(r => r.json()).then(s => setSuperpdpConnected(!!s.connected)).catch(() => {});
   }, []);
 
   const handleZohoSync = async () => {
@@ -100,6 +112,26 @@ export default function Invoices() {
       setZohoSyncResult({ pushed: 0, pulled: 0, errors: [err.message] });
     } finally {
       setIsSyncingZoho(false);
+    }
+  };
+
+  const handleSendToPdp = async (invoice: Invoice) => {
+    setSendingToPdp(invoice.id);
+    setPdpNotice(null);
+    try {
+      const res = await fetchJson<{ success: boolean; superpdp_id?: number; status?: string; error?: string }>(
+        `/api/superpdp/send/${invoice.id}`, { method: 'POST' }
+      );
+      if (res.success) {
+        setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, superpdp_id: res.superpdp_id, superpdp_status: res.status } : i));
+        setPdpNotice({ invoiceId: invoice.id, type: 'success', message: `Facture envoyée au PDP (ID: ${res.superpdp_id}) — statut: ${res.status}` });
+      } else {
+        setPdpNotice({ invoiceId: invoice.id, type: 'error', message: res.error || 'Envoi échoué.' });
+      }
+    } catch (e: any) {
+      setPdpNotice({ invoiceId: invoice.id, type: 'error', message: e.message });
+    } finally {
+      setSendingToPdp(null);
     }
   };
 
@@ -595,7 +627,24 @@ export default function Invoices() {
                                 <IconCircleCheck size={18} />
                               </button>
                             )}
+                            {superpdpConnected && (
+                              <button
+                                onClick={() => handleSendToPdp(invoice)}
+                                disabled={sendingToPdp === invoice.id}
+                                className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                                style={{ color: invoice.superpdp_id ? '#2f9e44' : '#1971c2' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#e7f5ff'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title={invoice.superpdp_id ? `Re-envoyer au PDP (${invoice.superpdp_status})` : 'Envoyer au PDP (Super PDP)'}
+                              >
+                                {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
+                              </button>
+                            )}
                           </div>
+                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {pdpNotice?.invoiceId === invoice.id && (
+                            <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -687,7 +736,24 @@ export default function Invoices() {
                             <IconCircleCheck size={18} />
                           </button>
                         )}
+                        {superpdpConnected && (
+                          <button
+                            onClick={() => handleSendToPdp(invoice)}
+                            disabled={sendingToPdp === invoice.id}
+                            className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            style={{ color: invoice.superpdp_id ? '#2f9e44' : '#1971c2' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#e7f5ff'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                            title={invoice.superpdp_id ? `Re-envoyer au PDP (${invoice.superpdp_status})` : 'Envoyer au PDP (Super PDP)'}
+                          >
+                            {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
+                          </button>
+                        )}
                       </div>
+                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {pdpNotice?.invoiceId === invoice.id && (
+                        <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                      )}
                     </td>
                   </tr>
                 ))
