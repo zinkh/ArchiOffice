@@ -29,8 +29,16 @@ export const fetchJson = async <T = any>(url: string, options?: RequestInit): Pr
 };
 
 // Authenticated fetch — injecte automatiquement le JWT Supabase
+// Tente un refresh de session si le token est absent ou expiré, puis réessaie une fois.
 export const apiFetch = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
-  const { data: { session } } = await supabase.auth.getSession();
+  let { data: { session } } = await supabase.auth.getSession();
+
+  // If no session or token is close to expiry, try a silent refresh first
+  if (!session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000)) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session) session = refreshed.session;
+  }
+
   const headers = new Headers(options?.headers);
   if (options?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');

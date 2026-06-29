@@ -86,20 +86,32 @@ export default function ActivityFeed() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenMenuRef = useRef<HTMLDivElement>(null);
 
+  const authErrorCount = useRef(0);
+
   const fetchFeed = useCallback(async () => {
     try {
       const data = await apiFetch<FeedItem[]>('/api/feed');
+      authErrorCount.current = 0;
       setItems(data);
-    } catch (err) {
-      console.error('Feed fetch failed:', err);
+    } catch (err: any) {
+      if (err?.message?.includes('401')) {
+        authErrorCount.current += 1;
+      } else {
+        console.error('Feed fetch failed:', err);
+      }
     }
   }, []);
 
   useEffect(() => {
+    if (!currentUser) return;
+    authErrorCount.current = 0;
     fetchFeed();
-    const interval = setInterval(fetchFeed, 30000);
+    const interval = setInterval(() => {
+      // Stop polling after 3 consecutive auth failures — session is gone
+      if (authErrorCount.current < 3) fetchFeed();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchFeed]);
+  }, [fetchFeed, currentUser]);
 
   // Close hidden menu on outside click
   useEffect(() => {

@@ -103,22 +103,33 @@ export default function Notifications() {
   const [newPost, setNewPost] = useState('');
   const [isPosting, setIsPosting] = useState(false);
 
+  const authErrorCount = useRef(0);
+
   const fetchItems = useCallback(async () => {
     try {
       const data = await apiFetch<FeedItem[]>('/api/feed');
+      authErrorCount.current = 0;
       setItems(data);
-    } catch (err) {
-      console.error('Feed fetch failed:', err);
+    } catch (err: any) {
+      if (!err?.message?.includes('401')) {
+        console.error('Feed fetch failed:', err);
+      } else {
+        authErrorCount.current += 1;
+      }
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    if (!currentUser) return;
+    authErrorCount.current = 0;
     fetchItems();
-    const interval = setInterval(fetchItems, 30000);
+    const interval = setInterval(() => {
+      if (authErrorCount.current < 3) fetchItems();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchItems]);
+  }, [fetchItems, currentUser]);
 
   const markAllRead = async () => {
     setIsMarkingRead(true);
