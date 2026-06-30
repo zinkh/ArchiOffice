@@ -1116,29 +1116,9 @@ async function startServer() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
 
-  // Redirect HTTP → HTTPS so the HTML page and all its assets share the same origin.
-  // Without this, a reverse proxy redirect on asset requests changes the origin
-  // (http → https), causing the browser to apply CORS and block the scripts.
-  app.use((req, res, next) => {
-    // Only redirect when a proxy explicitly says the inbound connection was HTTP.
-    // Checking x-forwarded-proto directly avoids breaking localhost dev (no proxy → header absent).
-    if (req.headers['x-forwarded-proto'] === 'http') {
-      return res.redirect(301, `https://${req.headers.host}${req.url}`);
-    }
-    // Canonicalize www → non-www so all assets and the HTML share the same origin.
-    // Without this, loading archimanager.fr then fetching www.archimanager.fr assets
-    // (or vice-versa) is a cross-origin request and the browser blocks it with CORS.
-    const host = req.headers.host || '';
-    if (host.startsWith('www.')) {
-      const canonical = host.slice(4);
-      return res.redirect(301, `https://${canonical}${req.url}`);
-    }
-    next();
-  });
-
-  // CORS headers for /api routes — needed if the frontend is ever served from a
-  // different origin (e.g. local dev against production API, or future mobile app).
-  app.use('/api', (req: any, res: any, next: any) => {
+  // CORS headers — must run before any redirect so that redirect responses also
+  // carry Access-Control-Allow-Origin (browsers check CORS on redirect responses too).
+  app.use((req: any, res: any, next: any) => {
     const origin = req.headers.origin;
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -1147,6 +1127,20 @@ async function startServer() {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
+  // Redirect HTTP → HTTPS so the HTML page and all its assets share the same origin.
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] === 'http') {
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    // Canonicalize www → non-www so all assets and the HTML share the same origin.
+    const host = req.headers.host || '';
+    if (host.startsWith('www.')) {
+      const canonical = host.slice(4);
+      return res.redirect(301, `https://${canonical}${req.url}`);
+    }
     next();
   });
 
