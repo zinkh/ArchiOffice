@@ -6152,17 +6152,27 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // POST /api/chorus-pro/test — verify credentials by requesting a PISTE OAuth2 token
+  // POST /api/chorus-pro/test — verify both credential layers: the PISTE OAuth2
+  // client (token request) AND the Chorus Pro compte technique (cpro-account
+  // header), by looking up the tenant's own SIRET in the structures directory.
   app.post('/api/chorus-pro/test', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings')
-        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .select('siret,chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
         .eq('tenant_id', tenantId).single();
       const cfg = s as any;
       if (!chorusProCfgComplete(cfg)) return res.status(400).json({ connected: false, error: 'Configuration incomplète' });
-      await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, cfg.chorus_pro_sandbox ?? true);
-      res.json({ connected: true, sandbox: cfg.chorus_pro_sandbox ?? true });
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      if (cfg.siret) {
+        await chorusProFetch(
+          { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+          '/cpro/structures/v1/rechercher/siret',
+          { siret: cfg.siret },
+        );
+      }
+      res.json({ connected: true, sandbox });
     } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
   });
 
@@ -6185,16 +6195,25 @@ async function startServer() {
       if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
       if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
 
-      const finalBuyerSiret = buyer_siret || invoice.buyer_siret;
+      // Fall back to the SIRET already captured on the linked project (Factur-X fields)
+      // so it doesn't need to be re-entered when it's already known there.
+      let projectSiret: string | null = null;
+      if (!buyer_siret && !invoice.buyer_siret && invoice.project_id) {
+        const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
+        projectSiret = (project as any)?.client_siret || null;
+      }
+
+      const finalBuyerSiret = buyer_siret || invoice.buyer_siret || projectSiret;
       if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire (structure publique) est obligatoire' });
 
       // Persist the B2G fields for reuse on the next submission of this invoice
-      const { data: updated } = await supabaseAdmin.from('invoices').update({
+      const { data: updated, error: updateErr } = await supabaseAdmin.from('invoices').update({
         buyer_siret: finalBuyerSiret,
         buyer_service_code: buyer_service_code ?? invoice.buyer_service_code ?? null,
         engagement_number: engagement_number ?? invoice.engagement_number ?? null,
       }).eq('id', invoiceId).eq('tenant_id', tenantId).select('*').single();
-      invoice = updated || { ...invoice, buyer_siret: finalBuyerSiret, buyer_service_code, engagement_number };
+      if (updateErr) throw updateErr;
+      invoice = updated;
 
       const sandbox = cfg.chorus_pro_sandbox ?? true;
       const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
@@ -6208,7 +6227,7 @@ async function startServer() {
 
       const chorusProId = result?.identifiantFactureCPP ? String(result.identifiantFactureCPP) : (result?.numeroFluxDepot ? String(result.numeroFluxDepot) : null);
       const chorusProStatus = 'DEPOSEE';
-      await supabaseAdmin.from('invoices').update({ chorus_pro_id: chorusProId, chorus_pro_status: chorusProStatus }).eq('id', invoiceId);
+      await supabaseAdmin.from('invoices').update({ chorus_pro_id: chorusProId, chorus_pro_status: chorusProStatus }).eq('id', invoiceId).eq('tenant_id', tenantId);
 
       res.json({ success: true, chorus_pro_id: chorusProId, status: chorusProStatus });
     } catch (e: any) {
@@ -6242,7 +6261,7 @@ async function startServer() {
 
       const historique = result?.listeHistoriqueStatutVo || result?.listeStatuts || [];
       const latest = historique.length > 0 ? (historique[historique.length - 1]?.statut || historique[historique.length - 1]?.libelleStatut) : null;
-      if (latest) await supabaseAdmin.from('invoices').update({ chorus_pro_status: latest }).eq('id', invoiceId);
+      if (latest) await supabaseAdmin.from('invoices').update({ chorus_pro_status: latest }).eq('id', invoiceId).eq('tenant_id', tenantId);
 
       res.json({ history: historique, latest_status: latest || (inv as any)?.chorus_pro_status });
     } catch (e: any) { res.status(500).json({ error: e.message }); }

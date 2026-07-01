@@ -151,8 +151,9 @@ export default function Invoices() {
 
   const openChorusProModal = (invoice: Invoice) => {
     setChorusProNotice(null);
+    const project = projects.find(p => p.id === invoice.project_id);
     setChorusProForm({
-      buyer_siret: invoice.buyer_siret || '',
+      buyer_siret: invoice.buyer_siret || project?.client_siret || '',
       buyer_service_code: invoice.buyer_service_code || '',
       engagement_number: invoice.engagement_number || '',
     });
