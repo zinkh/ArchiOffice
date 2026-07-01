@@ -173,6 +173,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-blue-700',
     iconLabel: 'PDP',
   },
+  {
+    id: 'chorus_pro',
+    name: 'Chorus Pro',
+    vendor: 'AIFE — Ministère de l\'Économie',
+    description: "Transmettez vos factures de maîtrise d'œuvre et de travaux aux maîtrises d'ouvrage publiques via Chorus Pro, le portail de facturation électronique obligatoire pour le secteur public (B2G).",
+    category: 'accounting',
+    status: 'active',
+    iconBg: 'bg-indigo-50',
+    iconColor: 'text-indigo-700',
+    iconLabel: 'CP',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -234,6 +245,11 @@ export default function Settings() {
     superpdp_client_id: '',
     superpdp_client_secret: '',
     superpdp_sandbox: true,
+    chorus_pro_piste_client_id: '',
+    chorus_pro_piste_client_secret: '',
+    chorus_pro_technical_login: '',
+    chorus_pro_technical_password: '',
+    chorus_pro_sandbox: true,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -267,6 +283,12 @@ export default function Settings() {
   const [isTestingSuperpdp, setIsTestingSuperpdp] = useState(false);
   const [isDisconnectingSuperpdp, setIsDisconnectingSuperpdp] = useState(false);
   const [superpdpNotice, setSuperpdpNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Chorus Pro
+  const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
+  const [isTestingChorusPro, setIsTestingChorusPro] = useState(false);
+  const [isDisconnectingChorusPro, setIsDisconnectingChorusPro] = useState(false);
+  const [chorusProNotice, setChorusProNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Zoho Books (shares same OAuth token as Invoice)
   const [zohoBooksStatus, setZohoBooksStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
@@ -335,6 +357,9 @@ export default function Settings() {
         .catch(() => {});
       apiFetch('/api/superpdp/status')
         .then(s => setSuperpdpStatus(s))
+        .catch(() => {});
+      apiFetch('/api/chorus-pro/status')
+        .then(s => setChorusProStatus(s))
         .catch(() => {});
     }
     if (currentUser) {
@@ -488,6 +513,37 @@ export default function Settings() {
     }
   };
 
+  const handleChorusProTest = async () => {
+    setIsTestingChorusPro(true);
+    try {
+      const res = await apiFetch<{ connected: boolean; sandbox?: boolean; error?: string }>('/api/chorus-pro/test', { method: 'POST' });
+      if (res.connected) {
+        setChorusProStatus({ connected: true, sandbox: res.sandbox });
+        setChorusProNotice({ type: 'success', message: `Connecté${res.sandbox ? ' (environnement sandbox/qualification)' : ' (environnement production)'}.` });
+      } else {
+        setChorusProNotice({ type: 'error', message: res.error || 'Connexion échouée.' });
+      }
+    } catch (e: any) {
+      setChorusProNotice({ type: 'error', message: e.message });
+    } finally {
+      setIsTestingChorusPro(false);
+    }
+  };
+
+  const handleChorusProDisconnect = async () => {
+    setIsDisconnectingChorusPro(true);
+    try {
+      await apiFetch('/api/chorus-pro/disconnect', { method: 'DELETE' });
+      setChorusProStatus({ connected: false });
+      setSettings((prev: any) => ({ ...prev, chorus_pro_piste_client_id: '', chorus_pro_piste_client_secret: '', chorus_pro_technical_login: '', chorus_pro_technical_password: '' }));
+      setChorusProNotice({ type: 'success', message: 'Chorus Pro déconnecté avec succès.' });
+    } catch {
+      setChorusProNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
+    } finally {
+      setIsDisconnectingChorusPro(false);
+    }
+  };
+
   const handleZohoDisconnect = async () => {
     setIsDisconnectingZoho(true);
     try {
@@ -596,6 +652,7 @@ export default function Settings() {
     if (id === 'ragic') return !!(ragicStatus?.connected);
     if (id === 'odoo') return !!(odooStatus?.connected);
     if (id === 'superpdp') return !!(superpdpStatus?.connected);
+    if (id === 'chorus_pro') return !!(chorusProStatus?.connected);
     return false;
   };
 
@@ -1099,6 +1156,102 @@ export default function Settings() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
               style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
               {isDisconnectingSuperpdp ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
+            </button>
+          )}
+        </div>
+      </div>
+    );
+
+    if (pluginId === 'chorus_pro') return (
+      <div className="space-y-4">
+        {chorusProNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={chorusProNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {chorusProNotice.message}
+          </div>
+        )}
+        <div className="p-3 rounded-lg text-xs" style={{ background: '#eef2ff', border: '1px solid #c7d2fe', color: '#4338ca' }}>
+          <p className="font-bold mb-1">Facturation électronique du secteur public (B2G)</p>
+          <p>Chorus Pro est obligatoire pour toute facture de maîtrise d'œuvre ou de travaux adressée à une maîtrise d'ouvrage publique. Créez une <strong>habilitation API OAuth2</strong> sur <strong>piste.gouv.fr</strong> (Client ID / Client Secret) puis un <strong>compte technique</strong> dans votre espace Chorus Pro (Raccordements → API), et renseignez les deux ci-dessous.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client ID PISTE (OAuth2)</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="votre-client-id-piste"
+              value={(settings as any).chorus_pro_piste_client_id || ''}
+              onChange={e => setSettings({ ...settings, chorus_pro_piste_client_id: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client Secret PISTE (OAuth2)</label>
+            <input
+              type="password"
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="••••••••"
+              value={(settings as any).chorus_pro_piste_client_secret || ''}
+              onChange={e => setSettings({ ...settings, chorus_pro_piste_client_secret: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Identifiant compte technique Chorus Pro</label>
+            <input
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="TECH_1_xxxxx@cpro.fr"
+              value={(settings as any).chorus_pro_technical_login || ''}
+              onChange={e => setSettings({ ...settings, chorus_pro_technical_login: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe compte technique</label>
+            <input
+              type="password"
+              className="w-full p-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder="••••••••"
+              value={(settings as any).chorus_pro_technical_password || ''}
+              onChange={e => setSettings({ ...settings, chorus_pro_technical_password: e.target.value } as any)}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="chorus_pro_sandbox"
+            checked={(settings as any).chorus_pro_sandbox ?? true}
+            onChange={e => setSettings({ ...settings, chorus_pro_sandbox: e.target.checked } as any)}
+            className="rounded"
+          />
+          <label htmlFor="chorus_pro_sandbox" className="text-sm" style={{ color: 'var(--tblr-text)' }}>
+            Mode sandbox (environnement de qualification) — décochez pour passer en production
+          </label>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1">Champs utilisés pour le fournisseur (depuis vos Paramètres)</p>
+          <p>Nom agence · Adresse · Email · SIRET · N° TVA. Complétez ces champs dans l'onglet <strong>Général</strong>. Le SIRET du destinataire (structure publique), le code du service exécutant et le numéro d'engagement sont demandés à l'envoi de chaque facture, depuis la page <strong>Factures</strong>.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="button"
+            disabled={isTestingChorusPro}
+            onClick={handleChorusProTest}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: '#eef2ff', color: '#4338ca' }}>
+            {isTestingChorusPro ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester la connexion
+          </button>
+          {chorusProStatus?.connected && (
+            <button
+              type="button"
+              disabled={isDisconnectingChorusPro}
+              onClick={handleChorusProDisconnect}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+              {isDisconnectingChorusPro ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter
             </button>
           )}
         </div>

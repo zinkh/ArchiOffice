@@ -614,6 +614,12 @@ export interface Invoice {
   items?: InvoiceItem[];
   superpdp_id?: number;
   superpdp_status?: string;
+  // Chorus Pro (facturation B2G maîtrise d'ouvrage publique)
+  chorus_pro_id?: string;
+  chorus_pro_status?: string;
+  buyer_siret?: string;
+  buyer_service_code?: string;
+  engagement_number?: string;
 }
 
 export interface InvoiceItem {

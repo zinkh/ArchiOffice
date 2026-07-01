@@ -54,6 +54,7 @@ import GoogleAuthCallback from './pages/GoogleAuthCallback';
 import AdminDashboard from './pages/AdminDashboard';
 import MafDeclaration from './pages/MafDeclaration';
 import SuperPDPPortal from './pages/SuperPDPPortal';
+import ChorusProPortal from './pages/ChorusProPortal';
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agents/client';
 
@@ -608,6 +609,7 @@ export default function App() {
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/maf-declaration" element={<MafDeclaration />} />
               <Route path="/superpdp" element={<SuperPDPPortal />} />
+              <Route path="/chorus-pro" element={<ChorusProPortal />} />
             </Route>
           </Routes>
         </Router>

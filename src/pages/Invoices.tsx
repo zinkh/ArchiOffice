@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2 } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -41,6 +41,14 @@ function pdpStatusLabel(status: string): { label: string; style: React.CSSProper
   return { label: `PDP: ${status}`, style: { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' } };
 }
 
+function chorusProStatusLabel(status: string): { label: string; style: React.CSSProperties } {
+  if (['DEPOSEE', 'A_TRAITER', 'MISE_A_DISPOSITION'].includes(status)) return { label: 'Chorus Pro : déposée', style: { background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe' } };
+  if (['MANDATEE', 'COMPTABILISEE', 'SERVICE_FAIT', 'MISE_EN_PAIEMENT'].includes(status)) return { label: 'Chorus Pro : en traitement', style: { background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' } };
+  if (status === 'REJETEE' || status === 'SUSPENDUE') return { label: 'Chorus Pro : rejetée', style: { background: '#ffe3e3', color: '#c92a2a', border: '1px solid #ffc9c9' } };
+  if (status === 'PAIEMENT_EFFECTUE' || status === 'SOLDEE') return { label: 'Chorus Pro : payée', style: { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } };
+  return { label: `Chorus Pro : ${status}`, style: { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' } };
+}
+
 export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -59,6 +67,11 @@ export default function Invoices() {
   const [superpdpConnected, setSuperpdpConnected] = useState(false);
   const [sendingToPdp, setSendingToPdp] = useState<string | null>(null);
   const [pdpNotice, setPdpNotice] = useState<{ invoiceId: string; type: 'success' | 'error'; message: string } | null>(null);
+  const [chorusProConnected, setChorusProConnected] = useState(false);
+  const [chorusProModalInvoice, setChorusProModalInvoice] = useState<Invoice | null>(null);
+  const [chorusProForm, setChorusProForm] = useState({ buyer_siret: '', buyer_service_code: '', engagement_number: '' });
+  const [sendingToChorusPro, setSendingToChorusPro] = useState(false);
+  const [chorusProNotice, setChorusProNotice] = useState<{ invoiceId: string; type: 'success' | 'error'; message: string } | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -97,6 +110,7 @@ export default function Invoices() {
     loadData();
     fetch('/api/zoho/status').then(r => r.json()).then(s => setZohoConnected(!!s.connected)).catch(() => {});
     fetch('/api/superpdp/status').then(r => r.json()).then(s => setSuperpdpConnected(!!s.connected)).catch(() => {});
+    fetch('/api/chorus-pro/status').then(r => r.json()).then(s => setChorusProConnected(!!s.connected)).catch(() => {});
   }, []);
 
   const handleZohoSync = async () => {
@@ -132,6 +146,39 @@ export default function Invoices() {
       setPdpNotice({ invoiceId: invoice.id, type: 'error', message: e.message });
     } finally {
       setSendingToPdp(null);
+    }
+  };
+
+  const openChorusProModal = (invoice: Invoice) => {
+    setChorusProNotice(null);
+    setChorusProForm({
+      buyer_siret: invoice.buyer_siret || '',
+      buyer_service_code: invoice.buyer_service_code || '',
+      engagement_number: invoice.engagement_number || '',
+    });
+    setChorusProModalInvoice(invoice);
+  };
+
+  const handleSendToChorusPro = async () => {
+    if (!chorusProModalInvoice) return;
+    const invoice = chorusProModalInvoice;
+    setSendingToChorusPro(true);
+    try {
+      const res = await fetchJson<{ success: boolean; chorus_pro_id?: string; status?: string; error?: string }>(
+        `/api/chorus-pro/send/${invoice.id}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(chorusProForm) }
+      );
+      if (res.success) {
+        setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, chorus_pro_id: res.chorus_pro_id, chorus_pro_status: res.status, ...chorusProForm } : i));
+        setChorusProNotice({ invoiceId: invoice.id, type: 'success', message: `Facture déposée sur Chorus Pro (ID: ${res.chorus_pro_id}).` });
+        setChorusProModalInvoice(null);
+      } else {
+        setChorusProNotice({ invoiceId: invoice.id, type: 'error', message: res.error || 'Envoi échoué.' });
+      }
+    } catch (e: any) {
+      setChorusProNotice({ invoiceId: invoice.id, type: 'error', message: e.message });
+    } finally {
+      setSendingToChorusPro(false);
     }
   };
 
@@ -640,10 +687,26 @@ export default function Invoices() {
                                 {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
                               </button>
                             )}
+                            {chorusProConnected && (
+                              <button
+                                onClick={() => openChorusProModal(invoice)}
+                                className="p-1.5 rounded-lg transition-colors"
+                                style={{ color: invoice.chorus_pro_id ? '#4338ca' : '#4338ca' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#eef2ff'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title={invoice.chorus_pro_id ? `Re-envoyer à Chorus Pro (${invoice.chorus_pro_status})` : 'Envoyer à Chorus Pro'}
+                              >
+                                <IconBuildingBank size={18} />
+                              </button>
+                            )}
                           </div>
                           {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                           {pdpNotice?.invoiceId === invoice.id && (
                             <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                          )}
+                          {chorusProNotice?.invoiceId === invoice.id && (
+                            <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                           )}
                         </td>
                       </tr>
@@ -749,10 +812,26 @@ export default function Invoices() {
                             {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
                           </button>
                         )}
+                        {chorusProConnected && (
+                          <button
+                            onClick={() => openChorusProModal(invoice)}
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: '#4338ca' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#eef2ff'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                            title={invoice.chorus_pro_id ? `Re-envoyer à Chorus Pro (${invoice.chorus_pro_status})` : 'Envoyer à Chorus Pro'}
+                          >
+                            <IconBuildingBank size={18} />
+                          </button>
+                        )}
                       </div>
                       {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                       {pdpNotice?.invoiceId === invoice.id && (
                         <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                      )}
+                      {chorusProNotice?.invoiceId === invoice.id && (
+                        <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                       )}
                     </td>
                   </tr>
@@ -1183,6 +1262,97 @@ export default function Invoices() {
                       {isSending ? '...' : t('invoices_send_confirm')}
                     </button>
                   )}
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+        {chorusProModalInvoice && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg" style={{ background: '#eef2ff', color: '#4338ca' }}>
+                    <IconBuildingBank size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>Envoyer à Chorus Pro</h2>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{chorusProModalInvoice.invoice_number}</p>
+                  </div>
+                </div>
+                <button onClick={() => setChorusProModalInvoice(null)} style={{ color: 'var(--tblr-muted)' }}><IconX size={24} /></button>
+              </div>
+              <form onSubmit={e => { e.preventDefault(); handleSendToChorusPro(); }} className="p-6 space-y-4">
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Renseignez les informations de la structure publique destinataire (maîtrise d'ouvrage). Ces informations sont mémorisées pour les prochains envois de cette facture.
+                </p>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>SIRET du destinataire (structure publique) *</label>
+                  <input
+                    type="text" required
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 font-mono"
+                    style={inputStyle}
+                    value={chorusProForm.buyer_siret}
+                    onChange={e => setChorusProForm({ ...chorusProForm, buyer_siret: e.target.value })}
+                    placeholder="14 chiffres"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>Code du service exécutant</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 font-mono"
+                    style={inputStyle}
+                    value={chorusProForm.buyer_service_code}
+                    onChange={e => setChorusProForm({ ...chorusProForm, buyer_service_code: e.target.value })}
+                    placeholder="Optionnel"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>Numéro d'engagement / de marché</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 font-mono"
+                    style={inputStyle}
+                    value={chorusProForm.engagement_number}
+                    onChange={e => setChorusProForm({ ...chorusProForm, engagement_number: e.target.value })}
+                    placeholder="Optionnel selon la structure"
+                  />
+                </div>
+                {chorusProNotice?.invoiceId === chorusProModalInvoice.id && (
+                  <div
+                    className="text-sm p-3 rounded-lg"
+                    style={chorusProNotice.type === 'success'
+                      ? { background: '#d3f9d8', color: '#2f9e44' }
+                      : { background: '#ffe3e3', color: 'var(--tblr-danger)' }}
+                  >
+                    {chorusProNotice.message}
+                  </div>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setChorusProModalInvoice(null)}
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors"
+                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    {t('btn_cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={sendingToChorusPro}
+                    className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                    style={{ background: '#4338ca', color: '#fff' }}
+                  >
+                    {sendingToChorusPro ? <IconLoader2 size={18} className="animate-spin" /> : <IconBuildingBank size={18} />}
+                    {sendingToChorusPro ? 'Envoi...' : 'Déposer sur Chorus Pro'}
+                  </button>
                 </div>
               </form>
             </motion.div>

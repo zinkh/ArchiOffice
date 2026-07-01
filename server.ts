@@ -4543,6 +4543,8 @@ async function startServer() {
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',
         'odoo_url', 'odoo_db', 'odoo_username', 'odoo_api_key',
         'superpdp_client_id', 'superpdp_client_secret', 'superpdp_sandbox',
+        'chorus_pro_piste_client_id', 'chorus_pro_piste_client_secret',
+        'chorus_pro_technical_login', 'chorus_pro_technical_password', 'chorus_pro_sandbox',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year']);
       const filteredData: any = Object.fromEntries(
@@ -6042,6 +6044,230 @@ async function startServer() {
   });
 
   // ─── End SuperPDP Integration ────────────────────────────────────────────────
+
+  // ─── Chorus Pro Integration ────────────────────────────────────────────────
+  // Chorus Pro is the French government's mandatory B2G e-invoicing platform
+  // (facturation à destination des maîtrises d'ouvrage publiques). Access uses
+  // PISTE (OAuth2 client_credentials) plus a separate Chorus Pro "compte
+  // technique" sent via the cpro-account header (base64 of login:password).
+  function chorusProUrls(sandbox: boolean) {
+    return sandbox
+      ? { oauth: 'https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token', api: 'https://sandbox-api.aife.economie.gouv.fr' }
+      : { oauth: 'https://oauth.aife.economie.gouv.fr/api/oauth/token', api: 'https://api.aife.economie.gouv.fr' };
+  }
+
+  async function chorusProToken(clientId: string, clientSecret: string, sandbox: boolean): Promise<string> {
+    const { oauth } = chorusProUrls(sandbox);
+    const params = new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret, scope: 'openid' });
+    const r = await fetch(oauth, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+    if (!r.ok) throw new Error(`Chorus Pro (PISTE) — jeton OAuth2 refusé (${r.status}): ${await r.text()}`);
+    const json = await r.json() as any;
+    return json.access_token as string;
+  }
+
+  async function chorusProFetch(cfg: { token: string; login: string; password: string; sandbox: boolean }, path: string, body: any): Promise<any> {
+    const { api } = chorusProUrls(cfg.sandbox);
+    const cproAccount = Buffer.from(`${cfg.login}:${cfg.password}`).toString('base64');
+    const r = await fetch(`${api}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        'cpro-account': cproAccount,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await r.text();
+    let json: any = {};
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    if (!r.ok) throw new Error(`Chorus Pro API — erreur ${r.status}: ${json?.libelle || text}`);
+    if (json && typeof json.codeRetour === 'number' && json.codeRetour !== 0) {
+      throw new Error(`Chorus Pro API — code retour ${json.codeRetour}: ${json.libelle || 'erreur inconnue'}`);
+    }
+    return json;
+  }
+
+  function buildChorusProSubmission(invoice: any, items: any[], settings: any): any {
+    const vatRate = invoice.vat_rate ?? 20;
+    const amountHT = parseFloat(invoice.amount ?? 0);
+    const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
+    const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
+    const sellerSiret = invoice.seller_siret || settings.siret || '';
+
+    const lignePosteDtoList = (items.length > 0 ? items : [{ description: invoice.description || "Honoraires d'architecture", quantity: 1, unit_price: amountHT, vat_rate: vatRate }])
+      .map((item: any, idx: number) => ({
+        numeroLigne: idx + 1,
+        denomination: (item.description || 'Prestation').slice(0, 255),
+        quantite: parseFloat(item.quantity ?? 1),
+        montantUnitaireHT: parseFloat(item.unit_price ?? 0).toFixed(2),
+        montantHTApresRemise: (parseFloat(item.quantity ?? 1) * parseFloat(item.unit_price ?? 0)).toFixed(2),
+        tauxTva: parseFloat(item.vat_rate ?? vatRate),
+      }));
+
+    return {
+      modeDepotSoumission: 'SAISIE_API',
+      typeFacture: 'FACTURE',
+      typeTva: 'TVA_SUR_DEBIT',
+      dateFacture: invoice.issue_date || new Date().toISOString().slice(0, 10),
+      dateEcheancePaiement: invoice.due_date || undefined,
+      numeroFactureSaisie: invoice.invoice_number || invoice.id,
+      devise: invoice.currency || 'EUR',
+      fournisseur: { siret: sellerSiret },
+      destinataire: { siret: invoice.buyer_siret },
+      ...(invoice.engagement_number ? { numeroEngagementFacture: invoice.engagement_number } : {}),
+      ...(invoice.buyer_service_code ? { codeServiceExecutant: invoice.buyer_service_code } : {}),
+      montantHtTotal: amountHT.toFixed(2),
+      montantTvaTotal: taxAmount.toFixed(2),
+      montantTtcTotal: totalTTC.toFixed(2),
+      ligneTvaDtoList: [{ montantBaseHtLigne: amountHT.toFixed(2), montantTvaLigne: taxAmount.toFixed(2), tauxTvaLigne: vatRate }],
+      lignePosteDtoList,
+    };
+  }
+
+  function chorusProCfgComplete(cfg: any): boolean {
+    return !!(cfg?.chorus_pro_piste_client_id && cfg?.chorus_pro_piste_client_secret && cfg?.chorus_pro_technical_login && cfg?.chorus_pro_technical_password);
+  }
+
+  // GET /api/chorus-pro/status
+  app.get('/api/chorus-pro/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      res.json({ connected: chorusProCfgComplete(cfg), sandbox: cfg?.chorus_pro_sandbox ?? true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/chorus-pro/disconnect
+  app.delete('/api/chorus-pro/disconnect', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      await supabaseAdmin.from('settings').update({
+        chorus_pro_piste_client_id: null, chorus_pro_piste_client_secret: null,
+        chorus_pro_technical_login: null, chorus_pro_technical_password: null,
+      }).eq('tenant_id', tenantId);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/chorus-pro/test — verify credentials by requesting a PISTE OAuth2 token
+  app.post('/api/chorus-pro/test', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ connected: false, error: 'Configuration incomplète' });
+      await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, cfg.chorus_pro_sandbox ?? true);
+      res.json({ connected: true, sandbox: cfg.chorus_pro_sandbox ?? true });
+    } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
+  });
+
+  // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
+  app.post('/api/chorus-pro/send/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+      const { buyer_siret, buyer_service_code, engagement_number } = req.body || {};
+
+      const [settingsRes, invoiceRes, itemsRes] = await Promise.all([
+        supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoices').select('*').eq('id', invoiceId).eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoice_items').select('*').eq('invoice_id', invoiceId).eq('tenant_id', tenantId),
+      ]);
+      const cfg = settingsRes.data as any;
+      let invoice = invoiceRes.data as any;
+      const items = itemsRes.data || [];
+
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+      if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+
+      const finalBuyerSiret = buyer_siret || invoice.buyer_siret;
+      if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire (structure publique) est obligatoire' });
+
+      // Persist the B2G fields for reuse on the next submission of this invoice
+      const { data: updated } = await supabaseAdmin.from('invoices').update({
+        buyer_siret: finalBuyerSiret,
+        buyer_service_code: buyer_service_code ?? invoice.buyer_service_code ?? null,
+        engagement_number: engagement_number ?? invoice.engagement_number ?? null,
+      }).eq('id', invoiceId).eq('tenant_id', tenantId).select('*').single();
+      invoice = updated || { ...invoice, buyer_siret: finalBuyerSiret, buyer_service_code, engagement_number };
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const payload = buildChorusProSubmission(invoice, items, cfg);
+
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/soumettre',
+        payload,
+      );
+
+      const chorusProId = result?.identifiantFactureCPP ? String(result.identifiantFactureCPP) : (result?.numeroFluxDepot ? String(result.numeroFluxDepot) : null);
+      const chorusProStatus = 'DEPOSEE';
+      await supabaseAdmin.from('invoices').update({ chorus_pro_id: chorusProId, chorus_pro_status: chorusProStatus }).eq('id', invoiceId);
+
+      res.json({ success: true, chorus_pro_id: chorusProId, status: chorusProStatus });
+    } catch (e: any) {
+      console.error('[Chorus Pro send]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/chorus-pro/status/:invoiceId — consult/refresh the status of a submitted invoice
+  app.get('/api/chorus-pro/status/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+
+      const { data: inv } = await supabaseAdmin.from('invoices').select('chorus_pro_id,chorus_pro_status').eq('id', invoiceId).eq('tenant_id', tenantId).single();
+      const chorusProId = (inv as any)?.chorus_pro_id;
+      if (!chorusProId) return res.status(404).json({ error: "Facture non envoyée à Chorus Pro" });
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/consulter/historique_statut',
+        { identifiantFactureCPP: chorusProId },
+      );
+
+      const historique = result?.listeHistoriqueStatutVo || result?.listeStatuts || [];
+      const latest = historique.length > 0 ? (historique[historique.length - 1]?.statut || historique[historique.length - 1]?.libelleStatut) : null;
+      if (latest) await supabaseAdmin.from('invoices').update({ chorus_pro_status: latest }).eq('id', invoiceId);
+
+      res.json({ history: historique, latest_status: latest || (inv as any)?.chorus_pro_status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/chorus-pro/invoices — list local invoices already submitted to Chorus Pro
+  app.get('/api/chorus-pro/invoices', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('invoices')
+        .select('*, projects(name)')
+        .eq('tenant_id', tenantId)
+        .not('chorus_pro_id', 'is', null)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const result = (data || []).map((inv: any) => {
+        const project_name = inv.projects?.name || null;
+        const { projects: _p, ...rest } = inv;
+        return { ...rest, project_name };
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Chorus Pro Integration ────────────────────────────────────────────
 
   // ─── Project Templates ─────────────────────────────────────────────────────
   app.get("/api/project-templates", async (req: any, res: any) => {
