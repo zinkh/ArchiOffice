@@ -149,6 +149,10 @@ export default function Invoices() {
     }
   };
 
+  // Chorus Pro n'est accessible que pour les marchés publics (maîtrises d'ouvrage
+  // publiques) — les marchés privés passent par Super PDP.
+  const isInvoicePublicMarket = (invoice: Invoice) => !!projects.find(p => p.id === invoice.project_id)?.is_public_client;
+
   const openChorusProModal = (invoice: Invoice) => {
     setChorusProNotice(null);
     const project = projects.find(p => p.id === invoice.project_id);
@@ -688,7 +692,7 @@ export default function Invoices() {
                                 {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
                               </button>
                             )}
-                            {chorusProConnected && (
+                            {chorusProConnected && isInvoicePublicMarket(invoice) && (
                               <button
                                 onClick={() => openChorusProModal(invoice)}
                                 className="p-1.5 rounded-lg transition-colors"
@@ -813,7 +817,7 @@ export default function Invoices() {
                             {sendingToPdp === invoice.id ? <IconLoader2 size={18} className="animate-spin" /> : <IconCloudUpload size={18} />}
                           </button>
                         )}
-                        {chorusProConnected && (
+                        {chorusProConnected && isInvoicePublicMarket(invoice) && (
                           <button
                             onClick={() => openChorusProModal(invoice)}
                             className="p-1.5 rounded-lg transition-colors"

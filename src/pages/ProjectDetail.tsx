@@ -2352,6 +2352,15 @@ export default function ProjectDetail() {
                             <FormField label="Représentant" value={project.representant} onChange={(v: any) => setProject(prev => prev ? ({...prev, representant: v}) : null)} />
                             <FormField label="Qualité" value={project.qualite} onChange={(v: any) => setProject(prev => prev ? ({...prev, qualite: v}) : null)} />
                           </div>
+                          {/* Facturation électronique (Factur-X, Chorus Pro, Super PDP) */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                            <FormField label="SIRET client (Factur-X)" value={project.client_siret} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_siret: v}) : null)} />
+                            <FormField label="N° TVA client" value={project.client_vat_number} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_vat_number: v}) : null)} />
+                            <FormField label="Maîtrise d'ouvrage publique" type="checkbox" value={project.is_public_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_public_client: v}) : null)} />
+                          </div>
+                          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 -mt-4">
+                            La maîtrise d'ouvrage publique détermine si les factures et situations de ce projet passent par Chorus Pro (marchés publics) ou par Super PDP (marchés privés).
+                          </p>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
                               <FormField 

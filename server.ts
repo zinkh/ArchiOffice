@@ -2305,7 +2305,7 @@ async function startServer() {
       await checkQuota(tenantId, 'projects');
       const {
         id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, etudes_notes, chantier_notes, is_public_client,
+        is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -2327,6 +2327,7 @@ async function startServer() {
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
         is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
@@ -2366,7 +2367,7 @@ async function startServer() {
       const { id } = req.params;
       const {
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, etudes_notes, chantier_notes, is_public_client,
+        is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -2380,6 +2381,7 @@ async function startServer() {
       const { error: ue } = await supabaseAdmin.from('projects').update({
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
@@ -6039,6 +6041,174 @@ async function startServer() {
       if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'SuperPDP non configuré' });
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
       const result = await superpdpFetch(token, '/v1.beta/invoices?direction=out&limit=100');
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Situations / factures de travaux — marchés privés ──────────────────────
+  // Chorus Pro is reserved for marchés publics. For private markets, the same
+  // workflow (retrouver la facture de l'entreprise, la lier, joindre l'état
+  // d'acompte MOE en pièce jointe complémentaire) is offered via Super PDP,
+  // the Plateforme Agréée déjà connectée par le cabinet pour ses honoraires.
+  async function loadSituationForSuperpdp(tenantId: string, situationId: string) {
+    const { data: sit } = await supabaseAdmin
+      .from('situations')
+      .select('*, marche:marches_entreprises(*)')
+      .eq('id', situationId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (!sit) return null;
+    const marche = (sit as any).marche as any;
+    const { data: detailsRaw } = await supabaseAdmin
+      .from('detail_situations')
+      .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
+      .eq('tenant_id', tenantId)
+      .eq('situation_id', situationId);
+    return { sit, marche, details: detailsRaw ?? [] };
+  }
+
+  // POST /api/superpdp/search-situation-facture/:situationId — find the
+  // entreprise's facture already deposited on Super PDP for this marché
+  app.post('/api/superpdp/search-situation-facture/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { buyer_siret } = req.body || {};
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single(),
+        loadSituationForSuperpdp(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche } = loaded;
+      if (!marche?.entreprise_siret) return res.status(400).json({ error: "Le SIRET de l'entreprise (marché lié) est obligatoire pour rechercher sa facture" });
+      const finalBuyerSiret = buyer_siret || sit.buyer_siret;
+      if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire est obligatoire pour la recherche' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const result = await superpdpFetch(token, `/v1.beta/invoices?supplier_siret=${encodeURIComponent(marche.entreprise_siret)}&buyer_siret=${encodeURIComponent(finalBuyerSiret)}&limit=20`);
+
+      const factures = (result?.data || []).map((f: any) => ({
+        identifiantFactureCPP: String(f.id),
+        numeroFacture: f.en_invoice?.number || null,
+        dateFacture: f.en_invoice?.issue_date || null,
+        montantTtc: f.en_invoice?.totals?.total_with_vat ? Number(f.en_invoice.totals.total_with_vat) : null,
+        statut: f.events?.[f.events.length - 1]?.status_code || null,
+      }));
+
+      res.json({ factures });
+    } catch (e: any) {
+      console.error('[SuperPDP search-situation-facture]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/superpdp/link-situation/:situationId — link this situation to
+  // the entreprise's facture found on Super PDP (no new facture is created)
+  app.post('/api/superpdp/link-situation/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { superpdp_id, statut, buyer_siret, buyer_service_code, engagement_number } = req.body || {};
+      if (!superpdp_id) return res.status(400).json({ error: 'Identifiant de facture Super PDP manquant' });
+
+      const { data: updated, error } = await supabaseAdmin.from('situations').update({
+        superpdp_id: Number(superpdp_id),
+        superpdp_status: statut || 'api:uploaded',
+        buyer_siret: buyer_siret || null,
+        buyer_service_code: buyer_service_code || null,
+        engagement_number: engagement_number || null,
+      }).eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/superpdp/attach-etat-acompte/:situationId — generate the état
+  // d'acompte PDF and deposit it as a complementary attachment on the
+  // entreprise's facture already linked on Super PDP
+  app.post('/api/superpdp/attach-etat-acompte/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('agency_name,superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single(),
+        loadSituationForSuperpdp(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche, details } = loaded;
+      if (!sit.superpdp_id) return res.status(400).json({ error: "Recherchez et liez d'abord la facture de l'entreprise avant de joindre l'état d'acompte" });
+
+      const pdfBuf = await buildEtatAcomptePdfBuffer(sit, marche, details, cfg.agency_name || '');
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      await superpdpFetch(token, `/v1.beta/invoices/${sit.superpdp_id}/attachments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: `etat-acompte-${sit.numero_situation}.pdf`,
+          content_base64: pdfBuf.toString('base64'),
+          comment: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${marche.entreprise_nom}, lot ${marche.lot_numero}` : ''}`,
+        }),
+      });
+
+      const { data: updated, error } = await supabaseAdmin.from('situations')
+        .update({ etat_acompte_joint_at: new Date().toISOString() })
+        .eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) {
+      console.error('[SuperPDP attach-etat-acompte]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/superpdp/situation-status/:situationId — consult/refresh the
+  // status of the linked entreprise facture
+  app.get('/api/superpdp/situation-status/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+
+      const { data: sit } = await supabaseAdmin.from('situations').select('superpdp_id,superpdp_status').eq('id', situationId).eq('tenant_id', tenantId).single();
+      const superpdpId = (sit as any)?.superpdp_id;
+      if (!superpdpId) return res.status(404).json({ error: 'Situation non liée à Super PDP' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const events = await superpdpFetch(token, `/v1.beta/invoice_events?invoice_id=${superpdpId}`);
+      const latest = events?.data?.[events.data.length - 1]?.status_code;
+      if (latest) await supabaseAdmin.from('situations').update({ superpdp_status: latest }).eq('id', situationId).eq('tenant_id', tenantId);
+
+      res.json({ events: events?.data || [], latest_status: latest || (sit as any)?.superpdp_status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/superpdp/situations — list local situations linked to an entreprise facture on Super PDP
+  app.get('/api/superpdp/situations', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('situations')
+        .select('*, marche:marches_entreprises(entreprise_nom,entreprise_siret,lot_numero,lot_titre,tva_rate,revision_active), projects(name)')
+        .eq('tenant_id', tenantId)
+        .not('superpdp_id', 'is', null)
+        .order('date_situation', { ascending: false });
+      if (error) throw error;
+      const result = await Promise.all((data || []).map(async (s: any) => {
+        const { data: details } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', s.id);
+        const net = computeEtatAcompte(s, s.marche, details ?? []);
+        const project_name = s.projects?.name || null;
+        const { projects: _p, ...rest } = s;
+        return { ...rest, project_name, montant_ttc: net.net };
+      }));
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
