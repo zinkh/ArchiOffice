@@ -63,6 +63,7 @@ import ConstructionReportModule from '../components/ConstructionReportModule';
 import SiteReports from '../components/SiteReports';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
+import Situations from './Situations';
 
 import { useTranslation } from 'react-i18next';
 
@@ -1312,8 +1313,8 @@ export default function ProjectDetail() {
           
           {/* Tab Navigation */}
           <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 mb-6 overflow-x-auto">
-            {['INFOS', 'HONOS', 'PRO', 'ACT', 'VISA', 'DET', 'RDT', 'AOR'].map(tab => {
-              if (['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab) && !project.is_chantier) return null;
+            {['INFOS', 'HONOS', 'PRO', 'ACT', 'VISA', 'DET', 'RDT', 'AOR', 'SIT'].map(tab => {
+              if (['ACT', 'VISA', 'DET', 'RDT', 'AOR', 'SIT'].includes(tab) && !project.is_chantier) return null;
               return (
                 <button 
                   key={tab}
@@ -4317,6 +4318,11 @@ export default function ProjectDetail() {
                 })()}
               </div>
               </div>
+              </div>
+            )}
+            {activeTab === 'SIT' && project.is_chantier && (
+              <div className="mt-2">
+                <Situations projectId={id!} />
               </div>
             )}
           </div>

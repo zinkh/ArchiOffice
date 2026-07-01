@@ -4,6 +4,17 @@ import { IconBuildingBank, IconRefresh, IconLoader2, IconCircleCheck, IconX, Ico
 import { fetchJson } from '../lib/api';
 import type { Invoice } from '../types';
 
+interface ChorusProSituation {
+  id: string;
+  numero_situation: number;
+  date_situation: string;
+  project_name?: string;
+  buyer_siret?: string;
+  chorus_pro_status?: string;
+  montant_ttc: number;
+  marche?: { entreprise_nom: string; lot_numero: string; lot_titre: string };
+}
+
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; border: string; icon: React.ReactNode }> = {
   DEPOSEE:             { label: 'Déposée',            color: '#4338ca', bg: '#e0e7ff', border: '#c7d2fe', icon: <IconBuildingBank size={13} /> },
   A_TRAITER:           { label: 'À traiter',          color: '#4338ca', bg: '#e0e7ff', border: '#c7d2fe', icon: <IconClock size={13} /> },
@@ -31,6 +42,7 @@ function StatusBadge({ code }: { code: string }) {
 export default function ChorusProPortal() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [situations, setSituations] = useState<ChorusProSituation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
@@ -40,8 +52,12 @@ export default function ChorusProPortal() {
         const status = await fetchJson<{ connected: boolean }>('/api/chorus-pro/status');
         setConnected(status.connected);
         if (status.connected) {
-          const data = await fetchJson<Invoice[]>('/api/chorus-pro/invoices');
-          setInvoices(data || []);
+          const [invoicesData, situationsData] = await Promise.all([
+            fetchJson<Invoice[]>('/api/chorus-pro/invoices'),
+            fetchJson<ChorusProSituation[]>('/api/chorus-pro/situations'),
+          ]);
+          setInvoices(invoicesData || []);
+          setSituations(situationsData || []);
         }
       } catch {
         setConnected(false);
@@ -58,6 +74,18 @@ export default function ChorusProPortal() {
       const res = await fetchJson<{ latest_status?: string }>(`/api/chorus-pro/status/${invoiceId}`);
       if (res.latest_status) {
         setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, chorus_pro_status: res.latest_status } : inv));
+      }
+    } catch { /* ignore */ } finally {
+      setRefreshingId(null);
+    }
+  };
+
+  const refreshSituationStatus = async (situationId: string) => {
+    setRefreshingId(situationId);
+    try {
+      const res = await fetchJson<{ latest_status?: string }>(`/api/chorus-pro/situation-status/${situationId}`);
+      if (res.latest_status) {
+        setSituations(prev => prev.map(s => s.id === situationId ? { ...s, chorus_pro_status: res.latest_status } : s));
       }
     } catch { /* ignore */ } finally {
       setRefreshingId(null);
@@ -105,6 +133,7 @@ export default function ChorusProPortal() {
         </span>
       </div>
 
+      <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Factures de maîtrise d'œuvre</h2>
       {invoices.length === 0 ? (
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <IconFileInvoice size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
@@ -157,6 +186,70 @@ export default function ChorusProPortal() {
                       title="Actualiser le statut"
                     >
                       {refreshingId === inv.id ? <IconLoader2 size={16} className="animate-spin" /> : <IconRefresh size={16} />}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Factures de travaux (situations)</h2>
+      {situations.length === 0 ? (
+        <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune situation de travaux envoyée via Chorus Pro pour l'instant.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Envoyer à Chorus Pro</strong> depuis l'onglet Situations d'un projet.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Situation</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Projet / Entreprise</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>SIRET destinataire</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Net à payer TTC</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Statut Chorus Pro</th>
+                <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {situations.map(sit => (
+                <tr key={sit.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg" style={{ background: '#eef2ff', color: '#4338ca' }}>
+                        <IconBuildingBank size={16} />
+                      </div>
+                      <div>
+                        <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>Sit. n°{sit.numero_situation}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-4 text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>
+                    {sit.project_name || '—'}{sit.marche && ` — ${sit.marche.entreprise_nom} (lot ${sit.marche.lot_numero})`}
+                  </td>
+                  <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--tblr-text)' }}>{sit.buyer_siret || '—'}</td>
+                  <td className="px-5 py-4 font-mono text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>
+                    {Number(sit.montant_ttc || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                  </td>
+                  <td className="px-5 py-4">
+                    {sit.chorus_pro_status ? <StatusBadge code={sit.chorus_pro_status} /> : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button
+                      onClick={() => refreshSituationStatus(sit.id)}
+                      disabled={refreshingId === sit.id}
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      style={{ color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-surface-2)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                      title="Actualiser le statut"
+                    >
+                      {refreshingId === sit.id ? <IconLoader2 size={16} className="animate-spin" /> : <IconRefresh size={16} />}
                     </button>
                   </td>
                 </tr>

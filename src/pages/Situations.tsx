@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconX, IconDownload,
   IconCalculator, IconChevronDown, IconChevronRight, IconAlertTriangle,
+  IconBuildingBank, IconLoader2,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 
@@ -12,6 +13,7 @@ interface Marche {
   id: string;
   project_id: string;
   entreprise_nom: string;
+  entreprise_siret?: string;
   lot_numero: string;
   lot_titre: string;
   montant_ht: number;
@@ -58,6 +60,11 @@ interface SituationAvecMarche {
   revision_indices?: any;
   notes_moe?: string;
   marche?: Marche;
+  chorus_pro_id?: string;
+  chorus_pro_status?: string;
+  buyer_siret?: string;
+  buyer_service_code?: string;
+  engagement_number?: string;
 }
 
 interface EnrichedItem {
@@ -137,6 +144,57 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
     notes_moe: '',
   });
   const [savingEtat, setSavingEtat] = useState(false);
+
+  // ── Chorus Pro (factures de travaux) ───────────────────────────────────────
+  const [chorusProConnected, setChorusProConnected] = useState(false);
+  const [projectClientSiret, setProjectClientSiret] = useState('');
+  const [chorusProModalOpen, setChorusProModalOpen] = useState(false);
+  const [chorusProForm, setChorusProForm] = useState({ buyer_siret: '', buyer_service_code: '', engagement_number: '' });
+  const [sendingToChorusPro, setSendingToChorusPro] = useState(false);
+  const [chorusProNotice, setChorusProNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ connected: boolean }>('/api/chorus-pro/status').then(s => setChorusProConnected(!!s.connected)).catch(() => {});
+    if (!projectId) return;
+    apiFetch<any[]>('/api/projects').then(projects => {
+      setProjectClientSiret(projects.find(p => p.id === projectId)?.client_siret || '');
+    }).catch(() => {});
+  }, [projectId]);
+
+  const openChorusProModal = () => {
+    if (!selectedSit) return;
+    setChorusProNotice(null);
+    setChorusProForm({
+      buyer_siret: selectedSit.buyer_siret || projectClientSiret || '',
+      buyer_service_code: selectedSit.buyer_service_code || '',
+      engagement_number: selectedSit.engagement_number || '',
+    });
+    setChorusProModalOpen(true);
+  };
+
+  const handleSendToChorusPro = async () => {
+    if (!selectedSit) return;
+    setSendingToChorusPro(true);
+    try {
+      const res = await apiFetch<{ success: boolean; chorus_pro_id?: string; status?: string; error?: string }>(
+        `/api/chorus-pro/send-situation/${selectedSit.id}`,
+        { method: 'POST', body: JSON.stringify(chorusProForm) }
+      );
+      if (res.success) {
+        const updatedSit = { ...selectedSit, chorus_pro_id: res.chorus_pro_id, chorus_pro_status: res.status, ...chorusProForm };
+        setSelectedSit(updatedSit);
+        setSituations(prev => prev.map(s => s.id === selectedSit.id ? updatedSit : s));
+        setChorusProNotice({ type: 'success', message: `Situation déposée sur Chorus Pro (ID: ${res.chorus_pro_id}).` });
+        setChorusProModalOpen(false);
+      } else {
+        setChorusProNotice({ type: 'error', message: res.error || 'Envoi échoué.' });
+      }
+    } catch (e: any) {
+      setChorusProNotice({ type: 'error', message: e.message });
+    } finally {
+      setSendingToChorusPro(false);
+    }
+  };
 
   // ── Chargement marchés ─────────────────────────────────────────────────────
   const loadMarches = useCallback(async () => {
@@ -550,14 +608,33 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
             ) : (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
-                  <button
-                    onClick={handleDownloadPdf}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border"
-                    style={{ borderColor: 'var(--tblr-border)' }}
-                  >
-                    <IconDownload size={14} /> Export PDF
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
+                    {selectedSit.chorus_pro_id && selectedSit.chorus_pro_status && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#e0e7ff', color: '#4338ca' }}>
+                        Chorus Pro : {selectedSit.chorus_pro_status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {chorusProConnected && (
+                      <button
+                        onClick={openChorusProModal}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white"
+                        style={{ background: '#4338ca' }}
+                        title={selectedSit.chorus_pro_id ? `Re-envoyer à Chorus Pro (${selectedSit.chorus_pro_status})` : 'Envoyer à Chorus Pro'}
+                      >
+                        <IconBuildingBank size={14} /> Envoyer à Chorus Pro
+                      </button>
+                    )}
+                    <button
+                      onClick={handleDownloadPdf}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border"
+                      style={{ borderColor: 'var(--tblr-border)' }}
+                    >
+                      <IconDownload size={14} /> Export PDF
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -704,6 +781,59 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
           </div>
         </div>
       )}
+
+      {/* ── Modal envoi Chorus Pro ──────────────────────────────────────────── */}
+      {chorusProModalOpen && selectedSit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[26rem] space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-base flex items-center gap-2"><IconBuildingBank size={18} style={{ color: '#4338ca' }} /> Envoyer à Chorus Pro</h3>
+              <button onClick={() => setChorusProModalOpen(false)}><IconX size={18} /></button>
+            </div>
+            <p className="text-xs text-[var(--tblr-muted)]">
+              Situation n°{selectedSit.numero_situation}{selectedSit.marche && ` — ${selectedSit.marche.entreprise_nom} (lot ${selectedSit.marche.lot_numero})`}.
+              {!selectedSit.marche?.entreprise_siret && (
+                <span className="block mt-1 text-red-600">Le SIRET de l'entreprise n'est pas renseigné sur le marché lié — ajoutez-le dans l'onglet Marchés avant l'envoi.</span>
+              )}
+            </p>
+            <Field label="SIRET du destinataire (structure publique) *">
+              <input value={chorusProForm.buyer_siret}
+                onChange={e => setChorusProForm(f => ({ ...f, buyer_siret: e.target.value }))}
+                className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
+                placeholder="14 chiffres" />
+            </Field>
+            <Field label="Code du service exécutant">
+              <input value={chorusProForm.buyer_service_code}
+                onChange={e => setChorusProForm(f => ({ ...f, buyer_service_code: e.target.value }))}
+                className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
+                placeholder="Optionnel" />
+            </Field>
+            <Field label="Numéro d'engagement / de marché">
+              <input value={chorusProForm.engagement_number}
+                onChange={e => setChorusProForm(f => ({ ...f, engagement_number: e.target.value }))}
+                className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
+                placeholder="Optionnel selon la structure" />
+            </Field>
+            {chorusProNotice && (
+              <div className="text-sm p-3 rounded-lg" style={chorusProNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
+                {chorusProNotice.message}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setChorusProModalOpen(false)} className="px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
+              <button
+                onClick={handleSendToChorusPro}
+                disabled={sendingToChorusPro || !chorusProForm.buyer_siret || !selectedSit.marche?.entreprise_siret}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60"
+                style={{ background: '#4338ca' }}
+              >
+                {sendingToChorusPro ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
+                {sendingToChorusPro ? 'Envoi…' : 'Déposer sur Chorus Pro'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -742,6 +872,10 @@ function MarcheForm({
         <Field label="Entreprise *">
           <input value={form.entreprise_nom ?? ''} onChange={e => setForm({ ...form, entreprise_nom: e.target.value })}
             className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+        </Field>
+        <Field label="SIRET entreprise (requis pour Chorus Pro)">
+          <input value={form.entreprise_siret ?? ''} onChange={e => setForm({ ...form, entreprise_siret: e.target.value })}
+            className="w-full text-sm border rounded px-2 py-1.5 bg-white font-mono" style={{ borderColor: 'var(--tblr-border)' }} placeholder="14 chiffres" />
         </Field>
         <Field label="Lot n°">
           <input value={form.lot_numero ?? ''} onChange={e => setForm({ ...form, lot_numero: e.target.value })}
