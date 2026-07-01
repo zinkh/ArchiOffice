@@ -11,6 +11,7 @@ interface ChorusProSituation {
   project_name?: string;
   buyer_siret?: string;
   chorus_pro_status?: string;
+  etat_acompte_joint_at?: string;
   montant_ttc: number;
   marche?: { entreprise_nom: string; lot_numero: string; lot_titre: string };
 }
@@ -199,8 +200,8 @@ export default function ChorusProPortal() {
       {situations.length === 0 ? (
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
-          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune situation de travaux envoyée via Chorus Pro pour l'instant.</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Envoyer à Chorus Pro</strong> depuis l'onglet Situations d'un projet.</p>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune facture entreprise liée sur Chorus Pro pour l'instant.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Rechercher sur Chorus Pro</strong> depuis l'onglet Situations d'un projet pour retrouver la facture déposée par l'entreprise, puis y joindre l'état d'acompte.</p>
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
@@ -211,7 +212,8 @@ export default function ChorusProPortal() {
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Projet / Entreprise</th>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>SIRET destinataire</th>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Net à payer TTC</th>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Statut Chorus Pro</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Statut facture entreprise</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>État d'acompte</th>
                 <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Actions</th>
               </tr>
             </thead>
@@ -238,6 +240,11 @@ export default function ChorusProPortal() {
                   </td>
                   <td className="px-5 py-4">
                     {sit.chorus_pro_status ? <StatusBadge code={sit.chorus_pro_status} /> : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>}
+                  </td>
+                  <td className="px-5 py-4">
+                    {sit.etat_acompte_joint_at
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
+                      : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Non joint</span>}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <button

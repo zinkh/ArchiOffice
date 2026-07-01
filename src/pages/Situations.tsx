@@ -65,6 +65,15 @@ interface SituationAvecMarche {
   buyer_siret?: string;
   buyer_service_code?: string;
   engagement_number?: string;
+  etat_acompte_joint_at?: string;
+}
+
+interface ChorusProFactureCandidate {
+  identifiantFactureCPP: string;
+  numeroFacture?: string | null;
+  dateFacture?: string | null;
+  montantTtc?: number | null;
+  statut?: string | null;
 }
 
 interface EnrichedItem {
@@ -146,11 +155,17 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
   const [savingEtat, setSavingEtat] = useState(false);
 
   // ── Chorus Pro (factures de travaux) ───────────────────────────────────────
+  // En tant que MOE, on ne dépose jamais de nouvelle facture : on retrouve la
+  // facture déjà déposée par l'entreprise, on la lie à la situation, puis on
+  // joint l'état d'acompte MOE en pièce jointe complémentaire.
   const [chorusProConnected, setChorusProConnected] = useState(false);
   const [projectClientSiret, setProjectClientSiret] = useState('');
-  const [chorusProModalOpen, setChorusProModalOpen] = useState(false);
-  const [chorusProForm, setChorusProForm] = useState({ buyer_siret: '', buyer_service_code: '', engagement_number: '' });
-  const [sendingToChorusPro, setSendingToChorusPro] = useState(false);
+  const [chorusProSearchModalOpen, setChorusProSearchModalOpen] = useState(false);
+  const [chorusProSearchSiret, setChorusProSearchSiret] = useState('');
+  const [chorusProSearching, setChorusProSearching] = useState(false);
+  const [chorusProCandidates, setChorusProCandidates] = useState<ChorusProFactureCandidate[] | null>(null);
+  const [chorusProLinking, setChorusProLinking] = useState<string | null>(null);
+  const [chorusProAttaching, setChorusProAttaching] = useState(false);
   const [chorusProNotice, setChorusProNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
@@ -161,38 +176,77 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
     }).catch(() => {});
   }, [projectId]);
 
-  const openChorusProModal = () => {
+  const openChorusProSearchModal = () => {
     if (!selectedSit) return;
     setChorusProNotice(null);
-    setChorusProForm({
-      buyer_siret: selectedSit.buyer_siret || projectClientSiret || '',
-      buyer_service_code: selectedSit.buyer_service_code || '',
-      engagement_number: selectedSit.engagement_number || '',
-    });
-    setChorusProModalOpen(true);
+    setChorusProCandidates(null);
+    setChorusProSearchSiret(selectedSit.buyer_siret || projectClientSiret || '');
+    setChorusProSearchModalOpen(true);
   };
 
-  const handleSendToChorusPro = async () => {
+  const handleSearchChorusProFacture = async () => {
     if (!selectedSit) return;
-    setSendingToChorusPro(true);
+    setChorusProSearching(true);
+    setChorusProNotice(null);
     try {
-      const res = await apiFetch<{ success: boolean; chorus_pro_id?: string; status?: string; error?: string }>(
-        `/api/chorus-pro/send-situation/${selectedSit.id}`,
-        { method: 'POST', body: JSON.stringify(chorusProForm) }
+      const res = await apiFetch<{ factures: ChorusProFactureCandidate[]; error?: string }>(
+        `/api/chorus-pro/search-situation-facture/${selectedSit.id}`,
+        { method: 'POST', body: JSON.stringify({ buyer_siret: chorusProSearchSiret }) }
       );
-      if (res.success) {
-        const updatedSit = { ...selectedSit, chorus_pro_id: res.chorus_pro_id, chorus_pro_status: res.status, ...chorusProForm };
+      setChorusProCandidates(res.factures || []);
+    } catch (e: any) {
+      setChorusProNotice({ type: 'error', message: e.message });
+      setChorusProCandidates([]);
+    } finally {
+      setChorusProSearching(false);
+    }
+  };
+
+  const handleLinkChorusProFacture = async (candidate: ChorusProFactureCandidate) => {
+    if (!selectedSit) return;
+    setChorusProLinking(candidate.identifiantFactureCPP);
+    try {
+      const res = await apiFetch<{ success: boolean; situation?: SituationAvecMarche; error?: string }>(
+        `/api/chorus-pro/link-situation/${selectedSit.id}`,
+        { method: 'POST', body: JSON.stringify({ chorus_pro_id: candidate.identifiantFactureCPP, statut: candidate.statut, buyer_siret: chorusProSearchSiret }) }
+      );
+      if (res.success && res.situation) {
+        const updatedSit = { ...selectedSit, ...res.situation };
         setSelectedSit(updatedSit);
         setSituations(prev => prev.map(s => s.id === selectedSit.id ? updatedSit : s));
-        setChorusProNotice({ type: 'success', message: `Situation déposée sur Chorus Pro (ID: ${res.chorus_pro_id}).` });
-        setChorusProModalOpen(false);
+        setChorusProNotice({ type: 'success', message: `Facture entreprise liée (ID Chorus Pro : ${candidate.identifiantFactureCPP}).` });
+        setChorusProSearchModalOpen(false);
+      } else {
+        setChorusProNotice({ type: 'error', message: res.error || 'Liaison échouée.' });
+      }
+    } catch (e: any) {
+      setChorusProNotice({ type: 'error', message: e.message });
+    } finally {
+      setChorusProLinking(null);
+    }
+  };
+
+  const handleAttachEtatAcompte = async () => {
+    if (!selectedSit) return;
+    setChorusProAttaching(true);
+    setChorusProNotice(null);
+    try {
+      const res = await apiFetch<{ success: boolean; situation?: SituationAvecMarche; error?: string }>(
+        `/api/chorus-pro/attach-etat-acompte/${selectedSit.id}`,
+        { method: 'POST' }
+      );
+      if (res.success && res.situation) {
+        const updatedSit = { ...selectedSit, ...res.situation };
+        setSelectedSit(updatedSit);
+        setSituations(prev => prev.map(s => s.id === selectedSit.id ? updatedSit : s));
+        setChorusProNotice({ type: 'success', message: "État d'acompte joint à la facture sur Chorus Pro." });
       } else {
         setChorusProNotice({ type: 'error', message: res.error || 'Envoi échoué.' });
       }
     } catch (e: any) {
       setChorusProNotice({ type: 'error', message: e.message });
     } finally {
-      setSendingToChorusPro(false);
+      setChorusProAttaching(false);
     }
   };
 
@@ -612,19 +666,36 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
                     {selectedSit.chorus_pro_id && selectedSit.chorus_pro_status && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#e0e7ff', color: '#4338ca' }}>
-                        Chorus Pro : {selectedSit.chorus_pro_status}
+                        Facture entreprise : {selectedSit.chorus_pro_status}
+                      </span>
+                    )}
+                    {selectedSit.etat_acompte_joint_at && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                        État d'acompte joint
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {chorusProConnected && (
+                    {chorusProConnected && !selectedSit.chorus_pro_id && (
                       <button
-                        onClick={openChorusProModal}
+                        onClick={openChorusProSearchModal}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white"
                         style={{ background: '#4338ca' }}
-                        title={selectedSit.chorus_pro_id ? `Re-envoyer à Chorus Pro (${selectedSit.chorus_pro_status})` : 'Envoyer à Chorus Pro'}
+                        title="Rechercher la facture de l'entreprise sur Chorus Pro"
                       >
-                        <IconBuildingBank size={14} /> Envoyer à Chorus Pro
+                        <IconBuildingBank size={14} /> Rechercher sur Chorus Pro
+                      </button>
+                    )}
+                    {chorusProConnected && selectedSit.chorus_pro_id && (
+                      <button
+                        onClick={handleAttachEtatAcompte}
+                        disabled={chorusProAttaching}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
+                        style={{ background: '#4338ca' }}
+                        title="Joindre l'état d'acompte à la facture liée sur Chorus Pro"
+                      >
+                        {chorusProAttaching ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
+                        {selectedSit.etat_acompte_joint_at ? 'Rejoindre l’état d’acompte' : 'Joindre l’état d’acompte'}
                       </button>
                     )}
                     <button
@@ -636,6 +707,12 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     </button>
                   </div>
                 </div>
+
+                {chorusProNotice && !chorusProSearchModalOpen && (
+                  <div className="text-sm p-3 rounded-lg" style={chorusProNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
+                    {chorusProNotice.message}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Récapitulatif financier */}
@@ -782,55 +859,70 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
         </div>
       )}
 
-      {/* ── Modal envoi Chorus Pro ──────────────────────────────────────────── */}
-      {chorusProModalOpen && selectedSit && (
+      {/* ── Modal recherche facture entreprise Chorus Pro ───────────────────── */}
+      {chorusProSearchModalOpen && selectedSit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[26rem] space-y-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[30rem] space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-base flex items-center gap-2"><IconBuildingBank size={18} style={{ color: '#4338ca' }} /> Envoyer à Chorus Pro</h3>
-              <button onClick={() => setChorusProModalOpen(false)}><IconX size={18} /></button>
+              <h3 className="font-semibold text-base flex items-center gap-2"><IconBuildingBank size={18} style={{ color: '#4338ca' }} /> Rechercher la facture entreprise</h3>
+              <button onClick={() => setChorusProSearchModalOpen(false)}><IconX size={18} /></button>
             </div>
             <p className="text-xs text-[var(--tblr-muted)]">
-              Situation n°{selectedSit.numero_situation}{selectedSit.marche && ` — ${selectedSit.marche.entreprise_nom} (lot ${selectedSit.marche.lot_numero})`}.
+              Recherche la facture déposée sur Chorus Pro par <strong>{selectedSit.marche?.entreprise_nom || "l'entreprise"}</strong> pour la structure publique destinataire, afin d'y joindre l'état d'acompte n°{selectedSit.numero_situation}.
               {!selectedSit.marche?.entreprise_siret && (
-                <span className="block mt-1 text-red-600">Le SIRET de l'entreprise n'est pas renseigné sur le marché lié — ajoutez-le dans l'onglet Marchés avant l'envoi.</span>
+                <span className="block mt-1 text-red-600">Le SIRET de l'entreprise n'est pas renseigné sur le marché lié — ajoutez-le dans l'onglet Marchés.</span>
               )}
             </p>
             <Field label="SIRET du destinataire (structure publique) *">
-              <input value={chorusProForm.buyer_siret}
-                onChange={e => setChorusProForm(f => ({ ...f, buyer_siret: e.target.value }))}
+              <input value={chorusProSearchSiret}
+                onChange={e => setChorusProSearchSiret(e.target.value)}
                 className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
                 placeholder="14 chiffres" />
             </Field>
-            <Field label="Code du service exécutant">
-              <input value={chorusProForm.buyer_service_code}
-                onChange={e => setChorusProForm(f => ({ ...f, buyer_service_code: e.target.value }))}
-                className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
-                placeholder="Optionnel" />
-            </Field>
-            <Field label="Numéro d'engagement / de marché">
-              <input value={chorusProForm.engagement_number}
-                onChange={e => setChorusProForm(f => ({ ...f, engagement_number: e.target.value }))}
-                className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
-                placeholder="Optionnel selon la structure" />
-            </Field>
+            <button
+              onClick={handleSearchChorusProFacture}
+              disabled={chorusProSearching || !chorusProSearchSiret || !selectedSit.marche?.entreprise_siret}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60"
+              style={{ background: '#4338ca' }}
+            >
+              {chorusProSearching ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
+              {chorusProSearching ? 'Recherche…' : 'Rechercher sur Chorus Pro'}
+            </button>
+
             {chorusProNotice && (
               <div className="text-sm p-3 rounded-lg" style={chorusProNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
                 {chorusProNotice.message}
               </div>
             )}
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setChorusProModalOpen(false)} className="px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
-              <button
-                onClick={handleSendToChorusPro}
-                disabled={sendingToChorusPro || !chorusProForm.buyer_siret || !selectedSit.marche?.entreprise_siret}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60"
-                style={{ background: '#4338ca' }}
-              >
-                {sendingToChorusPro ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
-                {sendingToChorusPro ? 'Envoi…' : 'Déposer sur Chorus Pro'}
-              </button>
-            </div>
+
+            {chorusProCandidates !== null && (
+              chorusProCandidates.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: 'var(--tblr-muted)' }}>Aucune facture trouvée pour ce fournisseur / cette structure.</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {chorusProCandidates.map(c => (
+                    <div key={c.identifiantFactureCPP} className="flex items-center justify-between rounded-lg border p-2.5 text-xs" style={{ borderColor: 'var(--tblr-border)' }}>
+                      <div>
+                        <p className="font-semibold">{c.numeroFacture || `Facture #${c.identifiantFactureCPP}`}</p>
+                        <p style={{ color: 'var(--tblr-muted)' }}>
+                          {c.dateFacture ? new Date(c.dateFacture).toLocaleDateString('fr-FR') : '—'}
+                          {c.montantTtc != null && ` · ${f2(Number(c.montantTtc))} € TTC`}
+                          {c.statut && ` · ${c.statut}`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleLinkChorusProFacture(c)}
+                        disabled={chorusProLinking === c.identifiantFactureCPP}
+                        className="px-2.5 py-1 rounded text-white text-xs font-medium disabled:opacity-60"
+                        style={{ background: '#4338ca' }}
+                      >
+                        {chorusProLinking === c.identifiantFactureCPP ? '…' : 'Lier'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
           </div>
         </div>
       )}
