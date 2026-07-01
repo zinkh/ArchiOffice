@@ -2305,7 +2305,7 @@ async function startServer() {
       await checkQuota(tenantId, 'projects');
       const {
         id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, etudes_notes, chantier_notes, is_public_client,
+        is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -2327,6 +2327,7 @@ async function startServer() {
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
         is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
@@ -2366,7 +2367,7 @@ async function startServer() {
       const { id } = req.params;
       const {
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, etudes_notes, chantier_notes, is_public_client,
+        is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -2380,6 +2381,7 @@ async function startServer() {
       const { error: ue } = await supabaseAdmin.from('projects').update({
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
@@ -4543,6 +4545,8 @@ async function startServer() {
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',
         'odoo_url', 'odoo_db', 'odoo_username', 'odoo_api_key',
         'superpdp_client_id', 'superpdp_client_secret', 'superpdp_sandbox',
+        'chorus_pro_piste_client_id', 'chorus_pro_piste_client_secret',
+        'chorus_pro_technical_login', 'chorus_pro_technical_password', 'chorus_pro_sandbox',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year']);
       const filteredData: any = Object.fromEntries(
@@ -6041,7 +6045,605 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── Situations / factures de travaux — marchés privés ──────────────────────
+  // Chorus Pro is reserved for marchés publics. For private markets, the same
+  // workflow (retrouver la facture de l'entreprise, la lier, joindre l'état
+  // d'acompte MOE en pièce jointe complémentaire) is offered via Super PDP,
+  // the Plateforme Agréée déjà connectée par le cabinet pour ses honoraires.
+  async function loadSituationForSuperpdp(tenantId: string, situationId: string) {
+    const { data: sit } = await supabaseAdmin
+      .from('situations')
+      .select('*, marche:marches_entreprises(*)')
+      .eq('id', situationId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (!sit) return null;
+    const marche = (sit as any).marche as any;
+    const { data: detailsRaw } = await supabaseAdmin
+      .from('detail_situations')
+      .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
+      .eq('tenant_id', tenantId)
+      .eq('situation_id', situationId);
+    return { sit, marche, details: detailsRaw ?? [] };
+  }
+
+  // POST /api/superpdp/search-situation-facture/:situationId — find the
+  // entreprise's facture already deposited on Super PDP for this marché
+  app.post('/api/superpdp/search-situation-facture/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { buyer_siret } = req.body || {};
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single(),
+        loadSituationForSuperpdp(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche } = loaded;
+      if (!marche?.entreprise_siret) return res.status(400).json({ error: "Le SIRET de l'entreprise (marché lié) est obligatoire pour rechercher sa facture" });
+      const finalBuyerSiret = buyer_siret || sit.buyer_siret;
+      if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire est obligatoire pour la recherche' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const result = await superpdpFetch(token, `/v1.beta/invoices?supplier_siret=${encodeURIComponent(marche.entreprise_siret)}&buyer_siret=${encodeURIComponent(finalBuyerSiret)}&limit=20`);
+
+      const factures = (result?.data || []).map((f: any) => ({
+        identifiantFactureCPP: String(f.id),
+        numeroFacture: f.en_invoice?.number || null,
+        dateFacture: f.en_invoice?.issue_date || null,
+        montantTtc: f.en_invoice?.totals?.total_with_vat ? Number(f.en_invoice.totals.total_with_vat) : null,
+        statut: f.events?.[f.events.length - 1]?.status_code || null,
+      }));
+
+      res.json({ factures });
+    } catch (e: any) {
+      console.error('[SuperPDP search-situation-facture]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/superpdp/link-situation/:situationId — link this situation to
+  // the entreprise's facture found on Super PDP (no new facture is created)
+  app.post('/api/superpdp/link-situation/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { superpdp_id, statut, buyer_siret, buyer_service_code, engagement_number } = req.body || {};
+      if (!superpdp_id) return res.status(400).json({ error: 'Identifiant de facture Super PDP manquant' });
+
+      const { data: updated, error } = await supabaseAdmin.from('situations').update({
+        superpdp_id: Number(superpdp_id),
+        superpdp_status: statut || 'api:uploaded',
+        buyer_siret: buyer_siret || null,
+        buyer_service_code: buyer_service_code || null,
+        engagement_number: engagement_number || null,
+      }).eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/superpdp/attach-etat-acompte/:situationId — generate the état
+  // d'acompte PDF and deposit it as a complementary attachment on the
+  // entreprise's facture already linked on Super PDP
+  app.post('/api/superpdp/attach-etat-acompte/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('agency_name,superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single(),
+        loadSituationForSuperpdp(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche, details } = loaded;
+      if (!sit.superpdp_id) return res.status(400).json({ error: "Recherchez et liez d'abord la facture de l'entreprise avant de joindre l'état d'acompte" });
+
+      const pdfBuf = await buildEtatAcomptePdfBuffer(sit, marche, details, cfg.agency_name || '');
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      await superpdpFetch(token, `/v1.beta/invoices/${sit.superpdp_id}/attachments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: `etat-acompte-${sit.numero_situation}.pdf`,
+          content_base64: pdfBuf.toString('base64'),
+          comment: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${marche.entreprise_nom}, lot ${marche.lot_numero}` : ''}`,
+        }),
+      });
+
+      const { data: updated, error } = await supabaseAdmin.from('situations')
+        .update({ etat_acompte_joint_at: new Date().toISOString() })
+        .eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) {
+      console.error('[SuperPDP attach-etat-acompte]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/superpdp/situation-status/:situationId — consult/refresh the
+  // status of the linked entreprise facture
+  app.get('/api/superpdp/situation-status/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
+
+      const { data: sit } = await supabaseAdmin.from('situations').select('superpdp_id,superpdp_status').eq('id', situationId).eq('tenant_id', tenantId).single();
+      const superpdpId = (sit as any)?.superpdp_id;
+      if (!superpdpId) return res.status(404).json({ error: 'Situation non liée à Super PDP' });
+
+      const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
+      const events = await superpdpFetch(token, `/v1.beta/invoice_events?invoice_id=${superpdpId}`);
+      const latest = events?.data?.[events.data.length - 1]?.status_code;
+      if (latest) await supabaseAdmin.from('situations').update({ superpdp_status: latest }).eq('id', situationId).eq('tenant_id', tenantId);
+
+      res.json({ events: events?.data || [], latest_status: latest || (sit as any)?.superpdp_status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/superpdp/situations — list local situations linked to an entreprise facture on Super PDP
+  app.get('/api/superpdp/situations', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('situations')
+        .select('*, marche:marches_entreprises(entreprise_nom,entreprise_siret,lot_numero,lot_titre,tva_rate,revision_active), projects(name)')
+        .eq('tenant_id', tenantId)
+        .not('superpdp_id', 'is', null)
+        .order('date_situation', { ascending: false });
+      if (error) throw error;
+      const result = await Promise.all((data || []).map(async (s: any) => {
+        const { data: details } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', s.id);
+        const net = computeEtatAcompte(s, s.marche, details ?? []);
+        const project_name = s.projects?.name || null;
+        const { projects: _p, ...rest } = s;
+        return { ...rest, project_name, montant_ttc: net.net };
+      }));
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── End SuperPDP Integration ────────────────────────────────────────────────
+
+  // ─── Chorus Pro Integration ────────────────────────────────────────────────
+  // Chorus Pro is the French government's mandatory B2G e-invoicing platform
+  // (facturation à destination des maîtrises d'ouvrage publiques). Access uses
+  // PISTE (OAuth2 client_credentials) plus a separate Chorus Pro "compte
+  // technique" sent via the cpro-account header (base64 of login:password).
+  function chorusProUrls(sandbox: boolean) {
+    return sandbox
+      ? { oauth: 'https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token', api: 'https://sandbox-api.aife.economie.gouv.fr' }
+      : { oauth: 'https://oauth.aife.economie.gouv.fr/api/oauth/token', api: 'https://api.aife.economie.gouv.fr' };
+  }
+
+  async function chorusProToken(clientId: string, clientSecret: string, sandbox: boolean): Promise<string> {
+    const { oauth } = chorusProUrls(sandbox);
+    const params = new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret, scope: 'openid' });
+    const r = await fetch(oauth, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+    if (!r.ok) throw new Error(`Chorus Pro (PISTE) — jeton OAuth2 refusé (${r.status}): ${await r.text()}`);
+    const json = await r.json() as any;
+    return json.access_token as string;
+  }
+
+  async function chorusProFetch(cfg: { token: string; login: string; password: string; sandbox: boolean }, path: string, body: any): Promise<any> {
+    const { api } = chorusProUrls(cfg.sandbox);
+    const cproAccount = Buffer.from(`${cfg.login}:${cfg.password}`).toString('base64');
+    const r = await fetch(`${api}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        'cpro-account': cproAccount,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await r.text();
+    let json: any = {};
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    if (!r.ok) throw new Error(`Chorus Pro API — erreur ${r.status}: ${json?.libelle || text}`);
+    if (json && typeof json.codeRetour === 'number' && json.codeRetour !== 0) {
+      throw new Error(`Chorus Pro API — code retour ${json.codeRetour}: ${json.libelle || 'erreur inconnue'}`);
+    }
+    return json;
+  }
+
+  function buildChorusProSubmission(invoice: any, items: any[], settings: any): any {
+    const vatRate = invoice.vat_rate ?? 20;
+    const amountHT = parseFloat(invoice.amount ?? 0);
+    const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
+    const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
+    const sellerSiret = invoice.seller_siret || settings.siret || '';
+
+    const lignePosteDtoList = (items.length > 0 ? items : [{ description: invoice.description || "Honoraires d'architecture", quantity: 1, unit_price: amountHT, vat_rate: vatRate }])
+      .map((item: any, idx: number) => ({
+        numeroLigne: idx + 1,
+        denomination: (item.description || 'Prestation').slice(0, 255),
+        quantite: parseFloat(item.quantity ?? 1),
+        montantUnitaireHT: parseFloat(item.unit_price ?? 0).toFixed(2),
+        montantHTApresRemise: (parseFloat(item.quantity ?? 1) * parseFloat(item.unit_price ?? 0)).toFixed(2),
+        tauxTva: parseFloat(item.vat_rate ?? vatRate),
+      }));
+
+    return {
+      modeDepotSoumission: 'SAISIE_API',
+      typeFacture: 'FACTURE',
+      typeTva: 'TVA_SUR_DEBIT',
+      dateFacture: invoice.issue_date || new Date().toISOString().slice(0, 10),
+      dateEcheancePaiement: invoice.due_date || undefined,
+      numeroFactureSaisie: invoice.invoice_number || invoice.id,
+      devise: invoice.currency || 'EUR',
+      fournisseur: { siret: sellerSiret },
+      destinataire: { siret: invoice.buyer_siret },
+      ...(invoice.engagement_number ? { numeroEngagementFacture: invoice.engagement_number } : {}),
+      ...(invoice.buyer_service_code ? { codeServiceExecutant: invoice.buyer_service_code } : {}),
+      montantHtTotal: amountHT.toFixed(2),
+      montantTvaTotal: taxAmount.toFixed(2),
+      montantTtcTotal: totalTTC.toFixed(2),
+      ligneTvaDtoList: [{ montantBaseHtLigne: amountHT.toFixed(2), montantTvaLigne: taxAmount.toFixed(2), tauxTvaLigne: vatRate }],
+      lignePosteDtoList,
+    };
+  }
+
+  function chorusProCfgComplete(cfg: any): boolean {
+    return !!(cfg?.chorus_pro_piste_client_id && cfg?.chorus_pro_piste_client_secret && cfg?.chorus_pro_technical_login && cfg?.chorus_pro_technical_password);
+  }
+
+  // GET /api/chorus-pro/status
+  app.get('/api/chorus-pro/status', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      res.json({ connected: chorusProCfgComplete(cfg), sandbox: cfg?.chorus_pro_sandbox ?? true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/chorus-pro/disconnect
+  app.delete('/api/chorus-pro/disconnect', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      await supabaseAdmin.from('settings').update({
+        chorus_pro_piste_client_id: null, chorus_pro_piste_client_secret: null,
+        chorus_pro_technical_login: null, chorus_pro_technical_password: null,
+      }).eq('tenant_id', tenantId);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/chorus-pro/test — verify both credential layers: the PISTE OAuth2
+  // client (token request) AND the Chorus Pro compte technique (cpro-account
+  // header), by looking up the tenant's own SIRET in the structures directory.
+  app.post('/api/chorus-pro/test', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('siret,chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ connected: false, error: 'Configuration incomplète' });
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      if (cfg.siret) {
+        await chorusProFetch(
+          { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+          '/cpro/structures/v1/rechercher/siret',
+          { siret: cfg.siret },
+        );
+      }
+      res.json({ connected: true, sandbox });
+    } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
+  });
+
+  // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
+  app.post('/api/chorus-pro/send/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+      const { buyer_siret, buyer_service_code, engagement_number } = req.body || {};
+
+      const [settingsRes, invoiceRes, itemsRes] = await Promise.all([
+        supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoices').select('*').eq('id', invoiceId).eq('tenant_id', tenantId).single(),
+        supabaseAdmin.from('invoice_items').select('*').eq('invoice_id', invoiceId).eq('tenant_id', tenantId),
+      ]);
+      const cfg = settingsRes.data as any;
+      let invoice = invoiceRes.data as any;
+      const items = itemsRes.data || [];
+
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+      if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+
+      // Fall back to the SIRET already captured on the linked project (Factur-X fields)
+      // so it doesn't need to be re-entered when it's already known there.
+      let projectSiret: string | null = null;
+      if (!buyer_siret && !invoice.buyer_siret && invoice.project_id) {
+        const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
+        projectSiret = (project as any)?.client_siret || null;
+      }
+
+      const finalBuyerSiret = buyer_siret || invoice.buyer_siret || projectSiret;
+      if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire (structure publique) est obligatoire' });
+
+      // Persist the B2G fields for reuse on the next submission of this invoice
+      const { data: updated, error: updateErr } = await supabaseAdmin.from('invoices').update({
+        buyer_siret: finalBuyerSiret,
+        buyer_service_code: buyer_service_code ?? invoice.buyer_service_code ?? null,
+        engagement_number: engagement_number ?? invoice.engagement_number ?? null,
+      }).eq('id', invoiceId).eq('tenant_id', tenantId).select('*').single();
+      if (updateErr) throw updateErr;
+      invoice = updated;
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const payload = buildChorusProSubmission(invoice, items, cfg);
+
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/soumettre',
+        payload,
+      );
+
+      const chorusProId = result?.identifiantFactureCPP ? String(result.identifiantFactureCPP) : (result?.numeroFluxDepot ? String(result.numeroFluxDepot) : null);
+      const chorusProStatus = 'DEPOSEE';
+      await supabaseAdmin.from('invoices').update({ chorus_pro_id: chorusProId, chorus_pro_status: chorusProStatus }).eq('id', invoiceId).eq('tenant_id', tenantId);
+
+      res.json({ success: true, chorus_pro_id: chorusProId, status: chorusProStatus });
+    } catch (e: any) {
+      console.error('[Chorus Pro send]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/chorus-pro/status/:invoiceId — consult/refresh the status of a submitted invoice
+  app.get('/api/chorus-pro/status/:invoiceId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { invoiceId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+
+      const { data: inv } = await supabaseAdmin.from('invoices').select('chorus_pro_id,chorus_pro_status').eq('id', invoiceId).eq('tenant_id', tenantId).single();
+      const chorusProId = (inv as any)?.chorus_pro_id;
+      if (!chorusProId) return res.status(404).json({ error: "Facture non envoyée à Chorus Pro" });
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/consulter/historique_statut',
+        { identifiantFactureCPP: chorusProId },
+      );
+
+      const historique = result?.listeHistoriqueStatutVo || result?.listeStatuts || [];
+      const latest = historique.length > 0 ? (historique[historique.length - 1]?.statut || historique[historique.length - 1]?.libelleStatut) : null;
+      if (latest) await supabaseAdmin.from('invoices').update({ chorus_pro_status: latest }).eq('id', invoiceId).eq('tenant_id', tenantId);
+
+      res.json({ history: historique, latest_status: latest || (inv as any)?.chorus_pro_status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/chorus-pro/invoices — list local invoices already submitted to Chorus Pro
+  app.get('/api/chorus-pro/invoices', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('invoices')
+        .select('*, projects(name)')
+        .eq('tenant_id', tenantId)
+        .not('chorus_pro_id', 'is', null)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const result = (data || []).map((inv: any) => {
+        const project_name = inv.projects?.name || null;
+        const { projects: _p, ...rest } = inv;
+        return { ...rest, project_name };
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Situations / factures de travaux ────────────────────────────────────────
+  // As MOE (maîtrise d'œuvre), ArchiOffice never submits a new facture for a
+  // situation de travaux — the entreprise already deposited its own facture on
+  // Chorus Pro under its own compte. Per Chorus Pro's official guidance for
+  // MOE ("Gérer les factures de travaux sur Chorus Pro pour les MOE"), the
+  // MOE's job is to (1) retrieve that facture, (2) accept/rectify the décompte
+  // mensuel (already computed by this module), and (3) attach its état
+  // d'acompte to the facture as a pièce jointe complémentaire, with its visa.
+  async function loadSituationForChorusPro(tenantId: string, situationId: string) {
+    const { data: sit } = await supabaseAdmin
+      .from('situations')
+      .select('*, marche:marches_entreprises(*)')
+      .eq('id', situationId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (!sit) return null;
+    const marche = (sit as any).marche as any;
+    const { data: detailsRaw } = await supabaseAdmin
+      .from('detail_situations')
+      .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
+      .eq('tenant_id', tenantId)
+      .eq('situation_id', situationId);
+    return { sit, marche, details: detailsRaw ?? [] };
+  }
+
+  // POST /api/chorus-pro/search-situation-facture/:situationId — find the
+  // entreprise's facture already deposited on Chorus Pro for this marché
+  app.post('/api/chorus-pro/search-situation-facture/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { buyer_siret } = req.body || {};
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single(),
+        loadSituationForChorusPro(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche } = loaded;
+      if (!marche?.entreprise_siret) return res.status(400).json({ error: "Le SIRET de l'entreprise (marché lié) est obligatoire pour rechercher sa facture" });
+      const finalBuyerSiret = buyer_siret || sit.buyer_siret;
+      if (!finalBuyerSiret) return res.status(400).json({ error: 'Le SIRET du destinataire (structure publique) est obligatoire pour la recherche' });
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/rechercher/recipiendaire',
+        { siretRecipiendaire: finalBuyerSiret, critereRecherche: { siretFournisseur: marche.entreprise_siret } },
+      );
+
+      const factures = (result?.listeFactures || result?.factures || []).map((f: any) => ({
+        identifiantFactureCPP: f.identifiantFactureCPP ? String(f.identifiantFactureCPP) : String(f.id ?? ''),
+        numeroFacture: f.numeroFactureSaisie || f.numeroFacture || null,
+        dateFacture: f.dateFacture || f.dateDepot || null,
+        montantTtc: f.montantTtcTotal ?? f.montantTTC ?? null,
+        statut: f.statut || f.libelleStatut || null,
+      }));
+
+      res.json({ factures });
+    } catch (e: any) {
+      console.error('[Chorus Pro search-situation-facture]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/chorus-pro/link-situation/:situationId — link this situation to
+  // the entreprise's facture found on Chorus Pro (no new facture is created)
+  app.post('/api/chorus-pro/link-situation/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { chorus_pro_id, buyer_siret, buyer_service_code, engagement_number, statut } = req.body || {};
+      if (!chorus_pro_id) return res.status(400).json({ error: 'Identifiant de facture Chorus Pro manquant' });
+
+      const { data: updated, error } = await supabaseAdmin.from('situations').update({
+        chorus_pro_id: String(chorus_pro_id),
+        chorus_pro_status: statut || 'LIEE',
+        buyer_siret: buyer_siret || null,
+        buyer_service_code: buyer_service_code || null,
+        engagement_number: engagement_number || null,
+      }).eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/chorus-pro/attach-etat-acompte/:situationId — generate the état
+  // d'acompte PDF and deposit it as a pièce jointe complémentaire on the
+  // entreprise's facture already linked on Chorus Pro
+  app.post('/api/chorus-pro/attach-etat-acompte/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+
+      const [settingsRes, loaded] = await Promise.all([
+        supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single(),
+        loadSituationForChorusPro(tenantId, situationId),
+      ]);
+      const cfg = settingsRes.data as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+      if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
+      const { sit, marche, details } = loaded;
+      if (!sit.chorus_pro_id) return res.status(400).json({ error: "Recherchez et liez d'abord la facture de l'entreprise avant de joindre l'état d'acompte" });
+
+      const pdfBuf = await buildEtatAcomptePdfBuffer(sit, marche, details, cfg.agency_name || '');
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/pieceJointeComplementaire/v1/deposer',
+        {
+          identifiantFactureCPP: sit.chorus_pro_id,
+          nomPieceJointe: `etat-acompte-${sit.numero_situation}.pdf`.slice(0, 50),
+          contenuPieceJointe: pdfBuf.toString('base64'),
+          commentaire: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${marche.entreprise_nom}, lot ${marche.lot_numero}` : ''}`,
+        },
+      );
+
+      const { data: updated, error } = await supabaseAdmin.from('situations')
+        .update({ etat_acompte_joint_at: new Date().toISOString() })
+        .eq('id', situationId).eq('tenant_id', tenantId).select('*').single();
+      if (error) throw error;
+
+      res.json({ success: true, situation: updated });
+    } catch (e: any) {
+      console.error('[Chorus Pro attach-etat-acompte]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/chorus-pro/situation-status/:situationId — consult/refresh the
+  // status of the linked entreprise facture (not a facture we deposited)
+  app.get('/api/chorus-pro/situation-status/:situationId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { situationId } = req.params;
+      const { data: s } = await supabaseAdmin.from('settings')
+        .select('chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
+        .eq('tenant_id', tenantId).single();
+      const cfg = s as any;
+      if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
+
+      const { data: sit } = await supabaseAdmin.from('situations').select('chorus_pro_id,chorus_pro_status').eq('id', situationId).eq('tenant_id', tenantId).single();
+      const chorusProId = (sit as any)?.chorus_pro_id;
+      if (!chorusProId) return res.status(404).json({ error: 'Situation non envoyée à Chorus Pro' });
+
+      const sandbox = cfg.chorus_pro_sandbox ?? true;
+      const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
+      const result = await chorusProFetch(
+        { token, login: cfg.chorus_pro_technical_login, password: cfg.chorus_pro_technical_password, sandbox },
+        '/cpro/factures/v1/consulter/historique_statut',
+        { identifiantFactureCPP: chorusProId },
+      );
+
+      const historique = result?.listeHistoriqueStatutVo || result?.listeStatuts || [];
+      const latest = historique.length > 0 ? (historique[historique.length - 1]?.statut || historique[historique.length - 1]?.libelleStatut) : null;
+      if (latest) await supabaseAdmin.from('situations').update({ chorus_pro_status: latest }).eq('id', situationId).eq('tenant_id', tenantId);
+
+      res.json({ history: historique, latest_status: latest || (sit as any)?.chorus_pro_status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/chorus-pro/situations — list local situations linked to an entreprise facture on Chorus Pro
+  app.get('/api/chorus-pro/situations', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('situations')
+        .select('*, marche:marches_entreprises(entreprise_nom,entreprise_siret,lot_numero,lot_titre,tva_rate,revision_active), projects(name)')
+        .eq('tenant_id', tenantId)
+        .not('chorus_pro_id', 'is', null)
+        .order('date_situation', { ascending: false });
+      if (error) throw error;
+      const result = await Promise.all((data || []).map(async (s: any) => {
+        const { data: details } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', s.id);
+        const net = computeEtatAcompte(s, s.marche, details ?? []);
+        const project_name = s.projects?.name || null;
+        const { projects: _p, ...rest } = s;
+        return { ...rest, project_name, montant_ttc: net.net };
+      }));
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── End Chorus Pro Integration ────────────────────────────────────────────
 
   // ─── Project Templates ─────────────────────────────────────────────────────
   app.get("/api/project-templates", async (req: any, res: any) => {
@@ -6477,6 +7079,101 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Calcul de l'état d'acompte d'une situation de travaux (partagé entre le PDF
+  // et le dépôt Chorus Pro) : décompte HT → révision → TVA → TTC → net à payer.
+  function computeEtatAcompte(sit: any, marche: any, details: any[]) {
+    const montantHt = details.reduce((s: number, d: any) => s + Number(d.montant_situation || d.montant_periode || 0), 0);
+    const coeff = Number(sit.revision_coeff ?? 1);
+    const revisionMontant = marche?.revision_active ? montantHt * (coeff - 1) : 0;
+    const htRevise = montantHt + revisionMontant;
+    const tvaRate = Number(marche?.tva_rate ?? 20) / 100;
+    const tva = htRevise * tvaRate;
+    const ttc = htRevise + tva;
+    const retenue = Number(sit.retenue_garantie_pct ?? marche?.retenue_garantie_pct ?? 5) / 100 * ttc;
+    const avanceRemb = Number(sit.avance_remboursement ?? 0);
+    const penalites = Number(sit.penalites_ht ?? 0);
+    const net = ttc - retenue - avanceRemb - penalites;
+    return { montantHt, coeff, revisionMontant, htRevise, tvaRate, tva, ttc, retenue, avanceRemb, penalites, net };
+  }
+
+  // Génère le PDF de l'état d'acompte — partagé entre le téléchargement direct
+  // et le dépôt en pièce jointe complémentaire sur Chorus Pro.
+  async function buildEtatAcomptePdfBuffer(sit: any, marche: any, details: any[], agencyName: string): Promise<Buffer> {
+    const { montantHt, coeff, revisionMontant, htRevise, tva, ttc, retenue, avanceRemb, penalites, net } = computeEtatAcompte(sit, marche, details);
+
+    const { jsPDF } = await import('jspdf');
+    const autoTable = (await import('jspdf-autotable')).default;
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+    pdf.setFontSize(16); pdf.setFont('helvetica', 'bold');
+    pdf.text(`ÉTAT D'ACOMPTE N°${sit.numero_situation}`, 20, 20);
+    pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
+    if (agencyName) pdf.text(`Architecte : ${agencyName}`, 20, 30);
+    pdf.text(`Date situation : ${new Date(sit.date_situation).toLocaleDateString('fr-FR')}`, 20, 36);
+    if (marche) {
+      pdf.text(`Entreprise : ${marche.entreprise_nom}`, 20, 42);
+      pdf.text(`Lot : ${marche.lot_numero} — ${marche.lot_titre}`, 20, 48);
+      pdf.text(`Marché HT : ${Number(marche.montant_ht).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`, 20, 54);
+    }
+
+    const f = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    autoTable(pdf, {
+      startY: 65,
+      head: [['', 'Montant HT']],
+      body: [
+        ['Décompte mensuel (travaux de la période)', `${f(montantHt)} €`],
+        ...(marche?.revision_active ? [
+          [`Révision des prix (Cn = ${coeff.toFixed(6)})`, `${revisionMontant >= 0 ? '+' : ''}${f(revisionMontant)} €`],
+          ['Total HT révisé', `${f(htRevise)} €`],
+        ] : []),
+        [`TVA ${marche?.tva_rate ?? 20} %`, `+ ${f(tva)} €`],
+        ['─────────────────────────────', ''],
+        ['TOTAL TTC', `${f(ttc)} €`],
+        ['─────────────────────────────', ''],
+        [`Retenue de garantie ${marche?.retenue_garantie_pct ?? 5} %`, `- ${f(retenue)} €`],
+        ...(avanceRemb > 0 ? [['Remboursement avance', `- ${f(avanceRemb)} €`]] : []),
+        ...(penalites > 0 ? [['Pénalités de retard', `- ${f(penalites)} €`]] : []),
+        ['─────────────────────────────', ''],
+        ['NET À PAYER TTC', `${f(net)} €`],
+      ],
+      styles: { fontSize: 10 },
+      columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
+      didParseCell: (data: any) => {
+        if (data.row.raw[0] === 'NET À PAYER TTC' || data.row.raw[0] === 'TOTAL TTC') {
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+
+    // Annexe : détail postes
+    if (details.length > 0) {
+      (pdf as any).addPage();
+      pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
+      pdf.text('DÉTAIL DU DÉCOMPTE MENSUEL', 20, 20);
+      autoTable(pdf, {
+        startY: 28,
+        head: [['Désignation', 'U', 'Qté', 'P.U. HT', 'Av. N-1 %', 'Av. N %', 'Montant période HT']],
+        body: details.map((d: any) => {
+          const item = d.dpgf_item;
+          return [
+            item?.designation ?? '—',
+            item?.unite ?? '—',
+            item?.quantite_prevue ?? '—',
+            item ? `${f(item.prix_unitaire_ht)} €` : '—',
+            d.avancement_n_moins_1 ? `${d.avancement_n_moins_1}%` : '0%',
+            `${d.pourcentage_avancement ?? 0}%`,
+            `${f(Number(d.montant_situation || d.montant_periode || 0))} €`,
+          ];
+        }),
+        foot: [['', '', '', '', '', 'Total HT', `${f(montantHt)} €`]],
+        styles: { fontSize: 8 },
+        columnStyles: { 6: { halign: 'right' } },
+      });
+    }
+
+    return Buffer.from(pdf.output('arraybuffer'));
+  }
+
   // GET /api/situations/:situationId/etat-acompte-pdf — PDF état d'acompte
   app.get("/api/situations/:situationId/etat-acompte-pdf", async (req: any, res: any) => {
     try {
@@ -6499,94 +7196,13 @@ async function startServer() {
         .eq('situation_id', sit.id);
 
       const details = detailsRaw ?? [];
-      const montantHt = details.reduce((s: number, d: any) => s + Number(d.montant_situation || d.montant_periode || 0), 0);
-      const coeff = Number(sit.revision_coeff ?? 1);
-      const revisionMontant = marche?.revision_active ? montantHt * (coeff - 1) : 0;
-      const htRevise = montantHt + revisionMontant;
-      const tvaRate = Number(marche?.tva_rate ?? 20) / 100;
-      const tva = htRevise * tvaRate;
-      const ttc = htRevise + tva;
-      const retenue = Number(sit.retenue_garantie_pct ?? marche?.retenue_garantie_pct ?? 5) / 100 * ttc;
-      const avanceRemb = Number(sit.avance_remboursement ?? 0);
-      const penalites = Number(sit.penalites_ht ?? 0);
-      const net = ttc - retenue - avanceRemb - penalites;
-
-      const { jsPDF } = await import('jspdf');
-      const autoTable = (await import('jspdf-autotable')).default;
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const { data: cfg } = await supabaseAdmin.from('settings').select('agency_name').eq('tenant_id', tenantId).single();
       const agencyName = (cfg as any)?.agency_name ?? '';
 
-      pdf.setFontSize(16); pdf.setFont('helvetica', 'bold');
-      pdf.text(`ÉTAT D'ACOMPTE N°${sit.numero_situation}`, 20, 20);
-      pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
-      if (agencyName) pdf.text(`Architecte : ${agencyName}`, 20, 30);
-      pdf.text(`Date situation : ${new Date(sit.date_situation).toLocaleDateString('fr-FR')}`, 20, 36);
-      if (marche) {
-        pdf.text(`Entreprise : ${marche.entreprise_nom}`, 20, 42);
-        pdf.text(`Lot : ${marche.lot_numero} — ${marche.lot_titre}`, 20, 48);
-        pdf.text(`Marché HT : ${Number(marche.montant_ht).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`, 20, 54);
-      }
-
-      const f = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      autoTable(pdf, {
-        startY: 65,
-        head: [['', 'Montant HT']],
-        body: [
-          ['Décompte mensuel (travaux de la période)', `${f(montantHt)} €`],
-          ...(marche?.revision_active ? [
-            [`Révision des prix (Cn = ${coeff.toFixed(6)})`, `${revisionMontant >= 0 ? '+' : ''}${f(revisionMontant)} €`],
-            ['Total HT révisé', `${f(htRevise)} €`],
-          ] : []),
-          [`TVA ${marche?.tva_rate ?? 20} %`, `+ ${f(tva)} €`],
-          ['─────────────────────────────', ''],
-          ['TOTAL TTC', `${f(ttc)} €`],
-          ['─────────────────────────────', ''],
-          [`Retenue de garantie ${marche?.retenue_garantie_pct ?? 5} %`, `- ${f(retenue)} €`],
-          ...(avanceRemb > 0 ? [['Remboursement avance', `- ${f(avanceRemb)} €`]] : []),
-          ...(penalites > 0 ? [['Pénalités de retard', `- ${f(penalites)} €`]] : []),
-          ['─────────────────────────────', ''],
-          ['NET À PAYER TTC', `${f(net)} €`],
-        ],
-        styles: { fontSize: 10 },
-        columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
-        didParseCell: (data: any) => {
-          if (data.row.raw[0] === 'NET À PAYER TTC' || data.row.raw[0] === 'TOTAL TTC') {
-            data.cell.styles.fontStyle = 'bold';
-          }
-        },
-      });
-
-      // Annexe : détail postes
-      if (details.length > 0) {
-        (pdf as any).addPage();
-        pdf.setFontSize(12); pdf.setFont('helvetica', 'bold');
-        pdf.text('DÉTAIL DU DÉCOMPTE MENSUEL', 20, 20);
-        autoTable(pdf, {
-          startY: 28,
-          head: [['Désignation', 'U', 'Qté', 'P.U. HT', 'Av. N-1 %', 'Av. N %', 'Montant période HT']],
-          body: details.map((d: any) => {
-            const item = d.dpgf_item;
-            return [
-              item?.designation ?? '—',
-              item?.unite ?? '—',
-              item?.quantite_prevue ?? '—',
-              item ? `${f(item.prix_unitaire_ht)} €` : '—',
-              d.avancement_n_moins_1 ? `${d.avancement_n_moins_1}%` : '0%',
-              `${d.pourcentage_avancement ?? 0}%`,
-              `${f(Number(d.montant_situation || d.montant_periode || 0))} €`,
-            ];
-          }),
-          foot: [['', '', '', '', '', 'Total HT', `${f(montantHt)} €`]],
-          styles: { fontSize: 8 },
-          columnStyles: { 6: { halign: 'right' } },
-        });
-      }
-
-      const buf = pdf.output('arraybuffer');
+      const buf = await buildEtatAcomptePdfBuffer(sit, marche, details, agencyName);
       res.set('Content-Type', 'application/pdf');
       res.set('Content-Disposition', `attachment; filename="etat-acompte-${sit.numero_situation}.pdf"`);
-      res.send(Buffer.from(buf));
+      res.send(buf);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

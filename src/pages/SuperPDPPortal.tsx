@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconCloudUpload, IconRefresh, IconLoader2, IconCircleCheck, IconX, IconClock, IconFileInvoice, IconAlertTriangle } from '@tabler/icons-react';
+import { IconCloudUpload, IconRefresh, IconLoader2, IconCircleCheck, IconX, IconClock, IconFileInvoice, IconAlertTriangle, IconBuildingBank } from '@tabler/icons-react';
 import { fetchJson } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 
@@ -17,6 +17,18 @@ interface PdpInvoice {
     buyer?: { name?: string };
     seller?: { name?: string };
   };
+}
+
+interface SuperpdpSituation {
+  id: string;
+  numero_situation: number;
+  date_situation: string;
+  project_name?: string;
+  buyer_siret?: string;
+  superpdp_status?: string;
+  etat_acompte_joint_at?: string;
+  montant_ttc: number;
+  marche?: { entreprise_nom: string; lot_numero: string; lot_titre: string };
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; border: string; icon: React.ReactNode }> = {
@@ -59,6 +71,8 @@ export default function SuperPDPPortal() {
   const [loading, setLoading] = useState(true);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [localInvoices, setLocalInvoices] = useState<any[]>([]);
+  const [situations, setSituations] = useState<SuperpdpSituation[]>([]);
+  const [refreshingSituationId, setRefreshingSituationId] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -70,8 +84,12 @@ export default function SuperPDPPortal() {
         setConnected(status.connected);
         setLocalInvoices(local);
         if (status.connected) {
-          const data = await fetchJson<{ data: PdpInvoice[] }>('/api/superpdp/invoices');
+          const [data, situationsData] = await Promise.all([
+            fetchJson<{ data: PdpInvoice[] }>('/api/superpdp/invoices'),
+            fetchJson<SuperpdpSituation[]>('/api/superpdp/situations'),
+          ]);
           setInvoices(data.data || []);
+          setSituations(situationsData || []);
         }
       } catch {
         setConnected(false);
@@ -81,6 +99,18 @@ export default function SuperPDPPortal() {
     };
     init();
   }, []);
+
+  const refreshSituationStatus = async (situationId: string) => {
+    setRefreshingSituationId(situationId);
+    try {
+      const res = await fetchJson<{ latest_status?: string }>(`/api/superpdp/situation-status/${situationId}`);
+      if (res.latest_status) {
+        setSituations(prev => prev.map(s => s.id === situationId ? { ...s, superpdp_status: res.latest_status } : s));
+      }
+    } catch { /* ignore */ } finally {
+      setRefreshingSituationId(null);
+    }
+  };
 
   const refreshEvents = async (pdpId: number, localInvoiceId: string) => {
     setRefreshingId(pdpId);
@@ -233,6 +263,76 @@ export default function SuperPDPPortal() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Factures de travaux (situations, marchés privés)</h2>
+      {situations.length === 0 ? (
+        <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune facture entreprise liée sur Super PDP pour l'instant.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Rechercher sur Super PDP</strong> depuis l'onglet Situations d'un projet à marché privé pour retrouver la facture déposée par l'entreprise, puis y joindre l'état d'acompte.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Situation</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Projet / Entreprise</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>SIRET destinataire</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Net à payer TTC</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Statut facture entreprise</th>
+                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>État d'acompte</th>
+                <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {situations.map(sit => (
+                <tr key={sit.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg" style={{ background: '#e7f5ff', color: '#1971c2' }}>
+                        <IconBuildingBank size={16} />
+                      </div>
+                      <div>
+                        <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>Sit. n°{sit.numero_situation}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-4 text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>
+                    {sit.project_name || '—'}{sit.marche && ` — ${sit.marche.entreprise_nom} (lot ${sit.marche.lot_numero})`}
+                  </td>
+                  <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--tblr-text)' }}>{sit.buyer_siret || '—'}</td>
+                  <td className="px-5 py-4 font-mono text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>
+                    {Number(sit.montant_ttc || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                  </td>
+                  <td className="px-5 py-4">
+                    {sit.superpdp_status ? <StatusBadge code={sit.superpdp_status} /> : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>}
+                  </td>
+                  <td className="px-5 py-4">
+                    {sit.etat_acompte_joint_at
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
+                      : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Non joint</span>}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button
+                      onClick={() => refreshSituationStatus(sit.id)}
+                      disabled={refreshingSituationId === sit.id}
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      style={{ color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--tblr-surface-2)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                      title="Actualiser le statut"
+                    >
+                      {refreshingSituationId === sit.id ? <IconLoader2 size={16} className="animate-spin" /> : <IconRefresh size={16} />}
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

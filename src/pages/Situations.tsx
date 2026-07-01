@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconX, IconDownload,
   IconCalculator, IconChevronDown, IconChevronRight, IconAlertTriangle,
+  IconBuildingBank, IconLoader2,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 
@@ -12,6 +13,7 @@ interface Marche {
   id: string;
   project_id: string;
   entreprise_nom: string;
+  entreprise_siret?: string;
   lot_numero: string;
   lot_titre: string;
   montant_ht: number;
@@ -58,7 +60,32 @@ interface SituationAvecMarche {
   revision_indices?: any;
   notes_moe?: string;
   marche?: Marche;
+  chorus_pro_id?: string;
+  chorus_pro_status?: string;
+  superpdp_id?: number;
+  superpdp_status?: string;
+  buyer_siret?: string;
+  buyer_service_code?: string;
+  engagement_number?: string;
+  etat_acompte_joint_at?: string;
 }
+
+interface FactureCandidate {
+  identifiantFactureCPP: string;
+  numeroFacture?: string | null;
+  dateFacture?: string | null;
+  montantTtc?: number | null;
+  statut?: string | null;
+}
+
+// Chorus Pro : réservé aux marchés publics (circuit MOE obligatoire CCAG
+// Travaux). Super PDP : marchés privés, même principe (retrouver la facture
+// entreprise, la lier, y joindre l'état d'acompte MOE).
+type InvoicingProvider = 'chorus_pro' | 'superpdp';
+const PROVIDER_INFO: Record<InvoicingProvider, { label: string; color: string; apiBase: string; linkIdKey: string }> = {
+  chorus_pro: { label: 'Chorus Pro', color: '#4338ca', apiBase: '/api/chorus-pro', linkIdKey: 'chorus_pro_id' },
+  superpdp:   { label: 'Super PDP',  color: '#1971c2', apiBase: '/api/superpdp',   linkIdKey: 'superpdp_id' },
+};
 
 interface EnrichedItem {
   id: string;
@@ -137,6 +164,111 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
     notes_moe: '',
   });
   const [savingEtat, setSavingEtat] = useState(false);
+
+  // ── Facturation des situations (Chorus Pro / Super PDP) ────────────────────
+  // En tant que MOE, on ne dépose jamais de nouvelle facture : on retrouve la
+  // facture déjà déposée par l'entreprise, on la lie à la situation, puis on
+  // joint l'état d'acompte MOE en pièce jointe complémentaire. Chorus Pro pour
+  // les marchés publics, Super PDP pour les marchés privés.
+  const [chorusProConnected, setChorusProConnected] = useState(false);
+  const [superpdpConnected, setSuperpdpConnected] = useState(false);
+  const [projectClientSiret, setProjectClientSiret] = useState('');
+  const [projectIsPublic, setProjectIsPublic] = useState(false);
+
+  const [invoicingSearchModalOpen, setInvoicingSearchModalOpen] = useState<InvoicingProvider | null>(null);
+  const [invoicingSearchSiret, setInvoicingSearchSiret] = useState('');
+  const [invoicingSearching, setInvoicingSearching] = useState(false);
+  const [invoicingCandidates, setInvoicingCandidates] = useState<FactureCandidate[] | null>(null);
+  const [invoicingLinking, setInvoicingLinking] = useState<string | null>(null);
+  const [invoicingAttaching, setInvoicingAttaching] = useState(false);
+  const [invoicingNotice, setInvoicingNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ connected: boolean }>('/api/chorus-pro/status').then(s => setChorusProConnected(!!s.connected)).catch(() => {});
+    apiFetch<{ connected: boolean }>('/api/superpdp/status').then(s => setSuperpdpConnected(!!s.connected)).catch(() => {});
+    if (!projectId) return;
+    apiFetch<any[]>('/api/projects').then(projects => {
+      const p = projects.find(pr => pr.id === projectId);
+      setProjectClientSiret(p?.client_siret || '');
+      setProjectIsPublic(!!p?.is_public_client);
+    }).catch(() => {});
+  }, [projectId]);
+
+  const activeSituationId = (provider: InvoicingProvider) => selectedSit ? (provider === 'chorus_pro' ? selectedSit.chorus_pro_id : selectedSit.superpdp_id) : undefined;
+
+  const openInvoicingSearchModal = (provider: InvoicingProvider) => {
+    if (!selectedSit) return;
+    setInvoicingNotice(null);
+    setInvoicingCandidates(null);
+    setInvoicingSearchSiret(selectedSit.buyer_siret || projectClientSiret || '');
+    setInvoicingSearchModalOpen(provider);
+  };
+
+  const handleSearchFacture = async (provider: InvoicingProvider) => {
+    if (!selectedSit) return;
+    setInvoicingSearching(true);
+    setInvoicingNotice(null);
+    try {
+      const res = await apiFetch<{ factures: FactureCandidate[]; error?: string }>(
+        `${PROVIDER_INFO[provider].apiBase}/search-situation-facture/${selectedSit.id}`,
+        { method: 'POST', body: JSON.stringify({ buyer_siret: invoicingSearchSiret }) }
+      );
+      setInvoicingCandidates(res.factures || []);
+    } catch (e: any) {
+      setInvoicingNotice({ type: 'error', message: e.message });
+      setInvoicingCandidates([]);
+    } finally {
+      setInvoicingSearching(false);
+    }
+  };
+
+  const handleLinkFacture = async (provider: InvoicingProvider, candidate: FactureCandidate) => {
+    if (!selectedSit) return;
+    setInvoicingLinking(candidate.identifiantFactureCPP);
+    try {
+      const res = await apiFetch<{ success: boolean; situation?: SituationAvecMarche; error?: string }>(
+        `${PROVIDER_INFO[provider].apiBase}/link-situation/${selectedSit.id}`,
+        { method: 'POST', body: JSON.stringify({ [PROVIDER_INFO[provider].linkIdKey]: candidate.identifiantFactureCPP, statut: candidate.statut, buyer_siret: invoicingSearchSiret }) }
+      );
+      if (res.success && res.situation) {
+        const updatedSit = { ...selectedSit, ...res.situation };
+        setSelectedSit(updatedSit);
+        setSituations(prev => prev.map(s => s.id === selectedSit.id ? updatedSit : s));
+        setInvoicingNotice({ type: 'success', message: `Facture entreprise liée (${PROVIDER_INFO[provider].label}, ID : ${candidate.identifiantFactureCPP}).` });
+        setInvoicingSearchModalOpen(null);
+      } else {
+        setInvoicingNotice({ type: 'error', message: res.error || 'Liaison échouée.' });
+      }
+    } catch (e: any) {
+      setInvoicingNotice({ type: 'error', message: e.message });
+    } finally {
+      setInvoicingLinking(null);
+    }
+  };
+
+  const handleAttachEtatAcompte = async (provider: InvoicingProvider) => {
+    if (!selectedSit) return;
+    setInvoicingAttaching(true);
+    setInvoicingNotice(null);
+    try {
+      const res = await apiFetch<{ success: boolean; situation?: SituationAvecMarche; error?: string }>(
+        `${PROVIDER_INFO[provider].apiBase}/attach-etat-acompte/${selectedSit.id}`,
+        { method: 'POST' }
+      );
+      if (res.success && res.situation) {
+        const updatedSit = { ...selectedSit, ...res.situation };
+        setSelectedSit(updatedSit);
+        setSituations(prev => prev.map(s => s.id === selectedSit.id ? updatedSit : s));
+        setInvoicingNotice({ type: 'success', message: `État d'acompte joint à la facture sur ${PROVIDER_INFO[provider].label}.` });
+      } else {
+        setInvoicingNotice({ type: 'error', message: res.error || 'Envoi échoué.' });
+      }
+    } catch (e: any) {
+      setInvoicingNotice({ type: 'error', message: e.message });
+    } finally {
+      setInvoicingAttaching(false);
+    }
+  };
 
   // ── Chargement marchés ─────────────────────────────────────────────────────
   const loadMarches = useCallback(async () => {
@@ -549,16 +681,70 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
               <p className="text-sm text-[var(--tblr-muted)] mt-8 text-center">Sélectionnez une situation</p>
             ) : (
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
-                  <button
-                    onClick={handleDownloadPdf}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border"
-                    style={{ borderColor: 'var(--tblr-border)' }}
-                  >
-                    <IconDownload size={14} /> Export PDF
-                  </button>
-                </div>
+                {(() => {
+                  const provider: InvoicingProvider = projectIsPublic ? 'chorus_pro' : 'superpdp';
+                  const providerConnected = projectIsPublic ? chorusProConnected : superpdpConnected;
+                  const linkedId = activeSituationId(provider);
+                  const status = projectIsPublic ? selectedSit.chorus_pro_status : selectedSit.superpdp_status;
+                  const info = PROVIDER_INFO[provider];
+                  return (
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          Marché {projectIsPublic ? 'public' : 'privé'}
+                        </span>
+                        {linkedId && status && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#e0e7ff', color: info.color }}>
+                            Facture entreprise : {status}
+                          </span>
+                        )}
+                        {selectedSit.etat_acompte_joint_at && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                            État d'acompte joint
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {providerConnected && !linkedId && (
+                          <button
+                            onClick={() => openInvoicingSearchModal(provider)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white"
+                            style={{ background: info.color }}
+                            title={`Rechercher la facture de l'entreprise sur ${info.label}`}
+                          >
+                            <IconBuildingBank size={14} /> Rechercher sur {info.label}
+                          </button>
+                        )}
+                        {providerConnected && linkedId && (
+                          <button
+                            onClick={() => handleAttachEtatAcompte(provider)}
+                            disabled={invoicingAttaching}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
+                            style={{ background: info.color }}
+                            title={`Joindre l'état d'acompte à la facture liée sur ${info.label}`}
+                          >
+                            {invoicingAttaching ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
+                            {selectedSit.etat_acompte_joint_at ? 'Rejoindre l’état d’acompte' : 'Joindre l’état d’acompte'}
+                          </button>
+                        )}
+                        <button
+                          onClick={handleDownloadPdf}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border"
+                          style={{ borderColor: 'var(--tblr-border)' }}
+                        >
+                          <IconDownload size={14} /> Export PDF
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {invoicingNotice && !invoicingSearchModalOpen && (
+                  <div className="text-sm p-3 rounded-lg" style={invoicingNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
+                    {invoicingNotice.message}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Récapitulatif financier */}
@@ -704,6 +890,78 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
           </div>
         </div>
       )}
+
+      {/* ── Modal recherche facture entreprise (Chorus Pro / Super PDP) ─────── */}
+      {invoicingSearchModalOpen && selectedSit && (() => {
+        const provider = invoicingSearchModalOpen;
+        const info = PROVIDER_INFO[provider];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[30rem] space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-base flex items-center gap-2"><IconBuildingBank size={18} style={{ color: info.color }} /> Rechercher la facture entreprise</h3>
+                <button onClick={() => setInvoicingSearchModalOpen(null)}><IconX size={18} /></button>
+              </div>
+              <p className="text-xs text-[var(--tblr-muted)]">
+                Recherche la facture déposée sur {info.label} par <strong>{selectedSit.marche?.entreprise_nom || "l'entreprise"}</strong> pour le destinataire, afin d'y joindre l'état d'acompte n°{selectedSit.numero_situation}.
+                {!selectedSit.marche?.entreprise_siret && (
+                  <span className="block mt-1 text-red-600">Le SIRET de l'entreprise n'est pas renseigné sur le marché lié — ajoutez-le dans l'onglet Marchés.</span>
+                )}
+              </p>
+              <Field label={`SIRET du destinataire (${provider === 'chorus_pro' ? 'structure publique' : 'client'}) *`}>
+                <input value={invoicingSearchSiret}
+                  onChange={e => setInvoicingSearchSiret(e.target.value)}
+                  className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
+                  placeholder="14 chiffres" />
+              </Field>
+              <button
+                onClick={() => handleSearchFacture(provider)}
+                disabled={invoicingSearching || !invoicingSearchSiret || !selectedSit.marche?.entreprise_siret}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60"
+                style={{ background: info.color }}
+              >
+                {invoicingSearching ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
+                {invoicingSearching ? 'Recherche…' : `Rechercher sur ${info.label}`}
+              </button>
+
+              {invoicingNotice && (
+                <div className="text-sm p-3 rounded-lg" style={invoicingNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
+                  {invoicingNotice.message}
+                </div>
+              )}
+
+              {invoicingCandidates !== null && (
+                invoicingCandidates.length === 0 ? (
+                  <p className="text-xs text-center py-4" style={{ color: 'var(--tblr-muted)' }}>Aucune facture trouvée pour ce fournisseur / ce destinataire.</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {invoicingCandidates.map(c => (
+                      <div key={c.identifiantFactureCPP} className="flex items-center justify-between rounded-lg border p-2.5 text-xs" style={{ borderColor: 'var(--tblr-border)' }}>
+                        <div>
+                          <p className="font-semibold">{c.numeroFacture || `Facture #${c.identifiantFactureCPP}`}</p>
+                          <p style={{ color: 'var(--tblr-muted)' }}>
+                            {c.dateFacture ? new Date(c.dateFacture).toLocaleDateString('fr-FR') : '—'}
+                            {c.montantTtc != null && ` · ${f2(Number(c.montantTtc))} € TTC`}
+                            {c.statut && ` · ${c.statut}`}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleLinkFacture(provider, c)}
+                          disabled={invoicingLinking === c.identifiantFactureCPP}
+                          className="px-2.5 py-1 rounded text-white text-xs font-medium disabled:opacity-60"
+                          style={{ background: info.color }}
+                        >
+                          {invoicingLinking === c.identifiantFactureCPP ? '…' : 'Lier'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -742,6 +1000,10 @@ function MarcheForm({
         <Field label="Entreprise *">
           <input value={form.entreprise_nom ?? ''} onChange={e => setForm({ ...form, entreprise_nom: e.target.value })}
             className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+        </Field>
+        <Field label="SIRET entreprise (requis pour Chorus Pro)">
+          <input value={form.entreprise_siret ?? ''} onChange={e => setForm({ ...form, entreprise_siret: e.target.value })}
+            className="w-full text-sm border rounded px-2 py-1.5 bg-white font-mono" style={{ borderColor: 'var(--tblr-border)' }} placeholder="14 chiffres" />
         </Field>
         <Field label="Lot n°">
           <input value={form.lot_numero ?? ''} onChange={e => setForm({ ...form, lot_numero: e.target.value })}

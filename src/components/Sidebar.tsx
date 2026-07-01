@@ -27,6 +27,7 @@ import {
   IconShieldLock,
   IconShieldCheck,
   IconCloudUpload,
+  IconBuildingBank,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -123,6 +124,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [superpdpConnected, setSuperpdpConnected] = useState(false);
+  const [chorusProConnected, setChorusProConnected] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch {}
@@ -135,6 +137,9 @@ export function Sidebar() {
       .catch(() => setIsSuperAdmin(false));
     apiFetch<{ connected: boolean }>('/api/superpdp/status')
       .then(r => setSuperpdpConnected(!!r.connected))
+      .catch(() => {});
+    apiFetch<{ connected: boolean }>('/api/chorus-pro/status')
+      .then(r => setChorusProConnected(!!r.connected))
       .catch(() => {});
   }, [currentUser?.email]);
 
@@ -250,6 +255,25 @@ export function Sidebar() {
                       >
                         <IconCloudUpload size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
                         <span>Portail PDP</span>
+                      </Link>
+                    );
+                  })()}
+                  {/* Chorus Pro portal — shown only when connected */}
+                  {section.key === 'finances' && chorusProConnected && (() => {
+                    const isActive = location.pathname === '/chorus-pro';
+                    return (
+                      <Link
+                        key="/chorus-pro"
+                        to="/chorus-pro"
+                        className={cn(
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          isActive
+                            ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                            : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                        )}
+                      >
+                        <IconBuildingBank size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
+                        <span>Portail Chorus Pro</span>
                       </Link>
                     );
                   })()}
