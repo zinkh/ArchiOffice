@@ -691,7 +691,7 @@ export default function Invoices() {
                               <button
                                 onClick={() => openChorusProModal(invoice)}
                                 className="p-1.5 rounded-lg transition-colors"
-                                style={{ color: invoice.chorus_pro_id ? '#4338ca' : '#4338ca' }}
+                                style={{ color: '#4338ca' }}
                                 onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#eef2ff'}
                                 onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
                                 title={invoice.chorus_pro_id ? `Re-envoyer à Chorus Pro (${invoice.chorus_pro_status})` : 'Envoyer à Chorus Pro'}
