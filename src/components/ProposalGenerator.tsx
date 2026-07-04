@@ -3,6 +3,8 @@ import { IconFileExport, IconDownload, IconX, IconPlus, IconTrash, IconEye, Icon
 import jsPDF from 'jspdf';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 
+const MISSION_COURTE_TITLE = "MISSION LIMITÉE AU PROJET ARCHITECTURAL NÉCESSAIRE À LA DEMANDE DE L'AUTORISATION D'URBANISME";
+
 interface Stakeholder {
   name: string;
   role: string;
@@ -21,6 +23,12 @@ interface ProposalData {
     phone: string;
     mail: string;
   };
+  architect: {
+    name: string;
+    oaNumber: string;
+    mafNumber: string;
+    city: string;
+  };
   project: {
     title: string;
     cadastralRef: string;
@@ -32,10 +40,18 @@ interface ProposalData {
     totalSurfaceWithExtension: string;
     estimatedWorksCost: string;
     estimatedTax: string;
+    projectedFloorArea: string;
+    provisionalEnvelope: string;
   };
   program: {
     frontExtension: string;
     backExtension: string;
+  };
+  programShort: {
+    description: string;
+    levels: string;
+    buildingType: string;
+    parking: string;
   };
   pluAnalysis: {
     rnu: boolean;
@@ -59,6 +75,7 @@ interface ProposalData {
     urbanPlanningElaboration: string;
     instructionDelay: string;
   };
+  proposalType: 'court' | 'detaille';
   pageFormat: 'portrait' | 'landscape';
   stakeholders: Stakeholder[];
   companies: Company[];
@@ -71,12 +88,15 @@ interface ProposalData {
 interface ProposalGeneratorProps {
   initialData?: {
     client?: Partial<ProposalData['client']>;
+    architect?: Partial<ProposalData['architect']>;
     project?: Partial<ProposalData['project']>;
     program?: Partial<ProposalData['program']>;
+    programShort?: Partial<ProposalData['programShort']>;
     pluAnalysis?: Partial<ProposalData['pluAnalysis']>;
     missions?: string[];
     financials?: Partial<ProposalData['financials']>;
     schedule?: Partial<ProposalData['schedule']>;
+    proposalType?: ProposalData['proposalType'];
   };
   onClose: () => void;
 }
@@ -90,6 +110,12 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
       phone: initialData?.client?.phone || '',
       mail: initialData?.client?.mail || '',
     },
+    architect: {
+      name: initialData?.architect?.name || 'Khaldoun SEKTAOUI Architecte',
+      oaNumber: initialData?.architect?.oaNumber || '078686',
+      mafNumber: initialData?.architect?.mafNumber || '155162B',
+      city: initialData?.architect?.city || 'Laxou',
+    },
     project: {
       title: initialData?.project?.title || "Extension d'une maison individuelle à l'avant et à l'arrière",
       cadastralRef: initialData?.project?.cadastralRef || '',
@@ -101,10 +127,18 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
       totalSurfaceWithExtension: initialData?.project?.totalSurfaceWithExtension || '',
       estimatedWorksCost: initialData?.project?.estimatedWorksCost || '0.00',
       estimatedTax: initialData?.project?.estimatedTax || '0.00',
+      projectedFloorArea: initialData?.project?.projectedFloorArea || '',
+      provisionalEnvelope: initialData?.project?.provisionalEnvelope || '',
     },
     program: {
       frontExtension: initialData?.program?.frontExtension || "Création d'une surface d'environ 60 m², implantée sur la façade donnant sur la route, correspondant à la largeur de la maison et sur environ 10 m de profondeur.",
       backExtension: initialData?.program?.backExtension || "Ajout d'une avancée sur toute la largeur de la maison, d'environ 2 à 2,50 m de profondeur, destinée à accueillir la cuisine.",
+    },
+    programShort: {
+      description: initialData?.programShort?.description || "Construction d'une maison individuelle",
+      levels: initialData?.programShort?.levels || 'RDC + Étage',
+      buildingType: initialData?.programShort?.buildingType || 'Maison individuelle',
+      parking: initialData?.programShort?.parking || '1 place de stationnement',
     },
     pluAnalysis: {
       rnu: initialData?.pluAnalysis?.rnu ?? true,
@@ -137,6 +171,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
       urbanPlanningElaboration: initialData?.schedule?.urbanPlanningElaboration || '3 semaines',
       instructionDelay: initialData?.schedule?.instructionDelay || '3 mois',
     },
+    proposalType: initialData?.proposalType || 'detaille',
     pageFormat: 'portrait',
     stakeholders: [],
     companies: [],
@@ -150,6 +185,10 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
   const [isGenerating, setIsGenerating] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
   const [agencyName, setAgencyName] = useState('');
+  const [agencyAddress, setAgencyAddress] = useState('');
+  const [agencyEmail, setAgencyEmail] = useState('');
+  const [agencySiret, setAgencySiret] = useState('');
+  const [agencyVat, setAgencyVat] = useState('');
   const [mafPluginEnabled, setMafPluginEnabled] = useState(false);
   const [showMafCost, setShowMafCost] = useState(false);
   const [mafTauxContratPermil, setMafTauxContratPermil] = useState(0);
@@ -164,6 +203,10 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
         if (s && !s.error) {
           if (s.logoUrl) setLogoUrl(s.logoUrl);
           if (s.agencyName) setAgencyName(s.agencyName);
+          if (s.address) setAgencyAddress(s.address);
+          if (s.email) setAgencyEmail(s.email);
+          if (s.siret) setAgencySiret(s.siret);
+          if (s.vatNumber) setAgencyVat(s.vatNumber);
           if (s.maf_enabled) setMafPluginEnabled(true);
           if (s.maf_taux_contrat_permil) setMafTauxContratPermil(parseFloat(s.maf_taux_contrat_permil) || 0);
         }
@@ -241,7 +284,8 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
         });
       }
       
-      const filename = `Proposition_Honoraires_${data.client.name.replace(/\s+/g, '_') || 'Client'}.pdf`;
+      const typeSuffix = data.proposalType === 'court' ? 'Courte' : 'Detaillee';
+      const filename = `Proposition_Honoraires_${typeSuffix}_${data.client.name.replace(/\s+/g, '_') || 'Client'}.pdf`;
       pdf.save(filename);
       autoSaveDocument({
         blob: pdf.output('blob'),
@@ -269,6 +313,15 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
     const montantM = mafIsMaisonInd ? 1714 * worksHT : worksHT;
     const assiette = montantM * (mafTauxMission / 100) * (mafPartInteret / 100);
     return assiette * mafTauxContratPermil / 1000;
+  })();
+
+  // Mission limitée au projet architectural (PC/DP) — taux de mission MAF fixe à 30 %
+  const MAF_TAUX_MISSION_COURTE = 30;
+  const decennaleShort = (() => {
+    if (!showMafCost || !mafTauxContratPermil) return null;
+    const floorArea = parseFloat(data.project.projectedFloorArea) || 0;
+    if (!floorArea) return null;
+    return floorArea * 1714 * (mafTauxContratPermil / 100) * (MAF_TAUX_MISSION_COURTE / 100);
   })();
 
   return (
@@ -305,6 +358,8 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
           <div ref={containerRef} className={view === 'preview' ? "flex flex-col items-center gap-8 py-8 min-h-full w-full overflow-x-auto" : "fixed -left-[9999px] top-0"}>
             {/* PDF Preview Container */}
             <div ref={previewRef} className="flex flex-col gap-16 origin-top" style={{ transform: 'scale(var(--pdf-scale, 1))' }}>
+              {data.proposalType === 'detaille' && (
+              <>
               {/* PAGE 1: Cover */}
               <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
                 {/* Agency logo + name header */}
@@ -590,6 +645,245 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   <p>SIRET 801 417 122 00026 – Inscrit à l'Ordre des Architectes sous la référence : 078686</p>
                 </div>
               </div>
+              </>
+              )}
+
+              {data.proposalType === 'court' && (
+              <>
+              {/* PAGE COURTE 1 */}
+              <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
+                {/* Header */}
+                <div className="flex justify-between items-start mb-8 pb-4 border-b-2 border-black">
+                  <div className="flex items-center gap-3">
+                    {logoUrl && <img src={logoUrl} alt="Logo" style={{ height: '48px', maxWidth: '160px', objectFit: 'contain', display: 'block' }} crossOrigin="anonymous" />}
+                    {agencyName && <span className="text-lg font-bold uppercase text-zinc-900">{agencyName}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <p className="text-[8pt] font-bold text-red-600 uppercase">Ordre des</p>
+                      <p className="text-[8pt] font-bold text-red-600 uppercase">Architectes</p>
+                    </div>
+                    <div className="w-12 h-12 bg-black flex items-center justify-center text-white font-bold text-xl">OA</div>
+                  </div>
+                </div>
+
+                <h2 className="text-center font-bold uppercase mb-8 border-b-2 border-black pb-2 text-[11pt]">
+                  PROPOSITION D'HONORAIRES - {MISSION_COURTE_TITLE}
+                </h2>
+
+                <div className="space-y-3 mb-6 text-[9pt]">
+                  <div className="grid grid-cols-[150px_1fr] gap-2">
+                    <span className="font-bold">Projet :</span>
+                    <span>{data.project.title}</span>
+                  </div>
+                  <div className="grid grid-cols-[150px_1fr] gap-2">
+                    <span className="font-bold">Maître d'Ouvrage :</span>
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+                      <div><span className="text-zinc-500">Nom, Prénom :</span> {data.client.name}</div>
+                      <div><span className="text-zinc-500">Adresse :</span> {data.client.address}</div>
+                      <div><span className="text-zinc-500">RCS si entreprise :</span> {data.client.rcs}</div>
+                      <div><span className="text-zinc-500">Téléphone :</span> {data.client.phone}</div>
+                      <div className="col-span-2"><span className="text-zinc-500">Mail :</span> {data.client.mail}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-[150px_1fr] gap-2">
+                    <span className="font-bold">Maître d'Œuvre :</span>
+                    <div>
+                      <p>{data.architect.name}</p>
+                      <p>Ordre des Architectes n° : {data.architect.oaNumber}</p>
+                      <p>Assurance MAF n° : {data.architect.mafNumber}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="font-bold underline mb-2 text-[9pt]">Informations Projet :</h3>
+                  <div className="grid grid-cols-2 gap-x-12 gap-y-1 text-[9pt]">
+                    <div className="grid grid-cols-[170px_1fr] gap-y-1">
+                      <span className="underline">Référence cadastrale :</span><span>{data.project.cadastralRef}</span>
+                      <span className="underline">Surface terrain :</span><span>{data.project.siteSurface} m²</span>
+                      <span className="underline">Surface existante (SHON) :</span><span>{data.project.existingSurface} m²</span>
+                      <span className="underline">Emprise au sol existante :</span><span>{data.project.existingFootprint} m²</span>
+                      <span className="underline">Emprise au sol projetée :</span><span>{data.project.projectedFootprint}</span>
+                      <span className="underline">SDO projetée :</span><span>{data.project.projectedFloorArea} m²</span>
+                      <span className="underline">Enveloppe Prévisionnelle :</span><span>{(parseFloat(data.project.provisionalEnvelope) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                    </div>
+                    <div className="space-y-1">
+                      <div><span className="underline">Adresse Terrain :</span> {data.project.siteAddress}</div>
+                      <div className="mt-2">Montant estimé travaux (Hors VRD) <span className="font-bold">{(parseFloat(data.project.estimatedWorksCost) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span></div>
+                      <div className="text-[7pt] text-zinc-500">Taxe d'Aménagement, Maîtrise d'Oeuvre et Frais divers non compris</div>
+                      <div className="text-[7pt] text-zinc-500">Estimation sur la base des ratios MAF (Mutuelle des Arch. Français)</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="font-bold underline mb-2 text-[9pt]">Programme de l'opération :</h3>
+                  <div className="text-[9pt] space-y-1">
+                    <div className="flex gap-2"><span>-</span><span>{data.programShort.description}</span></div>
+                    <div className="ml-4">Nombre de niveaux : {data.programShort.levels}</div>
+                    <div className="ml-4">Type de bâtiment : {data.programShort.buildingType}</div>
+                    <div className="ml-4">Stationnement : {data.programShort.parking}</div>
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="font-bold underline mb-2 text-[9pt]">Proposition de missions :</h3>
+                  <p className="text-[8pt] font-bold uppercase underline mb-2">{MISSION_COURTE_TITLE}</p>
+                  <ul className="list-none space-y-1 text-[9pt]">
+                    {data.missions.map((m, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span>-</span>
+                        <span>{m}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="mt-auto w-full max-w-[320px] space-y-1 text-[9pt]">
+                  <div className="flex justify-between">
+                    <span className="font-bold">Mission d'Etudes Préliminaires</span>
+                    <span>{data.financials.preliminaryStudies.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-bold">Mission Autorisation d'Urbanisme</span>
+                    <span>{data.financials.urbanPlanningMission.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                  </div>
+                  <div className="flex justify-between border-t border-black pt-1">
+                    <span>TOTAL HT</span>
+                    <span>{(data.financials.preliminaryStudies + data.financials.urbanPlanningMission).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                  </div>
+                  <div className="flex justify-between text-zinc-600">
+                    <span>Remise -{data.financials.commercialDiscountPercent.toFixed(0)} %</span>
+                    <span>-{discount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                  </div>
+                  <div className="flex justify-between font-bold border-t-2 border-black pt-1">
+                    <span>TOTAL HT</span>
+                    <span>{totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                  </div>
+                </div>
+
+                {/* Footer Legal */}
+                <div className="mt-8 pt-4 border-t border-zinc-200 text-[7pt] text-center text-zinc-400">
+                  <p>
+                    {agencyName}{agencyAddress ? ` - ${agencyAddress}` : ''}{agencyEmail ? ` : ${agencyEmail}` : ''}
+                    {agencySiret ? ` - SIRET ${agencySiret}` : ''}{data.architect.oaNumber ? ` – OA : ${data.architect.oaNumber}` : ''}{agencyVat ? ` - TVA : ${agencyVat}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {/* PAGE COURTE 2 */}
+              <div className={`pdf-page bg-white text-black ${data.pageFormat === 'portrait' ? 'w-[210mm] h-[297mm]' : 'w-[297mm] h-[210mm]'} p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col`} style={{ fontFamily: 'Inter, sans-serif' }}>
+                <div className="w-full max-w-[320px] ml-auto space-y-1 text-[9pt] mb-8">
+                  <div className="flex justify-between">
+                    <span>TVA {data.financials.tvaPercent.toFixed(0)} %</span>
+                    <span>{tva.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-[10pt] border-t-2 border-black pt-1">
+                    <span>TOTAL TTC</span>
+                    <span>{totalTTC.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
+                  </div>
+                </div>
+
+                <p className="text-[8pt] text-zinc-600 mb-6">
+                  Nota : La mission limitée au projet architectural n'intègre pas les plans d'exécution, la consultation des entreprises, ni le suivi des travaux et réception. La mission se termine à l'obtention de l'autorisation d'urbanisme. Elle n'intègre pas les plans de réseaux, les plans techniques (Elec, CVC…)
+                </p>
+
+                {decennaleShort !== null && (
+                  <div className="mb-8 text-[9pt]">
+                    <p><span className="font-bold">Dont Assurance Décennale = Surface Plancher x 1714€ x {mafTauxContratPermil.toLocaleString('fr-FR')}%</span> : {decennaleShort.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-[7pt] italic text-zinc-500 mt-1">Dans l'hypothèse d'augmentation de la surface de plancher en cours d'études, le montant de l'assurance sera recalculé selon la formule ci-dessus, la facture finale sera revalorisée pour inclure l'augmentation des frais d'assurances</p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-12 mb-8">
+                  <div className="space-y-2">
+                    <h3 className="font-bold underline text-[9pt]">Echéancier :</h3>
+                    <div className="grid grid-cols-[190px_1fr] gap-y-1 text-[9pt]">
+                      <span>Début de l'esquisse</span><span>{data.schedule.sketchStart}</span>
+                      <span>Délai de l'Avant Projet</span><span>{data.schedule.preliminaryProject}</span>
+                      <span>Délai de l'élaboration de l'Autorisation d'Urbanisme</span><span>{data.schedule.urbanPlanningElaboration}</span>
+                      <span>Délai d'instruction du dossier :</span><span>{data.schedule.instructionDelay}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-bold underline text-[9pt]">Paiement :</h3>
+                    <div className="space-y-1 text-[9pt]">
+                      <div className="flex justify-between">
+                        <span>- Acompte 30 % à la commande</span>
+                        <span>{(totalTTC * 0.3).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>- Acompte 50 % au dépôt de l'Autorisation d'Urbanisme</span>
+                        <span>{(totalTTC * 0.5).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>- Solde 20 % à l'obtention de l'Autorisation d'Urbanisme</span>
+                        <span>{(totalTTC * 0.2).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-end mb-8 text-[9pt]">
+                  <div>
+                    <p>A {data.architect.city}, le {new Date().toLocaleDateString('fr-FR')}</p>
+                    <p className="mt-1">{data.architect.name}</p>
+                    <div className="mt-4 w-32 h-16 border border-zinc-100"></div>
+                  </div>
+                  <div className="text-right">
+                    <p>A ........................., le .........................</p>
+                    <p className="mt-1">Bon pour mission, le client,</p>
+                    <div className="mt-4 ml-auto w-32 h-16 border border-zinc-100"></div>
+                  </div>
+                </div>
+
+                <div className="text-[7.5pt] text-zinc-600 italic space-y-2 mb-6">
+                  <p className="font-bold not-italic">Nota :</p>
+                  <p>
+                    La mission partielle n'intègre pas les plans d'exécution, les tests d'étanchéité à l'air, l'étude thermique et l'attestation thermique de fin de chantier.
+                    {decennaleShort !== null && (
+                      <> Le prix indiqué comprend les frais d'assurance décennale pour {decennaleShort.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € et les taxes pour {tva.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € soit un total de {(decennaleShort + tva).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</>
+                    )}
+                  </p>
+                  <p>La présente mission se termine à l'obtention de l'autorisation d'urbanisme (Permis de Construire ou Déclaration Préalable)</p>
+                </div>
+
+                <div className="text-[7.5pt] text-zinc-600 space-y-2 mb-6">
+                  <p className="font-bold">Assurance dommages-ouvrage (DO)</p>
+                  <p className="italic">Il est rappelé que conformément à l'article L. 242-1 du Code des assurances, le maître d'ouvrage est tenu de souscrire une assurance dommages-ouvrage avant l'ouverture du chantier, garantissant la prise en charge immédiate des réparations relevant de la responsabilité décennale, sans attendre la détermination des responsabilités.</p>
+                </div>
+
+                <div className="text-[7.5pt] text-zinc-600 space-y-3">
+                  <p className="italic">Rappel des frais et coûts annexes à la charge du maître d'ouvrage, non compris dans la prestation</p>
+                  <div>
+                    <p className="font-bold underline">Assurances obligatoires</p>
+                    <p>Assurance dommages-ouvrage (DO) : 1,5 à 3 % du coût des travaux HT</p>
+                    <p>Assurance CNR (uniquement si vente dans les 10 ans) : variable</p>
+                  </div>
+                  <div>
+                    <p className="font-bold underline">Études techniques obligatoires</p>
+                    <p>Étude géotechnique de sol (G2-AVP) pour le dimensionnement des fondations : 1 500 à 2 000 € HT</p>
+                    <p>Étude thermique et fluides RE2020 (au dépôt du permis de construire et à l'achèvement) : 1 500 à 2 000 € HT</p>
+                    <p>Étude de structure (béton, charpente, fondations) : 2 000 à 3 000 € HT - <span className="font-bold">Facultatif mais fortement conseillé</span></p>
+                  </div>
+                  <div>
+                    <p className="font-bold underline">Taxes et participations</p>
+                    <p>Taxe d'aménagement (TA) : calculée sur la surface taxable × valeur forfaitaire × taux communal/départemental</p>
+                    <p>Participation raccordement réseaux (eau, assainissement, électricité, gaz, télécom) : 3 000 à 15 000 € selon commune</p>
+                  </div>
+                </div>
+
+                {/* Footer Legal */}
+                <div className="mt-auto pt-8 border-t border-zinc-200 text-[7pt] text-center text-zinc-400">
+                  <p>
+                    {agencyName}{agencyAddress ? ` - ${agencyAddress}` : ''}{agencyEmail ? ` : ${agencyEmail}` : ''}
+                    {agencySiret ? ` - SIRET ${agencySiret}` : ''}{data.architect.oaNumber ? ` – OA : ${data.architect.oaNumber}` : ''}{agencyVat ? ` - TVA : ${agencyVat}` : ''}
+                  </p>
+                </div>
+              </div>
+              </>
+              )}
             </div>
           </div>
 
@@ -598,6 +892,19 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
               {/* PDF Settings */}
               <section className="space-y-4">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Paramètres PDF</h3>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-zinc-500">Type de proposition</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="proposalType" value="court" checked={data.proposalType === 'court'} onChange={() => setData({...data, proposalType: 'court'})} />
+                      Courte (2 pages)
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="proposalType" value="detaille" checked={data.proposalType === 'detaille'} onChange={() => setData({...data, proposalType: 'detaille'})} />
+                      Détaillée (5 pages)
+                    </label>
+                  </div>
+                </div>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2">
                     <input type="radio" name="pageFormat" value="portrait" checked={data.pageFormat === 'portrait'} onChange={() => setData({...data, pageFormat: 'portrait'})} />
@@ -658,6 +965,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
               </section>
 
               {/* Stakeholders */}
+              {data.proposalType === 'detaille' && (
               <section className="space-y-4">
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Intervenants (Page de garde)</h3>
@@ -677,6 +985,32 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   ))}
                 </div>
               </section>
+              )}
+
+              {/* Maître d'Œuvre (Proposition courte) */}
+              {data.proposalType === 'court' && (
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Maître d'Œuvre</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-zinc-500">Nom de l'architecte</label>
+                    <input type="text" value={data.architect.name} onChange={(e) => setData({...data, architect: {...data.architect, name: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Ordre des Architectes n°</label>
+                    <input type="text" value={data.architect.oaNumber} onChange={(e) => setData({...data, architect: {...data.architect, oaNumber: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Assurance MAF n°</label>
+                    <input type="text" value={data.architect.mafNumber} onChange={(e) => setData({...data, architect: {...data.architect, mafNumber: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Ville de signature</label>
+                    <input type="text" value={data.architect.city} onChange={(e) => setData({...data, architect: {...data.architect, city: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                </div>
+              </section>
+              )}
 
               {/* Project Info */}
               <section className="space-y-4">
@@ -711,8 +1045,8 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-zinc-500">Montant estimé travaux (HT)</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={data.project.estimatedWorksCost}
                       onChange={(e) => setData({...data, project: {...data.project, estimatedWorksCost: e.target.value}})}
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
@@ -720,6 +1054,64 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   </div>
                 </div>
               </section>
+
+              {/* Informations Projet — complément (Proposition courte) */}
+              {data.proposalType === 'court' && (
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Informations Projet — Complément</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-zinc-500">Adresse Terrain</label>
+                    <input type="text" value={data.project.siteAddress} onChange={(e) => setData({...data, project: {...data.project, siteAddress: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Surface existante - SHON (m²)</label>
+                    <input type="text" value={data.project.existingSurface} onChange={(e) => setData({...data, project: {...data.project, existingSurface: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Emprise au sol existante (m²)</label>
+                    <input type="text" value={data.project.existingFootprint} onChange={(e) => setData({...data, project: {...data.project, existingFootprint: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Emprise au sol projetée</label>
+                    <input type="text" value={data.project.projectedFootprint} onChange={(e) => setData({...data, project: {...data.project, projectedFootprint: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">SDO projetée (m²)</label>
+                    <input type="text" value={data.project.projectedFloorArea} onChange={(e) => setData({...data, project: {...data.project, projectedFloorArea: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Enveloppe Prévisionnelle (€)</label>
+                    <input type="text" value={data.project.provisionalEnvelope} onChange={(e) => setData({...data, project: {...data.project, provisionalEnvelope: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                </div>
+              </section>
+              )}
+
+              {/* Programme (Proposition courte) */}
+              {data.proposalType === 'court' && (
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Programme de l'opération</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-zinc-500">Description</label>
+                    <textarea value={data.programShort.description} onChange={(e) => setData({...data, programShort: {...data.programShort, description: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm h-20" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Nombre de niveaux</label>
+                    <input type="text" value={data.programShort.levels} onChange={(e) => setData({...data, programShort: {...data.programShort, levels: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Type de bâtiment</label>
+                    <input type="text" value={data.programShort.buildingType} onChange={(e) => setData({...data, programShort: {...data.programShort, buildingType: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-zinc-500">Stationnement</label>
+                    <input type="text" value={data.programShort.parking} onChange={(e) => setData({...data, programShort: {...data.programShort, parking: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                </div>
+              </section>
+              )}
 
               {/* Financials */}
               <section className="space-y-4">
@@ -764,6 +1156,29 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                 </div>
               </section>
 
+              {/* Échéancier */}
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Échéancier</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Début de l'esquisse</label>
+                    <input type="text" value={data.schedule.sketchStart} onChange={(e) => setData({...data, schedule: {...data.schedule, sketchStart: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Délai de l'Avant Projet</label>
+                    <input type="text" value={data.schedule.preliminaryProject} onChange={(e) => setData({...data, schedule: {...data.schedule, preliminaryProject: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Délai d'élaboration de l'Autorisation d'Urbanisme</label>
+                    <input type="text" value={data.schedule.urbanPlanningElaboration} onChange={(e) => setData({...data, schedule: {...data.schedule, urbanPlanningElaboration: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-zinc-500">Délai d'instruction du dossier</label>
+                    <input type="text" value={data.schedule.instructionDelay} onChange={(e) => setData({...data, schedule: {...data.schedule, instructionDelay: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                </div>
+              </section>
+
               {/* MAF Insurance Cost */}
               {mafPluginEnabled && (
                 <section className="space-y-4">
@@ -778,7 +1193,10 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                     />
                     <label htmlFor="showMafCost" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Afficher le coût assurance MAF</label>
                   </div>
-                  {showMafCost && (
+                  {showMafCost && data.proposalType === 'court' && (
+                    <p className="text-xs text-zinc-500">Taux de mission fixé à {MAF_TAUX_MISSION_COURTE} % (mission limitée au projet architectural — PC/DP seul).</p>
+                  )}
+                  {showMafCost && data.proposalType === 'detaille' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="text-xs font-medium text-zinc-500">Taux de mission T (%)</label>
@@ -855,6 +1273,8 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
               </section>
 
               {/* Companies */}
+              {data.proposalType === 'detaille' && (
+              <>
               <section className="space-y-4">
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Entreprises (Page 2)</h3>
@@ -934,6 +1354,8 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   </div>
                 )}
               </section>
+              </>
+              )}
             </div>
           )}
         </div>
