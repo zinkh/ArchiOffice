@@ -12,6 +12,7 @@ import {
   IconLogout,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
+import { UpdateBanner } from './components/UpdateBanner';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -572,6 +573,7 @@ export default function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <UserProvider>
+        <UpdateBanner />
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
