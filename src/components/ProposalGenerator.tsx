@@ -68,13 +68,23 @@ interface ProposalData {
     urbanPlanningMission: number;
     commercialDiscountPercent: number;
     tvaPercent: number;
+    includePreliminaryStudies: boolean;
+    applyDiscount: boolean;
+    pricingMode: 'fixed' | 'percentTravaux';
+    honorairesPercent: number;
+    preliminaryStudiesSharePercent: number;
+    mafRatioPerM2: number;
+    mafRatioYear: string;
   };
   schedule: {
     sketchStart: string;
     preliminaryProject: string;
     urbanPlanningElaboration: string;
     instructionDelay: string;
+    paymentAcompte1Percent: number;
+    paymentAcompte2Percent: number;
   };
+  appendixNotes: string;
   proposalType: 'court' | 'detaille';
   pageFormat: 'portrait' | 'landscape';
   stakeholders: Stakeholder[];
@@ -96,6 +106,7 @@ interface ProposalGeneratorProps {
     missions?: string[];
     financials?: Partial<ProposalData['financials']>;
     schedule?: Partial<ProposalData['schedule']>;
+    appendixNotes?: string;
     proposalType?: ProposalData['proposalType'];
   };
   onClose: () => void;
@@ -164,13 +175,23 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
       urbanPlanningMission: initialData?.financials?.urbanPlanningMission || 1475,
       commercialDiscountPercent: initialData?.financials?.commercialDiscountPercent || 25,
       tvaPercent: initialData?.financials?.tvaPercent || 20,
+      includePreliminaryStudies: initialData?.financials?.includePreliminaryStudies ?? true,
+      applyDiscount: initialData?.financials?.applyDiscount ?? true,
+      pricingMode: initialData?.financials?.pricingMode || 'fixed',
+      honorairesPercent: initialData?.financials?.honorairesPercent || 8,
+      preliminaryStudiesSharePercent: initialData?.financials?.preliminaryStudiesSharePercent ?? 40,
+      mafRatioPerM2: initialData?.financials?.mafRatioPerM2 || 1714,
+      mafRatioYear: initialData?.financials?.mafRatioYear || String(new Date().getFullYear()),
     },
     schedule: {
       sketchStart: initialData?.schedule?.sketchStart || '2 semaines',
       preliminaryProject: initialData?.schedule?.preliminaryProject || '3 semaines',
       urbanPlanningElaboration: initialData?.schedule?.urbanPlanningElaboration || '3 semaines',
       instructionDelay: initialData?.schedule?.instructionDelay || '3 mois',
+      paymentAcompte1Percent: initialData?.schedule?.paymentAcompte1Percent ?? 30,
+      paymentAcompte2Percent: initialData?.schedule?.paymentAcompte2Percent ?? 50,
     },
+    appendixNotes: initialData?.appendixNotes || "Assurances obligatoires\nAssurance dommages-ouvrage (DO) : 1,5 à 3 % du coût des travaux HT\nAssurance CNR (uniquement si vente dans les 10 ans) : variable\n\nÉtudes techniques obligatoires\nÉtude géotechnique de sol (G2-AVP) pour le dimensionnement des fondations : 1 500 à 2 000 € HT\nÉtude thermique et fluides RE2020 (au dépôt du permis de construire et à l'achèvement) : 1 500 à 2 000 € HT\nÉtude de structure (béton, charpente, fondations) : 2 000 à 3 000 € HT - Facultatif mais fortement conseillé\n\nTaxes et participations\nTaxe d'aménagement (TA) : calculée sur la surface taxable × valeur forfaitaire × taux communal/départemental\nParticipation raccordement réseaux (eau, assainissement, électricité, gaz, télécom) : 3 000 à 15 000 € selon commune",
     proposalType: initialData?.proposalType || 'detaille',
     pageFormat: 'portrait',
     stakeholders: [],
@@ -245,9 +266,34 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
     setData({ ...data, cotraitants: newCotraitants });
   };
 
+  // Montant des travaux estimé à partir du ratio MAF (€/m², évolutif par année), quand le mode "pourcentage" est actif
+  const computedMontantTravaux = (() => {
+    if (data.financials.pricingMode !== 'percentTravaux') return null;
+    const floorArea = parseFloat(data.project.projectedFloorArea) || 0;
+    if (!floorArea) return null;
+    return floorArea * data.financials.mafRatioPerM2;
+  })();
+
+  // Répartition des honoraires (Etudes Préliminaires optionnelles / Mission Autorisation), selon le mode de tarification
+  const { effectivePreliminaryStudies, effectiveUrbanPlanningMission } = (() => {
+    if (data.financials.pricingMode === 'percentTravaux' && computedMontantTravaux !== null) {
+      const totalFees = computedMontantTravaux * (data.financials.honorairesPercent / 100);
+      const prelimShare = data.financials.includePreliminaryStudies ? data.financials.preliminaryStudiesSharePercent / 100 : 0;
+      return {
+        effectivePreliminaryStudies: totalFees * prelimShare,
+        effectiveUrbanPlanningMission: totalFees * (1 - prelimShare),
+      };
+    }
+    return {
+      effectivePreliminaryStudies: data.financials.includePreliminaryStudies ? data.financials.preliminaryStudies : 0,
+      effectiveUrbanPlanningMission: data.financials.urbanPlanningMission,
+    };
+  })();
+
   const calculateFinancials = () => {
-    const subtotal = data.financials.preliminaryStudies + data.financials.urbanPlanningMission;
-    const discount = (subtotal * data.financials.commercialDiscountPercent) / 100;
+    const subtotal = effectivePreliminaryStudies + effectiveUrbanPlanningMission;
+    const effectiveDiscountPercent = data.financials.applyDiscount ? data.financials.commercialDiscountPercent : 0;
+    const discount = (subtotal * effectiveDiscountPercent) / 100;
     const totalHT = subtotal - discount;
     const tva = (totalHT * data.financials.tvaPercent) / 100;
     const totalTTC = totalHT + tva;
@@ -305,6 +351,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
   };
 
   const { discount, totalHT, tva, totalTTC } = calculateFinancials();
+  const paymentSoldePercent = Math.max(0, 100 - data.schedule.paymentAcompte1Percent - data.schedule.paymentAcompte2Percent);
 
   const mafCotisationEstimee = (() => {
     if (!showMafCost || !mafTauxContratPermil) return null;
@@ -321,7 +368,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
     if (!showMafCost || !mafTauxContratPermil) return null;
     const floorArea = parseFloat(data.project.projectedFloorArea) || 0;
     if (!floorArea) return null;
-    return floorArea * 1714 * (mafTauxContratPermil / 100) * (MAF_TAUX_MISSION_COURTE / 100);
+    return floorArea * data.financials.mafRatioPerM2 * (mafTauxContratPermil / 100) * (MAF_TAUX_MISSION_COURTE / 100);
   })();
 
   return (
@@ -538,18 +585,22 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
 
                 {/* Financial Summary */}
                 <div className="ml-auto w-[300px] border-t-2 border-black pt-4 space-y-1 text-[10pt] mb-12">
-                  <div className="flex justify-between">
-                    <span className="font-bold">Mission d'Etudes Préliminaires</span>
-                    <span>{data.financials.preliminaryStudies.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
-                  </div>
+                  {data.financials.includePreliminaryStudies && (
+                    <div className="flex justify-between">
+                      <span className="font-bold">Mission d'Etudes Préliminaires</span>
+                      <span>{effectivePreliminaryStudies.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="font-bold">Mission Autorisation d'Urbanisme</span>
-                    <span>{data.financials.urbanPlanningMission.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                    <span>{effectiveUrbanPlanningMission.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
                   </div>
-                  <div className="flex justify-between text-zinc-500">
-                    <span>Remise commerciale {data.financials.commercialDiscountPercent.toFixed(2)} %</span>
-                    <span>-{discount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
-                  </div>
+                  {data.financials.applyDiscount && (
+                    <div className="flex justify-between text-zinc-500">
+                      <span>Remise commerciale {data.financials.commercialDiscountPercent.toFixed(2)} %</span>
+                      <span>-{discount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold border-t border-zinc-200 pt-1">
                     <span>L'ensemble HT :</span>
                     <span>{totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
@@ -602,16 +653,16 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                       <h3 className="font-bold underline">Paiement :</h3>
                       <div className="space-y-1 text-[9pt]">
                         <div className="flex justify-between">
-                          <span>- Acompte 30 % à la commande</span>
-                          <span>{(totalTTC * 0.3).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
+                          <span>- Acompte {data.schedule.paymentAcompte1Percent} % à la commande</span>
+                          <span>{(totalTTC * data.schedule.paymentAcompte1Percent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>- Acompte 50 % au dépôt de l'AU</span>
-                          <span>{(totalTTC * 0.5).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
+                          <span>- Acompte {data.schedule.paymentAcompte2Percent} % au dépôt de l'AU</span>
+                          <span>{(totalTTC * data.schedule.paymentAcompte2Percent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>- Solde 20 % à l'obtention de l'AU</span>
-                          <span>{(totalTTC * 0.2).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
+                          <span>- Solde {paymentSoldePercent} % à l'obtention de l'AU</span>
+                          <span>{(totalTTC * paymentSoldePercent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € TTC</span>
                         </div>
                       </div>
                     </div>
@@ -706,13 +757,13 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                       <span className="underline">Emprise au sol existante :</span><span>{data.project.existingFootprint} m²</span>
                       <span className="underline">Emprise au sol projetée :</span><span>{data.project.projectedFootprint}</span>
                       <span className="underline">SDO projetée :</span><span>{data.project.projectedFloorArea} m²</span>
-                      <span className="underline">Enveloppe Prévisionnelle :</span><span>{(parseFloat(data.project.provisionalEnvelope) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                      <span className="underline">Enveloppe Prévisionnelle :</span><span>{(computedMontantTravaux ?? (parseFloat(data.project.provisionalEnvelope) || 0)).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
                     </div>
                     <div className="space-y-1">
                       <div><span className="underline">Adresse Terrain :</span> {data.project.siteAddress}</div>
-                      <div className="mt-2">Montant estimé travaux (Hors VRD) <span className="font-bold">{(parseFloat(data.project.estimatedWorksCost) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span></div>
+                      <div className="mt-2">Montant estimé travaux (Hors VRD) <span className="font-bold">{(computedMontantTravaux ?? (parseFloat(data.project.estimatedWorksCost) || 0)).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span></div>
                       <div className="text-[7pt] text-zinc-500">Taxe d'Aménagement, Maîtrise d'Oeuvre et Frais divers non compris</div>
-                      <div className="text-[7pt] text-zinc-500">Estimation sur la base des ratios MAF (Mutuelle des Arch. Français)</div>
+                      <div className="text-[7pt] text-zinc-500">Estimation sur la base des ratios MAF (Mutuelle des Arch. Français) — {data.financials.mafRatioPerM2.toLocaleString('fr-FR')} €/m² ({data.financials.mafRatioYear})</div>
                     </div>
                   </div>
                 </div>
@@ -741,22 +792,26 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                 </div>
 
                 <div className="mt-auto w-full max-w-[320px] space-y-1 text-[9pt]">
-                  <div className="flex justify-between">
-                    <span className="font-bold">Mission d'Etudes Préliminaires</span>
-                    <span>{data.financials.preliminaryStudies.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
-                  </div>
+                  {data.financials.includePreliminaryStudies && (
+                    <div className="flex justify-between">
+                      <span className="font-bold">Mission d'Etudes Préliminaires</span>
+                      <span>{effectivePreliminaryStudies.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="font-bold">Mission Autorisation d'Urbanisme</span>
-                    <span>{data.financials.urbanPlanningMission.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                    <span>{effectiveUrbanPlanningMission.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
                   </div>
                   <div className="flex justify-between border-t border-black pt-1">
                     <span>TOTAL HT</span>
-                    <span>{(data.financials.preliminaryStudies + data.financials.urbanPlanningMission).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
+                    <span>{(effectivePreliminaryStudies + effectiveUrbanPlanningMission).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
                   </div>
-                  <div className="flex justify-between text-zinc-600">
-                    <span>Remise -{data.financials.commercialDiscountPercent.toFixed(0)} %</span>
-                    <span>-{discount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
-                  </div>
+                  {data.financials.applyDiscount && (
+                    <div className="flex justify-between text-zinc-600">
+                      <span>Remise -{data.financials.commercialDiscountPercent.toFixed(0)} %</span>
+                      <span>-{discount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold border-t-2 border-black pt-1">
                     <span>TOTAL HT</span>
                     <span>{totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} € HT</span>
@@ -791,7 +846,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
 
                 {decennaleShort !== null && (
                   <div className="mb-8 text-[9pt]">
-                    <p><span className="font-bold">Dont Assurance Décennale = Surface Plancher x 1714€ x {mafTauxContratPermil.toLocaleString('fr-FR')}%</span> : {decennaleShort.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
+                    <p><span className="font-bold">Dont Assurance Décennale = Surface Plancher x {data.financials.mafRatioPerM2.toLocaleString('fr-FR')}€ x {mafTauxContratPermil.toLocaleString('fr-FR')}%</span> : {decennaleShort.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
                     <p className="text-[7pt] italic text-zinc-500 mt-1">Dans l'hypothèse d'augmentation de la surface de plancher en cours d'études, le montant de l'assurance sera recalculé selon la formule ci-dessus, la facture finale sera revalorisée pour inclure l'augmentation des frais d'assurances</p>
                   </div>
                 )}
@@ -810,16 +865,16 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                     <h3 className="font-bold underline text-[9pt]">Paiement :</h3>
                     <div className="space-y-1 text-[9pt]">
                       <div className="flex justify-between">
-                        <span>- Acompte 30 % à la commande</span>
-                        <span>{(totalTTC * 0.3).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                        <span>- Acompte {data.schedule.paymentAcompte1Percent} % à la commande</span>
+                        <span>{(totalTTC * data.schedule.paymentAcompte1Percent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>- Acompte 50 % au dépôt de l'Autorisation d'Urbanisme</span>
-                        <span>{(totalTTC * 0.5).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                        <span>- Acompte {data.schedule.paymentAcompte2Percent} % au dépôt de l'Autorisation d'Urbanisme</span>
+                        <span>{(totalTTC * data.schedule.paymentAcompte2Percent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>- Solde 20 % à l'obtention de l'Autorisation d'Urbanisme</span>
-                        <span>{(totalTTC * 0.2).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
+                        <span>- Solde {paymentSoldePercent} % à l'obtention de l'Autorisation d'Urbanisme</span>
+                        <span>{(totalTTC * paymentSoldePercent / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</span>
                       </div>
                     </div>
                   </div>
@@ -854,24 +909,9 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   <p className="italic">Il est rappelé que conformément à l'article L. 242-1 du Code des assurances, le maître d'ouvrage est tenu de souscrire une assurance dommages-ouvrage avant l'ouverture du chantier, garantissant la prise en charge immédiate des réparations relevant de la responsabilité décennale, sans attendre la détermination des responsabilités.</p>
                 </div>
 
-                <div className="text-[7.5pt] text-zinc-600 space-y-3">
+                <div className="text-[7.5pt] text-zinc-600 space-y-2">
                   <p className="italic">Rappel des frais et coûts annexes à la charge du maître d'ouvrage, non compris dans la prestation</p>
-                  <div>
-                    <p className="font-bold underline">Assurances obligatoires</p>
-                    <p>Assurance dommages-ouvrage (DO) : 1,5 à 3 % du coût des travaux HT</p>
-                    <p>Assurance CNR (uniquement si vente dans les 10 ans) : variable</p>
-                  </div>
-                  <div>
-                    <p className="font-bold underline">Études techniques obligatoires</p>
-                    <p>Étude géotechnique de sol (G2-AVP) pour le dimensionnement des fondations : 1 500 à 2 000 € HT</p>
-                    <p>Étude thermique et fluides RE2020 (au dépôt du permis de construire et à l'achèvement) : 1 500 à 2 000 € HT</p>
-                    <p>Étude de structure (béton, charpente, fondations) : 2 000 à 3 000 € HT - <span className="font-bold">Facultatif mais fortement conseillé</span></p>
-                  </div>
-                  <div>
-                    <p className="font-bold underline">Taxes et participations</p>
-                    <p>Taxe d'aménagement (TA) : calculée sur la surface taxable × valeur forfaitaire × taux communal/départemental</p>
-                    <p>Participation raccordement réseaux (eau, assainissement, électricité, gaz, télécom) : 3 000 à 15 000 € selon commune</p>
-                  </div>
+                  <p className="whitespace-pre-wrap">{data.appendixNotes}</p>
                 </div>
 
                 {/* Footer Legal */}
@@ -1116,45 +1156,107 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
               {/* Financials */}
               <section className="space-y-4">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Honoraires</h3>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-zinc-500">Mode de tarification</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="radio" name="pricingMode" value="fixed" checked={data.financials.pricingMode === 'fixed'} onChange={() => setData({...data, financials: {...data.financials, pricingMode: 'fixed'}})} />
+                      Montant fixe
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="radio" name="pricingMode" value="percentTravaux" checked={data.financials.pricingMode === 'percentTravaux'} onChange={() => setData({...data, financials: {...data.financials, pricingMode: 'percentTravaux'}})} />
+                      % du montant des travaux (ratio MAF)
+                    </label>
+                  </div>
+                </div>
+
+                {data.financials.pricingMode === 'percentTravaux' && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-zinc-500">Taux MAF (€/m²)</label>
+                      <input type="number" value={data.financials.mafRatioPerM2} onChange={(e) => setData({...data, financials: {...data.financials, mafRatioPerM2: parseFloat(e.target.value) || 0}})} className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-zinc-500">Année du taux</label>
+                      <input type="text" value={data.financials.mafRatioYear} onChange={(e) => setData({...data, financials: {...data.financials, mafRatioYear: e.target.value}})} className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-zinc-500">Honoraires (% du montant travaux)</label>
+                      <input type="number" step="0.1" value={data.financials.honorairesPercent} onChange={(e) => setData({...data, financials: {...data.financials, honorairesPercent: parseFloat(e.target.value) || 0}})} className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                    </div>
+                    {data.financials.includePreliminaryStudies && (
+                      <div className="space-y-1 md:col-span-3">
+                        <label className="text-xs font-medium text-zinc-500">Part des honoraires allouée aux Etudes Préliminaires (%)</label>
+                        <input type="number" value={data.financials.preliminaryStudiesSharePercent} onChange={(e) => setData({...data, financials: {...data.financials, preliminaryStudiesSharePercent: parseFloat(e.target.value) || 0}})} className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="includePrelim" checked={data.financials.includePreliminaryStudies} onChange={(e) => setData({...data, financials: {...data.financials, includePreliminaryStudies: e.target.checked}})} className="w-4 h-4 text-blue-600 rounded border-zinc-300" />
+                  <label htmlFor="includePrelim" className="text-sm text-zinc-700 dark:text-zinc-300">Inclure la mission d'Etudes Préliminaires</label>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500">Etudes Préliminaires (€)</label>
-                    <input 
-                      type="number" 
-                      value={data.financials.preliminaryStudies}
-                      onChange={(e) => setData({...data, financials: {...data.financials, preliminaryStudies: parseFloat(e.target.value) || 0}})}
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500">Mission Autorisation (€)</label>
-                    <input 
-                      type="number" 
-                      value={data.financials.urbanPlanningMission}
-                      onChange={(e) => setData({...data, financials: {...data.financials, urbanPlanningMission: parseFloat(e.target.value) || 0}})}
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500">Remise Commerciale (%)</label>
-                    <input 
-                      type="number" 
-                      value={data.financials.commercialDiscountPercent}
-                      onChange={(e) => setData({...data, financials: {...data.financials, commercialDiscountPercent: parseFloat(e.target.value) || 0}})}
-                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
-                    />
-                  </div>
+                  {data.financials.pricingMode === 'fixed' && data.financials.includePreliminaryStudies && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-zinc-500">Etudes Préliminaires (€)</label>
+                      <input
+                        type="number"
+                        value={data.financials.preliminaryStudies}
+                        onChange={(e) => setData({...data, financials: {...data.financials, preliminaryStudies: parseFloat(e.target.value) || 0}})}
+                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                      />
+                    </div>
+                  )}
+                  {data.financials.pricingMode === 'fixed' && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-zinc-500">Mission Autorisation (€)</label>
+                      <input
+                        type="number"
+                        value={data.financials.urbanPlanningMission}
+                        onChange={(e) => setData({...data, financials: {...data.financials, urbanPlanningMission: parseFloat(e.target.value) || 0}})}
+                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                      />
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-zinc-500">TVA (%)</label>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       value={data.financials.tvaPercent}
                       onChange={(e) => setData({...data, financials: {...data.financials, tvaPercent: parseFloat(e.target.value) || 0}})}
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
                     />
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="applyDiscount" checked={data.financials.applyDiscount} onChange={(e) => setData({...data, financials: {...data.financials, applyDiscount: e.target.checked}})} className="w-4 h-4 text-blue-600 rounded border-zinc-300" />
+                  <label htmlFor="applyDiscount" className="text-sm text-zinc-700 dark:text-zinc-300">Appliquer une remise commerciale</label>
+                </div>
+                {data.financials.applyDiscount && (
+                  <div className="space-y-1 max-w-xs">
+                    <label className="text-xs font-medium text-zinc-500">Remise Commerciale (%)</label>
+                    <input
+                      type="number"
+                      value={data.financials.commercialDiscountPercent}
+                      onChange={(e) => setData({...data, financials: {...data.financials, commercialDiscountPercent: parseFloat(e.target.value) || 0}})}
+                      className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
+                    />
+                  </div>
+                )}
               </section>
+
+              {/* Rappel des frais annexes (Proposition courte) */}
+              {data.proposalType === 'court' && (
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 pb-2">Rappel des frais annexes</h3>
+                <textarea value={data.appendixNotes} onChange={(e) => setData({...data, appendixNotes: e.target.value})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm h-40" />
+              </section>
+              )}
 
               {/* Échéancier */}
               <section className="space-y-4">
@@ -1175,6 +1277,23 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-zinc-500">Délai d'instruction du dossier</label>
                     <input type="text" value={data.schedule.instructionDelay} onChange={(e) => setData({...data, schedule: {...data.schedule, instructionDelay: e.target.value}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-zinc-500">Échéancier de paiement</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-1">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-400">Acompte à la commande (%)</label>
+                      <input type="number" min={0} max={100} value={data.schedule.paymentAcompte1Percent} onChange={(e) => setData({...data, schedule: {...data.schedule, paymentAcompte1Percent: parseFloat(e.target.value) || 0}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-400">Acompte au dépôt de l'AU (%)</label>
+                      <input type="number" min={0} max={100} value={data.schedule.paymentAcompte2Percent} onChange={(e) => setData({...data, schedule: {...data.schedule, paymentAcompte2Percent: parseFloat(e.target.value) || 0}})} className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-400">Solde à l'obtention de l'AU (%)</label>
+                      <input type="number" value={paymentSoldePercent} readOnly className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm text-zinc-500" />
+                    </div>
                   </div>
                 </div>
               </section>
