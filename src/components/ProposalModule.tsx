@@ -149,6 +149,7 @@ export interface ProposalTemplate {
     fontFamily: 'Helvetica' | 'Times New Roman' | 'Arial';
     logoSize: 'small' | 'medium' | 'large';
     logoPosition: 'left' | 'center';
+    lineHeight: number;
   };
 }
 
@@ -295,7 +296,7 @@ const getPdfStyles = (template: ProposalTemplate) => `
 
   p {
     margin: 0 0 3mm 0;
-    line-height: 1.5;
+    line-height: ${template.visual.lineHeight ?? 1.5};
     font-size: 9.5pt;
     color: #334155;
   }
@@ -976,7 +977,8 @@ export const ProposalGenerator = ({ data, template }: { data: ProposalData, temp
 export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => void }) => {
   const [template, setTemplate] = useState<ProposalTemplate>(() => {
     const saved = localStorage.getItem('proposalTemplate');
-    return saved ? JSON.parse(saved) : {
+    const parsed = saved ? JSON.parse(saved) : null;
+    const defaults = {
       pages: {
         garde: true,
         objet: true,
@@ -998,8 +1000,11 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
         fontFamily: 'Helvetica',
         logoSize: 'medium',
         logoPosition: 'left',
+        lineHeight: 1.5,
       }
     };
+    if (!parsed) return defaults;
+    return { ...defaults, ...parsed, visual: { ...defaults.visual, ...parsed.visual } };
   });
 
   useEffect(() => {
@@ -1099,6 +1104,22 @@ export const TemplateEditor = ({ onSave }: { onSave: (t: ProposalTemplate) => vo
                   <option value="center">Centre</option>
                 </select>
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[8px] font-bold text-zinc-400 uppercase">Hauteur entre lignes</label>
+                <span className="text-[10px] font-mono text-zinc-500">{template.visual.lineHeight.toFixed(1)}</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={2.5}
+                step={0.1}
+                value={template.visual.lineHeight}
+                onChange={(e) => setTemplate({ ...template, visual: { ...template.visual, lineHeight: parseFloat(e.target.value) } })}
+                className="w-full accent-blue-600"
+              />
             </div>
           </div>
         </section>
