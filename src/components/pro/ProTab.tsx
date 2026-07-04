@@ -6,7 +6,9 @@ import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne } from '../../types/dpgf';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
+  IconFileDescription, IconTable, IconCalculator,
 } from '@tabler/icons-react';
+import { PillTabs, PillTabItem } from '../ui/PillTabs';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -178,10 +180,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   }, [rightDpgf, rightProjectId]);
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
-  const TABS: { id: SubTab; label: string }[] = [
-    { id: 'CCTP', label: 'CCTP' },
-    { id: 'DPGF', label: 'DPGF' },
-    { id: 'ESTIMATION', label: 'ESTIMATION' },
+  const TABS: PillTabItem[] = [
+    { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
+    { id: 'DPGF', label: 'DPGF', icon: IconTable },
+    { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
   ];
 
   const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
@@ -206,33 +208,23 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
       )}
 
       {/* ── Sub-tab navigation ──────────────────────────────────────────────── */}
-      <div className="no-print flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shrink-0">
-        <div className="flex">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSubTab(tab.id)}
-              className={`px-5 py-2.5 text-sm font-semibold transition-colors border-b-2 ${
-                activeSubTab === tab.id
-                  ? 'text-blue-700 dark:text-blue-400 border-blue-600 bg-white dark:bg-zinc-800'
-                  : 'text-zinc-500 dark:text-zinc-400 border-transparent hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <div
+        className="no-print flex items-center gap-3 border-b p-2 shrink-0"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      >
+        <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} />
 
         {/* Tree toggle — only for DPGF / ESTIMATION */}
         {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION') && (
           <button
             onClick={toggleTree}
             title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
-            className={`ml-3 p-1.5 rounded transition-colors border ${
+            className="p-1.5 rounded-lg transition-colors border"
+            style={
               showTree
-                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
-                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
-            }`}
+                ? { background: 'var(--tblr-primary-lt)', borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }
+                : { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }
+            }
           >
             <IconLayoutSidebar size={16} />
           </button>
@@ -240,7 +232,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
         {/* Save status + print + split — always visible on the right */}
         <div className="ml-auto flex items-center gap-2 px-3 no-print">
-          {saveStatus === 'saving' && <span className="text-xs text-zinc-400">Enregistrement…</span>}
+          {saveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
           {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
           {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
 
@@ -248,7 +240,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           <button
             onClick={handlePrint}
             title="Imprimer"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border transition-colors bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:border-blue-300 hover:text-blue-600"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:text-[var(--tblr-primary)]"
+            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
           >
             <IconPrinter size={14} />
             Imprimer
@@ -259,11 +252,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
             <button
               onClick={() => setSplitView(v => !v)}
               title={splitView ? 'Vue simple' : 'Vue divisée (deux projets)'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              style={
                 splitView
-                  ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
-                  : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:border-blue-300'
-              }`}
+                  ? { background: 'var(--tblr-primary-lt)', borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }
+                  : { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }
+              }
             >
               <IconLayoutColumns size={15} />
               {splitView ? 'Vue divisée' : 'Diviser'}
@@ -279,8 +273,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         {activeSubTab === 'CCTP' && (
           <div className="flex-1 overflow-hidden">
             {dpgfLoading ? (
-              <div className="flex items-center gap-2 p-8 text-zinc-500">
-                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <div className="flex items-center gap-2 p-8 text-[var(--tblr-muted)]">
+                <div className="w-4 h-4 border-2 border-[var(--tblr-primary)] border-t-transparent rounded-full animate-spin" />
                 Chargement…
               </div>
             ) : dpgf ? (
@@ -293,9 +287,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         {activeSubTab === 'DPGF' && (
           <>
             {/* Left panel */}
-            <div className={`flex flex-col overflow-hidden ${splitView ? 'w-1/2 border-r border-zinc-300 dark:border-zinc-600' : 'flex-1'}`}>
+            <div className={`flex flex-col overflow-hidden ${splitView ? 'w-1/2 border-r border-[var(--tblr-border)]' : 'flex-1'}`}>
               {dpgfLoading ? (
-                <div className="flex items-center justify-center h-full text-zinc-400">Chargement du DPGF…</div>
+                <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">Chargement du DPGF…</div>
               ) : dpgf ? (
                 <DPGFWorkspace
                   dpgf={dpgf}
@@ -331,7 +325,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                   onClose={() => setSplitView(false)}
                 />
                 {rightLoading ? (
-                  <div className="flex items-center justify-center flex-1 text-zinc-400">Chargement…</div>
+                  <div className="flex items-center justify-center flex-1 text-[var(--tblr-muted)]">Chargement…</div>
                 ) : rightDpgf ? (
                   <DPGFWorkspace
                     dpgf={rightDpgf}
@@ -352,9 +346,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         {activeSubTab === 'ESTIMATION' && (
           <>
             {/* Left panel */}
-            <div className={`flex flex-col overflow-hidden ${splitView ? 'w-1/2 border-r border-zinc-300 dark:border-zinc-600' : 'flex-1'}`}>
+            <div className={`flex flex-col overflow-hidden ${splitView ? 'w-1/2 border-r border-[var(--tblr-border)]' : 'flex-1'}`}>
               {dpgfLoading ? (
-                <div className="flex items-center justify-center h-full text-zinc-400">Chargement…</div>
+                <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">Chargement…</div>
               ) : dpgf ? (
                 <EstimationEditor
                   dpgf={dpgf}
@@ -380,7 +374,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                   onClose={() => setSplitView(false)}
                 />
                 {rightLoading ? (
-                  <div className="flex items-center justify-center flex-1 text-zinc-400">Chargement…</div>
+                  <div className="flex items-center justify-center flex-1 text-[var(--tblr-muted)]">Chargement…</div>
                 ) : rightDpgf ? (
                   <EstimationEditor
                     dpgf={rightDpgf}
@@ -425,36 +419,38 @@ const RightPanelHeader: React.FC<{
   const current = projects.find(p => p.id === projectId);
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-[#edf1f7] dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-700 shrink-0">
-      <span className="text-xs text-zinc-500 font-medium shrink-0">Projet :</span>
+    <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+      <span className="text-xs font-medium shrink-0" style={{ color: 'var(--tblr-muted)' }}>Projet :</span>
       <div className="relative flex-1">
         <button
           onClick={() => setOpen(v => !v)}
-          className="flex items-center gap-1 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:text-blue-600 transition-colors"
+          className="flex items-center gap-1 text-xs font-medium transition-colors hover:text-[var(--tblr-primary)]"
+          style={{ color: 'var(--tblr-text)' }}
         >
           <span>{current?.name ?? projectId}</span>
           <IconChevronDown size={12} />
         </button>
         {open && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg min-w-[200px] max-h-64 overflow-y-auto">
+          <div className="absolute top-full left-0 mt-1 z-50 rounded-lg shadow-lg min-w-[200px] max-h-64 overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
             {projects.filter(p => p.id !== currentProjectId).map(p => (
               <button
                 key={p.id}
                 onClick={() => { onChange(p.id); setOpen(false); }}
-                className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors truncate"
+                className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--tblr-surface-2)] transition-colors truncate"
               >
                 {p.name}
               </button>
             ))}
             {projects.length === 0 && (
-              <div className="px-3 py-2 text-xs text-zinc-400">Aucun autre projet</div>
+              <div className="px-3 py-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>Aucun autre projet</div>
             )}
           </div>
         )}
       </div>
       <button
         onClick={onClose}
-        className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 ml-auto"
+        className="ml-auto hover:text-[var(--tblr-text)]"
+        style={{ color: 'var(--tblr-muted)' }}
         title="Fermer vue divisée"
       >
         <IconX size={15} />
