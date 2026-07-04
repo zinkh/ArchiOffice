@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconFileInvoice } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -17,6 +17,7 @@ import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import { ProposalGenerator } from '../components/ProposalGenerator';
 
 import { saveAs } from 'file-saver';
 
@@ -85,6 +86,38 @@ const FormField = ({ label, value, onChange, type = "text", required = false, op
   </div>
 );
 
+const mapProposalToFeeGeneratorData = (p: Proposal) => ({
+  client: {
+    name: p.is_entreprise ? (p.nom_societe || p.client_name || '') : (p.client_name || ''),
+    address: [p.adresse_client, p.cp_client, p.ville_client].filter(Boolean).join(' ') || '',
+    rcs: p.rcs || 'Non',
+    phone: p.telephone || p.portable || '',
+    mail: p.email_client || '',
+  },
+  project: {
+    title: p.title || '',
+    cadastralRef: p.ref_cadastrale || '',
+    siteAddress: [p.adresse_terrain, p.cp_ville_terrain].filter(Boolean).join(' ') || '',
+    siteSurface: p.surface_parcelle || '',
+    existingSurface: '',
+    existingFootprint: '',
+    projectedFootprint: '',
+    projectedFloorArea: p.surface_plancher || '',
+    provisionalEnvelope: p.construction_cost ? String(p.construction_cost) : '',
+    estimatedWorksCost: p.construction_cost ? String(p.construction_cost) : '0.00',
+  },
+  programShort: {
+    description: p.projet_detail || p.description || '',
+  },
+  financials: {
+    preliminaryStudies: 0,
+    urbanPlanningMission: p.amount || 0,
+    commercialDiscountPercent: 0,
+    tvaPercent: p.vat_rate ?? 20,
+  },
+  proposalType: 'court' as const,
+});
+
 export default function Proposals() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -95,6 +128,7 @@ export default function Proposals() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
+  const [feeGeneratorProposal, setFeeGeneratorProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
     title: '',
@@ -482,6 +516,7 @@ export default function Proposals() {
               <div className="flex gap-2">
                 <button onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
                 <button onClick={() => navigate('/proposal-generator', { state: { proposal: p } })} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
+                <button onClick={() => setFeeGeneratorProposal(p)} title="Proposition d'honoraires (courte / détaillée)" className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileInvoice size={15} /></button>
                 {p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
@@ -563,6 +598,13 @@ export default function Proposals() {
                         title={t('pdf_generator')}
                       >
                         <IconFileTypePdf size={20} />
+                      </button>
+                      <button
+                        onClick={() => setFeeGeneratorProposal(proposal)}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        title="Proposition d'honoraires (courte / détaillée)"
+                      >
+                        <IconFileInvoice size={20} />
                       </button>
                       <button
                         onClick={() => navigate('/contrats', { state: { fromProposal: proposal } })}
@@ -1186,6 +1228,13 @@ export default function Proposals() {
           fetchContacts();
         }}
       />
+
+      {feeGeneratorProposal && (
+        <ProposalGenerator
+          initialData={mapProposalToFeeGeneratorData(feeGeneratorProposal)}
+          onClose={() => setFeeGeneratorProposal(null)}
+        />
+      )}
     </div>
   );
 }

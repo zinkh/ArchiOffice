@@ -8,10 +8,22 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     : (input as Request).url;
 
   if (url.startsWith('/api/')) {
-    const { data: { session }, error } = await supabase.auth.getSession();
+    let { data: { session }, error } = await supabase.auth.getSession();
+
+    // Proactively refresh when the token is absent or close to expiry, so a
+    // merely-stale token doesn't fall through as an unauthenticated request.
+    if (!error && (!session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000))) {
+      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshed.session) {
+        session = refreshed.session;
+      } else if (refreshError) {
+        error = refreshError;
+      }
+    }
+
     if (error) {
-      // Stale refresh token — clear it so the auth state listener can redirect to login
-      supabase.auth.signOut();
+      // Stale/invalid refresh token — clear it so the auth state listener can redirect to login
+      await supabase.auth.signOut();
     } else if (session?.access_token) {
       const headers = new Headers(init?.headers);
       if (!headers.has('Authorization')) {
