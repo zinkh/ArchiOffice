@@ -291,7 +291,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
         ))}
       </div>
       {selectedReport && (
-        <div id="printable-report" className="mt-6 bg-white dark:bg-zinc-900 p-4 sm:p-6 rounded border border-zinc-200 dark:border-zinc-700">
+        <div id="printable-report" className="mt-6 p-4 sm:p-6 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <div className="hidden print:block mb-6 border-b pb-4">
             <h2 className="text-2xl font-bold dark:text-white">{project.name}</h2>
             <p className="text-zinc-600 dark:text-zinc-400">{project.client}</p>

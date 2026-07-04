@@ -454,7 +454,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
     <div className="space-y-6">
 
       {/* Stepper */}
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-4">
+      <div className="rounded-lg p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="flex items-center gap-0 overflow-x-auto">
           {PHASES.map((p, i) => {
             const Icon = p.icon;
@@ -465,10 +465,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <button
                   onClick={() => goPhase(p.id)}
                   className={cn(
-                    'flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex-shrink-0',
+                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0',
                     active ? 'bg-blue-600 text-white shadow-sm' :
                     done ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100' :
-                    'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    'text-[var(--tblr-muted)] hover:bg-zinc-100 dark:hover:bg-zinc-800'
                   )}
                 >
                   {done && !active ? <IconCircleCheck size={14} /> : <Icon size={14} />}
@@ -499,9 +499,9 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
         <div className="space-y-6">
 
           {/* Lots */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
+              <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                 <IconClipboardList size={15} /> Lots de travaux
               </h3>
               <button onClick={() => setShowLotForm(!showLotForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
@@ -509,35 +509,35 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               </button>
             </div>
             {showLotForm && (
-              <div className="px-5 py-4 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 flex gap-3">
-                <input className="w-20 px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+              <div className="px-5 py-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] flex gap-3">
+                <input className="w-20 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="N°" value={lotForm.lot_number} onChange={e => setLotForm({ ...lotForm, lot_number: e.target.value })} />
-                <input className="flex-1 px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                <input className="flex-1 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Désignation du lot (ex : Gros œuvre)" value={lotForm.lot_title} onChange={e => setLotForm({ ...lotForm, lot_title: e.target.value })}
                   onKeyDown={e => e.key === 'Enter' && addLot()} />
                 <button onClick={addLot} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700">Ajouter</button>
-                <button onClick={() => setShowLotForm(false)} className="p-1.5 text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>
+                <button onClick={() => setShowLotForm(false)} className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700"><IconX size={14} /></button>
               </div>
             )}
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 dark:bg-zinc-800/50">
+              <thead className="bg-[var(--tblr-surface-2)]">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400 w-16">N°</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Désignation</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Entreprise attribuée</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-zinc-400">Montant HT</th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] w-16">N°</th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Désignation</th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise attribuée</th>
+                  <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT</th>
                   <th className="w-10"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              <tbody className="divide-y divide-[var(--tblr-border)]">
                 {lots.map(lot => {
                   const attr = consultation.attributions.find(a => a.lot_id === lot.id);
                   const entreprise = attr ? consultation.entreprises.find(e => e.id === attr.entreprise_id) : null;
                   return (
                     <tr key={lot.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                       <td className="px-4 py-3 font-bold text-zinc-700 dark:text-zinc-300">{lot.lot_number}</td>
-                      <td className="px-4 py-3 font-medium text-zinc-900 dark:text-white">{lot.lot_title}</td>
-                      <td className="px-4 py-3 text-zinc-500">{entreprise?.nom || lot.contact_name || '—'}</td>
+                      <td className="px-4 py-3 font-medium text-[var(--tblr-text)]">{lot.lot_title}</td>
+                      <td className="px-4 py-3 text-[var(--tblr-muted)]">{entreprise?.nom || lot.contact_name || '—'}</td>
                       <td className="px-4 py-3 text-right font-bold text-zinc-700 dark:text-zinc-300">
                         {attr?.montant ? fmt(attr.montant) : fmt((lot.base_amount || 0) + (lot.options_amount || 0))}
                       </td>
@@ -548,20 +548,20 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   );
                 })}
                 {lots.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-400 italic text-sm">Aucun lot défini. Ajoutez les lots de travaux.</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucun lot défini. Ajoutez les lots de travaux.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
 
           {/* DCE Documents */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconFileText size={15} /> Dossier de Consultation des Entreprises (DCE)
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
               </div>
               <button onClick={() => {
                 const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
@@ -572,13 +572,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             </div>
             <div className="p-5 space-y-3">
               {consultation.dce_documents.length === 0 && (
-                <p className="text-sm text-zinc-400 italic text-center py-4">Aucun document DCE. Cliquez sur "Ajouter" pour commencer.</p>
+                <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun document DCE. Cliquez sur "Ajouter" pour commencer.</p>
               )}
               {consultation.dce_documents.map((doc, idx) => (
-                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800">
+                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
                   <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <select
-                      className="px-2.5 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                       value={doc.type_doc}
                       onChange={e => {
                         const docs = [...consultation.dce_documents];
@@ -589,7 +589,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                       {Object.entries(TYPE_DOC_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                     <input
-                      className="px-2.5 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Intitulé précis"
                       value={doc.nom}
                       onChange={e => {
@@ -599,7 +599,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                       }}
                     />
                     <div className="flex items-center gap-3 flex-wrap">
-                      <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                      <label className="flex items-center gap-1.5 text-xs text-[var(--tblr-muted)] cursor-pointer">
                         <input type="checkbox" checked={doc.tous_lots} onChange={e => {
                           const docs = [...consultation.dce_documents];
                           docs[idx] = { ...doc, tous_lots: e.target.checked };
@@ -608,7 +608,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                         Tous les lots
                       </label>
                       {!doc.tous_lots && lots.map(lot => (
-                        <label key={lot.id} className="flex items-center gap-1 text-xs text-zinc-500 cursor-pointer">
+                        <label key={lot.id} className="flex items-center gap-1 text-xs text-[var(--tblr-muted)] cursor-pointer">
                           <input type="checkbox"
                             checked={doc.lots_ids.includes(lot.id)}
                             onChange={e => {
@@ -631,13 +631,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
           </div>
 
           {/* Entreprises consultées */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconBuilding size={15} /> Entreprises consultées
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Sélectionnez les entreprises et affectez-leur les lots</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Sélectionnez les entreprises et affectez-leur les lots</p>
               </div>
               <button onClick={() => {
                 const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
@@ -648,21 +648,21 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[600px]">
-                <thead className="bg-zinc-50 dark:bg-zinc-800/50">
+                <thead className="bg-[var(--tblr-surface-2)]">
                   <tr>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Entreprise</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Email</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Lots assignés</th>
-                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400">Envoyer DCE</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Email</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Lots assignés</th>
+                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Envoyer DCE</th>
                     <th className="w-10"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <tbody className="divide-y divide-[var(--tblr-border)]">
                   {consultation.entreprises.map((e, idx) => (
                     <tr key={e.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                       <td className="px-4 py-3">
                         <select
-                          className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                           value={e.contact_id || ''}
                           onChange={ev => {
                             const contact = contacts.find(c => c.id === ev.target.value);
@@ -679,13 +679,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           ))}
                         </select>
                         {!e.contact_id && (
-                          <input className="mt-1 w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                          <input className="mt-1 w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
                             placeholder="Ou saisir un nom" value={e.nom}
                             onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, nom: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <input className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                        <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
                           placeholder="email@entreprise.fr" value={e.email || ''}
                           onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, email: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
                       </td>
@@ -696,7 +696,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                               'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors',
                               e.lots_ids.includes(lot.id)
                                 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:bg-zinc-200'
+                                : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-zinc-200'
                             )}>
                               <input type="checkbox" className="hidden"
                                 checked={e.lots_ids.includes(lot.id)}
@@ -724,7 +724,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                     </tr>
                   ))}
                   {consultation.entreprises.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-400 italic text-sm">Aucune entreprise consultée.</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -738,13 +738,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* Critères de notation */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconPercentage size={15} /> Critères de notation
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Total : {consultation.criteres.reduce((s, c) => s + c.poids, 0)} % (doit être 100 %)</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Total : {consultation.criteres.reduce((s, c) => s + c.poids, 0)} % (doit être 100 %)</p>
               </div>
               <button onClick={() => {
                 const nc: CritereNotation = { id: crypto.randomUUID(), nom: '', poids: 0 };
@@ -756,15 +756,15 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             <div className="p-5 space-y-2">
               {consultation.criteres.map((c, idx) => (
                 <div key={c.id} className="flex items-center gap-3">
-                  <input className="flex-1 text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  <input className="flex-1 text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Nom du critère" value={c.nom}
                     onChange={e => { const cr = [...consultation.criteres]; cr[idx] = { ...c, nom: e.target.value }; update({ ...consultation, criteres: cr }); }} />
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <input type="number" min={0} max={100}
-                      className="w-16 text-sm text-center px-2 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-16 text-sm text-center px-2 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                       value={c.poids}
                       onChange={e => { const cr = [...consultation.criteres]; cr[idx] = { ...c, poids: parseInt(e.target.value) || 0 }; update({ ...consultation, criteres: cr }); }} />
-                    <span className="text-xs text-zinc-400">%</span>
+                    <span className="text-xs text-[var(--tblr-muted)]">%</span>
                   </div>
                   <button onClick={() => update({ ...consultation, criteres: consultation.criteres.filter(x => x.id !== c.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
                 </div>
@@ -783,13 +783,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
           </div>
 
           {/* Pièces administratives obligatoires */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconClipboardList size={15} /> Pièces administratives obligatoires
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Documents requis pour la conformité de l'offre</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Documents requis pour la conformité de l'offre</p>
               </div>
               <button onClick={() => {
                 const np: PieceAdmin = { id: crypto.randomUUID(), nom: '' };
@@ -802,7 +802,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               {consultation.pieces_admin.map((p, idx) => (
                 <div key={p.id} className="flex items-center gap-2">
                   <IconCheck size={14} className="text-green-500 flex-shrink-0" />
-                  <input className="flex-1 text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  <input className="flex-1 text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                     value={p.nom}
                     onChange={e => { const ps = [...consultation.pieces_admin]; ps[idx] = { ...p, nom: e.target.value }; update({ ...consultation, pieces_admin: ps }); }}
                     placeholder="ex : Attestation URSSAF" />
@@ -818,36 +818,36 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
       {phase === 'portail' && (
         <div className="space-y-6">
           {/* Récapitulatif DCE */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800">
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)]">
+              <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                 <IconEye size={15} /> Documents DCE disponibles
               </h3>
             </div>
             <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {consultation.dce_documents.map(doc => (
-                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/30">
+                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)]/30">
                   <IconFileText size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{doc.nom || TYPE_DOC_LABELS[doc.type_doc]}</p>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                    <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">
                       {doc.tous_lots ? 'Tous les lots' : `Lots : ${doc.lots_ids.map(lid => lots.find(l => l.id === lid)?.lot_number).filter(Boolean).join(', ')}`}
                     </p>
                   </div>
                 </div>
               ))}
-              {consultation.dce_documents.length === 0 && <p className="text-sm text-zinc-400 italic col-span-3">Aucun document DCE défini à la phase 1.</p>}
+              {consultation.dce_documents.length === 0 && <p className="text-sm text-[var(--tblr-muted)] italic col-span-3">Aucun document DCE défini à la phase 1.</p>}
             </div>
           </div>
 
           {/* Questions / Réponses */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconMessageDots size={15} /> Questions / Réponses
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
               </div>
               <button onClick={() => setShowQRForm(!showQRForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700">
                 <IconPlus size={13} /> Nouvelle question
@@ -855,27 +855,27 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             </div>
 
             {showQRForm && (
-              <div className="p-5 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
+              <div className="p-5 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <select className="text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none"
+                  <select className="text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none"
                     value={qrForm.entreprise_id}
                     onChange={e => setQrForm({ ...qrForm, entreprise_id: e.target.value })}>
                     <option value="">— Entreprise —</option>
                     {consultation.entreprises.map(e => <option key={e.id} value={e.id}>{e.nom}</option>)}
                   </select>
-                  <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                  <label className="flex items-center gap-2 text-xs text-[var(--tblr-muted)] cursor-pointer">
                     <input type="checkbox" checked={qrForm.publique} onChange={e => setQrForm({ ...qrForm, publique: e.target.checked })} className="rounded w-4 h-4" />
                     Réponse publique (visible par tous)
                   </label>
                 </div>
-                <textarea className="w-full text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-20"
+                <textarea className="w-full text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-20"
                   placeholder="Question de l'entreprise…"
                   value={qrForm.question} onChange={e => setQrForm({ ...qrForm, question: e.target.value })} />
-                <textarea className="w-full text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-16"
+                <textarea className="w-full text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-16"
                   placeholder="Réponse (optionnel pour l'instant)…"
                   value={qrForm.reponse} onChange={e => setQrForm({ ...qrForm, reponse: e.target.value })} />
                 <div className="flex gap-2 justify-end">
-                  <button onClick={() => setShowQRForm(false)} className="px-3 py-1.5 text-xs text-zinc-500">Annuler</button>
+                  <button onClick={() => setShowQRForm(false)} className="px-3 py-1.5 text-xs text-[var(--tblr-muted)]">Annuler</button>
                   <button onClick={() => {
                     if (!qrForm.question.trim()) return;
                     const entreprise = consultation.entreprises.find(e => e.id === qrForm.entreprise_id);
@@ -897,33 +897,33 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               </div>
             )}
 
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            <div className="divide-y divide-[var(--tblr-border)]">
               {consultation.questions.map(q => (
                 <div key={q.id} className="p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{q.entreprise_nom}</span>
-                        <span className="text-[10px] text-zinc-400">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
+                        <span className="text-[10px] text-[var(--tblr-muted)]">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
                         {q.publique && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">Publique</span>}
                       </div>
-                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2">{q.question}</p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2">{q.question}</p>
                       {q.reponse ? (
                         <div className="mt-2 ml-4 pl-3 border-l-2 border-blue-300">
-                          <p className="text-xs text-zinc-500 mb-0.5">Réponse — {q.date_reponse && new Date(q.date_reponse).toLocaleDateString('fr-FR')}</p>
+                          <p className="text-xs text-[var(--tblr-muted)] mb-0.5">Réponse — {q.date_reponse && new Date(q.date_reponse).toLocaleDateString('fr-FR')}</p>
                           <p className="text-sm text-blue-700 dark:text-blue-300">{q.reponse}</p>
                         </div>
                       ) : (
                         repondreId === q.id ? (
                           <div className="mt-2 ml-4 space-y-2">
-                            <textarea className="w-full text-sm px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-16"
+                            <textarea className="w-full text-sm px-3 py-2 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none resize-none h-16"
                               placeholder="Votre réponse…"
                               onChange={e => {
                                 const qs = consultation.questions.map(x => x.id === q.id ? { ...x, _draft: e.target.value } : x);
                                 setConsultation({ ...consultation, questions: qs });
                               }} />
                             <div className="flex gap-2">
-                              <button onClick={() => setRepondreId(null)} className="text-xs text-zinc-500 px-2 py-1">Annuler</button>
+                              <button onClick={() => setRepondreId(null)} className="text-xs text-[var(--tblr-muted)] px-2 py-1">Annuler</button>
                               <button onClick={() => {
                                 const qs = consultation.questions.map(x => {
                                   if (x.id !== q.id) return x;
@@ -946,7 +946,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   </div>
                 </div>
               ))}
-              {consultation.questions.length === 0 && <div className="px-4 py-8 text-center text-zinc-400 italic text-sm">Aucune question enregistrée.</div>}
+              {consultation.questions.length === 0 && <div className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune question enregistrée.</div>}
             </div>
           </div>
         </div>
@@ -958,26 +958,26 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
           {lots.map(lot => {
             const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
             return (
-              <div key={lot.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                <div className="p-5 border-b border-zinc-100 dark:border-zinc-800">
-                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+              <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                <div className="p-5 border-b border-[var(--tblr-border)]">
+                  <h3 className="text-sm font-bold text-[var(--tblr-text)] flex items-center gap-2">
                     <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-black">Lot {lot.lot_number}</span>
                     {lot.lot_title}
                   </h3>
-                  <p className="text-[10px] text-zinc-400 mt-0.5">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
+                  <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[600px]">
-                    <thead className="bg-zinc-50 dark:bg-zinc-800/50">
+                    <thead className="bg-[var(--tblr-surface-2)]">
                       <tr>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Entreprise</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-zinc-400">Montant HT (€)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400">Note technique /100</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400">Conforme</th>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-400">Motif NC</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
+                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT (€)</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    <tbody className="divide-y divide-[var(--tblr-border)]">
                       {entreprisesLot.map(entreprise => {
                         const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === entreprise.id)
                           || { id: crypto.randomUUID(), lot_id: lot.id, entreprise_id: entreprise.id, montant_base: 0, note_technique: 0, conforme: true, motif_nc: '' };
@@ -996,14 +996,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                             <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise.nom}</td>
                             <td className="px-4 py-3">
                               <input type="number" min={0} step={100}
-                                className="w-full text-right px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                                className="w-full text-right px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                                 value={offre.montant_base || ''}
                                 onChange={e => updateOffre({ montant_base: parseFloat(e.target.value) || 0 })}
                                 placeholder="0.00" />
                             </td>
                             <td className="px-4 py-3">
                               <input type="number" min={0} max={100}
-                                className="w-20 mx-auto block text-center px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                                className="w-20 mx-auto block text-center px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
                                 value={offre.note_technique || ''}
                                 onChange={e => updateOffre({ note_technique: parseFloat(e.target.value) || 0 })}
                                 placeholder="—" />
@@ -1025,7 +1025,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                         );
                       })}
                       {entreprisesLot.length === 0 && (
-                        <tr><td colSpan={5} className="px-4 py-6 text-center text-zinc-400 italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
+                        <tr><td colSpan={5} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1033,16 +1033,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               </div>
             );
           })}
-          {lots.length === 0 && <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-8 text-center text-zinc-400 italic">Aucun lot défini. Créez les lots en phase 1.</div>}
+          {lots.length === 0 && <div className="rounded-lg p-8 text-center text-[var(--tblr-muted)] italic" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>Aucun lot défini. Créez les lots en phase 1.</div>}
 
           {/* ── Comparatif détaillé ──────────────────────────────────────── */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+          <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconScale size={15} /> Comparatif détaillé des offres
                 </h3>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1089,7 +1089,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
             {showComparatif && (
               <div className="p-5 space-y-6">
-                {lots.length === 0 && <p className="text-sm text-zinc-400 italic text-center py-4">Aucun lot défini.</p>}
+                {lots.length === 0 && <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun lot défini.</p>}
                 {lots.map(lot => {
                   const cl: ComparatifLot = (consultation.comparatif || []).find(c => c.lot_id === lot.id) || { lot_id: lot.id, articles: [] };
                   const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
@@ -1133,9 +1133,9 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   };
 
                   return (
-                    <div key={lot.id} className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+                    <div key={lot.id} className="border border-[var(--tblr-border)] rounded-lg overflow-hidden">
                       <div
-                        className="flex items-center justify-between px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        className="flex items-center justify-between px-4 py-3 bg-[var(--tblr-surface-2)] cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                         onClick={() => setExpandedComparatifLots(prev => {
                           const next = new Set(prev);
                           next.has(lot.id) ? next.delete(lot.id) : next.add(lot.id);
@@ -1146,7 +1146,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           {isExpanded ? <IconChevronRight size={14} className="rotate-90 transition-transform" /> : <IconChevronRight size={14} className="transition-transform" />}
                           <span className="text-xs font-black text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30">Lot {lot.lot_number}</span>
                           <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{lot.lot_title}</span>
-                          <span className="text-[10px] text-zinc-400">({cl.articles.length} lignes)</span>
+                          <span className="text-[10px] text-[var(--tblr-muted)]">({cl.articles.length} lignes)</span>
                         </div>
                         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                           <button onClick={addSection} className="px-2 py-1 text-[10px] font-bold rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-300">+ Section</button>
@@ -1160,16 +1160,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           <table className="w-full text-xs" style={{ minWidth: `${300 + entreprisesLot.length * 140}px` }}>
                             <thead className="bg-zinc-100 dark:bg-zinc-800">
                               <tr>
-                                <th className="px-3 py-2 text-left font-bold text-zinc-500 w-20">Code</th>
-                                <th className="px-3 py-2 text-left font-bold text-zinc-500">Désignation</th>
-                                <th className="px-3 py-2 text-right font-bold text-zinc-500 w-28">Estimatif HT</th>
+                                <th className="px-3 py-2 text-left font-bold text-[var(--tblr-muted)] w-20">Code</th>
+                                <th className="px-3 py-2 text-left font-bold text-[var(--tblr-muted)]">Désignation</th>
+                                <th className="px-3 py-2 text-right font-bold text-[var(--tblr-muted)] w-28">Estimatif HT</th>
                                 {entreprisesLot.map(e => (
                                   <th key={e.id} className="px-3 py-2 text-right font-bold text-zinc-700 dark:text-zinc-300 w-36 whitespace-nowrap">{e.nom}</th>
                                 ))}
                                 <th className="w-8"></th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            <tbody className="divide-y divide-[var(--tblr-border)]">
                               {cl.articles.map((article, idx) => {
                                 if (article.is_section_header) {
                                   return (
@@ -1191,12 +1191,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                 if (article.is_subtotal) {
                                   return (
                                     <tr key={article.id} className="bg-amber-50 dark:bg-amber-900/10 font-bold">
-                                      <td className="px-3 py-2 text-zinc-400 text-[10px]">{article.code !== '__lot_total__' ? article.code : ''}</td>
+                                      <td className="px-3 py-2 text-[var(--tblr-muted)] text-[10px]">{article.code !== '__lot_total__' ? article.code : ''}</td>
                                       <td className="px-3 py-2">
                                         <input className="w-full bg-transparent text-xs font-bold text-amber-700 dark:text-amber-400 outline-none"
                                           value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} readOnly={article.code === '__lot_total__'} />
                                       </td>
-                                      <td className="px-3 py-2 text-right text-zinc-400">—</td>
+                                      <td className="px-3 py-2 text-right text-[var(--tblr-muted)]">—</td>
                                       {entreprisesLot.map(e => (
                                         <td key={e.id} className="px-3 py-2 text-right">
                                           <input type="number" min={0} step={100}
@@ -1217,16 +1217,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                 return (
                                   <tr key={article.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                                     <td className="px-3 py-2">
-                                      <input className="w-full text-[10px] px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
+                                      <input className="w-full text-[10px] px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
                                         value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="1.3.1" />
                                     </td>
                                     <td className="px-3 py-2">
-                                      <input className="w-full text-xs px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
+                                      <input className="w-full text-xs px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
                                         value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} placeholder="Désignation de l'article" />
                                     </td>
                                     <td className="px-3 py-2">
                                       <input type="number" min={0} step={100}
-                                        className="w-full text-right px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
+                                        className="w-full text-right px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
                                         value={article.estimatif ?? ''}
                                         onChange={e => updateArticle(idx, { estimatif: parseFloat(e.target.value) || undefined })}
                                         placeholder="—" />
@@ -1234,7 +1234,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                     {entreprisesLot.map(e => (
                                       <td key={e.id} className="px-3 py-2">
                                         <input type="number" min={0} step={100}
-                                          className="w-full text-right px-1.5 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
+                                          className="w-full text-right px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400 text-xs"
                                           value={article.prix[e.id] ?? ''}
                                           onChange={ev => updatePrix(idx, e.id, parseFloat(ev.target.value) || 0)}
                                           placeholder="—" />
@@ -1248,7 +1248,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                               })}
                               {cl.articles.length === 0 && (
                                 <tr>
-                                  <td colSpan={4 + entreprisesLot.length} className="px-4 py-6 text-center text-zinc-400 italic">
+                                  <td colSpan={4 + entreprisesLot.length} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic">
                                     Cliquez sur "+ Section", "+ Article" ou "+ Sous-total" pour construire le comparatif de ce lot.
                                   </td>
                                 </tr>
@@ -1270,14 +1270,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
       {phase === 'analyse' && (
         <div className="space-y-6">
           {/* Bouton global RAO */}
-          <div className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
+          <div className="flex items-center justify-between rounded-lg p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
             <div>
-              <p className="text-sm font-bold text-zinc-900 dark:text-white">Rapport d'Analyse des Offres (RAO)</p>
-              <p className="text-[10px] text-zinc-400">Génère un PDF comparatif pour tous les lots ou par lot</p>
+              <p className="text-sm font-bold text-[var(--tblr-text)]">Rapport d'Analyse des Offres (RAO)</p>
+              <p className="text-[10px] text-[var(--tblr-muted)]">Génère un PDF comparatif pour tous les lots ou par lot</p>
             </div>
             <div className="flex gap-2">
               <button onClick={() => generateRAO(lots, consultation, projectName)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all">
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all">
                 <IconDownload size={14} /> RAO Global
               </button>
             </div>
@@ -1302,9 +1302,9 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             }).sort((a, b) => b.noteGlobale - a.noteGlobale);
 
             return (
-              <div key={lot.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+              <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-[var(--tblr-text)] flex items-center gap-2">
                     <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-black">Lot {lot.lot_number}</span>
                     {lot.lot_title}
                     {attribution && (
@@ -1320,19 +1320,19 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[700px]">
-                    <thead className="bg-zinc-50 dark:bg-zinc-800/50">
+                    <thead className="bg-[var(--tblr-surface-2)]">
                       <tr>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-zinc-400">Rang</th>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-zinc-400">Entreprise</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-zinc-400">Montant HT</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-zinc-400">% / moins-disant</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-zinc-400">Note prix ({poidsPrix}%)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-zinc-400">Note tech. ({poidsTech}%)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-zinc-400">NOTE GLOBALE</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-zinc-400">Attribuer</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Rang</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Entreprise</th>
+                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Montant HT</th>
+                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-[var(--tblr-muted)]">% / moins-disant</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Note prix ({poidsPrix}%)</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Note tech. ({poidsTech}%)</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">NOTE GLOBALE</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Attribuer</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    <tbody className="divide-y divide-[var(--tblr-border)]">
                       {scored.map(({ offre, entreprise, notePrix, noteGlobale }, rank) => {
                         const isAttribue = attribution?.entreprise_id === offre.entreprise_id;
                         const pctMinDisant = minMontant > 0 && offre.montant_base > 0
@@ -1345,14 +1345,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           )}>
                             <td className="px-4 py-3 text-center">
                               {offre.conforme ? (
-                                <span className={cn('text-sm font-black', rank === 0 ? 'text-yellow-500' : rank === 1 ? 'text-zinc-500' : rank === 2 ? 'text-amber-600' : 'text-zinc-400')}>
+                                <span className={cn('text-sm font-black', rank === 0 ? 'text-yellow-500' : rank === 1 ? 'text-[var(--tblr-muted)]' : rank === 2 ? 'text-amber-600' : 'text-[var(--tblr-muted)]')}>
                                   {rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`}
                                 </span>
                               ) : <span className="text-red-500 text-xs font-bold">NC</span>}
                             </td>
                             <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise?.nom || '—'}</td>
-                            <td className="px-4 py-3 text-right font-bold text-zinc-900 dark:text-white">{fmt(offre.montant_base)}</td>
-                            <td className="px-4 py-3 text-right text-zinc-500 text-xs">
+                            <td className="px-4 py-3 text-right font-bold text-[var(--tblr-text)]">{fmt(offre.montant_base)}</td>
+                            <td className="px-4 py-3 text-right text-[var(--tblr-muted)] text-xs">
                               {offre.conforme && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
                             </td>
                             <td className="px-4 py-3 text-center font-bold" style={{ color: offre.conforme ? '#206bc4' : '#d63939' }}>
@@ -1362,7 +1362,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                               {offre.conforme ? (offre.note_technique || '—') : 'NC'}
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && rank === 0 ? 'bg-green-100 text-green-700' : 'text-zinc-400')}>
+                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && rank === 0 ? 'bg-green-100 text-green-700' : 'text-[var(--tblr-muted)]')}>
                                 {offre.conforme ? noteGlobale.toFixed(1) : 'NC'}
                               </span>
                             </td>
@@ -1378,7 +1378,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                   'px-3 py-1 rounded-lg text-xs font-bold transition-all',
                                   isAttribue
                                     ? 'bg-green-600 text-white hover:bg-red-100 hover:text-red-600'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-green-100 hover:text-green-700'
+                                    : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-green-100 hover:text-green-700'
                                 )}>
                                   {isAttribue ? '✓ Attribué' : 'Attribuer'}
                                 </button>
@@ -1387,7 +1387,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           </tr>
                         );
                       })}
-                      {scored.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-400 italic text-sm">Aucune offre saisie pour ce lot (phase 4).</td></tr>}
+                      {scored.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune offre saisie pour ce lot (phase 4).</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -1402,14 +1402,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
         <button
           onClick={() => phaseIdx > 0 && goPhase(PHASES[phaseIdx - 1].id)}
           disabled={phaseIdx === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition-all"
         >
           <IconChevronLeft size={14} /> Phase précédente
         </button>
         <button
           onClick={() => phaseIdx < PHASES.length - 1 && goPhase(PHASES[phaseIdx + 1].id)}
           disabled={phaseIdx === PHASES.length - 1}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-all"
         >
           Phase suivante <IconChevronRight size={14} />
         </button>

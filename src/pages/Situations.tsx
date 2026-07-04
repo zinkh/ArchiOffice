@@ -417,7 +417,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
   };
 
   const statColor = (e: string) =>
-    e === 'Payée' ? 'bg-green-100 text-green-800' : e === 'Validée' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600';
+    e === 'Payée' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' : e === 'Validée' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400';
 
   // ── UI ────────────────────────────────────────────────────────────────────
   return (
@@ -446,7 +446,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
             <h2 className="text-base font-semibold">Marchés des entreprises</h2>
             <button
               onClick={() => { setEditingMarche({}); setMarcheForm(emptyMarche()); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white"
               style={{ background: 'var(--tblr-primary)' }}
             >
               <IconPlus size={14} /> Nouveau marché
@@ -467,8 +467,8 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   </div>
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-sm">{f2(m.montant_ht)} € HT</p>
-                    <button onClick={() => { setEditingMarche(m); setMarcheForm({ ...m }); }} className="p-1 rounded hover:bg-[var(--tblr-surface-2)]"><IconEdit size={14} /></button>
-                    <button onClick={() => handleDeleteMarche(m.id)} className="p-1 rounded hover:bg-red-50 text-red-500"><IconTrash size={14} /></button>
+                    <button onClick={() => { setEditingMarche(m); setMarcheForm({ ...m }); }} className="p-1 rounded-lg hover:bg-[var(--tblr-surface-2)]"><IconEdit size={14} /></button>
+                    <button onClick={() => handleDeleteMarche(m.id)} className="p-1 rounded-lg hover:bg-red-50 text-red-500"><IconTrash size={14} /></button>
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--tblr-muted)]">
@@ -501,13 +501,13 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
           <div className="w-64 shrink-0 space-y-1">
             <div className="flex justify-between items-center mb-2">
               <p className="text-xs font-semibold text-[var(--tblr-muted)] uppercase tracking-wide">Situations</p>
-              <button onClick={() => setShowNewSit(true)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)]" title="Nouvelle situation"><IconPlus size={14} /></button>
+              <button onClick={() => setShowNewSit(true)} className="p-1 rounded-lg hover:bg-[var(--tblr-surface-2)]" title="Nouvelle situation"><IconPlus size={14} /></button>
             </div>
             {situations.map(s => (
               <div
                 key={s.id}
                 onClick={() => setSelectedSit(s)}
-                className={`flex items-center justify-between px-3 py-2 rounded cursor-pointer text-sm transition-colors ${
+                className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
                   selectedSit?.id === s.id ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'hover:bg-[var(--tblr-surface-2)]'
                 }`}
               >
@@ -516,8 +516,8 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="text-xs text-[var(--tblr-muted)]">{new Date(s.date_situation).toLocaleDateString('fr-FR')}</p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statColor(s.etat)}`}>{s.etat}</span>
-                  <button onClick={e => { e.stopPropagation(); handleDeleteSit(s.id); }} className="p-0.5 rounded hover:bg-red-50 text-red-400 opacity-0 group-hover:opacity-100"><IconTrash size={12} /></button>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
+                  <button onClick={e => { e.stopPropagation(); handleDeleteSit(s.id); }} className="p-0.5 rounded-lg hover:bg-red-50 text-red-400 opacity-0 group-hover:opacity-100"><IconTrash size={12} /></button>
                 </div>
               </div>
             ))}
@@ -544,7 +544,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <select
                       value={selectedSit.etat}
                       onChange={e => handleChangeEtat(selectedSit, e.target.value as any)}
-                      className="text-xs border rounded px-2 py-1"
+                      className="text-xs border rounded-lg px-2 py-1"
                       style={{ borderColor: 'var(--tblr-border)' }}
                     >
                       <option value="Brouillon">Brouillon</option>
@@ -563,7 +563,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                         const updated = situations.find(s => s.id === selectedSit.id);
                         if (updated) setSelectedSit({ ...updated, marche_id: e.target.value || undefined });
                       }}
-                      className="text-xs border rounded px-2 py-1"
+                      className="text-xs border rounded-lg px-2 py-1"
                       style={{ borderColor: 'var(--tblr-border)' }}
                     >
                       <option value="">— Lier à un marché —</option>
@@ -610,7 +610,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                                     return { ...i, avancement_n: val, montant_cumul_n: cumN, montant_periode: cumN - i.montant_cumul_n_moins_1 };
                                   }));
                                 }}
-                                className="w-16 text-right text-xs border rounded px-1 py-0.5 tabular-nums"
+                                className="w-16 text-right text-xs border rounded-lg px-1 py-0.5 tabular-nums"
                                 style={{ borderColor: 'var(--tblr-border)' }}
                               />
                             </td>
@@ -639,7 +639,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <button
                       onClick={handleSaveItems}
                       disabled={savingItems}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-60"
                       style={{ background: 'var(--tblr-primary)' }}
                     >
                       <IconCheck size={14} /> {savingItems ? 'Enregistrement…' : 'Enregistrer le décompte'}
@@ -662,7 +662,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
               <div
                 key={s.id}
                 onClick={() => setSelectedSit(s)}
-                className={`flex items-center justify-between px-3 py-2 rounded cursor-pointer text-sm transition-colors ${
+                className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
                   selectedSit?.id === s.id ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'hover:bg-[var(--tblr-surface-2)]'
                 }`}
               >
@@ -670,7 +670,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="font-medium">Sit. n°{s.numero_situation}</p>
                   <p className="text-xs text-[var(--tblr-muted)]">{new Date(s.date_situation).toLocaleDateString('fr-FR')}</p>
                 </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statColor(s.etat)}`}>{s.etat}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
               </div>
             ))}
           </div>
@@ -691,16 +691,16 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                        <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                           Marché {projectIsPublic ? 'public' : 'privé'}
                         </span>
                         {linkedId && status && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#e0e7ff', color: info.color }}>
+                          <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-primary-lt)', color: info.color }}>
                             Facture entreprise : {status}
                           </span>
                         )}
                         {selectedSit.etat_acompte_joint_at && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                          <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
                             État d'acompte joint
                           </span>
                         )}
@@ -709,7 +709,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                         {providerConnected && !linkedId && (
                           <button
                             onClick={() => openInvoicingSearchModal(provider)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white"
                             style={{ background: info.color }}
                             title={`Rechercher la facture de l'entreprise sur ${info.label}`}
                           >
@@ -720,7 +720,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                           <button
                             onClick={() => handleAttachEtatAcompte(provider)}
                             disabled={invoicingAttaching}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-60"
                             style={{ background: info.color }}
                             title={`Joindre l'état d'acompte à la facture liée sur ${info.label}`}
                           >
@@ -730,7 +730,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                         )}
                         <button
                           onClick={handleDownloadPdf}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border"
                           style={{ borderColor: 'var(--tblr-border)' }}
                         >
                           <IconDownload size={14} /> Export PDF
@@ -741,7 +741,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                 })()}
 
                 {invoicingNotice && !invoicingSearchModalOpen && (
-                  <div className="text-sm p-3 rounded-lg" style={invoicingNotice.type === 'success' ? { background: '#d3f9d8', color: '#2f9e44' } : { background: '#ffe3e3', color: '#c92a2a' }}>
+                  <div className={`text-sm p-3 rounded-lg ${invoicingNotice.type === 'success' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
                     {invoicingNotice.message}
                   </div>
                 )}
@@ -777,13 +777,13 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <Field label="Date réception situation">
                       <input type="date" value={etatForm.date_reception_situation}
                         onChange={e => setEtatForm(f => ({ ...f, date_reception_situation: e.target.value }))}
-                        className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                        className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
                     </Field>
                     {marche?.revision_active && (
                       <Field label={`Coefficient révision Cn (formule : a=${marche.revision_formule?.fixe})`}>
                         <input type="number" step="0.000001" value={etatForm.revision_coeff}
                           onChange={e => setEtatForm(f => ({ ...f, revision_coeff: parseFloat(e.target.value) || 1 }))}
-                          className="w-full text-sm border rounded px-2 py-1.5 tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
+                          className="w-full text-sm border rounded-lg px-2 py-1.5 tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
                         <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">
                           Cn = {marche.revision_formule?.fixe} + Σ(poids × In/I0) — voir indices INSEE BT/TP
                         </p>
@@ -792,27 +792,27 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <Field label="Pénalités de retard HT (€)">
                       <input type="number" min={0} step={0.01} value={etatForm.penalites_ht}
                         onChange={e => setEtatForm(f => ({ ...f, penalites_ht: parseFloat(e.target.value) || 0 }))}
-                        className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                        className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
                     </Field>
                     <Field label="Motif pénalités">
                       <input type="text" value={etatForm.penalites_notes}
                         onChange={e => setEtatForm(f => ({ ...f, penalites_notes: e.target.value }))}
-                        className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                        className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
                     </Field>
                     <Field label="Remboursement avance (€ TTC)">
                       <input type="number" min={0} step={0.01} value={etatForm.avance_remboursement}
                         onChange={e => setEtatForm(f => ({ ...f, avance_remboursement: parseFloat(e.target.value) || 0 }))}
-                        className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                        className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
                     </Field>
                     <Field label="Notes MOE">
                       <textarea value={etatForm.notes_moe} rows={3}
                         onChange={e => setEtatForm(f => ({ ...f, notes_moe: e.target.value }))}
-                        className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                        className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
                     </Field>
                     <button
                       onClick={handleSaveEtat}
                       disabled={savingEtat}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60"
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-60"
                       style={{ background: 'var(--tblr-primary)' }}
                     >
                       <IconCheck size={14} /> {savingEtat ? 'Enregistrement…' : 'Enregistrer'}
@@ -871,19 +871,19 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
             <Field label="Date">
               <input type="date" value={newSitForm.date_situation}
                 onChange={e => setNewSitForm(f => ({ ...f, date_situation: e.target.value }))}
-                className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
+                className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }} />
             </Field>
             <Field label="Marché lié">
               <select value={newSitForm.marche_id}
                 onChange={e => setNewSitForm(f => ({ ...f, marche_id: e.target.value }))}
-                className="w-full text-sm border rounded px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }}>
+                className="w-full text-sm border rounded-lg px-2 py-1.5" style={{ borderColor: 'var(--tblr-border)' }}>
                 <option value="">— Aucun —</option>
                 {marches.map(m => <option key={m.id} value={m.id}>{m.entreprise_nom} — Lot {m.lot_numero}</option>)}
               </select>
             </Field>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowNewSit(false)} className="px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
-              <button onClick={handleCreateSit} disabled={savingSit} className="px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60" style={{ background: 'var(--tblr-primary)' }}>
+              <button onClick={() => setShowNewSit(false)} className="px-3 py-1.5 text-sm rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
+              <button onClick={handleCreateSit} disabled={savingSit} className="px-3 py-1.5 text-sm rounded-lg text-white font-medium disabled:opacity-60" style={{ background: 'var(--tblr-primary)' }}>
                 {savingSit ? '…' : 'Créer'}
               </button>
             </div>
@@ -911,13 +911,13 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
               <Field label={`SIRET du destinataire (${provider === 'chorus_pro' ? 'structure publique' : 'client'}) *`}>
                 <input value={invoicingSearchSiret}
                   onChange={e => setInvoicingSearchSiret(e.target.value)}
-                  className="w-full text-sm border rounded px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
+                  className="w-full text-sm border rounded-lg px-2 py-1.5 font-mono" style={{ borderColor: 'var(--tblr-border)' }}
                   placeholder="14 chiffres" />
               </Field>
               <button
                 onClick={() => handleSearchFacture(provider)}
                 disabled={invoicingSearching || !invoicingSearchSiret || !selectedSit.marche?.entreprise_siret}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm rounded text-white font-medium disabled:opacity-60"
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm rounded-lg text-white font-medium disabled:opacity-60"
                 style={{ background: info.color }}
               >
                 {invoicingSearching ? <IconLoader2 size={14} className="animate-spin" /> : <IconBuildingBank size={14} />}
@@ -948,7 +948,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                         <button
                           onClick={() => handleLinkFacture(provider, c)}
                           disabled={invoicingLinking === c.identifiantFactureCPP}
-                          className="px-2.5 py-1 rounded text-white text-xs font-medium disabled:opacity-60"
+                          className="px-2.5 py-1 rounded-lg text-white text-xs font-medium disabled:opacity-60"
                           style={{ background: info.color }}
                         >
                           {invoicingLinking === c.identifiantFactureCPP ? '…' : 'Lier'}
@@ -999,35 +999,35 @@ function MarcheForm({
       <div className="grid grid-cols-2 gap-3">
         <Field label="Entreprise *">
           <input value={form.entreprise_nom ?? ''} onChange={e => setForm({ ...form, entreprise_nom: e.target.value })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="SIRET entreprise (requis pour Chorus Pro)">
           <input value={form.entreprise_siret ?? ''} onChange={e => setForm({ ...form, entreprise_siret: e.target.value })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white font-mono" style={{ borderColor: 'var(--tblr-border)' }} placeholder="14 chiffres" />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white font-mono" style={{ borderColor: 'var(--tblr-border)' }} placeholder="14 chiffres" />
         </Field>
         <Field label="Lot n°">
           <input value={form.lot_numero ?? ''} onChange={e => setForm({ ...form, lot_numero: e.target.value })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="Titre du lot">
           <input value={form.lot_titre ?? ''} onChange={e => setForm({ ...form, lot_titre: e.target.value })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="Montant marché HT (€)">
           <input type="number" step={0.01} value={form.montant_ht ?? 0} onChange={e => setForm({ ...form, montant_ht: parseFloat(e.target.value) || 0 })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="TVA (%)">
           <input type="number" step={0.1} value={form.tva_rate ?? 20} onChange={e => setForm({ ...form, tva_rate: parseFloat(e.target.value) || 20 })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="Avance (%)">
           <input type="number" step={0.1} min={0} max={30} value={form.avance_pct ?? 0} onChange={e => setForm({ ...form, avance_pct: parseFloat(e.target.value) || 0 })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <Field label="Retenue de garantie (%)">
           <input type="number" step={0.1} min={0} max={5} value={form.retenue_garantie_pct ?? 5} onChange={e => setForm({ ...form, retenue_garantie_pct: parseFloat(e.target.value) || 5 })}
-            className="w-full text-sm border rounded px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
+            className="w-full text-sm border rounded-lg px-2 py-1.5 bg-white" style={{ borderColor: 'var(--tblr-border)' }} />
         </Field>
         <div className="flex items-center gap-2 mt-1">
           <input type="checkbox" id="rg-banc" checked={!!form.retenue_garantie_bancaire} onChange={e => setForm({ ...form, retenue_garantie_bancaire: e.target.checked })} />
@@ -1045,7 +1045,7 @@ function MarcheForm({
           <div className="space-y-2 pl-4">
             <Field label={`Partie fixe a₀ (total formule = 1, actuel: ${somme.toFixed(3)})`}>
               <input type="number" step={0.01} min={0} max={1} value={rf.fixe} onChange={e => setForm({ ...form, revision_formule: { ...rf, fixe: parseFloat(e.target.value) || 0 } })}
-                className={`w-full text-sm border rounded px-2 py-1.5 bg-white ${!formulaOk ? 'border-red-400' : ''}`} style={formulaOk ? { borderColor: 'var(--tblr-border)' } : {}} />
+                className={`w-full text-sm border rounded-lg px-2 py-1.5 bg-white ${!formulaOk ? 'border-red-400' : ''}`} style={formulaOk ? { borderColor: 'var(--tblr-border)' } : {}} />
               {!formulaOk && <p className="text-[10px] text-red-600 mt-0.5">⚠ a₀ + Σ poids doit être égal à 1 (actuel : {somme.toFixed(3)})</p>}
             </Field>
             <div className="space-y-2">
@@ -1055,16 +1055,16 @@ function MarcheForm({
                     const found = INDICES_COURANTS.find(ic => ic.code === e.target.value);
                     updateIndice(i, 'code', e.target.value);
                     if (found) updateIndice(i, 'label', found.label.split(' — ')[1]);
-                  }} className="text-xs border rounded px-1 py-1 bg-white flex-1" style={{ borderColor: 'var(--tblr-border)' }}>
+                  }} className="text-xs border rounded-lg px-1 py-1 bg-white flex-1" style={{ borderColor: 'var(--tblr-border)' }}>
                     <option value="">— Indice —</option>
                     {INDICES_COURANTS.map(ic => <option key={ic.code} value={ic.code}>{ic.label}</option>)}
                   </select>
                   <input type="number" step={0.01} min={0} max={1} placeholder="Poids" value={ind.poids}
                     onChange={e => updateIndice(i, 'poids', parseFloat(e.target.value) || 0)}
-                    className="w-20 text-xs border rounded px-1 py-1 bg-white tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
+                    className="w-20 text-xs border rounded-lg px-1 py-1 bg-white tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
                   <input type="number" step={0.1} placeholder="I0" value={ind.I0}
                     onChange={e => updateIndice(i, 'I0', parseFloat(e.target.value) || 100)}
-                    className="w-20 text-xs border rounded px-1 py-1 bg-white tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
+                    className="w-20 text-xs border rounded-lg px-1 py-1 bg-white tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
                   <button onClick={() => removeIndice(i)} className="text-red-400 hover:text-red-600"><IconTrash size={13} /></button>
                 </div>
               ))}
@@ -1077,8 +1077,8 @@ function MarcheForm({
       </div>
 
       <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded border bg-white" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
-        <button onClick={onSave} className="px-3 py-1.5 text-sm rounded text-white font-medium" style={{ background: 'var(--tblr-primary)' }}>
+        <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded-lg border bg-white" style={{ borderColor: 'var(--tblr-border)' }}>Annuler</button>
+        <button onClick={onSave} className="px-3 py-1.5 text-sm rounded-lg text-white font-medium" style={{ background: 'var(--tblr-primary)' }}>
           {isEdit ? 'Mettre à jour' : 'Créer le marché'}
         </button>
       </div>

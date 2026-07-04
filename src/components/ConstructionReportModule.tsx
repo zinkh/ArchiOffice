@@ -23,6 +23,8 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { PillTabs } from './ui/PillTabs';
+import { cn } from '../lib/utils';
 
 interface ConstructionReportModuleProps {
   project: Project;
@@ -44,16 +46,19 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const pdfTemplateRef = useRef<HTMLDivElement>(null);
 
-  // Styles object as requested
+  // Screen chrome — themed via the app's --tblr-* CSS variables (auto light/dark).
+  // NOTE: `pdfTemplate` below is intentionally excluded from theming — it is an
+  // offscreen html2canvas/jsPDF export target and must always render as a fixed
+  // white/black printable document regardless of the app's current theme.
   const styles: Record<string, React.CSSProperties> = {
     container: {
-      fontFamily: 'Inter, sans-serif',
-      color: '#1e293b',
-      background: '#f8fafc',
+      color: 'var(--tblr-text)',
+      background: 'var(--tblr-bg)',
       minHeight: '100%',
     },
     topBar: {
-      background: 'linear-gradient(to right, #0f2540, #1e3a5f)',
+      background: 'var(--tblr-surface)',
+      borderBottom: '1px solid var(--tblr-border)',
       minHeight: '52px',
       display: 'flex',
       flexWrap: 'wrap',
@@ -61,8 +66,7 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       justifyContent: 'space-between',
       padding: '8px 12px',
       gap: '8px',
-      color: 'white',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      color: 'var(--tblr-text)',
     },
     logoSection: {
       display: 'flex',
@@ -78,28 +82,30 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
+      color: 'var(--tblr-text)',
     },
     clientName: {
-      color: '#60a5fa',
+      color: 'var(--tblr-muted)',
       fontSize: '11px',
     },
     weekSelector: {
       display: 'flex',
       alignItems: 'center',
       gap: '6px',
-      background: 'rgba(255,255,255,0.1)',
+      background: 'var(--tblr-surface-2)',
       padding: '4px 8px',
       borderRadius: '20px',
       fontSize: '12px',
       flex: '0 1 auto',
       minWidth: 0,
+      color: 'var(--tblr-text)',
     },
     btnNew: {
-      background: '#3b82f6',
+      background: 'var(--tblr-primary)',
       color: 'white',
       border: 'none',
       padding: '6px 12px',
-      borderRadius: '6px',
+      borderRadius: '8px',
       fontSize: '12px',
       fontWeight: '600',
       cursor: 'pointer',
@@ -114,42 +120,15 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       overflowX: 'auto',
       WebkitOverflowScrolling: 'touch',
     },
-    tabsContainer: {
-      background: '#e2e8f0',
-      borderRadius: '10px',
-      padding: '4px',
-      display: 'flex',
-      gap: '2px',
-      width: 'max-content',
-    },
-    tab: {
-      padding: '6px 10px',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontSize: '12px',
-      fontWeight: '500',
-      transition: 'all 0.2s',
-      border: 'none',
-      background: 'transparent',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '5px',
-      whiteSpace: 'nowrap',
-    },
-    activeTab: {
-      background: 'white',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-      color: '#1e3a5f',
-    },
     contentArea: {
       padding: '0 12px 20px 12px',
     },
     card: {
-      background: 'white',
-      borderRadius: '12px',
+      background: 'var(--tblr-surface)',
+      borderRadius: '8px',
       padding: '16px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-      border: '1px solid #e2e8f0',
+      boxShadow: 'var(--tblr-shadow)',
+      border: '1px solid var(--tblr-border)',
     },
     grid2: {
       display: 'grid',
@@ -163,7 +142,7 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
-      color: '#0f172a',
+      color: 'var(--tblr-text)',
     },
     table: {
       width: '100%',
@@ -173,22 +152,16 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
     th: {
       textAlign: 'left',
       padding: '12px',
-      borderBottom: '2px solid #f1f5f9',
-      color: '#64748b',
+      borderBottom: '2px solid var(--tblr-border)',
+      color: 'var(--tblr-muted)',
       textTransform: 'uppercase',
       letterSpacing: '0.05em',
       fontSize: '11px',
     },
     td: {
       padding: '12px',
-      borderBottom: '1px solid #f1f5f9',
-    },
-    badge: {
-      padding: '4px 8px',
-      borderRadius: '4px',
-      fontSize: '11px',
-      fontWeight: '700',
-      textTransform: 'uppercase',
+      borderBottom: '1px solid var(--tblr-border)',
+      color: 'var(--tblr-text)',
     },
     modalOverlay: {
       position: 'fixed',
@@ -200,12 +173,15 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       zIndex: 1000,
     },
     modal: {
-      background: 'white',
+      background: 'var(--tblr-surface)',
+      color: 'var(--tblr-text)',
       padding: '24px',
-      borderRadius: '12px',
+      borderRadius: '8px',
       width: '400px',
-      boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+      boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)',
+      border: '1px solid var(--tblr-border)',
     },
+    // Offscreen PDF export template — deliberately NOT themed, see note above.
     pdfTemplate: {
       position: 'absolute',
       left: '-9999px',
@@ -338,11 +314,11 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'A FAIRE': return { bg: '#fee2e2', text: '#b91c1c' };
-      case 'EN COURS': return { bg: '#fef3c7', text: '#b45309' };
-      case 'LEVÉE': return { bg: '#dcfce7', text: '#15803d' };
-      case 'URGENT': return { bg: '#fecaca', text: '#dc2626' };
-      default: return { bg: '#f1f5f9', text: '#475569' };
+      case 'A FAIRE': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+      case 'EN COURS': return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400';
+      case 'LEVÉE': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+      case 'URGENT': return 'bg-red-200 dark:bg-red-900/50 text-red-800 dark:text-red-300';
+      default: return 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]';
     }
   };
 
@@ -407,8 +383,8 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
       {/* TopBar */}
       <div style={styles.topBar}>
         <div style={styles.logoSection}>
-          <div style={{ background: 'white', width: '28px', height: '28px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ color: '#0f2540', fontWeight: 'bold', fontSize: '16px' }}>A</span>
+          <div style={{ background: 'var(--tblr-primary)', width: '28px', height: '28px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: 'white', fontWeight: 'bold', fontSize: '16px' }}>A</span>
           </div>
           <div style={{ minWidth: 0, overflow: 'hidden' }}>
             <div style={styles.projectName}>{project.name}</div>
@@ -417,8 +393,8 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
         </div>
 
         <div style={styles.weekSelector}>
-          <button 
-            style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+          <button
+            style={{ background: 'none', border: 'none', color: 'var(--tblr-muted)', cursor: 'pointer', display: 'flex' }}
             onClick={() => {
               const idx = reports.findIndex(r => r.id === selectedReportId);
               if (idx < reports.length - 1) setSelectedReportId(reports[idx + 1].id);
@@ -429,8 +405,8 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
           <div style={{ fontSize: '14px', fontWeight: '600' }}>
             CR N°{selectedReport?.report_number || '--'} — {selectedReport?.date || 'Sélectionnez un rapport'}
           </div>
-          <button 
-            style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
+          <button
+            style={{ background: 'none', border: 'none', color: 'var(--tblr-muted)', cursor: 'pointer', display: 'flex' }}
             onClick={() => {
               const idx = reports.findIndex(r => r.id === selectedReportId);
               if (idx > 0) setSelectedReportId(reports[idx - 1].id);
@@ -447,26 +423,17 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
 
       {/* Tabs */}
       <div style={styles.tabsWrapper}>
-        <div style={styles.tabsContainer}>
-          {[
-            { id: 'garde', label: 'Page de Garde', icon: <IconHome size={18} /> },
-            { id: 'remarques', label: 'Remarques', icon: <IconNotes size={18} /> },
-            { id: 'stats', label: 'Statistiques', icon: <IconChartBar size={18} /> },
-            { id: 'pdf', label: 'Export PDF', icon: <IconFileExport size={18} /> },
-            { id: 'mail', label: 'Envoi Mail', icon: <IconMail size={18} /> },
-          ].map(t => (
-            <button
-              key={t.id}
-              style={{
-                ...styles.tab,
-                ...(activeTab === t.id ? styles.activeTab : {})
-              }}
-              onClick={() => setActiveTab(t.id as TabType)}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
+        <PillTabs
+          activeId={activeTab}
+          onChange={id => setActiveTab(id as TabType)}
+          tabs={[
+            { id: 'garde', label: 'Page de Garde', icon: IconHome },
+            { id: 'remarques', label: 'Remarques', icon: IconNotes },
+            { id: 'stats', label: 'Statistiques', icon: IconChartBar },
+            { id: 'pdf', label: 'Export PDF', icon: IconFileExport },
+            { id: 'mail', label: 'Envoi Mail', icon: IconMail },
+          ]}
+        />
       </div>
 
       {/* Content */}
@@ -477,36 +444,36 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
               <div style={styles.sectionTitle}><IconHome size={20} /> Informations Projet</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
-                  <label style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Opération</label>
+                  <label style={{ fontSize: '12px', color: 'var(--tblr-muted)', fontWeight: '600' }}>Opération</label>
                   <div style={{ fontSize: '15px', fontWeight: '500' }}>{project.name}</div>
                 </div>
                 <div>
-                  <label style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Maître d'Ouvrage</label>
+                  <label style={{ fontSize: '12px', color: 'var(--tblr-muted)', fontWeight: '600' }}>Maître d'Ouvrage</label>
                   <div style={{ fontSize: '15px', fontWeight: '500' }}>{project.client}</div>
                 </div>
                 <div>
-                  <label style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Adresse</label>
+                  <label style={{ fontSize: '12px', color: 'var(--tblr-muted)', fontWeight: '600' }}>Adresse</label>
                   <div style={{ fontSize: '15px', fontWeight: '500' }}>{project.address}</div>
                 </div>
                 <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
                   <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Météo</label>
+                    <label style={{ fontSize: '12px', color: 'var(--tblr-muted)', fontWeight: '600' }}>Météo</label>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <IconCloud size={18} color="#64748b" />
+                      <IconCloud size={18} color="var(--tblr-muted)" />
                       <input 
-                        style={{ border: 'none', borderBottom: '1px solid #e2e8f0', padding: '4px 0', width: '100%', outline: 'none' }}
+                        style={{ border: 'none', borderBottom: '1px solid var(--tblr-border)', padding: '4px 0', width: '100%', outline: 'none', background: 'transparent', color: 'var(--tblr-text)' }}
                         value={selectedReport?.meteo || ''}
                         onChange={e => updateReportField('meteo', e.target.value)}
                       />
                     </div>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Température (°C)</label>
+                    <label style={{ fontSize: '12px', color: 'var(--tblr-muted)', fontWeight: '600' }}>Température (°C)</label>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <IconTemperature size={18} color="#64748b" />
+                      <IconTemperature size={18} color="var(--tblr-muted)" />
                       <input 
                         type="number"
-                        style={{ border: 'none', borderBottom: '1px solid #e2e8f0', padding: '4px 0', width: '100%', outline: 'none' }}
+                        style={{ border: 'none', borderBottom: '1px solid var(--tblr-border)', padding: '4px 0', width: '100%', outline: 'none', background: 'transparent', color: 'var(--tblr-text)' }}
                         value={selectedReport?.temperature || 0}
                         onChange={e => updateReportField('temperature', parseInt(e.target.value))}
                       />
@@ -531,11 +498,11 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
                     <tr key={lot.id}>
                       <td style={styles.td}>
                         <div style={{ fontWeight: '600' }}>{lot.contact_name?.split(' - ')[0]}</div>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>{lot.lot_title}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--tblr-muted)' }}>{lot.lot_title}</div>
                       </td>
                       <td style={styles.td}>{lot.contact_name?.split(' - ')[1] || '-'}</td>
                       <td style={styles.td}>
-                        <select style={{ padding: '4px', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
+                        <select style={{ padding: '4px', borderRadius: '4px', border: '1px solid var(--tblr-border)', fontSize: '12px', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
                           <option>Présent</option>
                           <option>Absent</option>
                           <option>Excusé</option>
@@ -570,14 +537,13 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
               </thead>
               <tbody>
                 {notes.map(note => {
-                  const colors = getStatusColor(note.status);
                   return (
                     <tr key={note.id}>
-                      <td style={{ ...styles.td, fontWeight: 'bold', color: '#64748b' }}>{note.note_number}</td>
+                      <td style={{ ...styles.td, fontWeight: 'bold', color: 'var(--tblr-muted)' }}>{note.note_number}</td>
                       <td style={styles.td}>{note.issue_date}</td>
                       <td style={styles.td}>
                         <select 
-                          style={{ border: 'none', background: 'transparent', fontWeight: '600' }}
+                          style={{ border: 'none', background: 'transparent', fontWeight: '600', color: 'var(--tblr-text)' }}
                           value={note.lot_concerne || ''}
                           onChange={e => updateNote(note.id, { lot_concerne: e.target.value })}
                         >
@@ -587,20 +553,14 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
                       </td>
                       <td style={styles.td}>
                         <input 
-                          style={{ width: '100%', border: 'none', outline: 'none' }}
+                          style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'var(--tblr-text)' }}
                           value={note.text}
                           onChange={e => updateNote(note.id, { text: e.target.value })}
                         />
                       </td>
                       <td style={styles.td}>
-                        <select 
-                          style={{ 
-                            ...styles.badge, 
-                            background: colors.bg, 
-                            color: colors.text,
-                            border: 'none',
-                            cursor: 'pointer'
-                          }}
+                        <select
+                          className={cn('px-2 py-1 rounded text-[11px] font-bold uppercase border-none cursor-pointer', getStatusColor(note.status))}
                           value={note.status}
                           onChange={e => updateNote(note.id, { status: e.target.value as any })}
                         >
@@ -612,7 +572,7 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
                       </td>
                       <td style={styles.td}>
                         <button 
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tblr-danger)' }}
                           onClick={() => deleteNote(note.id)}
                         >
                           <IconTrash size={18} />
@@ -671,9 +631,9 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
         {activeTab === 'pdf' && (
           <div style={styles.card}>
             <div style={{ textAlign: 'center', padding: '40px' }}>
-              <IconFileExport size={64} color="#3b82f6" style={{ marginBottom: '20px' }} />
+              <IconFileExport size={64} color="var(--tblr-primary)" style={{ marginBottom: '20px' }} />
               <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>Générer le Compte Rendu</h3>
-              <p style={{ color: '#64748b', marginBottom: '24px' }}>Préparez le document PDF pour diffusion aux entreprises.</p>
+              <p style={{ color: 'var(--tblr-muted)', marginBottom: '24px' }}>Préparez le document PDF pour diffusion aux entreprises.</p>
               <button 
                 style={{ ...styles.btnNew, padding: '12px 24px', fontSize: '15px', margin: '0 auto' }}
                 onClick={generatePdf}
@@ -703,15 +663,15 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
               </div>
               <div>
                 <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Objet</label>
-                <input 
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                <input
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
                   defaultValue={`CR Chantier N°${selectedReport?.report_number} - ${project.name}`}
                 />
               </div>
               <div>
                 <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Message</label>
-                <textarea 
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', minHeight: '150px' }}
+                <textarea
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--tblr-border)', minHeight: '150px', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
                   defaultValue={`Bonjour,\n\nVeuillez trouver ci-joint le compte rendu de chantier N°${selectedReport?.report_number} pour l'opération ${project.name}.\n\nCordialement,\nL'équipe Maîtrise d'Oeuvre`}
                 />
               </div>
@@ -784,31 +744,31 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
             <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>Nouveau Compte Rendu</h3>
             <div style={{ marginBottom: '20px' }}>
               <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Date de la réunion</label>
-              <input 
-                type="date" 
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+              <input
+                type="date"
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
                 value={newReportDate}
                 onChange={e => setNewReportDate(e.target.value)}
               />
             </div>
             
             {project.address && (
-              <div style={{ marginBottom: '20px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '8px' }}>
+              <div style={{ marginBottom: '20px', padding: '12px', background: 'var(--tblr-surface-2)', borderRadius: '8px', border: '1px solid var(--tblr-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: 'var(--tblr-muted)', marginBottom: '8px' }}>
                   <IconCloud size={16} /> Météo automatique
                 </div>
                 {weatherLoading ? (
-                  <div style={{ fontSize: '12px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  <div style={{ fontSize: '12px', color: 'var(--tblr-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div className="w-3 h-3 border-2 border-[var(--tblr-primary)] border-t-transparent rounded-full animate-spin"></div>
                     Récupération des données...
                   </div>
                 ) : fetchedWeather ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: '500' }}>{fetchedWeather.meteo}</span>
-                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#3b82f6' }}>{fetchedWeather.temperature}°C</span>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--tblr-primary)' }}>{fetchedWeather.temperature}°C</span>
                   </div>
                 ) : (
-                  <div style={{ fontSize: '12px', color: '#ef4444' }}>Impossible de récupérer la météo</div>
+                  <div style={{ fontSize: '12px', color: 'var(--tblr-danger)' }}>Impossible de récupérer la météo</div>
                 )}
               </div>
             )}
