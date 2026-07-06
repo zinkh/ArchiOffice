@@ -1,0 +1,43 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/windows-offline-app-install-okof14]
+
+jobs:
+  build-electron-windows:
+    name: Build Electron NSIS installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Authenticate GitHub Packages
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build SPA
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder_anon_key
+
+      - name: Bundle server
+        run: npm run build:server
+
+      - name: Build NSIS installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArchiOffice-Windows-installer
+          path: release/*.exe

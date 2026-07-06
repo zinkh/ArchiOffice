@@ -1,0 +1,29 @@
+appId: com.archioffice.desktop
+productName: ArchiOffice
+directories:
+  output: release
+# The Express server is bundled into a single self-contained file by esbuild
+# (dist-server/server.cjs) and the Electron main/preload use only Node builtins,
+# so no node_modules are shipped and no native-module rebuild is needed.
+npmRebuild: false
+files:
+  - electron/**/*
+  - package.json
+extraResources:
+  - from: dist
+    to: dist
+  - from: dist-server
+    to: dist-server
+  - from: proxy.json
+    to: proxy.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: public/favicon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
