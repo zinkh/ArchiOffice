@@ -6,11 +6,12 @@ import { useUser } from '../UserContext';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
-  IconRefresh, IconSearch
+  IconRefresh, IconSearch, IconTrash, IconTag
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import type { ProjectCategory } from '../types';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -300,6 +301,10 @@ export default function Settings() {
   const [pluginSearch, setPluginSearch] = useState('');
   const [openPlugin, setOpenPlugin] = useState<string | null>(null);
 
+  // Domaines et catégories (projets / références)
+  const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
+  const [newProjectCategoryName, setNewProjectCategoryName] = useState('');
+
   const [userSettings, setUserSettings] = useState({
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
@@ -361,6 +366,7 @@ export default function Settings() {
       apiFetch('/api/chorus-pro/status')
         .then(s => setChorusProStatus(s))
         .catch(() => {});
+      fetchProjectCategories();
     }
     if (currentUser) {
       setUserSettings({
@@ -388,6 +394,40 @@ export default function Settings() {
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
+
+  const fetchProjectCategories = async () => {
+    const localData = await db.projectCategories.toArray();
+    if (localData.length > 0) setProjectCategories(localData);
+    if (navigator.onLine) {
+      try {
+        const data = await apiFetch<ProjectCategory[]>('/api/project_categories');
+        await db.projectCategories.clear();
+        await db.projectCategories.bulkPut(data);
+        setProjectCategories(data);
+      } catch (err) { console.error('Failed to fetch project categories:', err); }
+    }
+  };
+
+  const handleAddProjectCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectCategoryName.trim()) return;
+    try {
+      await apiFetch('/api/project_categories', {
+        method: 'POST',
+        body: JSON.stringify({ id: crypto.randomUUID(), name: newProjectCategoryName.trim() }),
+      });
+      setNewProjectCategoryName('');
+      fetchProjectCategories();
+    } catch (err) { console.error('Failed to add project category:', err); }
+  };
+
+  const handleDeleteProjectCategory = async (id: string) => {
+    if (!confirm(t('settings_categories_delete_confirm'))) return;
+    try {
+      await apiFetch(`/api/project_categories/${id}`, { method: 'DELETE' });
+      fetchProjectCategories();
+    } catch (err) { console.error('Failed to delete project category:', err); }
+  };
 
   const handleRagicSync = async () => {
     setIsSyncingRagic(true);
@@ -1403,6 +1443,42 @@ export default function Settings() {
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               placeholder={t('default_email_template')} value={settings.defaultEmailTemplate ?? ''}
               onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} />
+          </div>
+
+          {/* ── Domaines et catégories ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="flex items-center gap-2">
+              <IconTag size={16} style={{ color: 'var(--tblr-muted)' }} />
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_categories_title')}</h2>
+                <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_categories_desc')}</p>
+              </div>
+            </div>
+            <form onSubmit={handleAddProjectCategory} className="flex gap-2">
+              <input
+                className="flex-1 p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                placeholder={t('settings_categories_placeholder')}
+                value={newProjectCategoryName}
+                onChange={e => setNewProjectCategoryName(e.target.value)}
+              />
+              <button type="submit" className="px-4 py-2 rounded-lg text-sm font-bold transition-colors" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+                {t('btn_add')}
+              </button>
+            </form>
+            <div className="space-y-1.5">
+              {projectCategories.length === 0 && (
+                <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('settings_categories_empty')}</p>
+              )}
+              {projectCategories.map(cat => (
+                <div key={cat.id} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                  <button type="button" onClick={() => handleDeleteProjectCategory(cat.id)} className="p-1 rounded hover:bg-red-50 transition-colors" style={{ color: 'var(--tblr-danger)' }}>
+                    <IconTrash size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* ══════════════════ INTEGRATIONS MARKETPLACE ══════════════════ */}
