@@ -1,13 +1,16 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 
 const PORT = process.env.PORT || '3130';
 const HEALTH_URL = `http://127.0.0.1:${PORT}/api/health`;
 
 let serverProcess = null;
 let mainWindow = null;
+let offlineStack = null;
 
 function resolvePaths() {
   if (app.isPackaged) {
@@ -24,11 +27,25 @@ function resolvePaths() {
   };
 }
 
-function startServer() {
+async function startServer() {
   const { cwd, serverEntry } = resolvePaths();
+  const dataDir = app.getPath('userData');
+
+  offlineStack = await startOfflineDataStack(dataDir, console.log);
+
   serverProcess = spawn(process.execPath, [serverEntry], {
     cwd,
-    env: { ...process.env, PORT, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1' },
+    env: {
+      ...process.env,
+      PORT,
+      NODE_ENV: 'production',
+      ELECTRON_RUN_AS_NODE: '1',
+      OFFLINE_MODE: 'true',
+      OFFLINE_DATA_DIR: dataDir,
+      OFFLINE_POSTGREST_URL: offlineStack.postgrestUrl,
+      SUPABASE_URL: `http://127.0.0.1:${PORT}`,
+      SUPABASE_SERVICE_ROLE_KEY: crypto.randomBytes(24).toString('hex'),
+    },
     stdio: 'inherit',
   });
   serverProcess.on('exit', (code) => {
@@ -71,7 +88,9 @@ async function createWindow() {
   });
 
   try {
-    await waitForServer(HEALTH_URL, 20000);
+    // Generous timeout: first launch also initialises the local Postgres and
+    // applies the schema (see pgBootstrap.cjs), which takes longer than a warm start.
+    await waitForServer(HEALTH_URL, 60000);
     await mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
   } catch (err) {
     await mainWindow.loadURL(
@@ -81,7 +100,9 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
-  startServer();
+  startServer().catch((err) => {
+    console.error('[ArchiOffice] Échec du démarrage de la pile de données locale :', err);
+  });
   createWindow();
 
   app.on('activate', () => {
@@ -95,4 +116,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (serverProcess) serverProcess.kill();
+  if (offlineStack) offlineStack.stop().catch(() => {});
 });

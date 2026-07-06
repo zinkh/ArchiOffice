@@ -1149,6 +1149,15 @@ async function startServer() {
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
+  // Offline desktop mode: SUPABASE_URL points back at this same server, so
+  // supabaseAdmin's .from()/.auth/.storage calls loop back here instead of
+  // reaching the real Supabase — see the offline-mode plan for why this is
+  // additive only and never touches the routes/helpers below.
+  if (process.env.OFFLINE_MODE === 'true') {
+    const { createOfflineGateway } = await import('./server/offlineGateway');
+    app.use(createOfflineGateway({ postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555' }));
+  }
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -1165,8 +1174,13 @@ async function startServer() {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized)
-  await ensureStorageBuckets();
+  // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized).
+  // In offline mode this call loops back into this same server's /storage/v1 shim
+  // (see server/offlineGateway.ts), so it must wait until app.listen() below is
+  // actually accepting connections — otherwise the loopback request fails outright.
+  if (process.env.OFFLINE_MODE !== 'true') {
+    await ensureStorageBuckets();
+  }
 
   // Résolution tenant_id depuis profiles (mis en cache par request)
   async function getTenantId(userId: string): Promise<string> {
@@ -8537,6 +8551,9 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   // Start listening after all middleware is set up
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    if (process.env.OFFLINE_MODE === 'true') {
+      ensureStorageBuckets();
+    }
   });
 }
 
