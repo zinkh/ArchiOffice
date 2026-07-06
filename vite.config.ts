@@ -16,6 +16,9 @@ export default defineConfig(({mode}) => {
       // Use process.env directly — guaranteed to read DigitalOcean OS env vars at build time
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
+      // Set only in the offline desktop build's .env — switches auth to the local
+      // account flow instead of Supabase Auth (see src/lib/authToken.ts).
+      'import.meta.env.VITE_OFFLINE_MODE': JSON.stringify(process.env.VITE_OFFLINE_MODE || ''),
     },
     plugins: [
       react(),

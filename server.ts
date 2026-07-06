@@ -1180,6 +1180,11 @@ async function startServer() {
   // actually accepting connections — otherwise the loopback request fails outright.
   if (process.env.OFFLINE_MODE !== 'true') {
     await ensureStorageBuckets();
+  } else {
+    // Application-level local login (distinct from the /auth/v1 shim, which only
+    // satisfies supabaseAdmin's own internal calls) — see server/localAuthRoutes.ts.
+    const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
+    app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
   }
 
   // Résolution tenant_id depuis profiles (mis en cache par request)
@@ -1360,7 +1365,12 @@ async function startServer() {
 
   // ───────────────────────────────────────────────────────────────────────────
 
-  const AUTH_EXEMPT = ["/api/health", "/api/public", "/api/billing/webhook"];
+  // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
+  // above), so these entries are inert in the normal cloud deployment.
+  const AUTH_EXEMPT = [
+    "/api/health", "/api/public", "/api/billing/webhook",
+    "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
+  ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
     if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {

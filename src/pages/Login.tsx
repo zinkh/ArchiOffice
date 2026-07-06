@@ -3,6 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { IconCommand } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
+import { isOfflineBuild } from '../lib/authToken';
+import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -22,7 +24,157 @@ function GoogleIcon() {
   );
 }
 
+function LocalLogin() {
+  const { t } = useTranslation();
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  const [configured, setConfigured] = useState(false);
+  const [agencyName, setAgencyName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    checkLocalStatus()
+      .then((status) => setConfigured(status.configured))
+      .catch(() => setConfigured(false))
+      .finally(() => setCheckingStatus(false));
+  }, []);
+
+  const handleSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (password !== confirmPassword) {
+      setError(t('login_local_setup_password_hint'));
+      return;
+    }
+    setLoading(true);
+    try {
+      await localSetup(agencyName, password);
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await localSignIn(password);
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  if (checkingStatus) return null;
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
+      <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="flex justify-center mb-6">
+          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
+            <IconCommand size={32} />
+          </div>
+        </div>
+        {configured ? (
+          <>
+            <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-8">
+              {t('login_local_title')}
+            </h2>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
+                  autoFocus
+                />
+              </div>
+              {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+              >
+                {t('login_local_submit')}
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">
+              {t('login_local_setup_title')}
+            </h2>
+            <p className="text-sm text-center text-zinc-500 dark:text-zinc-400 mb-6">
+              {t('login_local_setup_subtitle')}
+            </p>
+            <form onSubmit={handleSetup} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  {t('login_local_setup_agency_label')}
+                </label>
+                <input
+                  type="text"
+                  value={agencyName}
+                  onChange={(e) => setAgencyName(e.target.value)}
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  minLength={8}
+                  required
+                />
+                <p className="text-xs text-zinc-400 mt-1">{t('login_local_setup_password_hint')}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  minLength={8}
+                  required
+                />
+              </div>
+              {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+              >
+                {t('login_local_setup_submit')}
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Login() {
+  if (isOfflineBuild()) return <LocalLogin />;
+  return <CloudLogin />;
+}
+
+function CloudLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

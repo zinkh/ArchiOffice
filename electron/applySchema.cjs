@@ -9,9 +9,9 @@ const { transformSql } = require('./schemaTransform.cjs');
 const SUPABASE_DIR = path.join(__dirname, '..', 'supabase');
 
 // migrate_add_tenant_id.sql is an earlier draft superseded by schema.sql itself
-// (same tenant_id/auth.users/RLS design, now consolidated); fix_trigger_and_email.sql
-// only patches the auth.users signup trigger we drop entirely locally.
-const SKIP_FILES = new Set(['migrate_add_tenant_id.sql', 'fix_trigger_and_email.sql']);
+// (same tenant_id/auth.users/RLS design, now consolidated) — applying it too
+// would just re-attempt already-applied changes.
+const SKIP_FILES = new Set(['migrate_add_tenant_id.sql']);
 
 function orderedSqlFiles() {
   const migrations = fs
@@ -19,7 +19,9 @@ function orderedSqlFiles() {
     .filter((f) => f.startsWith('migrate_') && f.endsWith('.sql'))
     .filter((f) => !SKIP_FILES.has(f))
     .sort();
-  return ['schema.sql', ...migrations];
+  // fix_trigger_and_email.sql adds profiles.email (needed by local auth) — its
+  // auth.users-touching statements are dropped by transformSql like everywhere else.
+  return ['schema.sql', 'fix_trigger_and_email.sql', ...migrations];
 }
 
 /**

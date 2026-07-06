@@ -10,4 +10,5 @@ coverage/
 !.env.example
 archimanager.db
 uploads/
+.offline-data/
 .npmrc

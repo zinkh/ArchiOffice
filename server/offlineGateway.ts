@@ -15,6 +15,7 @@ import {
   readAdminUsers,
   writeAdminUsers,
   storageDir,
+  goTrueUserFromAccount,
   AdminUser,
 } from './offlineAccount';
 
@@ -25,30 +26,14 @@ function bearerToken(req: Request): string | null {
   return token || null;
 }
 
-function goTrueUserFromAccount() {
-  const account = readLocalAccount();
-  if (!account) return null;
-  return {
-    id: account.userId,
-    aud: 'authenticated',
-    role: 'authenticated',
-    email: account.email,
-    email_confirmed_at: new Date(0).toISOString(),
-    app_metadata: { provider: 'local' },
-    user_metadata: { name: account.agencyName },
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-  };
-}
-
 function mountAuthShim(router: Router) {
   router.get('/user', (req: Request, res: Response) => {
     const token = bearerToken(req);
     const claims = token ? verifyLocalJwt(token) : null;
     if (!claims) return res.status(401).json({ message: 'Invalid token' });
-    const user = goTrueUserFromAccount();
-    if (!user || user.id !== claims.sub) return res.status(401).json({ message: 'Invalid token' });
-    res.json(user);
+    const account = readLocalAccount();
+    if (!account || account.userId !== claims.sub) return res.status(401).json({ message: 'Invalid token' });
+    res.json(goTrueUserFromAccount(account));
   });
 
   router.post('/admin/users', express.json(), (req: Request, res: Response) => {
@@ -67,7 +52,7 @@ function mountAuthShim(router: Router) {
   router.get('/admin/users/:id', (req: Request, res: Response) => {
     const account = readLocalAccount();
     if (account && account.userId === req.params.id) {
-      return res.json(goTrueUserFromAccount());
+      return res.json(goTrueUserFromAccount(account));
     }
     const user = readAdminUsers().find((u) => u.id === req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });

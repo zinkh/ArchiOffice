@@ -105,6 +105,10 @@ const DROP_PATTERNS = [
   /^\s*CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+handle_new_user\b/i,
   /^\s*DROP\s+TRIGGER\s+IF\s+EXISTS\s+on_auth_user_created\b/i,
   /^\s*CREATE\s+TRIGGER\s+on_auth_user_created\b/i,
+  // Catch-all: any other statement whose executable SQL still touches Supabase's
+  // managed auth schema (e.g. one-off backfills like `UPDATE ... FROM auth.users`)
+  // can't run against a local Postgres, which never has that schema at all.
+  /\bauth\.(users|uid)\b/i,
 ];
 
 /** Strips full-line `--` comments so DROP_PATTERNS can match the real leading keyword. */

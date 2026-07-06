@@ -82,5 +82,20 @@ export function storageDir(bucket: string): string {
   return dir;
 }
 
+/** GoTrue-shaped user object (matches auth-js's `User` interface) for the local account. */
+export function goTrueUserFromAccount(account: LocalAccount) {
+  return {
+    id: account.userId,
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: account.email,
+    email_confirmed_at: new Date(0).toISOString(),
+    app_metadata: { provider: 'local' },
+    user_metadata: { name: account.agencyName },
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  };
+}
+
 export { getDataDir };
 export type { AdminUser };

@@ -158,6 +158,14 @@ const resources = {
       "login_welcome": "Welcome to ArchiOffice",
       "login_enter": "Enter Application",
       "login_local_info": "This is a local-first application. Your data is stored in your browser.",
+      "password": "Password",
+      "login_local_setup_title": "Set up your agency",
+      "login_local_setup_subtitle": "First launch — create your local account",
+      "login_local_setup_agency_label": "Agency name",
+      "login_local_setup_password_hint": "At least 8 characters",
+      "login_local_setup_submit": "Create local account",
+      "login_local_title": "Sign in",
+      "login_local_submit": "Sign in",
 
       // Dashboard
       "dashboard_project_status": "Project Status",
@@ -767,6 +775,14 @@ const resources = {
       "login_welcome": "Bienvenue sur ArchiOffice",
       "login_enter": "Accéder à l'application",
       "login_local_info": "Cette application fonctionne hors ligne. Vos données sont stockées dans votre navigateur.",
+      "password": "Mot de passe",
+      "login_local_setup_title": "Configurer votre agence",
+      "login_local_setup_subtitle": "Premier lancement — créez votre compte local",
+      "login_local_setup_agency_label": "Nom de l'agence",
+      "login_local_setup_password_hint": "8 caractères minimum",
+      "login_local_setup_submit": "Créer le compte local",
+      "login_local_title": "Connexion",
+      "login_local_submit": "Se connecter",
 
       // Dashboard
       "dashboard_project_status": "Statut des projets",

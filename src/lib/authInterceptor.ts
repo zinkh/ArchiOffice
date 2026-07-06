@@ -1,3 +1,4 @@
+import { getAccessToken, isOfflineBuild } from './authToken';
 import { supabase } from './supabase';
 
 const originalFetch = window.fetch.bind(window);
@@ -8,26 +9,15 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     : (input as Request).url;
 
   if (url.startsWith('/api/')) {
-    let { data: { session }, error } = await supabase.auth.getSession();
+    const token = await getAccessToken();
 
-    // Proactively refresh when the token is absent or close to expiry, so a
-    // merely-stale token doesn't fall through as an unauthenticated request.
-    if (!error && (!session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000))) {
-      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-      if (refreshed.session) {
-        session = refreshed.session;
-      } else if (refreshError) {
-        error = refreshError;
-      }
-    }
-
-    if (error) {
+    if (!token && !isOfflineBuild()) {
       // Stale/invalid refresh token — clear it so the auth state listener can redirect to login
       await supabase.auth.signOut();
-    } else if (session?.access_token) {
+    } else if (token) {
       const headers = new Headers(init?.headers);
       if (!headers.has('Authorization')) {
-        headers.set('Authorization', `Bearer ${session.access_token}`);
+        headers.set('Authorization', `Bearer ${token}`);
       }
       return originalFetch(input, { ...init, headers });
     }

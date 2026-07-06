@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Document, DocumentPhase, DocumentDiffusion, Project } from '../types';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { getAccessToken } from '../lib/authToken';
 
 const PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR', 'Général'];
 
@@ -175,10 +175,10 @@ export default function Documents() {
     formData.append('doc_type', uploadDocType);
     setIsUploading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAccessToken();
       const response = await fetch('/api/documents', {
         method: 'POST',
-        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (response.ok) {
@@ -226,10 +226,10 @@ export default function Documents() {
       formData.append('emetteur', editEmetteur);
       formData.append('doc_type', editDocType);
       if (editFile) formData.append('file', editFile);
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAccessToken();
       const response = await fetch(`/api/documents/${editingDoc.id}`, {
         method: 'PUT',
-        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (response.ok) {
