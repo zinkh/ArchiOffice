@@ -473,19 +473,25 @@ CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(pro
 CREATE INDEX IF NOT EXISTS idx_project_members_tenant_id  ON project_members(tenant_id);
 
 CREATE TABLE IF NOT EXISTS custom_references (
-  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  name        TEXT NOT NULL,
-  client      TEXT,
-  category    TEXT,
-  end_date    DATE,
-  surface     NUMERIC,
-  budget      NUMERIC,
-  status      TEXT DEFAULT 'Completed',
-  description TEXT,
-  image_url   TEXT,
-  location    TEXT,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id         UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  name              TEXT NOT NULL,
+  client            TEXT,
+  category          TEXT,
+  end_date          DATE,
+  surface           NUMERIC,
+  budget            NUMERIC,
+  status            TEXT DEFAULT 'Completed',
+  description       TEXT,
+  image_url         TEXT,
+  location          TEXT,
+  start_date        DATE,
+  project_manager   TEXT,
+  construction_cost NUMERIC,
+  remuneration      NUMERIC,
+  progression       NUMERIC,
+  custom_data       JSONB DEFAULT '{}'::jsonb,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_custom_references_tenant_id ON custom_references(tenant_id);
 

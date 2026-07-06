@@ -7509,11 +7509,11 @@ async function startServer() {
   app.post('/api/references/custom', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { name, client, category, end_date, surface, budget, status, description, image_url, location } = req.body;
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, progression, custom_data } = req.body;
       if (!name) return res.status(400).json({ error: 'name requis' });
       const { data, error } = await supabaseAdmin
         .from('custom_references')
-        .insert({ tenant_id: tenantId, name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status: status || 'Completed', description, image_url, location })
+        .insert({ tenant_id: tenantId, name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status: status || 'Completed', description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, progression: progression || null, custom_data: custom_data || {} })
         .select()
         .single();
       if (error) throw error;
@@ -7524,10 +7524,10 @@ async function startServer() {
   app.put('/api/references/custom/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { name, client, category, end_date, surface, budget, status, description, image_url, location } = req.body;
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, progression, custom_data } = req.body;
       const { data, error } = await supabaseAdmin
         .from('custom_references')
-        .update({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status, description, image_url, location })
+        .update({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status, description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, progression: progression || null, custom_data: custom_data || {} })
         .eq('id', req.params.id)
         .eq('tenant_id', tenantId)
         .select()

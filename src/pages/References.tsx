@@ -24,11 +24,13 @@ import {
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
-import type { Project } from '../types';
+import type { Project, Contact, ProjectCategory } from '../types';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { loadImageAsDataUrl } from '../lib/imageUtils';
+import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { ContactModal } from '../components/ContactModal';
 
 // ── Unified reference type ─────────────────────────────────────────────────
 
@@ -44,6 +46,12 @@ interface CustomRef {
   description: string;
   image_url: string | null;
   location: string;
+  start_date: string | null;
+  project_manager: string;
+  construction_cost: number | null;
+  remuneration: number | null;
+  progression: number | null;
+  custom_data: Record<string, string>;
 }
 
 interface RefItem {
@@ -70,26 +78,44 @@ function customToRefItem(r: CustomRef): RefItem {
 
 const EMPTY_FORM: Omit<CustomRef, 'id'> = {
   name: '', client: '', category: '', end_date: '', surface: null, budget: null, status: 'Completed', description: '', image_url: '', location: '',
+  start_date: '', project_manager: '', construction_cost: null, remuneration: null, progression: null, custom_data: {},
 };
 
 // ── Form modal ─────────────────────────────────────────────────────────────
 
-function RefModal({ initial, onSave, onClose }: {
+function RefModal({ initial, onSave, onClose, contacts, categories, team, onContactCreated }: {
   initial: Partial<CustomRef> | null;
   onSave: (data: Omit<CustomRef, 'id'>) => Promise<void>;
   onClose: () => void;
+  contacts: Contact[];
+  categories: ProjectCategory[];
+  team: { id: string; name: string }[];
+  onContactCreated: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<Omit<CustomRef, 'id'>>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(() =>
+    Object.entries(initial?.custom_data || {}).map(([key, value]) => ({ key, value: String(value) }))
+  );
   const isEdit = !!(initial as any)?.id;
 
   const set = (k: keyof typeof form, v: any) => setForm((p: Omit<CustomRef, 'id'>) => ({ ...p, [k]: v }));
 
+  const addCustomField = () => setCustomFields(prev => [...prev, { key: '', value: '' }]);
+  const updateCustomField = (idx: number, patch: Partial<{ key: string; value: string }>) =>
+    setCustomFields(prev => prev.map((f, i) => i === idx ? { ...f, ...patch } : f));
+  const removeCustomField = (idx: number) => setCustomFields(prev => prev.filter((_, i) => i !== idx));
+
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault();
     setSaving(true);
-    try { await onSave(form); } finally { setSaving(false); }
+    try {
+      const custom_data: Record<string, string> = {};
+      customFields.forEach(({ key, value }) => { if (key.trim()) custom_data[key.trim()] = value; });
+      await onSave({ ...form, custom_data });
+    } finally { setSaving(false); }
   }
 
   const inputCls = "w-full text-sm rounded border px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500";
@@ -115,11 +141,29 @@ function RefModal({ initial, onSave, onClose }: {
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_client')}</label>
-              <input value={form.client} onChange={e => set('client', e.target.value)} className={inputCls} style={inputStyle} />
+              <ContactAutocomplete
+                contacts={contacts}
+                value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === form.client)?.id || ''}
+                onChange={id => {
+                  const contact = contacts.find(c => c.id === id);
+                  if (contact) set('client', contact.company_name || `${contact.first_name} ${contact.last_name}`);
+                }}
+                onAddNew={() => setIsContactModalOpen(true)}
+                addNewLabel={t('references_add_new_contact') as string}
+              />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_category')}</label>
-              <input value={form.category} onChange={e => set('category', e.target.value)} className={inputCls} style={inputStyle} placeholder="Ex: Logements, ERP, Bureaux…" />
+              <select value={form.category} onChange={e => set('category', e.target.value)} className={inputCls} style={inputStyle}>
+                <option value="">{t('projects_select_domain')}</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.name}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_start_date')}</label>
+              <input type="date" value={form.start_date || ''} onChange={e => set('start_date', e.target.value || null)} className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_date')}</label>
@@ -134,12 +178,33 @@ function RefModal({ initial, onSave, onClose }: {
               </select>
             </div>
             <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_manager')}</label>
+              <select value={form.project_manager} onChange={e => set('project_manager', e.target.value)} className={inputCls} style={inputStyle}>
+                <option value="">{t('projects_select_manager')}</option>
+                {team.map(member => (
+                  <option key={member.id} value={member.name}>{member.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_surface')}</label>
               <input type="number" min="0" value={form.surface ?? ''} onChange={e => set('surface', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_budget')}</label>
               <input type="number" min="0" value={form.budget ?? ''} onChange={e => set('budget', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_construction_cost')}</label>
+              <input type="number" min="0" value={form.construction_cost ?? ''} onChange={e => set('construction_cost', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_remuneration')}</label>
+              <input type="number" min="0" value={form.remuneration ?? ''} onChange={e => set('remuneration', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_progression')}</label>
+              <input type="number" min="0" max="100" value={form.progression ?? ''} onChange={e => set('progression', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_location')}</label>
@@ -155,6 +220,41 @@ function RefModal({ initial, onSave, onClose }: {
             </div>
           </div>
 
+          <div className="pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <label className={labelCls} style={{ ...labelStyle, marginBottom: 0 }}>{t('references_custom_data_title')}</label>
+              <button type="button" onClick={addCustomField} className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors">
+                <IconPlus size={14} /> {t('references_custom_data_add')}
+              </button>
+            </div>
+            {customFields.length === 0 && (
+              <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('references_custom_data_empty')}</p>
+            )}
+            <div className="space-y-2">
+              {customFields.map((field, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input
+                    value={field.key}
+                    onChange={e => updateCustomField(idx, { key: e.target.value })}
+                    placeholder={t('references_custom_data_key') as string}
+                    className={inputCls}
+                    style={inputStyle}
+                  />
+                  <input
+                    value={field.value}
+                    onChange={e => updateCustomField(idx, { value: e.target.value })}
+                    placeholder={t('references_custom_data_value') as string}
+                    className={inputCls}
+                    style={inputStyle}
+                  />
+                  <button type="button" onClick={() => removeCustomField(idx)} className="p-2 rounded hover:bg-red-50 transition-colors shrink-0" style={{ color: 'var(--tblr-danger)' }}>
+                    <IconTrash size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded border transition-colors hover:bg-[var(--tblr-surface-2)]" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
               Annuler
@@ -166,6 +266,15 @@ function RefModal({ initial, onSave, onClose }: {
           </div>
         </form>
       </div>
+
+      <ContactModal
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        onSuccess={async (contact) => {
+          await onContactCreated();
+          set('client', contact.company_name || `${contact.first_name} ${contact.last_name}`);
+        }}
+      />
     </div>
   );
 }
@@ -242,6 +351,12 @@ function rowToRef(row: Record<string, any>, mapping: Partial<Record<ImportField,
     description: String(get('description')).trim(),
     image_url: null,
     location: String(get('location')).trim(),
+    start_date: null,
+    project_manager: '',
+    construction_cost: null,
+    remuneration: null,
+    progression: null,
+    custom_data: {},
   };
 }
 
@@ -514,6 +629,10 @@ export default function References() {
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [modal, setModal] = useState<{ open: boolean; item: Partial<CustomRef> | null }>({ open: false, item: null });
   const [importOpen, setImportOpen] = useState(false);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [categories, setCategories] = useState<ProjectCategory[]>([]);
+  const [team, setTeam] = useState<{ id: string; name: string }[]>([]);
+  const [customRefsById, setCustomRefsById] = useState<Record<string, CustomRef>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -531,6 +650,7 @@ export default function References() {
           await db.projects.clear();
           await db.projects.bulkPut(projects);
           setItems([...projects.map(toRefItem), ...customs.map(customToRefItem)]);
+          setCustomRefsById(Object.fromEntries(customs.map(c => [c.id, c])));
         }
       } catch (err) {
         console.error('Failed to fetch references:', err);
@@ -539,7 +659,43 @@ export default function References() {
       }
     };
     load();
+    fetchContacts();
+    fetchCategories();
+    fetchTeam();
   }, []);
+
+  const fetchContacts = async () => {
+    const localData = await db.contacts.toArray();
+    if (localData.length > 0) setContacts(localData);
+    if (navigator.onLine) {
+      try {
+        const data = await apiFetch<Contact[]>('/api/contacts');
+        await db.contacts.clear();
+        await db.contacts.bulkPut(data);
+        setContacts(data);
+      } catch (err) { console.error('Failed to fetch contacts:', err); }
+    }
+  };
+
+  const fetchCategories = async () => {
+    const localData = await db.projectCategories.toArray();
+    if (localData.length > 0) setCategories(localData);
+    if (navigator.onLine) {
+      try {
+        const data = await apiFetch<ProjectCategory[]>('/api/project_categories');
+        await db.projectCategories.clear();
+        await db.projectCategories.bulkPut(data);
+        setCategories(data);
+      } catch (err) { console.error('Failed to fetch categories:', err); }
+    }
+  };
+
+  const fetchTeam = async () => {
+    try {
+      const data = await apiFetch<{ id: string; name: string }[]>('/api/team');
+      setTeam(data);
+    } catch (err) { console.error('Failed to fetch team:', err); }
+  };
 
   const filteredItems = useMemo(() => {
     return items.filter(p => {
@@ -622,9 +778,11 @@ export default function References() {
     if (id) {
       const updated = await apiFetch<CustomRef>(`/api/references/custom/${id}`, { method: 'PUT', body: JSON.stringify(data) });
       setItems(prev => prev.map(i => i.id === id ? customToRefItem(updated) : i));
+      setCustomRefsById(prev => ({ ...prev, [id]: updated }));
     } else {
       const created = await apiFetch<CustomRef>('/api/references/custom', { method: 'POST', body: JSON.stringify(data) });
       setItems(prev => [...prev, customToRefItem(created)]);
+      setCustomRefsById(prev => ({ ...prev, [created.id]: created }));
     }
     setModal({ open: false, item: null });
   }
@@ -634,14 +792,17 @@ export default function References() {
     await apiFetch(`/api/references/custom/${item.id}`, { method: 'DELETE' });
     setItems(prev => prev.filter(i => i.id !== item.id));
     setSelectedIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    setCustomRefsById(prev => { const n = { ...prev }; delete n[item.id]; return n; });
   }
 
   function openEdit(item: RefItem) {
-    setModal({ open: true, item: { id: item.id, name: item.name, client: item.client, category: item.category, end_date: item.end_date, surface: item.surface, budget: item.budget, status: item.status, image_url: item.image_url } as any });
+    const full = customRefsById[item.id];
+    setModal({ open: true, item: (full || { id: item.id, name: item.name, client: item.client, category: item.category, end_date: item.end_date, surface: item.surface, budget: item.budget, status: item.status, image_url: item.image_url }) as any });
   }
 
   function handleImported(imported: CustomRef[]) {
     setItems(prev => [...prev, ...imported.map(customToRefItem)]);
+    setCustomRefsById(prev => ({ ...prev, ...Object.fromEntries(imported.map(c => [c.id, c])) }));
   }
 
   const exportToPDF = async () => {
@@ -960,6 +1121,10 @@ export default function References() {
           initial={modal.item}
           onSave={handleSaveRef}
           onClose={() => setModal({ open: false, item: null })}
+          contacts={contacts}
+          categories={categories}
+          team={team}
+          onContactCreated={fetchContacts}
         />
       )}
 
