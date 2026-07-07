@@ -3,29 +3,27 @@ productName: ArchiOffice
 directories:
   output: release
 # The Express server is bundled into a single self-contained file by esbuild
-# (dist-server/server.cjs), so it needs no node_modules of its own. But
-# electron/main.cjs and electron/pgBootstrap.cjs are plain (unbundled) files
-# that require('embedded-postgres') directly — that package resolves its own
-# platform binary via a runtime `import('@embedded-postgres/<platform>')`
-# (see node_modules/embedded-postgres/dist/binary.js), which a bundler can't
-# safely inline, so node_modules must be shipped for real here. Neither
-# embedded-postgres nor pg has a native .node addon needing an Electron ABI
-# rebuild (embedded-postgres ships a plain OS executable), so npmRebuild stays off.
+# (dist-server/server.cjs) and the frontend is the static dist/ SPA, so
+# neither needs any node_modules shipped. Neither embedded-postgres nor pg has
+# a native .node addon needing an Electron ABI rebuild (embedded-postgres
+# ships a plain OS executable), so npmRebuild stays off.
 npmRebuild: false
+# asar stays enabled (default) for speed and a compact install — but
 # embedded-postgres isn't asar-aware: it resolves its own binary path via
 # require/import relative to its own module location, which still resolves
 # "inside" app.asar even when asarUnpack mirrors the files to
-# app.asar.unpacked — Electron only rewrites that path transparently for
-# fs reads, not for child_process.spawn(), so `initdb.exe`/`postgres.exe`
-# fail with ENOENT (confirmed on real Windows). Disabling asar entirely
-# avoids the whole path-mismatch class of bugs rather than trying to patch
-# around it — this is an internal/offline tool, so the loose-files layout
-# (no compression, no source hiding) costs nothing that matters here.
-asar: false
+# app.asar.unpacked — Electron only rewrites that path transparently for fs
+# reads, not for child_process.spawn(), so `initdb.exe`/`postgres.exe` fail
+# with ENOENT (confirmed on real Windows). Shipping the *entire* node_modules
+# tree as loose files (asar: false) "worked" but made installs extremely slow
+# (thousands of small files, each scanned by antivirus) for no reason: only
+# embedded-postgres + pg + their own small dependency closure ever need to
+# exist as real files — see electron/pgBootstrap.cjs's loadEmbeddedPostgres(),
+# which requires them from resourcesPath/node_modules explicitly instead of
+# relying on normal (asar-packed) node_modules resolution.
 files:
   - electron/**/*
   - package.json
-  - node_modules/**/*
 extraResources:
   - from: dist
     to: dist
@@ -38,6 +36,43 @@ extraResources:
   # this project's dev sandbox, so this directory only exists at CI build time.
   - from: vendor/postgrest
     to: postgrest
+  # embedded-postgres's exact runtime dependency closure (verified by walking
+  # each package.json's "dependencies" — see the Phase 4 follow-up notes),
+  # placed as a real node_modules/ folder under resources/ so embedded-postgres's
+  # own internal `import('@embedded-postgres/<platform>')` (and pg's requires)
+  # resolve normally by walking up from resources/node_modules/embedded-postgres/.
+  - from: node_modules/embedded-postgres
+    to: node_modules/embedded-postgres
+  - from: node_modules/@embedded-postgres
+    to: node_modules/@embedded-postgres
+  - from: node_modules/async-exit-hook
+    to: node_modules/async-exit-hook
+  - from: node_modules/pg
+    to: node_modules/pg
+  - from: node_modules/pg-connection-string
+    to: node_modules/pg-connection-string
+  - from: node_modules/pg-int8
+    to: node_modules/pg-int8
+  - from: node_modules/pg-pool
+    to: node_modules/pg-pool
+  - from: node_modules/pg-protocol
+    to: node_modules/pg-protocol
+  - from: node_modules/pg-types
+    to: node_modules/pg-types
+  - from: node_modules/pgpass
+    to: node_modules/pgpass
+  - from: node_modules/postgres-array
+    to: node_modules/postgres-array
+  - from: node_modules/postgres-bytea
+    to: node_modules/postgres-bytea
+  - from: node_modules/postgres-date
+    to: node_modules/postgres-date
+  - from: node_modules/postgres-interval
+    to: node_modules/postgres-interval
+  - from: node_modules/split2
+    to: node_modules/split2
+  - from: node_modules/xtend
+    to: node_modules/xtend
 win:
   target:
     - target: nsis

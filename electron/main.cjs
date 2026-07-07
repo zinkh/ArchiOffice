@@ -30,8 +30,9 @@ function resolvePaths() {
 async function startServer() {
   const { cwd, serverEntry } = resolvePaths();
   const dataDir = app.getPath('userData');
+  const resourcesDir = app.isPackaged ? process.resourcesPath : null;
 
-  offlineStack = await startOfflineDataStack(dataDir, console.log);
+  offlineStack = await startOfflineDataStack(dataDir, console.log, resourcesDir);
 
   serverProcess = spawn(process.execPath, [serverEntry], {
     cwd,
