@@ -34,7 +34,7 @@ jobs:
       - name: Bundle server
         run: npm run build:server
 
-      - name: Fetch PostgREST (Windows x64)
+      - name: Fetch PostgREST (Windows x86-64)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,11 +45,13 @@ jobs:
           release_json=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/PostgREST/postgrest/releases/latest)
 
+          # Confirmed asset naming as of PostgREST v14.14: postgrest-vX.Y-windows-x86-64.zip
+          # (verified from this workflow's own diagnostic output, not guessed).
           asset_url=$(echo "$release_json" | jq -r '[.assets[].browser_download_url
-            | select(test("win"; "i") and test("(x64|amd64)"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
+            | select(test("windows"; "i") and test("x86.?64"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
 
           if [ -z "$asset_url" ]; then
-            echo "::error::Could not find a Windows x64 PostgREST release asset. Raw API response below — inspect it, check https://github.com/PostgREST/postgrest/releases, and fix this step's jq filter."
+            echo "::error::Could not find a Windows x86-64 PostgREST release asset. Raw API response below — inspect it, check https://github.com/PostgREST/postgrest/releases, and fix this step's jq filter."
             echo "$release_json"
             exit 1
           fi
