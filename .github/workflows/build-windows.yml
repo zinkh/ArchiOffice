@@ -36,21 +36,43 @@ jobs:
 
       - name: Fetch PostgREST (Windows x64)
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p vendor/postgrest
-          asset_url=$(curl -sS https://api.github.com/repos/PostgREST/postgrest/releases/latest \
-            | grep -oE '"browser_download_url": *"[^"]*windows[^"]*x64[^"]*\.zip"' \
-            | head -1 \
-            | sed -E 's/"browser_download_url": *"([^"]*)"/\1/')
+
+          release_json=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/PostgREST/postgrest/releases/latest)
+
+          asset_url=$(echo "$release_json" | jq -r '[.assets[].browser_download_url
+            | select(test("win"; "i") and test("(x64|amd64)"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
+
           if [ -z "$asset_url" ]; then
-            echo "Could not find a Windows x64 PostgREST release asset — check https://github.com/PostgREST/postgrest/releases and adjust this step's asset-matching pattern." >&2
+            echo "::error::Could not find a Windows x64 PostgREST release asset. Raw API response below — inspect it, check https://github.com/PostgREST/postgrest/releases, and fix this step's jq filter."
+            echo "$release_json"
             exit 1
           fi
+
           echo "Downloading $asset_url"
-          curl -sSL -o postgrest.zip "$asset_url"
-          unzip -o postgrest.zip -d vendor/postgrest
-          ls -la vendor/postgrest
+          curl -sSL -o postgrest_archive "$asset_url"
+          case "$asset_url" in
+            *.zip) unzip -o postgrest_archive -d vendor/postgrest ;;
+            *.tar.xz) tar -xJf postgrest_archive -C vendor/postgrest ;;
+          esac
+          ls -laR vendor/postgrest
+
+          # The archive may nest the binary in a subfolder — flatten it so
+          # electron/pgBootstrap.cjs finds it at a fixed, known path.
+          found=$(find vendor/postgrest -iname 'postgrest.exe' | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::postgrest.exe not found anywhere inside the downloaded archive — inspect the listing above."
+            exit 1
+          fi
+          if [ "$found" != "vendor/postgrest/postgrest.exe" ]; then
+            mv "$found" vendor/postgrest/postgrest.exe
+          fi
+          echo "postgrest.exe ready at vendor/postgrest/postgrest.exe"
 
       - name: Build NSIS installer
         run: npx electron-builder --win --x64 --publish never
