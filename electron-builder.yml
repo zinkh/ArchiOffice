@@ -12,17 +12,20 @@ directories:
 # embedded-postgres nor pg has a native .node addon needing an Electron ABI
 # rebuild (embedded-postgres ships a plain OS executable), so npmRebuild stays off.
 npmRebuild: false
+# embedded-postgres isn't asar-aware: it resolves its own binary path via
+# require/import relative to its own module location, which still resolves
+# "inside" app.asar even when asarUnpack mirrors the files to
+# app.asar.unpacked — Electron only rewrites that path transparently for
+# fs reads, not for child_process.spawn(), so `initdb.exe`/`postgres.exe`
+# fail with ENOENT (confirmed on real Windows). Disabling asar entirely
+# avoids the whole path-mismatch class of bugs rather than trying to patch
+# around it — this is an internal/offline tool, so the loose-files layout
+# (no compression, no source hiding) costs nothing that matters here.
+asar: false
 files:
   - electron/**/*
   - package.json
   - node_modules/**/*
-# Native/executable binaries can't run from inside the asar archive.
-asarUnpack:
-  - node_modules/embedded-postgres/**/*
-  - node_modules/@embedded-postgres/**/*
-  - node_modules/pg/**/*
-  - node_modules/pg-*/**/*
-  - node_modules/async-exit-hook/**/*
 extraResources:
   - from: dist
     to: dist
