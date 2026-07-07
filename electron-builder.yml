@@ -3,12 +3,26 @@ productName: ArchiOffice
 directories:
   output: release
 # The Express server is bundled into a single self-contained file by esbuild
-# (dist-server/server.cjs) and the Electron main/preload use only Node builtins,
-# so no node_modules are shipped and no native-module rebuild is needed.
+# (dist-server/server.cjs), so it needs no node_modules of its own. But
+# electron/main.cjs and electron/pgBootstrap.cjs are plain (unbundled) files
+# that require('embedded-postgres') directly — that package resolves its own
+# platform binary via a runtime `import('@embedded-postgres/<platform>')`
+# (see node_modules/embedded-postgres/dist/binary.js), which a bundler can't
+# safely inline, so node_modules must be shipped for real here. Neither
+# embedded-postgres nor pg has a native .node addon needing an Electron ABI
+# rebuild (embedded-postgres ships a plain OS executable), so npmRebuild stays off.
 npmRebuild: false
 files:
   - electron/**/*
   - package.json
+  - node_modules/**/*
+# Native/executable binaries can't run from inside the asar archive.
+asarUnpack:
+  - node_modules/embedded-postgres/**/*
+  - node_modules/@embedded-postgres/**/*
+  - node_modules/pg/**/*
+  - node_modules/pg-*/**/*
+  - node_modules/async-exit-hook/**/*
 extraResources:
   - from: dist
     to: dist
@@ -16,6 +30,11 @@ extraResources:
     to: dist-server
   - from: proxy.json
     to: proxy.json
+  # Fetched in CI (see .github/workflows/build-windows.yml) — PostgREST has no
+  # npm-packaged binary and its GitHub-hosted releases aren't reachable from
+  # this project's dev sandbox, so this directory only exists at CI build time.
+  - from: vendor/postgrest
+    to: postgrest
 win:
   target:
     - target: nsis

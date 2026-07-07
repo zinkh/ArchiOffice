@@ -11,4 +11,5 @@ coverage/
 archimanager.db
 uploads/
 .offline-data/
+vendor/
 .npmrc

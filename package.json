@@ -2,6 +2,8 @@
   "name": "react-example",
   "private": true,
   "version": "0.0.0",
+  "description": "Gestion de cabinet d'architecture : projets, propositions, factures et équipe.",
+  "author": "ArchiOffice",
   "type": "module",
   "workspaces": [
     "packages/*"

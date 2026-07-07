@@ -24,14 +24,33 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Build SPA
+      - name: Build SPA (offline desktop build)
         run: npm run build
         env:
-          VITE_SUPABASE_URL: https://placeholder.supabase.co
-          VITE_SUPABASE_ANON_KEY: placeholder_anon_key
+          VITE_SUPABASE_URL: http://127.0.0.1:3130
+          VITE_SUPABASE_ANON_KEY: local-anon-key
+          VITE_OFFLINE_MODE: 'true'
 
       - name: Bundle server
         run: npm run build:server
+
+      - name: Fetch PostgREST (Windows x64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/postgrest
+          asset_url=$(curl -sS https://api.github.com/repos/PostgREST/postgrest/releases/latest \
+            | grep -oE '"browser_download_url": *"[^"]*windows[^"]*x64[^"]*\.zip"' \
+            | head -1 \
+            | sed -E 's/"browser_download_url": *"([^"]*)"/\1/')
+          if [ -z "$asset_url" ]; then
+            echo "Could not find a Windows x64 PostgREST release asset — check https://github.com/PostgREST/postgrest/releases and adjust this step's asset-matching pattern." >&2
+            exit 1
+          fi
+          echo "Downloading $asset_url"
+          curl -sSL -o postgrest.zip "$asset_url"
+          unzip -o postgrest.zip -d vendor/postgrest
+          ls -la vendor/postgrest
 
       - name: Build NSIS installer
         run: npx electron-builder --win --x64 --publish never
