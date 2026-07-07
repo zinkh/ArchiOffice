@@ -40,7 +40,10 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: public/favicon.ico
+  # public/favicon.ico only has 16x16/32x32 frames — Windows app icons need at
+  # least 256x256, so this is a dedicated multi-resolution icon generated from
+  # public/icon-512.png (via `npx png-to-ico public/icon-512.png`).
+  icon: electron/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
