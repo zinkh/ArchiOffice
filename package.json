@@ -1,5 +1,6 @@
 {
   "name": "react-example",
+  "productName": "ArchiOffice Client",
   "private": true,
   "version": "0.0.0",
   "description": "Gestion de cabinet d'architecture : projets, propositions, factures et équipe.",

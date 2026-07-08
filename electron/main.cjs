@@ -6,6 +6,12 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 
+// package.json's "name" is the npm workspace root ("react-example", a
+// leftover scaffold name) — Electron otherwise uses it verbatim for both the
+// title bar and the default userData path (%APPDATA%\react-example\...), so
+// this must be set explicitly, before anything calls app.getPath('userData').
+app.setName('ArchiOffice Client');
+
 const PORT = process.env.PORT || '3130';
 const HEALTH_URL = `http://127.0.0.1:${PORT}/api/health`;
 
@@ -121,11 +127,19 @@ async function createWindow() {
     width: 1360,
     height: 860,
     autoHideMenuBar: true,
+    title: 'ArchiOffice Client',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  // The loaded page's <title> ("ArchiOffice - Architectural Office
+  // Management", shared with the cloud web build's browser tab) would
+  // otherwise overwrite this window's title after every navigation.
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault();
   });
 
   try {
