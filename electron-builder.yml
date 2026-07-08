@@ -24,6 +24,12 @@ npmRebuild: false
 files:
   - electron/**/*
   - package.json
+  # Read via fs.readdirSync/readFileSync only (never spawned), so packing
+  # these inside the asar is fine — see electron/applySchema.cjs, which
+  # applies schema.sql + migrate_*.sql against the local Postgres on first
+  # launch. Previously missing entirely, causing "ENOENT, supabase not
+  # found in ...app.asar" on a real Windows install.
+  - supabase/**/*
 extraResources:
   - from: dist
     to: dist
