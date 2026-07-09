@@ -58,6 +58,13 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
     password: PG_PASSWORD,
     port: PG_PORT,
     persistent: true,
+    // On Windows, initdb defaults to the OS codepage (e.g. WIN1252) rather
+    // than UTF8 unless told otherwise — schema.sql/migrate_*.sql contain
+    // UTF-8 characters (box-drawing, Greek letters) in French comments, which
+    // then fail to insert with "has no equivalent in encoding WIN1252"
+    // (confirmed on a real Windows install). Force UTF8 explicitly so the
+    // cluster's encoding doesn't depend on the host machine's locale.
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
   });
 
   if (isFirstRun) {
@@ -67,16 +74,30 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
   await pg.start();
 
   if (isFirstRun) {
-    const client = await pg.getPgClient();
-    await client.connect();
     try {
-      await client.query(`GRANT ALL ON SCHEMA public TO ${PG_USER}`);
-      await applyLocalSchema(client, log);
-      await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PG_USER}`);
-      await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_USER}`);
-      log('[pgBootstrap] local schema applied');
-    } finally {
-      await client.end();
+      const client = await pg.getPgClient();
+      await client.connect();
+      try {
+        await client.query(`GRANT ALL ON SCHEMA public TO ${PG_USER}`);
+        await applyLocalSchema(client, log);
+        await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PG_USER}`);
+        await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_USER}`);
+        log('[pgBootstrap] local schema applied');
+      } finally {
+        await client.end();
+      }
+    } catch (err) {
+      // Without this, a failed first run leaves a half-initialised pgdata/
+      // directory behind — isFirstRun is based on that directory's mere
+      // existence, so every subsequent launch would silently skip
+      // initialise()/applyLocalSchema() forever and stay broken, requiring
+      // the user to manually find and delete the AppData folder (confirmed
+      // painful across several real-Windows bug reports in a row). Instead,
+      // clean up so the next launch is a true first run and retries on its own.
+      log('[pgBootstrap] first-run setup failed, cleaning up for a fresh retry on next launch:', err);
+      await pg.stop().catch(() => {});
+      fs.rmSync(databaseDir, { recursive: true, force: true });
+      throw err;
     }
   }
 
