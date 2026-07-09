@@ -102,3 +102,14 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   include: electron/installer.nsh
+  # customInstall (installer.nsh) silently installs the Microsoft VC++
+  # Redistributable, which itself requires admin rights. A per-user install
+  # (the previous default) can't elevate a sub-step reliably — electron-builder
+  # bundles its own patched, independently-versioned NSIS build, and there's
+  # no way to confirm from here whether its ExecShellWait "runas" support
+  # behaves as the upstream NSIS 3.08+ docs describe (the build compiled
+  # cleanly with it, but the redistributable still silently failed to install
+  # on a real Windows test). Requiring admin for the whole installer instead
+  # means customInstall's plain ExecWait inherits that elevation automatically
+  # — the well-trodden path, not a special-cased single-step elevation.
+  perMachine: true

@@ -8,15 +8,15 @@
 ; to re-run on every (re)install: it no-ops if an equal-or-newer version is
 ; already present.
 ;
-; This app installs per-user (no admin rights needed), but vc_redist.x64.exe
-; itself requires elevation to install its system-wide DLLs. Plain ExecWait
-; calls CreateProcess directly, which silently ignores the target exe's own
-; elevation manifest — the redistributable would just fail to install with
-; no error and no UAC prompt (confirmed: still 0xC0000135 after a first
-; attempt using ExecWait). ExecShellWait with the "runas" verb goes through
-; ShellExecuteEx instead, which does honor it, showing a single UAC consent
-; prompt for just this step.
+; vc_redist.x64.exe itself requires elevation to install its system-wide
+; DLLs. A plain ExecWait here previously failed silently (0xC0000135
+; persisted even after switching to ExecShellWait "runas" — electron-builder
+; bundles its own patched, independently-versioned NSIS build, and there's no
+; way to confirm from this sandbox whether its runas support genuinely
+; matches upstream NSIS 3.08+ behavior). electron-builder.yml now sets
+; perMachine: true, so the whole installer already runs elevated by the time
+; this macro executes — plain ExecWait inherits that, no special-casing needed.
 !macro customInstall
   DetailPrint "Installation du runtime Microsoft Visual C++ (requis par PostgREST)..."
-  ExecShellWait "runas" "$INSTDIR\resources\vc_redist.x64.exe" "/install /quiet /norestart"
+  ExecWait '"$INSTDIR\resources\vc_redist.x64.exe" /install /quiet /norestart'
 !macroend
