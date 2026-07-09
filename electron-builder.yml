@@ -42,6 +42,14 @@ extraResources:
   # this project's dev sandbox, so this directory only exists at CI build time.
   - from: vendor/postgrest
     to: postgrest
+  # PostgREST's Windows binary is dynamically linked against the Microsoft
+  # Visual C++ runtime — on a machine that doesn't already have it, spawning
+  # it fails immediately with exit code 0xC0000135 (STATUS_DLL_NOT_FOUND),
+  # confirmed on a real Windows install. electron/installer.nsh's
+  # customInstall macro runs this silently during setup so users never need
+  # to install it by hand.
+  - from: vendor/vc_redist.x64.exe
+    to: vc_redist.x64.exe
   # embedded-postgres's exact runtime dependency closure (verified by walking
   # each package.json's "dependencies" — see the Phase 4 follow-up notes),
   # placed as a real node_modules/ folder under resources/ so embedded-postgres's
@@ -93,3 +101,4 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  include: electron/installer.nsh

@@ -76,6 +76,14 @@ jobs:
           fi
           echo "postgrest.exe ready at vendor/postgrest/postgrest.exe"
 
+      - name: Fetch Microsoft Visual C++ Redistributable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor
+          curl -sSL -o vendor/vc_redist.x64.exe https://aka.ms/vs/17/release/vc_redist.x64.exe
+          ls -la vendor/vc_redist.x64.exe
+
       - name: Build NSIS installer
         run: npx electron-builder --win --x64 --publish never
 
