@@ -143,7 +143,7 @@ export default function Contacts() {
 
     const contactData = isEditing ? newContact : {
       ...newContact,
-      id: `c${Date.now()}`,
+      id: `c${Date.now()}-${Math.random()}`,
       created_at: new Date().toISOString(),
       created_by: 'Current User', // Replace with actual user
     };

@@ -81,7 +81,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     
     const contactData = {
       ...newContact,
-      id: `c${Date.now()}`,
+      id: `c${Date.now()}-${Math.random()}`,
       created_at: new Date().toISOString(),
       created_by: 'Current User',
     };

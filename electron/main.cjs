@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -14,6 +14,16 @@ app.setName('ArchiOffice Client');
 
 const PORT = process.env.PORT || '3130';
 const HEALTH_URL = `http://127.0.0.1:${PORT}/api/health`;
+
+// Public, safe to embed — the anon/publishable key + URL, same trust model
+// as the real web app's own client-side bundle (Row Level Security applies
+// to every cloud-link request; never a service-role key, see
+// server/cloudSyncClient.ts's own comment for why that's a hard line). Used
+// only for the optional "log into your existing cloud account" first-run
+// flow — the app's normal data operations never touch this, they go
+// through SUPABASE_URL (the local loopback, below) as always.
+const CLOUD_SUPABASE_URL = 'https://tkhcpkwakvqsnmpgfkjp.supabase.co';
+const CLOUD_SUPABASE_ANON_KEY = 'sb_publishable_vajyn6z5pbHzrCbK9IKdOQ_zxKFU4ul';
 
 let serverProcess = null;
 let mainWindow = null;
@@ -83,6 +93,32 @@ function waitForServer(url, timeoutMs) {
   });
 }
 
+// Bridges the spawned server process's server/ipcCrypto.ts requests to
+// Electron's safeStorage (main-process-only API, DPAPI-backed on Windows —
+// unreachable from the server process itself, which runs as a plain Node
+// process via ELECTRON_RUN_AS_NODE). Ciphertext travels as base64 strings
+// over the IPC channel (Buffers don't survive Node's structured-clone IPC
+// serialization cleanly).
+function handleIpcMessage(child, msg) {
+  if (!msg || (msg.type !== 'safeStorage:encrypt' && msg.type !== 'safeStorage:decrypt')) return;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("Le chiffrement sécurisé du système d'exploitation n'est pas disponible sur cette machine.");
+    }
+    let value;
+    if (msg.type === 'safeStorage:encrypt') {
+      value = safeStorage.encryptString(msg.value).toString('base64');
+      child.send({ type: 'safeStorage:encrypt:result', requestId: msg.requestId, value });
+    } else {
+      value = safeStorage.decryptString(Buffer.from(msg.value, 'base64'));
+      child.send({ type: 'safeStorage:decrypt:result', requestId: msg.requestId, value });
+    }
+  } catch (err) {
+    const responseType = msg.type === 'safeStorage:encrypt' ? 'safeStorage:encrypt:result' : 'safeStorage:decrypt:result';
+    child.send({ type: responseType, requestId: msg.requestId, error: err.message });
+  }
+}
+
 async function startServer() {
   const { cwd, serverEntry } = resolvePaths();
   const dataDir = app.getPath('userData');
@@ -102,10 +138,17 @@ async function startServer() {
       OFFLINE_MODE: 'true',
       OFFLINE_DATA_DIR: dataDir,
       OFFLINE_POSTGREST_URL: offlineStack.postgrestUrl,
+      OFFLINE_PG_URL: offlineStack.pgUrl,
       SUPABASE_URL: `http://127.0.0.1:${PORT}`,
       SUPABASE_SERVICE_ROLE_KEY: crypto.randomBytes(24).toString('hex'),
+      CLOUD_SUPABASE_URL,
+      CLOUD_SUPABASE_ANON_KEY,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    // 'ipc' gives the spawned process process.send()/process.on('message')
+    // to reach safeStorage (main-process-only, see the message handler
+    // below) — needed to encrypt the cloud-link refresh token before it's
+    // ever written to disk (server/ipcCrypto.ts, server/cloudLinkState.ts).
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   serverProcess.stdout.on('data', (d) => log('[server]', d.toString().trim()));
   serverProcess.stderr.on('data', (d) => log('[server:err]', d.toString().trim()));
@@ -115,6 +158,7 @@ async function startServer() {
     }
   });
   serverProcess.on('error', (err) => log('Échec du lancement du serveur local :', err));
+  serverProcess.on('message', (msg) => handleIpcMessage(serverProcess, msg));
 
   // Generous timeout: first launch also initialises the local Postgres and
   // applies the schema (see pgBootstrap.cjs), which takes longer than a warm start.

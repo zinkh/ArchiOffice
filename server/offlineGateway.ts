@@ -18,6 +18,48 @@ import {
   goTrueUserFromAccount,
   AdminUser,
 } from './offlineAccount';
+import { readCloudLinkState } from './cloudLinkState';
+import { recordPendingPush } from './localPendingPush';
+
+/** `?id=eq.<value>` — this app's update/delete calls consistently target a
+ *  single row via .eq('id', x), which PostgREST renders as this query param. */
+function rowIdFromEqFilter(url: string): string | null {
+  const match = url.match(/[?&]id=eq\.([^&]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function tableNameFromUrl(url: string): string {
+  return url.split('?')[0].replace(/^\//, '');
+}
+
+async function recordPendingPushForRequest(pgUrl: string, req: any): Promise<void> {
+  // Not cloud-linked yet (or the initial import hasn't finished) — the
+  // _local_pending_push table may not even exist yet (it's bootstrapped by
+  // server/cloudSync.ts only once linked), and there's no cloud to push to anyway.
+  const state = readCloudLinkState();
+  if (!state?.importCompleted) return;
+
+  const table = tableNameFromUrl(req.url);
+  const opByMethod: Record<string, string> = { POST: 'INSERT', PATCH: 'UPDATE', PUT: 'UPDATE', DELETE: 'DELETE' };
+  const op = opByMethod[req.method];
+  if (!op) return;
+
+  if (op === 'INSERT') {
+    const bodies = Array.isArray(req.body) ? req.body : [req.body];
+    for (const row of bodies) {
+      if (row?.id) await recordPendingPush(pgUrl, table, String(row.id), op);
+    }
+    return;
+  }
+
+  const rowId = rowIdFromEqFilter(req.url);
+  if (rowId) await recordPendingPush(pgUrl, table, rowId, op);
+  // A bulk update/delete without an id=eq. filter isn't captured in v1 —
+  // this codebase's write call sites consistently target a single row via
+  // .eq('id', x) (confirmed by grepping server.ts's supabaseAdmin.from(...)
+  // .update()/.insert() call sites), so this is a rare/non-existent case
+  // today rather than a silent gap in normal usage.
+}
 
 function bearerToken(req: Request): string | null {
   const header = req.headers.authorization;
@@ -128,20 +170,31 @@ function mountStorageShim(router: Router) {
 
 export interface OfflineGatewayOptions {
   postgrestUrl: string;
+  /** Direct local Postgres connection string (electron/main.cjs's
+   *  OFFLINE_PG_URL) — used only to record pending-push entries for cloud
+   *  sync (server/localPendingPush.ts); business-data reads/writes never use
+   *  this, they always go through the /rest/v1 → PostgREST proxy above. */
+  pgUrl?: string;
 }
 
-export function createOfflineGateway({ postgrestUrl }: OfflineGatewayOptions): Router {
+export function createOfflineGateway({ postgrestUrl, pgUrl }: OfflineGatewayOptions): Router {
   const router = Router();
 
   // Mounted before server.ts's own express.json()/urlencoded() so PostgREST
-  // requests keep their raw body stream intact for the proxy to forward.
+  // requests keep their raw body stream intact for the proxy to forward —
+  // except this route specifically now needs a parsed body too (to capture
+  // an INSERT's row id for cloud-sync bookkeeping), so it gets its own
+  // scoped express.json() + the "fixRequestBody" pattern (re-serialize
+  // req.body back onto the outgoing proxied request, since express.json()
+  // already consumed the raw stream).
   router.use(
     '/rest/v1',
+    express.json({ limit: '10mb' }),
     createProxyMiddleware({
       target: postgrestUrl,
       changeOrigin: true,
       on: {
-        proxyReq: (proxyReq) => {
+        proxyReq: (proxyReq, req: any) => {
           // supabaseAdmin always sends Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>
           // (a random local secret generated per launch — see electron/main.cjs —
           // not a real JWT). PostgREST has no PGRST_JWT_SECRET configured, since
@@ -152,6 +205,19 @@ export function createOfflineGateway({ postgrestUrl }: OfflineGatewayOptions): R
           // PostgREST reject every single request with "Server lacks JWT secret"
           // (confirmed on a real Windows install) — strip it before proxying.
           proxyReq.removeHeader('authorization');
+
+          if (req.body && Object.keys(req.body).length > 0) {
+            const bodyData = JSON.stringify(req.body);
+            proxyReq.setHeader('Content-Type', 'application/json');
+            proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+            proxyReq.write(bodyData);
+          }
+
+          if (pgUrl && req.method !== 'GET') {
+            recordPendingPushForRequest(pgUrl, req).catch((err) => {
+              console.error('[offlineGateway] Failed to record pending push:', err.message);
+            });
+          }
         },
       },
     }),

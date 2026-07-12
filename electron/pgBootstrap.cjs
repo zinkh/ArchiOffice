@@ -205,6 +205,11 @@ async function startOfflineDataStack(dataDir, log = console.log, resourcesDir = 
   log('[pgBootstrap] PostgREST ready');
   return {
     postgrestUrl: `http://127.0.0.1:${POSTGREST_PORT}`,
+    // For the rare cases PostgREST can't do (DDL) — see server/cloudSync.ts,
+    // which bootstraps a local-only bookkeeping table via a direct pg
+    // connection. Never used for ordinary business-data reads/writes; those
+    // all still go through the /rest/v1 proxy → PostgREST as usual.
+    pgUrl: `postgres://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/postgres`,
     stop: async () => {
       postgrest.kill();
       await pg.stop();

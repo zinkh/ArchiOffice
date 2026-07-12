@@ -1155,7 +1155,10 @@ async function startServer() {
   // additive only and never touches the routes/helpers below.
   if (process.env.OFFLINE_MODE === 'true') {
     const { createOfflineGateway } = await import('./server/offlineGateway');
-    app.use(createOfflineGateway({ postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555' }));
+    app.use(createOfflineGateway({
+      postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555',
+      pgUrl: process.env.OFFLINE_PG_URL,
+    }));
   }
 
   app.use(express.json({ limit: '10mb' }));
@@ -1185,6 +1188,30 @@ async function startServer() {
     // satisfies supabaseAdmin's own internal calls) — see server/localAuthRoutes.ts.
     const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
     app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
+
+    // First-run "log into your existing cloud account" flow — see
+    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
+    // install picks one or the other, both routers coexist harmlessly).
+    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
+    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin));
+
+    // If already linked, start the background sync engine (server/cloudSync.ts).
+    const { readCloudLinkState } = await import('./server/cloudLinkState');
+    const linkState = readCloudLinkState();
+    if (linkState?.importCompleted) {
+      try {
+        const { startCloudSync } = await import('./server/cloudSync');
+        const { createCloudSyncRouter } = await import('./server/cloudSyncRoutes');
+        const cloudSync = await startCloudSync(supabaseAdmin, linkState);
+        app.use('/api/sync', createCloudSyncRouter(cloudSync));
+      } catch (err: any) {
+        // A cloud-sync startup failure (e.g. the stored refresh token is no
+        // longer valid, or the machine is offline right now) shouldn't take
+        // the whole app down — the install still works fully offline
+        // against its local data either way; sync just won't run this session.
+        console.error('[cloudSync] Failed to start background sync:', err.message);
+      }
+    }
   }
 
   // Résolution tenant_id depuis profiles (mis en cache par request)
@@ -1370,6 +1397,7 @@ async function startServer() {
   const AUTH_EXEMPT = [
     "/api/health", "/api/public", "/api/billing/webhook",
     "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
+    "/api/auth/cloud-link-status", "/api/auth/cloud-link", "/api/auth/cloud-link-import",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
