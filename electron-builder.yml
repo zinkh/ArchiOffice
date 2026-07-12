@@ -1,0 +1,115 @@
+appId: com.archioffice.desktop
+productName: ArchiOffice
+directories:
+  output: release
+# The Express server is bundled into a single self-contained file by esbuild
+# (dist-server/server.cjs) and the frontend is the static dist/ SPA, so
+# neither needs any node_modules shipped. Neither embedded-postgres nor pg has
+# a native .node addon needing an Electron ABI rebuild (embedded-postgres
+# ships a plain OS executable), so npmRebuild stays off.
+npmRebuild: false
+# asar stays enabled (default) for speed and a compact install — but
+# embedded-postgres isn't asar-aware: it resolves its own binary path via
+# require/import relative to its own module location, which still resolves
+# "inside" app.asar even when asarUnpack mirrors the files to
+# app.asar.unpacked — Electron only rewrites that path transparently for fs
+# reads, not for child_process.spawn(), so `initdb.exe`/`postgres.exe` fail
+# with ENOENT (confirmed on real Windows). Shipping the *entire* node_modules
+# tree as loose files (asar: false) "worked" but made installs extremely slow
+# (thousands of small files, each scanned by antivirus) for no reason: only
+# embedded-postgres + pg + their own small dependency closure ever need to
+# exist as real files — see electron/pgBootstrap.cjs's loadEmbeddedPostgres(),
+# which requires them from resourcesPath/node_modules explicitly instead of
+# relying on normal (asar-packed) node_modules resolution.
+files:
+  - electron/**/*
+  - package.json
+  # Read via fs.readdirSync/readFileSync only (never spawned), so packing
+  # these inside the asar is fine — see electron/applySchema.cjs, which
+  # applies schema.sql + migrate_*.sql against the local Postgres on first
+  # launch. Previously missing entirely, causing "ENOENT, supabase not
+  # found in ...app.asar" on a real Windows install.
+  - supabase/**/*
+extraResources:
+  - from: dist
+    to: dist
+  - from: dist-server
+    to: dist-server
+  - from: proxy.json
+    to: proxy.json
+  # Fetched in CI (see .github/workflows/build-windows.yml) — PostgREST has no
+  # npm-packaged binary and its GitHub-hosted releases aren't reachable from
+  # this project's dev sandbox, so this directory only exists at CI build time.
+  - from: vendor/postgrest
+    to: postgrest
+  # PostgREST's Windows binary is dynamically linked against the Microsoft
+  # Visual C++ runtime — on a machine that doesn't already have it, spawning
+  # it fails immediately with exit code 0xC0000135 (STATUS_DLL_NOT_FOUND),
+  # confirmed on a real Windows install. electron/installer.nsh's
+  # customInstall macro runs this silently during setup so users never need
+  # to install it by hand.
+  - from: vendor/vc_redist.x64.exe
+    to: vc_redist.x64.exe
+  # embedded-postgres's exact runtime dependency closure (verified by walking
+  # each package.json's "dependencies" — see the Phase 4 follow-up notes),
+  # placed as a real node_modules/ folder under resources/ so embedded-postgres's
+  # own internal `import('@embedded-postgres/<platform>')` (and pg's requires)
+  # resolve normally by walking up from resources/node_modules/embedded-postgres/.
+  - from: node_modules/embedded-postgres
+    to: node_modules/embedded-postgres
+  - from: node_modules/@embedded-postgres
+    to: node_modules/@embedded-postgres
+  - from: node_modules/async-exit-hook
+    to: node_modules/async-exit-hook
+  - from: node_modules/pg
+    to: node_modules/pg
+  - from: node_modules/pg-connection-string
+    to: node_modules/pg-connection-string
+  - from: node_modules/pg-int8
+    to: node_modules/pg-int8
+  - from: node_modules/pg-pool
+    to: node_modules/pg-pool
+  - from: node_modules/pg-protocol
+    to: node_modules/pg-protocol
+  - from: node_modules/pg-types
+    to: node_modules/pg-types
+  - from: node_modules/pgpass
+    to: node_modules/pgpass
+  - from: node_modules/postgres-array
+    to: node_modules/postgres-array
+  - from: node_modules/postgres-bytea
+    to: node_modules/postgres-bytea
+  - from: node_modules/postgres-date
+    to: node_modules/postgres-date
+  - from: node_modules/postgres-interval
+    to: node_modules/postgres-interval
+  - from: node_modules/split2
+    to: node_modules/split2
+  - from: node_modules/xtend
+    to: node_modules/xtend
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # public/favicon.ico only has 16x16/32x32 frames — Windows app icons need at
+  # least 256x256, so this is a dedicated multi-resolution icon generated from
+  # public/icon-512.png (via `npx png-to-ico public/icon-512.png`).
+  icon: electron/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  include: electron/installer.nsh
+  # customInstall (installer.nsh) silently installs the Microsoft VC++
+  # Redistributable, which itself requires admin rights. A per-user install
+  # (the previous default) can't elevate a sub-step reliably — electron-builder
+  # bundles its own patched, independently-versioned NSIS build, and there's
+  # no way to confirm from here whether its ExecShellWait "runas" support
+  # behaves as the upstream NSIS 3.08+ docs describe (the build compiled
+  # cleanly with it, but the redistributable still silently failed to install
+  # on a real Windows test). Requiring admin for the whole installer instead
+  # means customInstall's plain ExecWait inherits that elevation automatically
+  # — the well-trodden path, not a special-cased single-step elevation.
+  perMachine: true

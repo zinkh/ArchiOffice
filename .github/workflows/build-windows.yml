@@ -1,0 +1,94 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/windows-offline-app-install-okof14]
+
+jobs:
+  build-electron-windows:
+    name: Build Electron NSIS installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Authenticate GitHub Packages
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build SPA (offline desktop build)
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: http://127.0.0.1:3130
+          VITE_SUPABASE_ANON_KEY: local-anon-key
+          VITE_OFFLINE_MODE: 'true'
+
+      - name: Bundle server
+        run: npm run build:server
+
+      - name: Fetch PostgREST (Windows x86-64)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          mkdir -p vendor/postgrest
+
+          release_json=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/PostgREST/postgrest/releases/latest)
+
+          # Confirmed asset naming as of PostgREST v14.14: postgrest-vX.Y-windows-x86-64.zip
+          # (verified from this workflow's own diagnostic output, not guessed).
+          asset_url=$(echo "$release_json" | jq -r '[.assets[].browser_download_url
+            | select(test("windows"; "i") and test("x86.?64"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
+
+          if [ -z "$asset_url" ]; then
+            echo "::error::Could not find a Windows x86-64 PostgREST release asset. Raw API response below — inspect it, check https://github.com/PostgREST/postgrest/releases, and fix this step's jq filter."
+            echo "$release_json"
+            exit 1
+          fi
+
+          echo "Downloading $asset_url"
+          curl -sSL -o postgrest_archive "$asset_url"
+          case "$asset_url" in
+            *.zip) unzip -o postgrest_archive -d vendor/postgrest ;;
+            *.tar.xz) tar -xJf postgrest_archive -C vendor/postgrest ;;
+          esac
+          ls -laR vendor/postgrest
+
+          # The archive may nest the binary in a subfolder — flatten it so
+          # electron/pgBootstrap.cjs finds it at a fixed, known path.
+          found=$(find vendor/postgrest -iname 'postgrest.exe' | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::postgrest.exe not found anywhere inside the downloaded archive — inspect the listing above."
+            exit 1
+          fi
+          if [ "$found" != "vendor/postgrest/postgrest.exe" ]; then
+            mv "$found" vendor/postgrest/postgrest.exe
+          fi
+          echo "postgrest.exe ready at vendor/postgrest/postgrest.exe"
+
+      - name: Fetch Microsoft Visual C++ Redistributable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor
+          curl -sSL -o vendor/vc_redist.x64.exe https://aka.ms/vs/17/release/vc_redist.x64.exe
+          ls -la vendor/vc_redist.x64.exe
+
+      - name: Build NSIS installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArchiOffice-Windows-installer
+          path: release/*.exe

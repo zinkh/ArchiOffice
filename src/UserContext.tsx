@@ -1,8 +1,23 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
 import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
+import { isOfflineBuild, getStoredLocalSession, clearLocalSession } from './lib/authToken';
+
+// Structurally compatible with both a real Supabase Session/User and our
+// locally-signed offline session (src/lib/authToken.ts) — the functions below
+// only ever read these fields, from whichever source is active.
+interface MinimalUser {
+  id: string;
+  email?: string;
+  user_metadata?: Record<string, any>;
+  app_metadata?: Record<string, any>;
+}
+interface MinimalSession {
+  access_token: string;
+  expires_at?: number;
+  user: MinimalUser;
+}
 
 interface UserContextType {
   currentUser: UserProfile | null;
@@ -20,7 +35,7 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-function mapSupabaseUser(user: User): UserProfile {
+function mapSupabaseUser(user: MinimalUser): UserProfile {
   return {
     id: user.id,
     email: user.email ?? '',
@@ -31,7 +46,7 @@ function mapSupabaseUser(user: User): UserProfile {
   };
 }
 
-async function loadFullProfile(session: Session): Promise<UserProfile> {
+async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
   const base = mapSupabaseUser(session.user);
   try {
     const res = await fetch('/api/me', {
@@ -56,7 +71,7 @@ async function loadFullProfile(session: Session): Promise<UserProfile> {
   }
 }
 
-async function loadBillingStatus(session: Session): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
+async function loadBillingStatus(session: MinimalSession): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
   try {
     const res = await fetch('/api/billing/status', {
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -80,7 +95,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [tenantPlan, setTenantPlan] = useState('trial');
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [isTrialExpired, setIsTrialExpired] = useState(false);
-  const sessionRef = React.useRef<Session | null>(null);
+  const sessionRef = React.useRef<MinimalSession | null>(null);
 
   const refreshBillingStatus = React.useCallback(async () => {
     if (!sessionRef.current) return;
@@ -91,6 +106,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isOfflineBuild()) {
+      // No Supabase Auth involved offline — the local session (see src/lib/localAuth.ts
+      // and src/lib/authToken.ts) is read once on mount; login/setup force a full
+      // page reload afterward so this effect re-runs and picks it up.
+      const local = getStoredLocalSession();
+      if (local) {
+        sessionRef.current = local;
+        Promise.all([loadFullProfile(local), loadBillingStatus(local)]).then(([user, billing]) => {
+          setCurrentUser(user);
+          setTenantPlan(billing.plan);
+          setTrialEndsAt(billing.trial_ends_at);
+          setIsTrialExpired(billing.is_expired);
+          setIsLoading(false);
+        });
+      } else {
+        setCurrentUser(null);
+        setIsLoading(false);
+      }
+      return;
+    }
+
     supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (error) {
         supabase.auth.signOut();
@@ -125,6 +161,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    if (isOfflineBuild()) {
+      clearLocalSession();
+      setCurrentUser(null);
+      return;
+    }
     await supabase.auth.signOut();
     setCurrentUser(null);
   };

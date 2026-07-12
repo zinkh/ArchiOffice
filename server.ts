@@ -1149,6 +1149,18 @@ async function startServer() {
   app.use('/uploads', express.static(uploadDir));
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
+  // Offline desktop mode: SUPABASE_URL points back at this same server, so
+  // supabaseAdmin's .from()/.auth/.storage calls loop back here instead of
+  // reaching the real Supabase — see the offline-mode plan for why this is
+  // additive only and never touches the routes/helpers below.
+  if (process.env.OFFLINE_MODE === 'true') {
+    const { createOfflineGateway } = await import('./server/offlineGateway');
+    app.use(createOfflineGateway({
+      postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555',
+      pgUrl: process.env.OFFLINE_PG_URL,
+    }));
+  }
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -1165,8 +1177,42 @@ async function startServer() {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized)
-  await ensureStorageBuckets();
+  // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized).
+  // In offline mode this call loops back into this same server's /storage/v1 shim
+  // (see server/offlineGateway.ts), so it must wait until app.listen() below is
+  // actually accepting connections — otherwise the loopback request fails outright.
+  if (process.env.OFFLINE_MODE !== 'true') {
+    await ensureStorageBuckets();
+  } else {
+    // Application-level local login (distinct from the /auth/v1 shim, which only
+    // satisfies supabaseAdmin's own internal calls) — see server/localAuthRoutes.ts.
+    const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
+    app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
+
+    // First-run "log into your existing cloud account" flow — see
+    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
+    // install picks one or the other, both routers coexist harmlessly).
+    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
+    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin));
+
+    // If already linked, start the background sync engine (server/cloudSync.ts).
+    const { readCloudLinkState } = await import('./server/cloudLinkState');
+    const linkState = readCloudLinkState();
+    if (linkState?.importCompleted) {
+      try {
+        const { startCloudSync } = await import('./server/cloudSync');
+        const { createCloudSyncRouter } = await import('./server/cloudSyncRoutes');
+        const cloudSync = await startCloudSync(supabaseAdmin, linkState);
+        app.use('/api/sync', createCloudSyncRouter(cloudSync));
+      } catch (err: any) {
+        // A cloud-sync startup failure (e.g. the stored refresh token is no
+        // longer valid, or the machine is offline right now) shouldn't take
+        // the whole app down — the install still works fully offline
+        // against its local data either way; sync just won't run this session.
+        console.error('[cloudSync] Failed to start background sync:', err.message);
+      }
+    }
+  }
 
   // Résolution tenant_id depuis profiles (mis en cache par request)
   async function getTenantId(userId: string): Promise<string> {
@@ -1346,7 +1392,13 @@ async function startServer() {
 
   // ───────────────────────────────────────────────────────────────────────────
 
-  const AUTH_EXEMPT = ["/api/health", "/api/public", "/api/billing/webhook"];
+  // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
+  // above), so these entries are inert in the normal cloud deployment.
+  const AUTH_EXEMPT = [
+    "/api/health", "/api/public", "/api/billing/webhook",
+    "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
+    "/api/auth/cloud-link-status", "/api/auth/cloud-link", "/api/auth/cloud-link-import",
+  ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
     if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
@@ -8537,6 +8589,9 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   // Start listening after all middleware is set up
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    if (process.env.OFFLINE_MODE === 'true') {
+      ensureStorageBuckets();
+    }
   });
 }
 

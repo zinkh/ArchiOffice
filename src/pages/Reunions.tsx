@@ -27,7 +27,7 @@ import {
   IconClipboardList,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { getAccessToken } from '../lib/authToken';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
 import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
@@ -570,13 +570,13 @@ export default function Reunions() {
     const files = Array.from(e.target.files);
     setUploadingPhoto(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAccessToken();
       for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
         const res = await fetch(`/api/meetings/${selectedMeeting.id}/photos`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${session?.access_token}` },
+          headers: { Authorization: `Bearer ${token}` },
           body: formData,
         });
         if (res.ok) {

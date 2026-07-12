@@ -21,6 +21,8 @@ import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { apiFetch } from './lib/api';
+import { isOfflineBuild } from './lib/authToken';
+import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
 import './i18n';
 
 // Pages
@@ -43,6 +45,7 @@ import Billing from './pages/Billing';
 import TenderDetail from './pages/TenderDetail';
 import ProposalModule from './components/ProposalModule';
 import Login from './pages/Login';
+import CloudImportProgress from './pages/CloudImportProgress';
 import Register from './pages/Register';
 import Onboarding from './pages/Onboarding';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -62,6 +65,8 @@ import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agent
 function SyncStatus() {
   const { t } = useTranslation();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [cloudStatus, setCloudStatus] = useState<SyncStatusResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -75,6 +80,56 @@ function SyncStatus() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Only the offline desktop build has anything to poll here — the regular
+  // cloud web app keeps the simple navigator.onLine indicator below unchanged.
+  useEffect(() => {
+    if (!isOfflineBuild()) return;
+    let cancelled = false;
+    const poll = () => { getSyncStatus().then((s) => { if (!cancelled) setCloudStatus(s); }); };
+    poll();
+    const interval = setInterval(poll, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  if (isOfflineBuild() && cloudStatus?.linked) {
+    const handleSyncNow = async () => {
+      setSyncing(true);
+      try {
+        await triggerSyncNow();
+        setCloudStatus(await getSyncStatus());
+      } finally {
+        setSyncing(false);
+      }
+    };
+    const statusLabel = cloudStatus.pendingPushCount > 0
+      ? t('sync_status_pending', { count: cloudStatus.pendingPushCount })
+      : t('sync_status_last_sync', {
+          time: cloudStatus.lastSyncAt ? new Date(cloudStatus.lastSyncAt).toLocaleTimeString() : '—',
+        });
+    return (
+      <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+          style={cloudStatus.isOnline
+            ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }
+            : { background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
+        >
+          {cloudStatus.isOnline ? <IconCheck size={13} /> : <IconCloudOff size={13} />}
+          {statusLabel}
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncNow}
+          disabled={syncing}
+          title={t('sync_status_now_btn')}
+          className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+        >
+          <IconCloudUpload size={16} />
+        </button>
+      </div>
+    );
+  }
 
   if (!isOnline) {
     return (
@@ -577,6 +632,7 @@ export default function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/cloud-import-progress" element={<CloudImportProgress />} />
             <Route path="/register" element={<Register />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />

@@ -352,7 +352,7 @@ export default function Projects() {
   };
 
   const handleAddProject = () => {
-    const newId = `p${Date.now()}`;
+    const newId = `p${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     const newProject: Project = {
       id: newId,
       name: '',
@@ -457,7 +457,7 @@ export default function Projects() {
     try {
       await apiFetch('/api/project_categories', {
         method: 'POST',
-        body: JSON.stringify({ id: `pcat${Date.now()}`, name: newCategoryName }),
+        body: JSON.stringify({ id: `pcat${Date.now()}-${crypto.randomUUID().slice(0, 8)}`, name: newCategoryName }),
       });
       setNewCategoryName('');
       fetchCategories();

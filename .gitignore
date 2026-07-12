@@ -1,6 +1,8 @@
 node_modules/
 build/
 dist/
+dist-server/
+release/
 coverage/
 .DS_Store
 *.log
@@ -8,4 +10,6 @@ coverage/
 !.env.example
 archimanager.db
 uploads/
+.offline-data/
+vendor/
 .npmrc

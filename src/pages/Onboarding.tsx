@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconBuilding, IconPhoto, IconUser, IconUsers, IconCheck, IconArrowRight, IconArrowLeft, IconUpload, IconX, IconPlus } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
-import { supabase } from '../lib/supabase';
+import { getAccessToken } from '../lib/authToken';
 import { apiFetch } from '../lib/api';
 
 const STEPS = [
@@ -15,9 +15,9 @@ const STEPS = [
 interface InviteRow { name: string; email: string; role: string }
 
 async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const token = await getAccessToken();
   const headers = new Headers(init.headers);
-  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   return fetch(url, { ...init, headers });
 }
 

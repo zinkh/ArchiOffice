@@ -76,7 +76,7 @@ export default function ProjectTemplates() {
         <button 
           onClick={() => {
             setEditForm({
-              id: `pt${Date.now()}`,
+              id: `pt${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
               name: '',
               description: '',
               default_status: 'Planning',

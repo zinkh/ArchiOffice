@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { IconCommand } from '@tabler/icons-react';
+import { IconCommand, IconCloud, IconDeviceDesktop } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
+import { isOfflineBuild } from '../lib/authToken';
+import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
+import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -22,7 +25,306 @@ function GoogleIcon() {
   );
 }
 
+type FirstRunMode = 'choice' | 'local-setup' | 'cloud-link';
+
+function LocalLoginShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
+      <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="flex justify-center mb-6">
+          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
+            <IconCommand size={32} />
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FirstRunChoice({ onChoose }: { onChoose: (mode: FirstRunMode) => void }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">
+        {t('login_choice_title')}
+      </h2>
+      <div className="space-y-3 mt-6">
+        <button
+          type="button"
+          onClick={() => onChoose('local-setup')}
+          className="w-full flex items-start gap-3 p-4 border border-zinc-300 dark:border-zinc-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-500 text-left transition-colors"
+        >
+          <IconDeviceDesktop size={22} className="mt-0.5 flex-shrink-0 text-blue-600" />
+          <div>
+            <div className="font-medium text-zinc-900 dark:text-white">{t('login_choice_local_title')}</div>
+            <div className="text-sm text-zinc-500 dark:text-zinc-400">{t('login_choice_local_desc')}</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => onChoose('cloud-link')}
+          className="w-full flex items-start gap-3 p-4 border border-zinc-300 dark:border-zinc-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-500 text-left transition-colors"
+        >
+          <IconCloud size={22} className="mt-0.5 flex-shrink-0 text-blue-600" />
+          <div>
+            <div className="font-medium text-zinc-900 dark:text-white">{t('login_choice_cloud_title')}</div>
+            <div className="text-sm text-zinc-500 dark:text-zinc-400">{t('login_choice_cloud_desc')}</div>
+          </div>
+        </button>
+      </div>
+    </>
+  );
+}
+
+function LocalSetupForm({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
+  const [agencyName, setAgencyName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (password !== confirmPassword) {
+      setError(t('login_local_setup_password_hint'));
+      return;
+    }
+    setLoading(true);
+    try {
+      await localSetup(agencyName, password);
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">
+        {t('login_local_setup_title')}
+      </h2>
+      <p className="text-sm text-center text-zinc-500 dark:text-zinc-400 mb-6">
+        {t('login_local_setup_subtitle')}
+      </p>
+      <form onSubmit={handleSetup} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+            {t('login_local_setup_agency_label')}
+          </label>
+          <input
+            type="text"
+            value={agencyName}
+            onChange={(e) => setAgencyName(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            required
+            autoFocus
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            minLength={8}
+            required
+          />
+          <p className="text-xs text-zinc-400 mt-1">{t('login_local_setup_password_hint')}</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            minLength={8}
+            required
+          />
+        </div>
+        {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+        >
+          {t('login_local_setup_submit')}
+        </button>
+        <button type="button" onClick={onBack} className="w-full text-sm text-zinc-500 hover:underline">
+          {t('login_choice_back')}
+        </button>
+      </form>
+    </>
+  );
+}
+
+function CloudLinkForm({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [localPassword, setLocalPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await cloudLink(email, password, localPassword);
+      navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">
+        {t('cloud_link_title')}
+      </h2>
+      <form onSubmit={handleSubmit} className="space-y-4 mt-6">
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+            {t('cloud_link_email_label')}
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            required
+            autoFocus
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+            {t('cloud_link_local_password_label')}
+          </label>
+          <input
+            type="password"
+            value={localPassword}
+            onChange={(e) => setLocalPassword(e.target.value)}
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            minLength={8}
+            required
+          />
+          <p className="text-xs text-zinc-400 mt-1">{t('cloud_link_local_password_hint')}</p>
+        </div>
+        {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+        >
+          {t('cloud_link_submit')}
+        </button>
+        <button type="button" onClick={onBack} className="w-full text-sm text-zinc-500 hover:underline">
+          {t('login_choice_back')}
+        </button>
+      </form>
+    </>
+  );
+}
+
+function LocalLogin() {
+  const { t } = useTranslation();
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  const [configured, setConfigured] = useState(false);
+  const [firstRunMode, setFirstRunMode] = useState<FirstRunMode>('choice');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    Promise.all([checkLocalStatus(), checkCloudLinkStatus()])
+      .then(([localStatus, cloudStatus]) => {
+        // A cloud-linked install also has a local account (provisioned
+        // during cloud-link) — either flag being true means first-run is over.
+        setConfigured(localStatus.configured || cloudStatus.linked);
+      })
+      .catch(() => setConfigured(false))
+      .finally(() => setCheckingStatus(false));
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await localSignIn(password);
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  if (checkingStatus) return null;
+
+  if (configured) {
+    return (
+      <LocalLoginShell>
+        <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-8">
+          {t('login_local_title')}
+        </h2>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+              required
+              autoFocus
+            />
+          </div>
+          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+          >
+            {t('login_local_submit')}
+          </button>
+        </form>
+      </LocalLoginShell>
+    );
+  }
+
+  return (
+    <LocalLoginShell>
+      {firstRunMode === 'choice' && <FirstRunChoice onChoose={setFirstRunMode} />}
+      {firstRunMode === 'local-setup' && <LocalSetupForm onBack={() => setFirstRunMode('choice')} />}
+      {firstRunMode === 'cloud-link' && <CloudLinkForm onBack={() => setFirstRunMode('choice')} />}
+    </LocalLoginShell>
+  );
+}
+
 export default function Login() {
+  if (isOfflineBuild()) return <LocalLogin />;
+  return <CloudLogin />;
+}
+
+function CloudLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
