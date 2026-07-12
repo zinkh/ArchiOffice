@@ -61,7 +61,9 @@ export function createCloudLinkRouter(supabaseAdmin: SupabaseClient): Router {
       .eq('id', cloudUserId)
       .single();
     if (profileErr || !profile || !profile.tenant_id) {
-      return res.status(400).json({ error: "Ce compte n'est rattaché à aucune agence" });
+      return res.status(400).json({
+        error: "Ce compte n'est rattaché à aucune agence. Connectez-vous sur l'application web pour créer votre agence ou demander à rejoindre une agence existante, puis réessayez ici.",
+      });
     }
 
     const { data: tenant, error: tenantErr } = await cloudClient

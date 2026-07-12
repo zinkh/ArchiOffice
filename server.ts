@@ -1214,7 +1214,10 @@ async function startServer() {
     }
   }
 
-  // Résolution tenant_id depuis profiles (mis en cache par request)
+  // Résolution tenant_id depuis profiles (mis en cache par request).
+  // N'auto-provisionne plus de tenant "fantôme" : un compte sans agence doit
+  // passer par /api/agency-setup (créer ou rejoindre une agence) — voir
+  // src/pages/AgencySetup.tsx et la garde dans ProtectedLayout (src/App.tsx).
   async function getTenantId(userId: string): Promise<string> {
     const { data } = await supabaseAdmin
       .from('profiles')
@@ -1224,29 +1227,10 @@ async function startServer() {
 
     if (data?.tenant_id) return data.tenant_id;
 
-    // Auto-provision tenant for OAuth users who have no tenant yet
-    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (!authData?.user) throw new Error('User not found: ' + userId);
-
-    const email = authData.user.email ?? '';
-    const displayName = authData.user.user_metadata?.name ?? email.split('@')[0] ?? 'Cabinet';
-    const base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 24);
-    const slug = base + '-' + Date.now().toString(36);
-
-    const { data: tenant, error: tenantErr } = await supabaseAdmin
-      .from('tenants')
-      .insert({ slug, name: displayName })
-      .select()
-      .single();
-
-    if (tenantErr || !tenant) throw new Error('Failed to auto-create tenant: ' + (tenantErr?.message ?? 'unknown'));
-
-    await supabaseAdmin
-      .from('profiles')
-      .upsert({ id: userId, tenant_id: tenant.id, name: displayName, system_role: 'admin', role: 'admin' });
-
-    console.log(`[getTenantId] Auto-provisioned tenant ${tenant.id} for user ${userId}`);
-    return tenant.id;
+    const err: any = new Error("Ce compte n'est rattaché à aucune agence. Veuillez d'abord créer ou rejoindre une agence.");
+    err.status = 409;
+    err.code = 'NO_TENANT';
+    throw err;
   }
 
   // ─── Billing / Plan quota ──────────────────────────────────────────────────
@@ -1454,46 +1438,126 @@ async function startServer() {
     }
   });
 
+  // Best-effort platform-level SMTP send (used before a tenant exists, so tenant
+  // settings' own SMTP config isn't available yet). Returns whether it was sent.
+  async function sendPlatformMail(to: string, subject: string, html: string): Promise<boolean> {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      console.warn('[mail] SMTP_HOST/SMTP_USER/SMTP_PASS not configured — email not sent.');
+      return false;
+    }
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(String(process.env.SMTP_PORT || '587')),
+        secure: String(process.env.SMTP_PORT) === '465',
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+      await transporter.sendMail({ from: `"ArchiOffice" <${smtpUser}>`, to, subject, html });
+      return true;
+    } catch (err: any) {
+      console.error('[mail] Send failed:', err.message);
+      return false;
+    }
+  }
+
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", async (req, res) => {
-    const { cabinet_name, slug, admin_name, email, password } = req.body;
-    if (!cabinet_name || !slug || !admin_name || !email || !password) {
-      return res.status(400).json({ error: "Tous les champs sont requis." });
+    try {
+      const { cabinet_name, slug, admin_name, email, password } = req.body;
+      if (!cabinet_name || !slug || !admin_name || !email || !password) {
+        return res.status(400).json({ error: "Tous les champs sont requis." });
+      }
+      if (String(password).length < 8) {
+        return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
+      }
+      // Vérifier unicité du slug
+      const { data: existing } = await supabaseAdmin
+        .from("tenants")
+        .select("id")
+        .eq("slug", slug)
+        .single();
+      if (existing) {
+        return res.status(409).json({ error: "Cet identifiant est déjà pris." });
+      }
+
+      // Créer l'utilisateur Supabase Auth SANS confirmer l'email — la confirmation
+      // se fait via le lien envoyé ci-dessous (email_confirm: true bypassait
+      // totalement la vérification d'adresse).
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error: signUpError } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'signup',
+        email,
+        password,
+        options: { data: { name: admin_name }, redirectTo: `${appUrl}/login?confirmed=1` },
+      });
+      if (signUpError || !linkData?.user) {
+        return res.status(400).json({ error: signUpError?.message || "Erreur création compte." });
+      }
+      const userId = linkData.user.id;
+
+      // Créer le tenant
+      const { data: tenant, error: tenantError } = await supabaseAdmin
+        .from("tenants")
+        .insert({ slug, name: cabinet_name })
+        .select()
+        .single();
+      if (tenantError || !tenant) {
+        await supabaseAdmin.auth.admin.deleteUser(userId);
+        return res.status(500).json({ error: "Erreur création cabinet." });
+      }
+      // Lier le profil au tenant
+      await supabaseAdmin
+        .from("profiles")
+        .upsert({ id: userId, tenant_id: tenant.id, name: admin_name, email, system_role: "admin", role: "admin" });
+
+      const emailSent = linkData.properties?.action_link
+        ? await sendPlatformMail(
+            email,
+            "Confirmez votre adresse email — ArchiOffice",
+            `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+               <h2 style="color: #2563eb;">Bienvenue sur ArchiOffice</h2>
+               <p>Bonjour ${admin_name},</p>
+               <p>Confirmez votre adresse email pour activer le compte de <strong>${cabinet_name}</strong> :</p>
+               <p style="margin: 24px 0;"><a href="${linkData.properties.action_link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Confirmer mon adresse email</a></p>
+               <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${linkData.properties.action_link}</p>
+             </div>`
+          )
+        : false;
+
+      res.json({ success: true, tenant_id: tenant.id, emailSent });
+    } catch (e: any) {
+      console.error('[register] Unexpected error:', e);
+      res.status(500).json({ error: e.message || "Erreur lors de l'inscription." });
     }
-    // Vérifier unicité du slug
-    const { data: existing } = await supabaseAdmin
-      .from("tenants")
-      .select("id")
-      .eq("slug", slug)
-      .single();
-    if (existing) {
-      return res.status(409).json({ error: "Cet identifiant est déjà pris." });
-    }
-    // Créer l'utilisateur Supabase Auth
-    const { data: authData, error: signUpError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      user_metadata: { name: admin_name },
-      email_confirm: true,
-    });
-    if (signUpError || !authData?.user) {
-      return res.status(400).json({ error: signUpError?.message || "Erreur création compte." });
-    }
-    // Créer le tenant
-    const { data: tenant, error: tenantError } = await supabaseAdmin
-      .from("tenants")
-      .insert({ slug, name: cabinet_name })
-      .select()
-      .single();
-    if (tenantError || !tenant) {
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-      return res.status(500).json({ error: "Erreur création cabinet." });
-    }
-    // Lier le profil au tenant
-    await supabaseAdmin
-      .from("profiles")
-      .upsert({ id: authData.user.id, tenant_id: tenant.id, name: admin_name, system_role: "admin", role: "admin" });
-    res.json({ success: true, tenant_id: tenant.id });
+  });
+
+  // Renvoyer l'email de confirmation (ne révèle jamais si le compte existe).
+  app.post("/api/public/resend-confirmation", async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim();
+      if (!email) return res.status(400).json({ error: "Email requis" });
+
+      const { data: profile } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
+      if (profile) {
+        const appUrl = process.env.APP_URL || 'http://localhost:3000';
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'magiclink',
+          email,
+          options: { redirectTo: `${appUrl}/login?confirmed=1` },
+        });
+        if (linkData?.properties?.action_link) {
+          await sendPlatformMail(
+            email,
+            "Confirmez votre adresse email — ArchiOffice",
+            `<p>Confirmez votre adresse email : <a href="${linkData.properties.action_link}">${linkData.properties.action_link}</a></p>`
+          );
+        }
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // Public: get tenant branding info by slug (used on subdomain login page)
@@ -2576,16 +2640,156 @@ async function startServer() {
 
   app.get("/api/me", async (req: any, res: any) => {
     try {
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, tenant_id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (!data) return res.json(null);
       res.json({
         ...data,
+        tenantId: data.tenant_id,
         senderOption: data.sender_option,
         defaultEmailTemplate: data.default_email_template,
         jobTitle: data.job_title,
       });
     } catch (e: any) { res.status(500).json({ error: "Failed to fetch profile" }); }
+  });
+
+  // ─── Agency setup (compte authentifié sans tenant — création OAuth ou en attente de rattachement) ─────
+
+  async function bestEffortNotifyAdmins(tenantId: string, subject: string, html: string) {
+    try {
+      const { data: admins } = await supabaseAdmin
+        .from('profiles')
+        .select('email')
+        .eq('tenant_id', tenantId)
+        .eq('system_role', 'admin');
+      const recipients = (admins || []).map((a: any) => a.email).filter(Boolean);
+      if (!recipients.length) return;
+      const smtpHost = process.env.SMTP_HOST;
+      const smtpUser = process.env.SMTP_USER;
+      const smtpPass = process.env.SMTP_PASS;
+      if (!smtpHost || !smtpUser || !smtpPass) return;
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(String(process.env.SMTP_PORT || '587')),
+        secure: String(process.env.SMTP_PORT) === '465',
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+      await transporter.sendMail({ from: `"ArchiOffice" <${smtpUser}>`, to: recipients.join(','), subject, html });
+    } catch (e: any) {
+      console.error('[agency-setup] Notification email failed:', e.message);
+    }
+  }
+
+  app.get("/api/agency-setup/status", async (req: any, res: any) => {
+    try {
+      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
+      if (profile?.tenant_id) return res.json({ hasTenant: true, pendingRequest: null });
+
+      const { data: pending } = await supabaseAdmin
+        .from('join_requests')
+        .select('id, tenant_id, created_at, tenants(name)')
+        .eq('user_id', req.user.id)
+        .eq('status', 'pending')
+        .maybeSingle();
+
+      res.json({
+        hasTenant: false,
+        pendingRequest: pending ? { id: pending.id, tenantName: (pending as any).tenants?.name, createdAt: pending.created_at } : null,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/agency-setup/search", async (req: any, res: any) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      if (q.length < 2) return res.json([]);
+      const { data, error } = await supabaseAdmin
+        .from('tenants')
+        .select('id, name')
+        .ilike('name', `%${q}%`)
+        .order('name')
+        .limit(10);
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/agency-setup/create", async (req: any, res: any) => {
+    try {
+      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
+      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
+
+      const agencyName = String(req.body?.agencyName || '').trim();
+      if (!agencyName) return res.status(400).json({ error: "Le nom de l'agence est requis" });
+      const address = req.body?.address ? String(req.body.address) : null;
+      const phone = req.body?.phone ? String(req.body.phone) : null;
+      const email = req.body?.email ? String(req.body.email) : null;
+
+      const base = agencyName.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'cabinet';
+      const slug = base + '-' + Date.now().toString(36);
+
+      const { data: tenant, error: tenantErr } = await supabaseAdmin
+        .from('tenants')
+        .insert({ slug, name: agencyName })
+        .select()
+        .single();
+      if (tenantErr || !tenant) return res.status(500).json({ error: tenantErr?.message || 'Erreur création agence' });
+
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(req.user.id);
+      const displayName = authUser?.user?.user_metadata?.name || req.user.email?.split('@')[0] || agencyName;
+
+      const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
+        id: req.user.id, tenant_id: tenant.id, name: displayName, email: req.user.email, role: 'admin', system_role: 'admin',
+      });
+      if (profileErr) return res.status(500).json({ error: profileErr.message });
+
+      if (address || phone || email) {
+        await supabaseAdmin.from('settings').upsert({ tenant_id: tenant.id, agency_name: agencyName, address, phone, email });
+      }
+
+      // Une éventuelle demande de rattachement en attente devient sans objet.
+      await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
+
+      res.json({ success: true, tenantId: tenant.id });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/agency-setup/join", async (req: any, res: any) => {
+    try {
+      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
+      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
+
+      const tenantId = String(req.body?.tenantId || '');
+      if (!tenantId) return res.status(400).json({ error: 'Agence requise' });
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name').eq('id', tenantId).single();
+      if (!tenant) return res.status(404).json({ error: 'Agence introuvable' });
+
+      // Une seule demande en attente à la fois : on remplace l'ancienne si elle vise une autre agence.
+      await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
+
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(req.user.id);
+      const name = authUser?.user?.user_metadata?.name || req.user.email?.split('@')[0] || '';
+
+      const { data: request, error } = await supabaseAdmin.from('join_requests').insert({
+        tenant_id: tenantId, user_id: req.user.id, email: req.user.email, name,
+      }).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+
+      bestEffortNotifyAdmins(
+        tenantId,
+        'Nouvelle demande de rattachement — ArchiOffice',
+        `<p>${name || req.user.email} (${req.user.email}) demande à rejoindre votre agence <strong>${tenant.name}</strong> sur ArchiOffice.</p><p>Rendez-vous sur la page Équipe pour approuver ou refuser cette demande.</p>`
+      );
+
+      res.json({ success: true, requestId: request.id, tenantName: tenant.name });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/agency-setup/join", async (req: any, res: any) => {
+    try {
+      await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.put("/api/team/:id", async (req: any, res: any) => {
@@ -2699,6 +2903,65 @@ async function startServer() {
       console.error("Error updating user role:", e);
       res.status(500).json({ error: "Failed to update role" });
     }
+  });
+
+  async function requireTenantAdmin(userId: string): Promise<string> {
+    const tenantId = await getTenantId(userId);
+    const { data: profile } = await supabaseAdmin.from('profiles').select('system_role').eq('id', userId).single();
+    if (profile?.system_role !== 'admin') {
+      const err: any = new Error("Réservé aux administrateurs de l'agence");
+      err.status = 403;
+      throw err;
+    }
+    return tenantId;
+  }
+
+  app.get("/api/team/join-requests", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('join_requests')
+        .select('id, email, name, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  app.post("/api/team/join-requests/:id/approve", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data: request } = await supabaseAdmin.from('join_requests').select('*').eq('id', req.params.id).eq('tenant_id', tenantId).eq('status', 'pending').single();
+      if (!request) return res.status(404).json({ error: 'Demande introuvable' });
+
+      await checkQuota(tenantId, 'users');
+
+      const { data: existingProfile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', request.user_id).single();
+      if (existingProfile?.tenant_id) return res.status(409).json({ error: 'Cet utilisateur est déjà rattaché à une agence' });
+
+      const { error: profileErr } = await supabaseAdmin.from('profiles').update({
+        tenant_id: tenantId, email: request.email, name: request.name, role: 'Member', system_role: 'user',
+      }).eq('id', request.user_id);
+      if (profileErr) return res.status(500).json({ error: profileErr.message });
+
+      await supabaseAdmin.from('join_requests').update({ status: 'approved', decided_at: new Date().toISOString(), decided_by: req.user.id }).eq('id', request.id);
+      res.json({ success: true });
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  app.post("/api/team/join-requests/:id/reject", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data, error } = await supabaseAdmin
+        .from('join_requests')
+        .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_by: req.user.id })
+        .eq('id', req.params.id).eq('tenant_id', tenantId).eq('status', 'pending')
+        .select().single();
+      if (error || !data) return res.status(404).json({ error: 'Demande introuvable' });
+      res.json({ success: true });
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
   });
 
   app.get("/api/tenders", async (req: any, res: any) => {

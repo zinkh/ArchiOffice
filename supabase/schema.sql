@@ -69,6 +69,23 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
+-- Demandes de rattachement à une agence existante (nouveau compte sans tenant
+-- qui choisit "Rejoindre une agence existante" — validé par un admin du tenant)
+CREATE TABLE IF NOT EXISTS join_requests (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  email       TEXT NOT NULL,
+  name        TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  decided_at  TIMESTAMPTZ,
+  decided_by  UUID REFERENCES auth.users(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS join_requests_pending_user_idx
+  ON join_requests(user_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS join_requests_tenant_idx ON join_requests(tenant_id);
+
 -- ============================================================
 -- 3. TABLES MÉTIER (toutes avec tenant_id)
 -- ============================================================
@@ -540,7 +557,8 @@ ALTER TABLE lignes_ouvrages      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE articles_type        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_templates    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE act_data             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE det_data             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE det_data              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE join_requests        ENABLE ROW LEVEL SECURITY;
 
 -- Helper function : tenant_id du user connecté
 CREATE OR REPLACE FUNCTION my_tenant_id()
@@ -639,6 +657,10 @@ CREATE POLICY "own_profile" ON profiles
 -- Tenants : visible par ses membres uniquement
 CREATE POLICY "own_tenant" ON tenants
   USING (id = my_tenant_id());
+
+-- Join requests : visible par le demandeur ou les membres du tenant visé
+CREATE POLICY "tenant_isolation" ON join_requests
+  USING (tenant_id = my_tenant_id() OR user_id = auth.uid());
 
 -- Activity Feed tables
 CREATE TABLE IF NOT EXISTS activities (

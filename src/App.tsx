@@ -48,6 +48,7 @@ import Login from './pages/Login';
 import CloudImportProgress from './pages/CloudImportProgress';
 import Register from './pages/Register';
 import Onboarding from './pages/Onboarding';
+import AgencySetup from './pages/AgencySetup';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
@@ -592,6 +593,16 @@ function ProtectedLayout() {
     return <Navigate to="/login" replace />;
   }
 
+  // Cloud accounts (OAuth signup, or a join-request awaiting approval) can
+  // reach this point with no agency attached yet — send them to agency
+  // setup instead of into a workspace with no tenant. Offline desktop
+  // accounts always have a tenant from local-setup, and tenantId is left
+  // `undefined` (not `null`) until /api/me actually answers, so this only
+  // fires once we're sure there's really no agency.
+  if (!isOfflineBuild() && currentUser.tenantId === null) {
+    return <Navigate to="/agency-setup" replace />;
+  }
+
   return (
     <AgentChatProvider>
     <div
@@ -635,6 +646,7 @@ export default function App() {
             <Route path="/cloud-import-progress" element={<CloudImportProgress />} />
             <Route path="/register" element={<Register />} />
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/agency-setup" element={<AgencySetup />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfUse />} />
             <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />

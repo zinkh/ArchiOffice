@@ -420,6 +420,9 @@ const resources = {
       // Team
       "team_subtitle": "Manage design team members and external consultants.",
       "team_add_member_btn": "Add Team Member",
+      "team_join_requests_title": "Pending join requests",
+      "team_join_request_approve": "Approve",
+      "team_join_request_reject": "Reject",
       "team_system_access": "System Access",
       "team_role_user": "User (View only/Limited)",
       "team_role_pm": "Project Manager",
@@ -1055,6 +1058,9 @@ const resources = {
       // Team
       "team_subtitle": "Gérez les membres de l'équipe et les consultants externes.",
       "team_add_member_btn": "Ajouter un membre",
+      "team_join_requests_title": "Demandes de rattachement en attente",
+      "team_join_request_approve": "Approuver",
+      "team_join_request_reject": "Refuser",
       "team_system_access": "Accès système",
       "team_role_user": "Utilisateur (Lecture seule/Limité)",
       "team_role_pm": "Chef de projet",

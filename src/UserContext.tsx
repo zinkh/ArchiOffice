@@ -43,6 +43,8 @@ function mapSupabaseUser(user: MinimalUser): UserProfile {
     system_role: (user.app_metadata?.system_role as UserProfile['system_role']) ?? 'admin',
     role: user.user_metadata?.role ?? 'admin',
     avatar: user.user_metadata?.avatar_url,
+    // Unknown until /api/me responds — treated as "loading", not "no tenant".
+    tenantId: undefined,
   };
 }
 
@@ -65,6 +67,9 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
       department: profile.department ?? undefined,
       senderOption: profile.senderOption ?? undefined,
       defaultEmailTemplate: profile.defaultEmailTemplate ?? undefined,
+      // null = confirmed no agency yet (drives the /agency-setup redirect below);
+      // offline builds have no /api/me tenantId field, so this stays undefined there.
+      tenantId: profile.tenantId ?? null,
     };
   } catch {
     return base;
