@@ -135,7 +135,27 @@ export function createOfflineGateway({ postgrestUrl }: OfflineGatewayOptions): R
 
   // Mounted before server.ts's own express.json()/urlencoded() so PostgREST
   // requests keep their raw body stream intact for the proxy to forward.
-  router.use('/rest/v1', createProxyMiddleware({ target: postgrestUrl, changeOrigin: true }));
+  router.use(
+    '/rest/v1',
+    createProxyMiddleware({
+      target: postgrestUrl,
+      changeOrigin: true,
+      on: {
+        proxyReq: (proxyReq) => {
+          // supabaseAdmin always sends Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>
+          // (a random local secret generated per launch — see electron/main.cjs —
+          // not a real JWT). PostgREST has no PGRST_JWT_SECRET configured, since
+          // it isn't meant to verify anything locally: every request should run
+          // as the fixed PGRST_DB_ANON_ROLE (no RLS locally), and real auth
+          // already happened in server.ts's own middleware before a request ever
+          // reaches this proxy. Forwarding that header verbatim instead makes
+          // PostgREST reject every single request with "Server lacks JWT secret"
+          // (confirmed on a real Windows install) — strip it before proxying.
+          proxyReq.removeHeader('authorization');
+        },
+      },
+    }),
+  );
 
   const authRouter = Router();
   mountAuthShim(authRouter);
