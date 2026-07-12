@@ -102,8 +102,8 @@ interface EnrichedItem {
   montant_periode: number;
 }
 
-const f2 = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const pct = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' %';
+const f2 = (n: number | null | undefined) => (n ?? 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (n: number | null | undefined) => (n ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' %';
 
 // ── Constantes indices BT/TP courants ───────────────────────────────────────
 const INDICES_COURANTS: { code: string; label: string }[] = [
