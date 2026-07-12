@@ -84,18 +84,6 @@ jobs:
           curl -sSL -o vendor/vc_redist.x64.exe https://aka.ms/vs/17/release/vc_redist.x64.exe
           ls -la vendor/vc_redist.x64.exe
 
-      # TEMPORARY — see electron/diagPostgrest.cjs. A real Windows install
-      # showed PostgREST logging "API server listening" and then exiting with
-      # code 3 within milliseconds, too fast to see why. This runs the real
-      # binaries directly on this Windows runner (full network + real Windows
-      # environment) and captures PostgREST's full output over 10s instead of
-      # the packaged app's much shorter window, without needing another
-      # install/reinstall round-trip. Delete this step and the script once
-      # the real crash cause is found and fixed.
-      - name: Diagnose PostgREST startup (temporary)
-        shell: bash
-        run: node electron/diagPostgrest.cjs
-
       - name: Build NSIS installer
         run: npx electron-builder --win --x64 --publish never
 
