@@ -138,6 +138,30 @@ function waitForHttp(url, timeoutMs) {
 }
 
 /**
+ * PostgREST's Windows binary dynamically links against libpq (and libpq's
+ * own dependencies: OpenSSL, zlib, ICU, ...) — confirmed via the actual
+ * Windows error dialog on a real install: "LIBPQ.dll est introuvable". The
+ * official PostgREST Windows release ships only postgrest.exe itself, no
+ * libpq.dll alongside it (the downloaded zip contains a single file — ruled
+ * out separately). Rather than vendor a second copy of these DLLs, reuse the
+ * ones that already ship inside the embedded-postgres Windows platform
+ * package (bundled anyway for postgres.exe/initdb.exe themselves — see
+ * electron-builder.yml's node_modules/@embedded-postgres extraResource) by
+ * adding its bin/ directory to the child process's DLL search path: Windows
+ * falls back to PATH when a DLL isn't found next to the launching exe.
+ * @param {string | null} resourcesDir
+ */
+function dllSearchPathEnv(resourcesDir) {
+  if (process.platform !== 'win32' || !resourcesDir) return {};
+  const libDir = path.join(resourcesDir, 'node_modules', '@embedded-postgres', 'windows-x64', 'native', 'bin');
+  // process.env's PATH key is case-insensitive on Windows (usually "Path") —
+  // preserve whatever casing is already there instead of adding a second,
+  // possibly-conflicting "PATH" key.
+  const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') || 'Path';
+  return { [pathKey]: `${libDir}${path.delimiter}${process.env[pathKey] || ''}` };
+}
+
+/**
  * @param {(msg: string) => void} [log]
  * @param {string | null} [resourcesDir]
  */
@@ -149,14 +173,20 @@ function startPostgrest(log = console.log, resourcesDir = null) {
   const child = spawn(bin, [], {
     env: {
       ...process.env,
+      ...dllSearchPathEnv(resourcesDir),
       PGRST_DB_URI: `postgres://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/postgres`,
       PGRST_DB_SCHEMAS: 'public',
       PGRST_DB_ANON_ROLE: PG_USER, // no RLS locally (see offline plan) — every request acts as this role
       PGRST_SERVER_HOST: '127.0.0.1',
       PGRST_SERVER_PORT: String(POSTGREST_PORT),
     },
-    stdio: 'inherit',
+    // 'inherit' is invisible on a windowless packaged app (same reason
+    // electron/main.cjs pipes the spawned server's own output into the log
+    // file) — capture PostgREST's own stdout/stderr too.
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  child.stdout.on('data', (d) => log('[postgrest]', d.toString().trim()));
+  child.stderr.on('data', (d) => log('[postgrest:err]', d.toString().trim()));
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) log(`[pgBootstrap] PostgREST exited unexpectedly (code ${code})`);
   });
