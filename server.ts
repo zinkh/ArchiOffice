@@ -1465,68 +1465,73 @@ async function startServer() {
 
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", async (req, res) => {
-    const { cabinet_name, slug, admin_name, email, password } = req.body;
-    if (!cabinet_name || !slug || !admin_name || !email || !password) {
-      return res.status(400).json({ error: "Tous les champs sont requis." });
-    }
-    if (String(password).length < 8) {
-      return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
-    }
-    // Vérifier unicité du slug
-    const { data: existing } = await supabaseAdmin
-      .from("tenants")
-      .select("id")
-      .eq("slug", slug)
-      .single();
-    if (existing) {
-      return res.status(409).json({ error: "Cet identifiant est déjà pris." });
-    }
+    try {
+      const { cabinet_name, slug, admin_name, email, password } = req.body;
+      if (!cabinet_name || !slug || !admin_name || !email || !password) {
+        return res.status(400).json({ error: "Tous les champs sont requis." });
+      }
+      if (String(password).length < 8) {
+        return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
+      }
+      // Vérifier unicité du slug
+      const { data: existing } = await supabaseAdmin
+        .from("tenants")
+        .select("id")
+        .eq("slug", slug)
+        .single();
+      if (existing) {
+        return res.status(409).json({ error: "Cet identifiant est déjà pris." });
+      }
 
-    // Créer l'utilisateur Supabase Auth SANS confirmer l'email — la confirmation
-    // se fait via le lien envoyé ci-dessous (email_confirm: true bypassait
-    // totalement la vérification d'adresse).
-    const appUrl = process.env.APP_URL || 'http://localhost:3000';
-    const { data: linkData, error: signUpError } = await supabaseAdmin.auth.admin.generateLink({
-      type: 'signup',
-      email,
-      password,
-      options: { data: { name: admin_name }, redirectTo: `${appUrl}/login?confirmed=1` },
-    });
-    if (signUpError || !linkData?.user) {
-      return res.status(400).json({ error: signUpError?.message || "Erreur création compte." });
+      // Créer l'utilisateur Supabase Auth SANS confirmer l'email — la confirmation
+      // se fait via le lien envoyé ci-dessous (email_confirm: true bypassait
+      // totalement la vérification d'adresse).
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error: signUpError } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'signup',
+        email,
+        password,
+        options: { data: { name: admin_name }, redirectTo: `${appUrl}/login?confirmed=1` },
+      });
+      if (signUpError || !linkData?.user) {
+        return res.status(400).json({ error: signUpError?.message || "Erreur création compte." });
+      }
+      const userId = linkData.user.id;
+
+      // Créer le tenant
+      const { data: tenant, error: tenantError } = await supabaseAdmin
+        .from("tenants")
+        .insert({ slug, name: cabinet_name })
+        .select()
+        .single();
+      if (tenantError || !tenant) {
+        await supabaseAdmin.auth.admin.deleteUser(userId);
+        return res.status(500).json({ error: "Erreur création cabinet." });
+      }
+      // Lier le profil au tenant
+      await supabaseAdmin
+        .from("profiles")
+        .upsert({ id: userId, tenant_id: tenant.id, name: admin_name, email, system_role: "admin", role: "admin" });
+
+      const emailSent = linkData.properties?.action_link
+        ? await sendPlatformMail(
+            email,
+            "Confirmez votre adresse email — ArchiOffice",
+            `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+               <h2 style="color: #2563eb;">Bienvenue sur ArchiOffice</h2>
+               <p>Bonjour ${admin_name},</p>
+               <p>Confirmez votre adresse email pour activer le compte de <strong>${cabinet_name}</strong> :</p>
+               <p style="margin: 24px 0;"><a href="${linkData.properties.action_link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Confirmer mon adresse email</a></p>
+               <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${linkData.properties.action_link}</p>
+             </div>`
+          )
+        : false;
+
+      res.json({ success: true, tenant_id: tenant.id, emailSent });
+    } catch (e: any) {
+      console.error('[register] Unexpected error:', e);
+      res.status(500).json({ error: e.message || "Erreur lors de l'inscription." });
     }
-    const userId = linkData.user.id;
-
-    // Créer le tenant
-    const { data: tenant, error: tenantError } = await supabaseAdmin
-      .from("tenants")
-      .insert({ slug, name: cabinet_name })
-      .select()
-      .single();
-    if (tenantError || !tenant) {
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-      return res.status(500).json({ error: "Erreur création cabinet." });
-    }
-    // Lier le profil au tenant
-    await supabaseAdmin
-      .from("profiles")
-      .upsert({ id: userId, tenant_id: tenant.id, name: admin_name, email, system_role: "admin", role: "admin" });
-
-    const emailSent = linkData.properties?.action_link
-      ? await sendPlatformMail(
-          email,
-          "Confirmez votre adresse email — ArchiOffice",
-          `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-             <h2 style="color: #2563eb;">Bienvenue sur ArchiOffice</h2>
-             <p>Bonjour ${admin_name},</p>
-             <p>Confirmez votre adresse email pour activer le compte de <strong>${cabinet_name}</strong> :</p>
-             <p style="margin: 24px 0;"><a href="${linkData.properties.action_link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Confirmer mon adresse email</a></p>
-             <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${linkData.properties.action_link}</p>
-           </div>`
-        )
-      : false;
-
-    res.json({ success: true, tenant_id: tenant.id, emailSent });
   });
 
   // Renvoyer l'email de confirmation (ne révèle jamais si le compte existe).
