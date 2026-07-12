@@ -212,4 +212,13 @@ async function startOfflineDataStack(dataDir, log = console.log, resourcesDir = 
   };
 }
 
-module.exports = { startLocalPostgres, startPostgrest, startOfflineDataStack, PG_PORT, PG_USER, PG_PASSWORD, POSTGREST_PORT };
+module.exports = {
+  startLocalPostgres,
+  startPostgrest,
+  startOfflineDataStack,
+  postgrestBinaryPath,
+  PG_PORT,
+  PG_USER,
+  PG_PASSWORD,
+  POSTGREST_PORT,
+};
