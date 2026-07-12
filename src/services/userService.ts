@@ -34,3 +34,24 @@ export const createUser = async (user: Omit<UserProfile, 'id'>): Promise<UserPro
   }
   return res.json();
 };
+
+export interface JoinRequest {
+  id: string;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+export const getJoinRequests = async (): Promise<JoinRequest[]> => {
+  const res = await fetch('/api/team/join-requests');
+  if (!res.ok) throw new Error('Failed to fetch join requests');
+  return res.json();
+};
+
+export const decideJoinRequest = async (id: string, decision: 'approve' | 'reject'): Promise<void> => {
+  const res = await fetch(`/api/team/join-requests/${id}/${decision}`, { method: 'POST' });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to decide join request');
+  }
+};

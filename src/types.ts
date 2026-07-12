@@ -286,6 +286,7 @@ export interface TeamMember {
   address?: string;
   jobTitle?: string;
   department?: string;
+  tenantId?: string | null;
 }
 
 export interface Milestone {

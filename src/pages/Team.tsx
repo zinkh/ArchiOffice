@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck } from '@tabler/icons-react';
+import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
-import { getAllUsers, updateUserRole, createUser, UserProfile } from '../services/userService';
+import { getAllUsers, updateUserRole, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { useUser } from '../UserContext';
 
 export default function Team() {
@@ -19,10 +19,32 @@ export default function Team() {
     system_role: 'user',
     role: 'Member'
   });
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+
+  const isAdmin = currentUser?.system_role === 'admin';
 
   useEffect(() => {
     getAllUsers().then(setTeam).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    getJoinRequests().then(setJoinRequests).catch(console.error);
+  }, [isAdmin]);
+
+  const handleDecideJoinRequest = async (id: string, decision: 'approve' | 'reject') => {
+    setDecidingId(id);
+    try {
+      await decideJoinRequest(id, decision);
+      setJoinRequests(prev => prev.filter(r => r.id !== id));
+      if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
+    } catch (err: any) {
+      alert(err.message || 'Erreur lors du traitement de la demande.');
+    } finally {
+      setDecidingId(null);
+    }
+  };
 
   const handleRoleChange = async (id: string, newRole: 'admin' | 'pm' | 'user') => {
     try {
@@ -56,8 +78,6 @@ export default function Team() {
     }
   };
 
-  const isAdmin = currentUser?.system_role === 'admin';
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -75,6 +95,43 @@ export default function Team() {
           </button>
         )}
       </div>
+
+      {isAdmin && joinRequests.length > 0 && (
+        <div className="bg-white dark:bg-zinc-800 rounded-xl border border-amber-300 dark:border-amber-700/50 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <IconClock size={18} className="text-amber-600 dark:text-amber-400" />
+            <h3 className="font-bold text-zinc-900 dark:text-white">{t('team_join_requests_title')}</h3>
+          </div>
+          <div className="space-y-3">
+            {joinRequests.map(request => (
+              <div key={request.id} className="flex items-center justify-between gap-3 p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg">
+                <div className="min-w-0">
+                  <p className="font-medium text-zinc-900 dark:text-white truncate">{request.name || request.email}</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{request.email}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => handleDecideJoinRequest(request.id, 'reject')}
+                    disabled={decidingId === request.id}
+                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                    title={t('team_join_request_reject') as string}
+                  >
+                    <IconX size={16} />
+                  </button>
+                  <button
+                    onClick={() => handleDecideJoinRequest(request.id, 'approve')}
+                    disabled={decidingId === request.id}
+                    className="p-2 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50"
+                    title={t('team_join_request_approve') as string}
+                  >
+                    <IconCheck size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {team.map((member, i) => (
