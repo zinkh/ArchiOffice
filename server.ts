@@ -1940,6 +1940,8 @@ async function startServer() {
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       }).select().single();
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de l'ordre de service "${title || os_number}"`, title || os_number || '', id, 'ordre_de_service', 'Ordres de service');
       res.status(201).json(data);
     } catch (e: any) {
       console.error("Error creating OS:", e);
@@ -1979,8 +1981,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: os } = await supabaseAdmin.from('ordres_de_service').select('title, os_number').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('ordres_de_service').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const label = (os as any)?.title || (os as any)?.os_number || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de l'ordre de service "${label}"`, label, id, 'ordre_de_service', 'Ordres de service');
       res.json({ success: true });
     } catch (e: any) {
       console.error(e);
@@ -2001,8 +2007,13 @@ async function startServer() {
       if (date_ar) updateData.date_ar = date_ar;
       if (date_execution) updateData.date_execution = date_execution;
       if (notes_ar) updateData.notes_ar = notes_ar;
+      const { data: os } = await supabaseAdmin.from('ordres_de_service').select('title, os_number').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('ordres_de_service').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const label = (os as any)?.title || (os as any)?.os_number || '';
+      const STATUS_LABELS: Record<string, string> = { draft: 'brouillon', submitted: 'soumis', approved: 'approuvé', rejected: 'rejeté' };
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Ordre de service "${label}" marqué ${STATUS_LABELS[status] || status}`, label, id, 'ordre_de_service', 'Ordres de service');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
   });
@@ -2139,6 +2150,8 @@ async function startServer() {
         status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber
       }).select().single();
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la réserve N° ${nextNumber} "${title}"`, title || '', id, 'reserve', 'Réserves/Observations');
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create reserve" }); }
   });
@@ -2146,8 +2159,11 @@ async function startServer() {
   app.delete("/api/reserves/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      const { data: reserve } = await supabaseAdmin.from('reserves').select('title, number').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('reserves').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la réserve N° ${(reserve as any)?.number} "${(reserve as any)?.title || ''}"`, (reserve as any)?.title || '', req.params.id, 'reserve', 'Réserves/Observations');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete reserve" }); }
   });
@@ -2216,6 +2232,8 @@ async function startServer() {
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
@@ -2225,6 +2243,7 @@ async function startServer() {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       // Fetch all version URLs before deleting DB rows
+      const { data: doc } = await supabaseAdmin.from('documents').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { data: versions } = await supabaseAdmin.from('document_versions').select('file_url').eq('document_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
@@ -2237,6 +2256,9 @@ async function startServer() {
           }
         }
       }
+      const docName = (doc as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du document "${docName}"`, docName, id, 'document', 'Documents');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
@@ -2467,8 +2489,7 @@ async function startServer() {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
       // Log activity
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
 
       res.status(201).json({ id, project_code });
@@ -2539,6 +2560,7 @@ async function startServer() {
       const userRole = req.headers['x-user-role'];
       console.log(`Attempting to delete project ${id} with role ${userRole}`);
       if (userRole !== 'admin') return res.status(403).json({ error: "Only administrators can delete projects" });
+      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
@@ -2547,6 +2569,9 @@ async function startServer() {
       ]);
       const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const name = (project as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du projet "${name}"`, name, id, 'project', 'Projets');
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting project:", error);
@@ -2600,6 +2625,8 @@ async function startServer() {
       const id = bodyId || crypto.randomUUID();
       const { error } = await supabaseAdmin.from('tasks').insert({ id, tenant_id: tenantId, project_id, title, start_date, end_date, progress: progress || 0, dependencies: dependencies || [] });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la tâche "${title}"`, title, id, 'task', 'Tâches');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create task" }); }
   });
@@ -2619,8 +2646,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: task } = await supabaseAdmin.from('tasks').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('tasks').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const title = (task as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la tâche "${title}"`, title, id, 'task', 'Tâches');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete task" }); }
   });
@@ -2995,8 +3026,7 @@ async function startServer() {
       if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
       const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
       // Log activity
-      const { data: meTndr } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userNameTndr = (meTndr as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userNameTndr = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
       res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
@@ -3006,10 +3036,14 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: tender } = await supabaseAdmin.from('tenders').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('tenders').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const title = (tender as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de l'appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender" }); }
   });
@@ -3096,6 +3130,8 @@ async function startServer() {
       const last_updated = new Date().toISOString();
       const { error } = await supabaseAdmin.from('specifications').insert({ id, tenant_id: tenantId, project_id, title, content, last_updated, is_template: !!is_template });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du CCTP "${title}"`, title, id, 'specification', 'CCTP');
       res.status(201).json({ id, last_updated });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create specification: " + e.message }); }
   });
@@ -3116,8 +3152,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: spec } = await supabaseAdmin.from('specifications').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('specifications').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const title = (spec as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du CCTP "${title}"`, title, id, 'specification', 'CCTP');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete specification: " + e.message }); }
   });
@@ -3139,6 +3179,9 @@ async function startServer() {
       const id = contact.id || crypto.randomUUID();
       const { error } = await supabaseAdmin.from('contacts').insert({ ...contact, id, tenant_id: tenantId });
       if (error) throw error;
+      const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
       res.status(201).json({ id });
     } catch (e: any) {
       console.error("Error creating contact:", e.message);
@@ -3166,8 +3209,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: contact } = await supabaseAdmin.from('contacts').select('first_name, last_name, company_name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('contacts').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const contactName = (contact as any)?.company_name || `${(contact as any)?.first_name || ''} ${(contact as any)?.last_name || ''}`.trim();
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error deleting contact:", e.message);
@@ -3367,6 +3414,8 @@ async function startServer() {
       const contact = (proposal as any)?.contacts;
       const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
       const { contacts: _c, ...rest } = (proposal as any) || {};
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du devis "${proposalData.reference}"`, client_name, id, 'proposal', 'Devis');
       res.status(201).json({ ...rest, client_name, specialties_list: (proposal as any)?.proposal_specialties || [] });
     } catch (error: any) {
       console.error("Error creating proposal:", error);
@@ -3549,8 +3598,7 @@ async function startServer() {
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
 
       // Log activity
-      const { data: meInv } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userNameInv = (meInv as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userNameInv = await getUserName(tenantId, req.user.id, req.user.email);
       const invLabel = invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture';
       logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${invoice_number || id.slice(0, 8)}`, project_name || '', id, 'invoice', 'Factures');
 
@@ -4275,7 +4323,7 @@ async function startServer() {
 
   const logActivity = async (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => {
     try {
-      await supabaseAdmin.from('activities').insert({
+      const { error } = await supabaseAdmin.from('activities').insert({
         id: crypto.randomUUID(),
         tenant_id: tenantId,
         user_id: userId,
@@ -4287,19 +4335,27 @@ async function startServer() {
         category,
         created_at: new Date().toISOString()
       });
+      if (error) console.error('[logActivity] insert failed:', error);
     } catch (e) {
-      // Non-blocking
+      console.error('[logActivity] unexpected error:', e);
     }
+  };
+
+  const getUserName = async (tenantId: string, userId: string, email?: string): Promise<string> => {
+    const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', userId).eq('tenant_id', tenantId).maybeSingle();
+    return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const [{ data: acts }, { data: posts }, { data: member }] = await Promise.all([
+      const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: member }] = await Promise.all([
         supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
       ]);
+      if (actsError) console.error('[GET /api/feed] activities query failed:', actsError);
+      if (postsError) console.error('[GET /api/feed] feed_posts query failed:', postsError);
 
       const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
 
@@ -4361,12 +4417,12 @@ async function startServer() {
       if (!content?.trim()) return res.status(400).json({ error: "Content required" });
 
       // Get user name
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
 
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      if (insertError) throw insertError;
       res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
     } catch (err: any) {
       console.error(err);
@@ -4426,13 +4482,14 @@ async function startServer() {
       const { id } = req.params;
       const { content } = req.body;
       if (!content?.trim()) return res.status(400).json({ error: "Content required" });
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
       const commentId = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      if (insertError) throw insertError;
       res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
     } catch (err: any) {
+      console.error(err);
       res.status(500).json({ error: "Failed to add comment" });
     }
   });
@@ -4543,6 +4600,10 @@ async function startServer() {
       const id = crypto.randomUUID();
       const { error: insErr } = await supabaseAdmin.from('site_reports').insert({ id, tenant_id: tenantId, project_id: projectId, date, report_number });
       if (insErr) throw insErr;
+      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
+      const projectName = (project as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${report_number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
       // Copy open notes from previous report
       const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
       if (previousReports && previousReports.length > 0) {
@@ -4579,6 +4640,8 @@ async function startServer() {
       const id = crypto.randomUUID();
       const { error } = await supabaseAdmin.from('site_report_notes').insert({ id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Ajout de la note de chantier N° ${note_number}`, category || '', id, 'site_report_note', 'Notes de site');
       res.status(201).json({ id });
     } catch (error) {
       res.status(500).json({ error: "Failed to create note" });
@@ -4623,8 +4686,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { noteId } = req.params;
+      const { data: note } = await supabaseAdmin.from('site_report_notes').select('note_number, category').eq('id', noteId).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('site_report_notes').delete().eq('id', noteId).eq('tenant_id', tenantId);
       if (error) throw error;
+      const noteNumber = (note as any)?.note_number;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la note de chantier N° ${noteNumber}`, (note as any)?.category || '', noteId, 'site_report_note', 'Notes de site');
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete note" });
@@ -4672,6 +4739,8 @@ async function startServer() {
       if (created_report_id) {
         await supabaseAdmin.from('observation_reports').insert({ observation_id: id, report_id: created_report_id });
       }
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de l'observation N° ${number}`, texte || '', id, 'observation', 'Réserves/Observations');
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Failed to create observation" });
@@ -4697,8 +4766,11 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: obs } = await supabaseAdmin.from('observations').select('number, texte').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('observations').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de l'observation N° ${(obs as any)?.number}`, (obs as any)?.texte || '', id, 'observation', 'Réserves/Observations');
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete observation" });
@@ -4802,6 +4874,10 @@ async function startServer() {
         await supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
       } else {
         await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
+        const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
+        const projectName = (project as any)?.name || '';
+        const userName = await getUserName(tenantId, req.user.id, req.user.email);
+        logActivity(tenantId, req.user.id, userName, `Création du DPGF du projet "${projectName}"`, projectName, id, 'dpgf', 'Situations/DPGF');
       }
       res.json(data);
     } catch (error) {
@@ -5160,6 +5236,8 @@ async function startServer() {
       const tenantId = await getTenantId(req.user.id);
       zohoAccessTokenCache = null;
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Failed to disconnect Zoho' });
@@ -5248,6 +5326,8 @@ async function startServer() {
         errors.push(`Récupération échouée: ${err.response?.data?.message || err.message}`);
       }
 
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
       res.json({ pushed, pulled, errors });
     } catch (error: any) {
       console.error('[Zoho sync error]', error.message);
@@ -5354,6 +5434,8 @@ async function startServer() {
       const tenantId = await getTenantId(req.user.id);
       zohoBooksAccessTokenCache = null;
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho Books', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -5436,6 +5518,8 @@ async function startServer() {
         errors.push(`Récupération échouée: ${err.message}`);
       }
 
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
       res.json({ pushed, pulled, errors });
     } catch (error: any) {
       console.error('[Zoho Books sync error]', error.message);
@@ -5858,6 +5942,8 @@ async function startServer() {
       await supabaseAdmin.from('settings').update({
         odoo_url: null, odoo_db: null, odoo_username: null, odoo_api_key: null,
       }).eq('tenant_id', tenantId);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Déconnexion d\'Odoo', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -6124,6 +6210,10 @@ async function startServer() {
         results.proposals = out;
       } catch (err: any) { results.proposals = { pushed: 0, pulled: 0, errors: [err.message] }; }
 
+      const totalPushed = Object.values(results).reduce((sum, r) => sum + (r?.pushed || 0), 0);
+      const totalPulled = Object.values(results).reduce((sum, r) => sum + (r?.pulled || 0), 0);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Odoo (${totalPushed} envoyée(s), ${totalPulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
       res.json({ results });
     } catch (error: any) {
       console.error('[Odoo sync error]', error.message);
@@ -6634,6 +6724,8 @@ async function startServer() {
         chorus_pro_piste_client_id: null, chorus_pro_piste_client_secret: null,
         chorus_pro_technical_login: null, chorus_pro_technical_password: null,
       }).eq('tenant_id', tenantId);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Déconnexion de Chorus Pro', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -6715,6 +6807,8 @@ async function startServer() {
       const chorusProStatus = 'DEPOSEE';
       await supabaseAdmin.from('invoices').update({ chorus_pro_id: chorusProId, chorus_pro_status: chorusProStatus }).eq('id', invoiceId).eq('tenant_id', tenantId);
 
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Envoi de la facture N° ${invoice.invoice_number || invoiceId.slice(0, 8)} sur Chorus Pro`, '', invoiceId, 'integration', 'Intégrations');
       res.json({ success: true, chorus_pro_id: chorusProId, status: chorusProStatus });
     } catch (e: any) {
       console.error('[Chorus Pro send]', e);
@@ -7139,6 +7233,8 @@ async function startServer() {
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await supabaseAdmin.from('situations').insert({ id, tenant_id: tenantId, project_id, numero, date_situation, statut }).select().single();
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la situation N° ${numero}`, String(numero ?? ''), id, 'situation', 'Situations/DPGF');
       res.status(201).json(data);
     } catch (e: any) { res.status(500).json({ error: "Failed to create situation: " + e.message }); }
   });
@@ -7156,8 +7252,12 @@ async function startServer() {
   app.delete("/api/situations/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      const { data: situation } = await supabaseAdmin.from('situations').select('numero').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const numero = (situation as any)?.numero;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la situation N° ${numero}`, String(numero ?? ''), req.params.id, 'situation', 'Situations/DPGF');
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: "Failed to delete situation" }); }
   });
@@ -8228,6 +8328,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const created_at = new Date().toISOString();
       const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -8248,12 +8350,16 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: meeting } = await supabaseAdmin.from('meetings').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { data: photos } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('meeting_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('meeting_photos').delete().eq('meeting_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('meetings').delete().eq('id', id).eq('tenant_id', tenantId);
       if (photos?.length) {
         for (const p of photos) deleteFromStorage('meeting-photos', p.file_url).catch(() => {});
       }
+      const title = (meeting as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

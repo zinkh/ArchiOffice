@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList } from '@tabler/icons-react';
+import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -51,6 +51,17 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Factures': 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400',
   'Appels d\'offres': 'text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400',
   'Messages': 'text-violet-600 bg-violet-50 dark:bg-violet-900/20 dark:text-violet-400',
+  'Contacts': 'text-pink-600 bg-pink-50 dark:bg-pink-900/20 dark:text-pink-400',
+  'Documents': 'text-cyan-600 bg-cyan-50 dark:bg-cyan-900/20 dark:text-cyan-400',
+  'CCTP': 'text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400',
+  'Devis': 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-400',
+  'Réunions': 'text-teal-600 bg-teal-50 dark:bg-teal-900/20 dark:text-teal-400',
+  'Ordres de service': 'text-lime-600 bg-lime-50 dark:bg-lime-900/20 dark:text-lime-400',
+  'Tâches': 'text-sky-600 bg-sky-50 dark:bg-sky-900/20 dark:text-sky-400',
+  'Situations/DPGF': 'text-fuchsia-600 bg-fuchsia-50 dark:bg-fuchsia-900/20 dark:text-fuchsia-400',
+  'Notes de site': 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400',
+  'Réserves/Observations': 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400',
+  'Intégrations': 'text-slate-600 bg-slate-50 dark:bg-slate-900/20 dark:text-slate-400',
 };
 
 const TYPE_ICONS: Record<string, React.ElementType> = {
@@ -58,6 +69,20 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   invoice: IconFileInvoice,
   tender: IconClipboardList,
   post: IconFileText,
+  contact: IconUser,
+  document: IconFile,
+  specification: IconClipboardList,
+  proposal: IconFileDescription,
+  meeting: IconUsers,
+  ordre_de_service: IconFileCheck,
+  task: IconChecklist,
+  situation: IconReceipt2,
+  dpgf: IconReceipt2,
+  site_report: IconNotes,
+  site_report_note: IconNotes,
+  reserve: IconAlertTriangle,
+  observation: IconAlertTriangle,
+  integration: IconPlugConnected,
 };
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
