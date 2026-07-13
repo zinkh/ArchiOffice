@@ -1089,7 +1089,7 @@ const resources = {
       "contacts_suffix_label": "Suffixe",
       "contacts_nickname_label": "Surnom",
       "contacts_section_organisation": "Organisation",
-      "contacts_company_name_label": "Société",
+      "contacts_company_name_label": "Organisme",
       "contacts_job_title_label": "Fonction",
       "contacts_department_label": "Service",
       "contacts_section_contact_info": "Coordonnées",

@@ -162,9 +162,9 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('first_name')} *</label>
-                <input 
-                  required
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('first_name')} {!newContact.company_name?.trim() && '*'}</label>
+                <input
+                  required={!newContact.company_name?.trim()}
                   className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                   value={newContact.first_name || ''}
                   onChange={e => setNewContact({...newContact, first_name: e.target.value})}
@@ -179,9 +179,9 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('last_name')} *</label>
-                <input 
-                  required
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('last_name')} {!newContact.company_name?.trim() && '*'}</label>
+                <input
+                  required={!newContact.company_name?.trim()}
                   className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                   value={newContact.last_name || ''}
                   onChange={e => setNewContact({...newContact, last_name: e.target.value})}
@@ -211,7 +211,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
             <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Organisation</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Société</label>
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Organisme</label>
                 <input 
                   className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
                   value={newContact.company_name || ''}
