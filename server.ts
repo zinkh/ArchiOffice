@@ -1135,11 +1135,12 @@ async function startServer() {
     if (req.headers['x-forwarded-proto'] === 'http') {
       return res.redirect(301, `https://${req.headers.host}${req.url}`);
     }
-    // Canonicalize www → non-www so all assets and the HTML share the same origin.
+    // Canonicalize bare apex → www so all assets and the HTML share the same origin.
+    // Only the exact apex domain is redirected — tenant subdomains (e.g.
+    // aacz.archimanager.fr) and www itself must pass through untouched.
     const host = req.headers.host || '';
-    if (host.startsWith('www.')) {
-      const canonical = host.slice(4);
-      return res.redirect(301, `https://${canonical}${req.url}`);
+    if (host === 'archimanager.fr') {
+      return res.redirect(301, `https://www.archimanager.fr${req.url}`);
     }
     next();
   });
