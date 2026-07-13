@@ -2216,6 +2216,8 @@ async function startServer() {
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
@@ -2225,6 +2227,7 @@ async function startServer() {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       // Fetch all version URLs before deleting DB rows
+      const { data: doc } = await supabaseAdmin.from('documents').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { data: versions } = await supabaseAdmin.from('document_versions').select('file_url').eq('document_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
@@ -2237,6 +2240,9 @@ async function startServer() {
           }
         }
       }
+      const docName = (doc as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du document "${docName}"`, docName, id, 'document', 'Documents');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
@@ -2467,8 +2473,7 @@ async function startServer() {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
       // Log activity
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
 
       res.status(201).json({ id, project_code });
@@ -2539,6 +2544,7 @@ async function startServer() {
       const userRole = req.headers['x-user-role'];
       console.log(`Attempting to delete project ${id} with role ${userRole}`);
       if (userRole !== 'admin') return res.status(403).json({ error: "Only administrators can delete projects" });
+      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
@@ -2547,6 +2553,9 @@ async function startServer() {
       ]);
       const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const name = (project as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du projet "${name}"`, name, id, 'project', 'Projets');
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting project:", error);
@@ -2995,8 +3004,7 @@ async function startServer() {
       if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
       const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
       // Log activity
-      const { data: meTndr } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userNameTndr = (meTndr as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userNameTndr = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
       res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
@@ -3006,10 +3014,14 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: tender } = await supabaseAdmin.from('tenders').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('tenders').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const title = (tender as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de l'appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender" }); }
   });
@@ -3096,6 +3108,8 @@ async function startServer() {
       const last_updated = new Date().toISOString();
       const { error } = await supabaseAdmin.from('specifications').insert({ id, tenant_id: tenantId, project_id, title, content, last_updated, is_template: !!is_template });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du CCTP "${title}"`, title, id, 'specification', 'CCTP');
       res.status(201).json({ id, last_updated });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create specification: " + e.message }); }
   });
@@ -3116,8 +3130,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: spec } = await supabaseAdmin.from('specifications').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('specifications').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const title = (spec as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du CCTP "${title}"`, title, id, 'specification', 'CCTP');
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete specification: " + e.message }); }
   });
@@ -3139,6 +3157,9 @@ async function startServer() {
       const id = contact.id || crypto.randomUUID();
       const { error } = await supabaseAdmin.from('contacts').insert({ ...contact, id, tenant_id: tenantId });
       if (error) throw error;
+      const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
       res.status(201).json({ id });
     } catch (e: any) {
       console.error("Error creating contact:", e.message);
@@ -3166,8 +3187,12 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: contact } = await supabaseAdmin.from('contacts').select('first_name, last_name, company_name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('contacts').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const contactName = (contact as any)?.company_name || `${(contact as any)?.first_name || ''} ${(contact as any)?.last_name || ''}`.trim();
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error deleting contact:", e.message);
@@ -3367,6 +3392,8 @@ async function startServer() {
       const contact = (proposal as any)?.contacts;
       const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
       const { contacts: _c, ...rest } = (proposal as any) || {};
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du devis "${proposalData.reference}"`, client_name, id, 'proposal', 'Devis');
       res.status(201).json({ ...rest, client_name, specialties_list: (proposal as any)?.proposal_specialties || [] });
     } catch (error: any) {
       console.error("Error creating proposal:", error);
@@ -3549,8 +3576,7 @@ async function startServer() {
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
 
       // Log activity
-      const { data: meInv } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userNameInv = (meInv as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userNameInv = await getUserName(tenantId, req.user.id, req.user.email);
       const invLabel = invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture';
       logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${invoice_number || id.slice(0, 8)}`, project_name || '', id, 'invoice', 'Factures');
 
@@ -4293,6 +4319,11 @@ async function startServer() {
     }
   };
 
+  const getUserName = async (tenantId: string, userId: string, email?: string): Promise<string> => {
+    const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', userId).eq('tenant_id', tenantId).maybeSingle();
+    return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
+  };
+
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -4364,8 +4395,7 @@ async function startServer() {
       if (!content?.trim()) return res.status(400).json({ error: "Content required" });
 
       // Get user name
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
 
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
@@ -4430,8 +4460,7 @@ async function startServer() {
       const { id } = req.params;
       const { content } = req.body;
       if (!content?.trim()) return res.status(400).json({ error: "Content required" });
-      const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
       const commentId = crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
@@ -8234,6 +8263,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const created_at = new Date().toISOString();
       const { error } = await supabaseAdmin.from('meetings').insert({ id, tenant_id: tenantId, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });
       if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -8254,12 +8285,16 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: meeting } = await supabaseAdmin.from('meetings').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const { data: photos } = await supabaseAdmin.from('meeting_photos').select('file_url').eq('meeting_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('meeting_photos').delete().eq('meeting_id', id).eq('tenant_id', tenantId);
       await supabaseAdmin.from('meetings').delete().eq('id', id).eq('tenant_id', tenantId);
       if (photos?.length) {
         for (const p of photos) deleteFromStorage('meeting-photos', p.file_url).catch(() => {});
       }
+      const title = (meeting as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
