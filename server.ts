@@ -4275,7 +4275,7 @@ async function startServer() {
 
   const logActivity = async (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => {
     try {
-      await supabaseAdmin.from('activities').insert({
+      const { error } = await supabaseAdmin.from('activities').insert({
         id: crypto.randomUUID(),
         tenant_id: tenantId,
         user_id: userId,
@@ -4287,19 +4287,22 @@ async function startServer() {
         category,
         created_at: new Date().toISOString()
       });
+      if (error) console.error('[logActivity] insert failed:', error);
     } catch (e) {
-      // Non-blocking
+      console.error('[logActivity] unexpected error:', e);
     }
   };
 
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const [{ data: acts }, { data: posts }, { data: member }] = await Promise.all([
+      const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: member }] = await Promise.all([
         supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
       ]);
+      if (actsError) console.error('[GET /api/feed] activities query failed:', actsError);
+      if (postsError) console.error('[GET /api/feed] feed_posts query failed:', postsError);
 
       const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
 
@@ -4366,7 +4369,8 @@ async function startServer() {
 
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      if (insertError) throw insertError;
       res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
     } catch (err: any) {
       console.error(err);
@@ -4430,9 +4434,11 @@ async function startServer() {
       const userName = (me as any)?.name || req.user.email?.split('@')[0] || 'Utilisateur';
       const commentId = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      if (insertError) throw insertError;
       res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
     } catch (err: any) {
+      console.error(err);
       res.status(500).json({ error: "Failed to add comment" });
     }
   });
