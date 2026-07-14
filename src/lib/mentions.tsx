@@ -131,7 +131,7 @@ export function renderTextWithMentions(text: string, members: TeamMemberLite[]):
     nodes.push(
       <Link
         key={`mention-${key++}`}
-        to={`/team?member=${member?.id}`}
+        to={`/profile/${member?.id}`}
         className="font-semibold hover:underline"
         style={{ color: 'var(--tblr-primary)' }}
       >

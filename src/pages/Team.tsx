@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
@@ -165,8 +165,14 @@ export default function Team() {
             </div>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-1">{member.name}</h3>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-1">{member.role}</p>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{member.email}</p>
-            
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{member.email}</p>
+            <Link
+              to={`/profile/${member.id}`}
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-1"
+            >
+              Voir le profil
+            </Link>
+
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
               <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
               {isAdmin ? (
