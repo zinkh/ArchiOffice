@@ -46,6 +46,25 @@ function initials(name: string) {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
+interface TeamMember {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+interface MentionTrigger {
+  start: number;
+  query: string;
+}
+
+// Finds an "@query" being typed right before the cursor, e.g. "hello @jul" -> { start: 6, query: 'jul' }
+function findMentionTrigger(text: string, cursor: number): MentionTrigger | null {
+  const before = text.slice(0, cursor);
+  const match = before.match(/(?:^|\s)@(\w*)$/);
+  if (!match) return null;
+  return { start: before.lastIndexOf('@'), query: match[1] };
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
   'Projets': 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400',
   'Factures': 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400',
@@ -107,11 +126,24 @@ export default function ActivityFeed() {
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [showHiddenMenu, setShowHiddenMenu] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [mention, setMention] = useState<MentionTrigger | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionTop, setMentionTop] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenMenuRef = useRef<HTMLDivElement>(null);
 
   const authErrorCount = useRef(0);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    apiFetch<TeamMember[]>('/api/team').then(setTeamMembers).catch(() => {});
+  }, [currentUser]);
+
+  const mentionSuggestions = mention
+    ? teamMembers.filter(m => m.name?.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6)
+    : [];
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -168,7 +200,57 @@ export default function ActivityFeed() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setMessage(value);
+    const cursor = e.target.selectionStart ?? value.length;
+    const trigger = findMentionTrigger(value, cursor);
+    setMention(trigger);
+    setMentionIndex(0);
+    if (trigger) {
+      setMentionTop(e.target.offsetTop + e.target.offsetHeight + 4);
+    }
+  };
+
+  const selectMention = (member: TeamMember) => {
+    if (!mention) return;
+    const before = message.slice(0, mention.start);
+    const after = message.slice(mention.start + 1 + mention.query.length);
+    const insertion = `@${member.name} `;
+    setMessage(before + insertion + after);
+    setMention(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        const pos = before.length + insertion.length;
+        el.focus();
+        el.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention && mentionSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIndex(i => (i + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIndex(i => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectMention(mentionSuggestions[mentionIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setMention(null);
+        return;
+      }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost();
   };
 
@@ -268,7 +350,7 @@ export default function ActivityFeed() {
       </div>
 
       {/* Compose area */}
-      <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+      <div className="p-4 relative" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
           <textarea
             ref={textareaRef}
@@ -277,8 +359,9 @@ export default function ActivityFeed() {
             style={{ color: 'var(--tblr-text)' }}
             rows={2}
             value={message}
-            onChange={e => setMessage(e.target.value)}
+            onChange={handleMessageChange}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setMention(null), 100)}
           />
           <div className="flex justify-between items-center px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
             <div className="flex gap-3">
@@ -311,6 +394,27 @@ export default function ActivityFeed() {
           </div>
         </div>
         <p className="text-[10px] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
+
+        {mention && mentionSuggestions.length > 0 && (
+          <div
+            className="absolute left-4 z-30 rounded-lg shadow-lg py-1 min-w-[200px]"
+            style={{ top: mentionTop, background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+          >
+            {mentionSuggestions.map((m, i) => (
+              <button
+                key={m.id}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); selectMention(m); }}
+                onMouseEnter={() => setMentionIndex(i)}
+                className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs transition-colors"
+                style={{ background: i === mentionIndex ? 'var(--tblr-surface-2)' : 'transparent', color: 'var(--tblr-text)' }}
+              >
+                <Avatar name={m.name || 'U'} size={22} />
+                <span className="truncate">{m.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Feed */}
