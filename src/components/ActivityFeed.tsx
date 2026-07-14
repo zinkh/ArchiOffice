@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
+import { IconPaperclip, IconLink, IconQuote, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
-import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions } from '../lib/mentions';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
 interface FeedComment {
   id: string;
@@ -355,15 +355,15 @@ export default function ActivityFeed() {
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconPaperclip size={16} />
               </button>
-              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien"
+              <button onClick={() => insertLinkInto(composer)} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconLink size={16} />
               </button>
-              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Formater"
+              <button onClick={() => insertQuoteInto(composer)} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Citation"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
-                <IconAlignLeft size={16} />
+                <IconQuote size={16} />
               </button>
             </div>
             <button
@@ -414,9 +414,9 @@ export default function ActivityFeed() {
                       {item.action}
                     </p>
                   ) : (
-                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>
+                    <div className="text-[13px] leading-relaxed" style={{ color: 'var(--tblr-text)' }}>
                       {renderTextWithMentions(item.content || '', teamMembers)}
-                    </p>
+                    </div>
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
@@ -468,7 +468,7 @@ export default function ActivityFeed() {
                               <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
                               {c.mentions_me && <MentionBadge />}
                             </div>
-                            <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{renderTextWithMentions(c.content, teamMembers)}</p>
+                            <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{renderTextWithMentions(c.content, teamMembers)}</div>
                           </div>
                         </div>
                       ))}

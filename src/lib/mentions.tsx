@@ -110,36 +110,99 @@ export function MentionDropdown({ suggestions, activeIndex, top, onHover, onSele
   );
 }
 
-// Renders text, turning any "@Full Name" that matches a known team member into a
-// clickable link to their profile in the team directory.
-export function renderTextWithMentions(text: string, members: TeamMemberLite[]): React.ReactNode {
-  if (!text) return text;
+// Tokenizes a single line into text / @mention-link / http(s) URL-link nodes, in
+// left-to-right order (a single combined regex avoids the two kinds of match
+// stepping on each other's positions).
+function renderLineTokens(line: string, members: TeamMemberLite[], keyPrefix: string): React.ReactNode[] {
   const candidates = members.filter(m => m.name?.trim()).sort((a, b) => b.name.length - a.name.length);
-  if (candidates.length === 0) return text;
-
-  const pattern = candidates.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const re = new RegExp(`@(${pattern})(?=[\\s.,!?;:]|$)`, 'gu');
+  const mentionPattern = candidates.length
+    ? `@(?<mention>${candidates.map(m => m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=[\\s.,!?;:]|$)`
+    : null;
+  const urlPattern = `(?<url>https?:\\/\\/[^\\s]+)`;
+  const re = new RegExp([mentionPattern, urlPattern].filter(Boolean).join('|'), 'gu');
 
   const nodes: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
-  while ((match = re.exec(text))) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    const name = match[1];
-    const member = candidates.find(m => m.name === name);
-    nodes.push(
-      <Link
-        key={`mention-${key++}`}
-        to={`/profile/${member?.id}`}
-        className="font-semibold hover:underline"
-        style={{ color: 'var(--tblr-primary)' }}
-      >
-        @{name}
-      </Link>
-    );
-    lastIndex = re.lastIndex;
+  while ((match = re.exec(line))) {
+    if (match.index > lastIndex) nodes.push(line.slice(lastIndex, match.index));
+    if (match.groups?.mention) {
+      const name = match.groups.mention;
+      const member = candidates.find(m => m.name === name);
+      nodes.push(
+        <Link key={`${keyPrefix}-m-${key++}`} to={`/profile/${member?.id}`} className="font-semibold hover:underline" style={{ color: 'var(--tblr-primary)' }}>
+          @{name}
+        </Link>
+      );
+    } else if (match.groups?.url) {
+      // Trailing punctuation (a period ending the sentence, a comma, ...) isn't part of the URL
+      const url = match.groups.url.replace(/[.,;:!?)]+$/, '');
+      nodes.push(
+        <a key={`${keyPrefix}-u-${key++}`} href={url} target="_blank" rel="noreferrer" className="underline break-all" style={{ color: 'var(--tblr-primary)' }}>
+          {url}
+        </a>
+      );
+    }
+    lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  if (lastIndex < line.length) nodes.push(line.slice(lastIndex));
   return nodes;
+}
+
+// Renders message/post text with:
+//  - "@Full Name" turned into a clickable link to that person's profile
+//  - raw http(s) URLs turned into clickable links
+//  - lines starting with "> " rendered as a blockquote (inserted by the
+//    composer's "Citation" button)
+export function renderTextWithMentions(text: string, members: TeamMemberLite[]): React.ReactNode {
+  if (!text) return null;
+  return text.split('\n').map((line, i) => {
+    const isQuote = line.startsWith('> ');
+    const tokens = renderLineTokens(isQuote ? line.slice(2) : line, members, String(i));
+    if (isQuote) {
+      return (
+        <blockquote key={i} className="pl-2 my-0.5 border-l-2 italic opacity-80" style={{ borderColor: 'var(--tblr-border)' }}>
+          {tokens.length ? tokens : ' '}
+        </blockquote>
+      );
+    }
+    return <div key={i}>{tokens.length ? tokens : ' '}</div>;
+  });
+}
+
+interface InsertableComposer {
+  value: string;
+  setValue: (v: string) => void;
+  ref: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
+}
+
+function insertAtCursor(composer: InsertableComposer, buildInsertion: (before: string) => string) {
+  const el = composer.ref.current;
+  const pos = el?.selectionStart ?? composer.value.length;
+  const before = composer.value.slice(0, pos);
+  const after = composer.value.slice(pos);
+  const insertion = buildInsertion(before);
+  composer.setValue(before + insertion + after);
+  requestAnimationFrame(() => {
+    if (el) {
+      const newPos = (before + insertion).length;
+      el.focus();
+      el.setSelectionRange(newPos, newPos);
+    }
+  });
+}
+
+// "Insérer un lien" toolbar button: prompts for a URL and inserts it at the
+// cursor — renderTextWithMentions then turns it into a clickable link.
+export function insertLinkInto(composer: InsertableComposer) {
+  const url = window.prompt('URL du lien :')?.trim();
+  if (!url) return;
+  insertAtCursor(composer, before => (before && !/[\s\n]$/.test(before) ? ' ' : '') + url + ' ');
+}
+
+// "Citation" toolbar button: starts a new "> quoted text" line at the cursor —
+// renderTextWithMentions then renders it as a blockquote.
+export function insertQuoteInto(composer: InsertableComposer) {
+  insertAtCursor(composer, before => (before && !before.endsWith('\n') ? '\n' : '') + '> ');
 }

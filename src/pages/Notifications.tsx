@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next';
 import {
   IconBell, IconBriefcase, IconFileInvoice, IconClipboardList,
   IconMessageCircle, IconHeart, IconSend, IconCheck, IconFilter,
-  IconFileText, IconRefresh, IconX
+  IconFileText, IconRefresh, IconX, IconLink, IconQuote
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
-import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions } from '../lib/mentions';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
 interface FeedComment {
   id: string;
@@ -339,7 +339,23 @@ export default function Notifications() {
               onKeyDown={e => composer.handleKeyDown(e, () => { if (e.ctrlKey || e.metaKey) handlePost(); })}
               onBlur={composer.handleBlur}
             />
-            <div className="flex justify-end mt-2">
+            <div className="flex items-center justify-between mt-2">
+              <div className="flex gap-1">
+                <button
+                  onClick={() => insertLinkInto(composer)}
+                  className="p-1.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  title="Insérer un lien"
+                >
+                  <IconLink size={15} />
+                </button>
+                <button
+                  onClick={() => insertQuoteInto(composer)}
+                  className="p-1.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  title="Citation"
+                >
+                  <IconQuote size={15} />
+                </button>
+              </div>
               <button
                 onClick={handlePost}
                 disabled={!composer.value.trim() || isPosting}
@@ -442,9 +458,9 @@ export default function Notifications() {
                             {item.action}
                           </p>
                         ) : (
-                          <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">
+                          <div className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed">
                             {renderTextWithMentions(item.content || '', teamMembers)}
-                          </p>
+                          </div>
                         )}
 
                         {/* Metadata row */}
@@ -515,7 +531,7 @@ export default function Notifications() {
                                       <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
                                       {c.mentions_me && <MentionBadge />}
                                     </div>
-                                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</p>
+                                    <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</div>
                                     <p className="text-[10px] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
                                   </div>
                                 </div>
