@@ -1,17 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
+import { IconPaperclip, IconLink, IconQuote, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected, IconDownload } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
-interface FeedComment {
+interface Attachment {
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
+}
+
+interface FeedComment extends Attachment {
   id: string;
   user_name: string;
   content: string;
   created_at: string;
+  mentions_me?: boolean;
 }
 
-interface FeedItem {
+interface FeedItem extends Attachment {
   id: string;
   kind: 'activity' | 'post';
   user_name: string;
@@ -25,8 +34,43 @@ interface FeedItem {
   created_at: string;
   likes_count: number;
   liked: boolean;
+  mentions_me?: boolean;
   comments: FeedComment[];
   comments_count: number;
+}
+
+// Authenticated multipart POST — apiFetch forces a JSON Content-Type header
+// whenever a body is present, which corrupts a FormData upload's boundary.
+async function postForm<T>(url: string, form: FormData): Promise<T> {
+  const token = await getAccessToken();
+  const res = await fetch(url, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
+}
+
+function AttachmentView({ item }: { item: Attachment }) {
+  if (!item.attachment_url) return null;
+  if (item.attachment_type?.startsWith('image/')) {
+    return (
+      <a href={item.attachment_url} target="_blank" rel="noreferrer">
+        <img src={item.attachment_url} alt={item.attachment_name || 'pièce jointe'} className="mt-1.5 rounded-lg max-w-full max-h-56" />
+      </a>
+    );
+  }
+  return (
+    <a href={item.attachment_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs mt-1.5 hover:underline w-fit" style={{ color: 'var(--tblr-primary)' }}>
+      <IconFile size={13} /> {item.attachment_name || 'Pièce jointe'} <IconDownload size={12} />
+    </a>
+  );
+}
+
+function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] w-fit" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+      <IconFile size={12} /> {file.name}
+      <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
+    </div>
+  );
 }
 
 function timeAgo(dateStr: string): string {
@@ -98,20 +142,95 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   );
 }
 
+function MentionBadge() {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+      @ Vous êtes mentionné(e)
+    </span>
+  );
+}
+
+function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string, file: File | null) => void }) {
+  const composer = useMentionComposer(teamMembers);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const submit = () => {
+    const content = composer.value.trim();
+    if (!content && !attachment) return;
+    composer.setValue('');
+    setAttachment(null);
+    onSubmit(content, attachment);
+  };
+
+  return (
+    <div className="flex-1 relative">
+      <div className="rounded-lg px-3 py-1.5 space-y-1" style={{ background: 'var(--tblr-surface-2)' }}>
+        {attachment && <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />}
+        <div className="flex items-center gap-2">
+          <textarea
+            ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
+            rows={1}
+            placeholder="Ajouter un commentaire... (@ pour mentionner)"
+            className="flex-1 bg-transparent text-xs outline-none resize-none"
+            style={{ color: 'var(--tblr-text)' }}
+            value={composer.value}
+            onChange={composer.handleChange}
+            onKeyDown={e => composer.handleKeyDown(e, ke => { if (!ke.shiftKey) { ke.preventDefault(); submit(); } })}
+            onBlur={composer.handleBlur}
+          />
+          <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
+          <button onClick={() => fileInputRef.current?.click()} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier">
+            <IconPaperclip size={13} />
+          </button>
+          <button onClick={() => insertLinkInto(composer)} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien">
+            <IconLink size={13} />
+          </button>
+          <button onClick={() => insertQuoteInto(composer)} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Citation">
+            <IconQuote size={13} />
+          </button>
+          <button
+            onClick={submit}
+            disabled={!composer.value.trim() && !attachment}
+            className="disabled:opacity-30 transition-colors shrink-0"
+            style={{ color: 'var(--tblr-primary)' }}
+          >
+            <IconSend size={13} />
+          </button>
+        </div>
+      </div>
+      <MentionDropdown
+        suggestions={composer.suggestions}
+        activeIndex={composer.mentionIndex}
+        top={composer.mentionTop}
+        onHover={composer.setMentionIndex}
+        onSelect={composer.selectMention}
+        renderAvatar={name => <Avatar name={name} size={20} />}
+      />
+    </div>
+  );
+}
+
 export default function ActivityFeed() {
   const { currentUser } = useUser();
   const [items, setItems] = useState<FeedItem[]>([]);
-  const [message, setMessage] = useState('');
   const [isPosting, setIsPosting] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
-  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [showHiddenMenu, setShowHiddenMenu] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const [attachment, setAttachment] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenMenuRef = useRef<HTMLDivElement>(null);
+  const autoExpandedRef = useRef<Set<string>>(new Set());
 
   const authErrorCount = useRef(0);
+  const composer = useMentionComposer(teamMembers);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    apiFetch<TeamMemberLite[]>('/api/team').then(setTeamMembers).catch(() => {});
+  }, [currentUser]);
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -138,6 +257,18 @@ export default function ActivityFeed() {
     return () => clearInterval(interval);
   }, [fetchFeed, currentUser]);
 
+  // Automatically open the comments of any item that mentions the current user,
+  // once, so the mention is visible without an extra click.
+  useEffect(() => {
+    const toExpand = items.filter(i => i.mentions_me && !autoExpandedRef.current.has(i.id));
+    if (toExpand.length === 0) return;
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      toExpand.forEach(i => { next.add(i.id); autoExpandedRef.current.add(i.id); });
+      return next;
+    });
+  }, [items]);
+
   // Close hidden menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -150,26 +281,33 @@ export default function ActivityFeed() {
   }, []);
 
   const handlePost = async () => {
-    if (!message.trim() || isPosting) return;
+    const content = composer.value.trim();
+    if ((!content && !attachment) || isPosting) return;
     setIsPosting(true);
-    const content = message.trim();
-    setMessage('');
+    composer.setValue('');
+    const file = attachment;
+    setAttachment(null);
     try {
-      const newItem = await apiFetch<FeedItem>('/api/feed/posts', {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let newItem: FeedItem;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        newItem = await postForm<FeedItem>('/api/feed/posts', fd);
+      } else {
+        newItem = await apiFetch<FeedItem>('/api/feed/posts', {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => [newItem, ...prev]);
     } catch (err) {
       console.error(err);
-      setMessage(content);
+      composer.setValue(content);
+      setAttachment(file);
     } finally {
       setIsPosting(false);
     }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost();
   };
 
   const handleLike = async (item: FeedItem) => {
@@ -192,15 +330,20 @@ export default function ActivityFeed() {
     }
   };
 
-  const handleComment = async (itemId: string) => {
-    const content = commentDraft[itemId]?.trim();
-    if (!content) return;
-    setCommentDraft(d => ({ ...d, [itemId]: '' }));
+  const handleComment = async (itemId: string, content: string, file: File | null) => {
     try {
-      const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let comment: FeedComment;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        comment = await postForm<FeedComment>(`/api/feed/posts/${itemId}/comments`, fd);
+      } else {
+        comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => prev.map(i => i.id === itemId
         ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
         : i
@@ -268,40 +411,46 @@ export default function ActivityFeed() {
       </div>
 
       {/* Compose area */}
-      <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+      <div className="p-4 relative" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
           <textarea
-            ref={textareaRef}
+            ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
             placeholder="Partagez quelque chose. Utilisez @ pour mentionner des personnes."
             className="w-full bg-transparent px-4 pt-3 pb-1 outline-none text-sm resize-none"
             style={{ color: 'var(--tblr-text)' }}
             rows={2}
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
+            value={composer.value}
+            onChange={composer.handleChange}
+            onKeyDown={e => composer.handleKeyDown(e, ke => { if (ke.ctrlKey || ke.metaKey) { ke.preventDefault(); handlePost(); } })}
+            onBlur={composer.handleBlur}
           />
+          {attachment && (
+            <div className="px-4 pb-2">
+              <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />
+            </div>
+          )}
           <div className="flex justify-between items-center px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
             <div className="flex gap-3">
-              <input type="file" ref={fileInputRef} className="hidden" />
+              <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
               <button onClick={() => fileInputRef.current?.click()} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconPaperclip size={16} />
               </button>
-              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien"
+              <button onClick={() => insertLinkInto(composer)} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
                 <IconLink size={16} />
               </button>
-              <button className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Formater"
+              <button onClick={() => insertQuoteInto(composer)} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Citation"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
-                <IconAlignLeft size={16} />
+                <IconQuote size={16} />
               </button>
             </div>
             <button
               onClick={handlePost}
-              disabled={!message.trim() || isPosting}
+              disabled={(!composer.value.trim() && !attachment) || isPosting}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
@@ -311,6 +460,15 @@ export default function ActivityFeed() {
           </div>
         </div>
         <p className="text-[10px] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
+
+        <MentionDropdown
+          suggestions={composer.suggestions}
+          activeIndex={composer.mentionIndex}
+          top={composer.mentionTop}
+          onHover={composer.setMentionIndex}
+          onSelect={composer.selectMention}
+          renderAvatar={name => <Avatar name={name} size={22} />}
+        />
       </div>
 
       {/* Feed */}
@@ -338,7 +496,10 @@ export default function ActivityFeed() {
                       {item.action}
                     </p>
                   ) : (
-                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{item.content}</p>
+                    <div className="text-[13px] leading-relaxed" style={{ color: 'var(--tblr-text)' }}>
+                      {renderTextWithMentions(item.content || '', teamMembers)}
+                      <AttachmentView item={item} />
+                    </div>
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
@@ -354,6 +515,7 @@ export default function ActivityFeed() {
                         </span>
                       </>
                     )}
+                    {item.mentions_me && <MentionBadge />}
                   </div>
 
                   <div className="flex items-center gap-4 mt-2">
@@ -385,33 +547,19 @@ export default function ActivityFeed() {
                         <div key={c.id} className="flex gap-2">
                           <Avatar name={c.user_name || 'U'} size={24} />
                           <div className="flex-1 rounded-lg px-3 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
-                            <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
-                            <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{c.content}</p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
+                              {c.mentions_me && <MentionBadge />}
+                            </div>
+                            <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{renderTextWithMentions(c.content, teamMembers)}</div>
+                            <AttachmentView item={c} />
                           </div>
                         </div>
                       ))}
                       {item.kind === 'post' && (
                         <div className="flex gap-2 items-center">
                           <Avatar name={currentUser?.name || 'U'} size={24} />
-                          <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
-                            <input
-                              type="text"
-                              placeholder="Ajouter un commentaire..."
-                              className="flex-1 bg-transparent text-xs outline-none"
-                              style={{ color: 'var(--tblr-text)' }}
-                              value={commentDraft[item.id] || ''}
-                              onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
-                              onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
-                            />
-                            <button
-                              onClick={() => handleComment(item.id)}
-                              disabled={!commentDraft[item.id]?.trim()}
-                              className="disabled:opacity-30 transition-colors"
-                              style={{ color: 'var(--tblr-primary)' }}
-                            >
-                              <IconSend size={13} />
-                            </button>
-                          </div>
+                          <CommentBox teamMembers={teamMembers} onSubmit={(content, file) => handleComment(item.id, content, file)} />
                         </div>
                       )}
                     </div>

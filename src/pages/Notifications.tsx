@@ -3,21 +3,31 @@ import { useTranslation } from 'react-i18next';
 import {
   IconBell, IconBriefcase, IconFileInvoice, IconClipboardList,
   IconMessageCircle, IconHeart, IconSend, IconCheck, IconFilter,
-  IconFileText, IconRefresh, IconX
+  IconFileText, IconRefresh, IconX, IconLink, IconQuote, IconPaperclip,
+  IconFile, IconDownload
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
-interface FeedComment {
+interface Attachment {
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
+}
+
+interface FeedComment extends Attachment {
   id: string;
   user_name: string;
   content: string;
   created_at: string;
+  mentions_me?: boolean;
 }
 
-interface FeedItem {
+interface FeedItem extends Attachment {
   id: string;
   kind: 'activity' | 'post';
   user_name: string;
@@ -32,8 +42,18 @@ interface FeedItem {
   likes_count: number;
   liked: boolean;
   unread: boolean;
+  mentions_me?: boolean;
   comments: FeedComment[];
   comments_count: number;
+}
+
+// Authenticated multipart POST — apiFetch forces a JSON Content-Type header
+// whenever a body is present, which corrupts a FormData upload's boundary.
+async function postForm<T>(url: string, form: FormData): Promise<T> {
+  const token = await getAccessToken();
+  const res = await fetch(url, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
 }
 
 type FilterKey = 'all' | 'projects' | 'invoices' | 'tenders' | 'messages' | 'unread';
@@ -91,6 +111,98 @@ function Avatar({ name, size = 38 }: { name: string; size?: number }) {
   );
 }
 
+function MentionBadge() {
+  return (
+    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[9px] font-bold uppercase tracking-wide">
+      @ Vous êtes mentionné(e)
+    </span>
+  );
+}
+
+function AttachmentView({ item }: { item: Attachment }) {
+  if (!item.attachment_url) return null;
+  if (item.attachment_type?.startsWith('image/')) {
+    return (
+      <a href={item.attachment_url} target="_blank" rel="noreferrer">
+        <img src={item.attachment_url} alt={item.attachment_name || 'pièce jointe'} className="mt-1.5 rounded-lg max-w-full max-h-56" />
+      </a>
+    );
+  }
+  return (
+    <a href={item.attachment_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs mt-1.5 text-blue-600 dark:text-blue-400 hover:underline w-fit">
+      <IconFile size={13} /> {item.attachment_name || 'Pièce jointe'} <IconDownload size={12} />
+    </a>
+  );
+}
+
+function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-700 rounded-lg text-[11px] text-zinc-500 dark:text-zinc-400 w-fit">
+      <IconFile size={12} /> {file.name}
+      <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
+    </div>
+  );
+}
+
+function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string, file: File | null) => void }) {
+  const composer = useMentionComposer(teamMembers);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const submit = () => {
+    const content = composer.value.trim();
+    if (!content && !attachment) return;
+    composer.setValue('');
+    setAttachment(null);
+    onSubmit(content, attachment);
+  };
+
+  return (
+    <div className="flex-1 relative">
+      <div className="bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2 space-y-1">
+        {attachment && <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />}
+        <div className="flex items-center gap-2">
+          <textarea
+            ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
+            rows={1}
+            placeholder="Répondre... (@ pour mentionner)"
+            className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 resize-none"
+            value={composer.value}
+            onChange={composer.handleChange}
+            onKeyDown={e => composer.handleKeyDown(e, ke => { if (!ke.shiftKey) { ke.preventDefault(); submit(); } })}
+            onBlur={composer.handleBlur}
+          />
+          <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
+          <button onClick={() => fileInputRef.current?.click()} className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shrink-0" title="Joindre un fichier">
+            <IconPaperclip size={14} />
+          </button>
+          <button onClick={() => insertLinkInto(composer)} className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shrink-0" title="Insérer un lien">
+            <IconLink size={14} />
+          </button>
+          <button onClick={() => insertQuoteInto(composer)} className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shrink-0" title="Citation">
+            <IconQuote size={14} />
+          </button>
+          <button
+            onClick={submit}
+            disabled={!composer.value.trim() && !attachment}
+            className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors shrink-0"
+          >
+            <IconSend size={13} />
+          </button>
+        </div>
+      </div>
+      <MentionDropdown
+        suggestions={composer.suggestions}
+        activeIndex={composer.mentionIndex}
+        top={composer.mentionTop}
+        onHover={composer.setMentionIndex}
+        onSelect={composer.selectMention}
+        renderAvatar={name => <Avatar name={name} size={20} />}
+      />
+    </div>
+  );
+}
+
 export default function Notifications() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
@@ -99,11 +211,19 @@ export default function Notifications() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
-  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
-  const [newPost, setNewPost] = useState('');
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
   const [isPosting, setIsPosting] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const composer = useMentionComposer(teamMembers);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const authErrorCount = useRef(0);
+  const autoExpandedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!currentUser) return;
+    apiFetch<TeamMemberLite[]>('/api/team').then(setTeamMembers).catch(() => {});
+  }, [currentUser]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -130,6 +250,17 @@ export default function Notifications() {
     }, 30000);
     return () => clearInterval(interval);
   }, [fetchItems, currentUser]);
+
+  // Automatically open the comments of any item that mentions the current user
+  useEffect(() => {
+    const toExpand = items.filter(i => i.mentions_me && !autoExpandedRef.current.has(i.id));
+    if (toExpand.length === 0) return;
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      toExpand.forEach(i => { next.add(i.id); autoExpandedRef.current.add(i.id); });
+      return next;
+    });
+  }, [items]);
 
   const markAllRead = async () => {
     setIsMarkingRead(true);
@@ -161,15 +292,20 @@ export default function Notifications() {
     }
   };
 
-  const handleComment = async (itemId: string) => {
-    const content = commentDraft[itemId]?.trim();
-    if (!content) return;
-    setCommentDraft(d => ({ ...d, [itemId]: '' }));
+  const handleComment = async (itemId: string, content: string, file: File | null) => {
     try {
-      const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let comment: FeedComment;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        comment = await postForm<FeedComment>(`/api/feed/posts/${itemId}/comments`, fd);
+      } else {
+        comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => prev.map(i => i.id === itemId
         ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
         : i
@@ -180,19 +316,30 @@ export default function Notifications() {
   };
 
   const handlePost = async () => {
-    if (!newPost.trim() || isPosting) return;
-    const content = newPost.trim();
+    const content = composer.value.trim();
+    if ((!content && !attachment) || isPosting) return;
     setIsPosting(true);
-    setNewPost('');
+    composer.setValue('');
+    const file = attachment;
+    setAttachment(null);
     try {
-      const item = await apiFetch<FeedItem>('/api/feed/posts', {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let item: FeedItem;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        item = await postForm<FeedItem>('/api/feed/posts', fd);
+      } else {
+        item = await apiFetch<FeedItem>('/api/feed/posts', {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => [item, ...prev]);
     } catch (err) {
       console.error(err);
-      setNewPost(content);
+      setAttachment(file);
+      composer.setValue(content);
     } finally {
       setIsPosting(false);
     }
@@ -257,22 +404,53 @@ export default function Notifications() {
       </div>
 
       {/* Compose box */}
-      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm p-4">
+      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm p-4 relative">
         <div className="flex gap-3">
           <Avatar name={currentUser?.name || 'U'} size={36} />
           <div className="flex-1">
             <textarea
+              ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
               rows={2}
-              placeholder="Partagez quelque chose avec l'équipe... (Ctrl+Entrée pour publier)"
+              placeholder="Partagez quelque chose avec l'équipe... (@ pour mentionner, Ctrl+Entrée pour publier)"
               className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition-all"
-              value={newPost}
-              onChange={e => setNewPost(e.target.value)}
-              onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost(); }}
+              value={composer.value}
+              onChange={composer.handleChange}
+              onKeyDown={e => composer.handleKeyDown(e, ke => { if (ke.ctrlKey || ke.metaKey) { ke.preventDefault(); handlePost(); } })}
+              onBlur={composer.handleBlur}
             />
-            <div className="flex justify-end mt-2">
+            {attachment && (
+              <div className="mt-2">
+                <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />
+              </div>
+            )}
+            <div className="flex items-center justify-between mt-2">
+              <div className="flex gap-1">
+                <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  title="Joindre un fichier"
+                >
+                  <IconPaperclip size={15} />
+                </button>
+                <button
+                  onClick={() => insertLinkInto(composer)}
+                  className="p-1.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  title="Insérer un lien"
+                >
+                  <IconLink size={15} />
+                </button>
+                <button
+                  onClick={() => insertQuoteInto(composer)}
+                  className="p-1.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                  title="Citation"
+                >
+                  <IconQuote size={15} />
+                </button>
+              </div>
               <button
                 onClick={handlePost}
-                disabled={!newPost.trim() || isPosting}
+                disabled={(!composer.value.trim() && !attachment) || isPosting}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 shadow-sm"
               >
                 <IconSend size={14} />
@@ -281,6 +459,14 @@ export default function Notifications() {
             </div>
           </div>
         </div>
+        <MentionDropdown
+          suggestions={composer.suggestions}
+          activeIndex={composer.mentionIndex}
+          top={composer.mentionTop}
+          onHover={composer.setMentionIndex}
+          onSelect={composer.selectMention}
+          renderAvatar={name => <Avatar name={name} size={22} />}
+        />
       </div>
 
       {/* Filter tabs */}
@@ -364,7 +550,10 @@ export default function Notifications() {
                             {item.action}
                           </p>
                         ) : (
-                          <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                          <div className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed">
+                            {renderTextWithMentions(item.content || '', teamMembers)}
+                            <AttachmentView item={item} />
+                          </div>
                         )}
 
                         {/* Metadata row */}
@@ -386,6 +575,7 @@ export default function Notifications() {
                               Nouveau
                             </span>
                           )}
+                          {item.mentions_me && <MentionBadge />}
                         </div>
 
                         {/* Action bar */}
@@ -430,8 +620,12 @@ export default function Notifications() {
                                 <div key={c.id} className="flex gap-2">
                                   <Avatar name={c.user_name || 'U'} size={26} />
                                   <div className="flex-1 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
-                                    <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
-                                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{c.content}</p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
+                                      {c.mentions_me && <MentionBadge />}
+                                    </div>
+                                    <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</div>
+                                    <AttachmentView item={c} />
                                     <p className="text-[10px] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
                                   </div>
                                 </div>
@@ -442,23 +636,7 @@ export default function Notifications() {
                               {item.kind === 'post' && (
                                 <div className="flex gap-2 items-center pt-1">
                                   <Avatar name={currentUser?.name || 'U'} size={26} />
-                                  <div className="flex-1 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
-                                    <input
-                                      type="text"
-                                      placeholder="Répondre..."
-                                      className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
-                                      value={commentDraft[item.id] || ''}
-                                      onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
-                                      onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
-                                    />
-                                    <button
-                                      onClick={() => handleComment(item.id)}
-                                      disabled={!commentDraft[item.id]?.trim()}
-                                      className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors shrink-0"
-                                    >
-                                      <IconSend size={13} />
-                                    </button>
-                                  </div>
+                                  <CommentBox teamMembers={teamMembers} onSubmit={(content, file) => handleComment(item.id, content, file)} />
                                 </div>
                               )}
                             </motion.div>

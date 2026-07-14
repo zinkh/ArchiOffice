@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
@@ -10,6 +11,9 @@ import { useUser } from '../UserContext';
 export default function Team() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('member');
+  const memberRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [team, setTeam] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,6 +36,12 @@ export default function Team() {
     if (!isAdmin) return;
     getJoinRequests().then(setJoinRequests).catch(console.error);
   }, [isAdmin]);
+
+  // Scroll to and highlight a member linked from a mention elsewhere in the app
+  useEffect(() => {
+    if (!highlightId || team.length === 0) return;
+    memberRefs.current[highlightId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, team]);
 
   const handleDecideJoinRequest = async (id: string, decision: 'approve' | 'reject') => {
     setDecidingId(id);
@@ -137,10 +147,14 @@ export default function Team() {
         {team.map((member, i) => (
           <motion.div
             key={member.id}
+            ref={el => { memberRefs.current[member.id] = el; }}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.05 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-6 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden"
+            className={cn(
+              "bg-white dark:bg-zinc-800 rounded-xl border p-6 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden",
+              member.id === highlightId ? "border-blue-500 ring-2 ring-blue-400/60" : "border-zinc-200 dark:border-zinc-700"
+            )}
           >
             <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-700 flex items-center justify-center text-zinc-400 mb-4">
               {member.avatar ? (
@@ -151,8 +165,14 @@ export default function Team() {
             </div>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-1">{member.name}</h3>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-1">{member.role}</p>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{member.email}</p>
-            
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{member.email}</p>
+            <Link
+              to={`/profile/${member.id}`}
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-1"
+            >
+              Voir le profil
+            </Link>
+
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
               <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
               {isAdmin ? (

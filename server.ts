@@ -1347,7 +1347,7 @@ async function startServer() {
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents']) {
+    for (const bucket of ['documents', 'cv', 'message-attachments', 'feed-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
@@ -4346,6 +4346,39 @@ async function startServer() {
     return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
+  // Matches "@Full Name" against known tenant members — longest names first so
+  // "Jean Dupont" isn't shadowed by a coincidental "Jean" member.
+  const extractMentionedUserIds = (content: string, members: { id: string; name: string }[]): string[] => {
+    const ids = new Set<string>();
+    const candidates = members.filter(m => m.name?.trim()).sort((a, b) => b.name.length - a.name.length);
+    for (const m of candidates) {
+      const escaped = m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`@${escaped}(?=[\\s.,!?;:]|$)`, 'u');
+      if (re.test(content)) ids.add(m.id);
+    }
+    return [...ids];
+  };
+
+  const createMentionsForContent = async (
+    tenantId: string, authorId: string, authorName: string, content: string,
+    itemType: 'post' | 'comment', itemId: string, postId: string
+  ) => {
+    try {
+      const { data: members } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId);
+      const mentionedIds = extractMentionedUserIds(content, (members || []).filter((m: any) => m.id !== authorId));
+      if (!mentionedIds.length) return;
+      const rows = mentionedIds.map(uid => ({
+        id: crypto.randomUUID(), tenant_id: tenantId, mentioned_user_id: uid,
+        author_id: authorId, author_name: authorName, item_type: itemType, item_id: itemId, post_id: postId,
+        content_snippet: content.slice(0, 200), created_at: new Date().toISOString()
+      }));
+      const { error } = await supabaseAdmin.from('mentions').insert(rows);
+      if (error) console.error('[mentions] insert failed:', error);
+    } catch (e) {
+      console.error('[mentions] unexpected error:', e);
+    }
+  };
+
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -4369,6 +4402,10 @@ async function startServer() {
         ? await supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true })
         : { data: [] };
 
+      // Items/comments that mention the requesting user, so the UI can surface them
+      const { data: myMentions } = await supabaseAdmin.from('mentions').select('item_id').eq('tenant_id', tenantId).eq('mentioned_user_id', req.user.id);
+      const mentionedItemIds = new Set((myMentions || []).map((m: any) => m.item_id));
+
       const feedItems = [
         ...(acts || []).map((a: any) => ({
           id: a.id,
@@ -4387,20 +4424,28 @@ async function startServer() {
           comments: [],
           comments_count: 0
         })),
-        ...(posts || []).map((p: any) => ({
-          id: p.id,
-          kind: 'post',
-          user_name: p.user_name,
-          user_id: p.user_id,
-          content: p.content,
-          category: 'Messages',
-          created_at: p.created_at,
-          likes_count: p.likes_count || 0,
-          liked: likedSet.has(`post:${p.id}`),
-          unread: p.created_at > lastSeen,
-          comments: (allComments || []).filter((c: any) => c.post_id === p.id),
-          comments_count: (allComments || []).filter((c: any) => c.post_id === p.id).length
-        }))
+        ...(posts || []).map((p: any) => {
+          const postComments = (allComments || []).filter((c: any) => c.post_id === p.id)
+            .map((c: any) => ({ ...c, mentions_me: mentionedItemIds.has(c.id) }));
+          return {
+            id: p.id,
+            kind: 'post',
+            user_name: p.user_name,
+            user_id: p.user_id,
+            content: p.content,
+            attachment_url: p.attachment_url,
+            attachment_name: p.attachment_name,
+            attachment_type: p.attachment_type,
+            category: 'Messages',
+            created_at: p.created_at,
+            likes_count: p.likes_count || 0,
+            liked: likedSet.has(`post:${p.id}`),
+            unread: p.created_at > lastSeen,
+            mentions_me: mentionedItemIds.has(p.id) || postComments.some((c: any) => c.mentions_me),
+            comments: postComments,
+            comments_count: postComments.length
+          };
+        })
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       res.json(feedItems);
@@ -4410,20 +4455,37 @@ async function startServer() {
     }
   });
 
-  app.post("/api/feed/posts", async (req: any, res: any) => {
+  app.post("/api/feed/posts", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { content } = req.body;
-      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+      const file = req.file;
+      if (!content?.trim() && !file) return res.status(400).json({ error: "Content required" });
 
       // Get user name
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
 
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('feed-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      const trimmedContent = content?.trim() || null;
+      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: trimmedContent,
+        attachment_url, attachment_name, attachment_type, created_at, likes_count: 0
+      });
       if (insertError) throw insertError;
-      res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
+      if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'post', id, id);
+      res.status(201).json({
+        id, kind: 'post', user_name: userName, user_id: req.user.id, content: trimmedContent,
+        attachment_url, attachment_name, attachment_type, created_at, likes_count: 0, liked: false, comments: [], comments_count: 0
+      });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: "Failed to create post" });
@@ -4476,18 +4538,33 @@ async function startServer() {
     }
   });
 
-  app.post("/api/feed/posts/:id/comments", async (req: any, res: any) => {
+  app.post("/api/feed/posts/:id/comments", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { content } = req.body;
-      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+      const file = req.file;
+      if (!content?.trim() && !file) return res.status(400).json({ error: "Content required" });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
+
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('feed-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const commentId = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      const trimmedContent = content?.trim() || null;
+      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({
+        id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName,
+        content: trimmedContent, attachment_url, attachment_name, attachment_type, created_at
+      });
       if (insertError) throw insertError;
-      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
+      if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'comment', commentId, id);
+      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: trimmedContent, attachment_url, attachment_name, attachment_type, created_at });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: "Failed to add comment" });
@@ -4523,6 +4600,400 @@ async function startServer() {
   });
 
   // ── End Activity Feed ───────────────────────────────────────────────────────
+
+  // ── Profile (bio, CV, éducation, expérience, projets en cours) ──────────────
+
+  app.get("/api/profile/:userId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { userId } = req.params;
+
+      const { data: profile, error } = await supabaseAdmin
+        .from('profiles')
+        .select('id, name, email, role, job_title, department, phone, address, avatar, bio, cv_url, cv_filename')
+        .eq('id', userId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!profile) return res.status(404).json({ error: "Profil introuvable" });
+
+      const [{ data: education }, { data: experience }, { data: memberships }] = await Promise.all([
+        supabaseAdmin.from('profile_education').select('*').eq('user_id', userId).eq('tenant_id', tenantId).order('sort_order', { ascending: true }),
+        supabaseAdmin.from('profile_experience').select('*').eq('user_id', userId).eq('tenant_id', tenantId).order('sort_order', { ascending: true }),
+        supabaseAdmin.from('project_members').select('project_id, role, projects(name, status)').eq('user_id', userId).eq('tenant_id', tenantId),
+      ]);
+
+      const currentProjects = (memberships || [])
+        .filter((m: any) => m.projects)
+        .map((m: any) => ({ id: m.project_id, name: m.projects.name, status: m.projects.status, role: m.role }));
+
+      res.json({
+        ...profile,
+        jobTitle: profile.job_title,
+        education: education || [],
+        experience: experience || [],
+        current_projects: currentProjects,
+        is_self: userId === req.user.id,
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to fetch profile" });
+    }
+  });
+
+  app.put("/api/profile", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { bio, job_title, department } = req.body;
+      const { error } = await supabaseAdmin.from('profiles')
+        .update({ bio, job_title, department })
+        .eq('id', req.user.id)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  app.post("/api/profile/cv", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const storagePath = `${tenantId}/${req.user.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+      const url = await uploadToStorage('cv', storagePath, file.buffer, file.mimetype);
+      await supabaseAdmin.from('profiles').update({ cv_url: url, cv_filename: file.originalname }).eq('id', req.user.id).eq('tenant_id', tenantId);
+      res.json({ url, filename: file.originalname });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to upload CV" });
+    }
+  });
+
+  app.delete("/api/profile/cv", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: profile } = await supabaseAdmin.from('profiles').select('cv_url').eq('id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      await supabaseAdmin.from('profiles').update({ cv_url: null, cv_filename: null }).eq('id', req.user.id).eq('tenant_id', tenantId);
+      if ((profile as any)?.cv_url) deleteFromStorage('cv', (profile as any).cv_url).catch(() => {});
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to remove CV" });
+    }
+  });
+
+  app.post("/api/profile/education", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { school, degree, field, start_year, end_year } = req.body;
+      if (!school?.trim()) return res.status(400).json({ error: "L'établissement est requis" });
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('profile_education').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, school: school.trim(), degree, field, start_year, end_year
+      });
+      if (error) throw error;
+      res.status(201).json({ id, school, degree, field, start_year, end_year });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to add education entry" });
+    }
+  });
+
+  app.put("/api/profile/education/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { school, degree, field, start_year, end_year } = req.body;
+      const { error } = await supabaseAdmin.from('profile_education')
+        .update({ school, degree, field, start_year, end_year })
+        .eq('id', req.params.id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to update education entry" });
+    }
+  });
+
+  app.delete("/api/profile/education/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('profile_education').delete()
+        .eq('id', req.params.id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to delete education entry" });
+    }
+  });
+
+  app.post("/api/profile/experience", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, company, start_date, end_date, description } = req.body;
+      if (!title?.trim()) return res.status(400).json({ error: "L'intitulé du poste est requis" });
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('profile_experience').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, title: title.trim(), company, start_date, end_date, description
+      });
+      if (error) throw error;
+      res.status(201).json({ id, title, company, start_date, end_date, description });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to add experience entry" });
+    }
+  });
+
+  app.put("/api/profile/experience/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, company, start_date, end_date, description } = req.body;
+      const { error } = await supabaseAdmin.from('profile_experience')
+        .update({ title, company, start_date, end_date, description })
+        .eq('id', req.params.id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to update experience entry" });
+    }
+  });
+
+  app.delete("/api/profile/experience/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('profile_experience').delete()
+        .eq('id', req.params.id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to delete experience entry" });
+    }
+  });
+
+  // ── End Profile ──────────────────────────────────────────────────────────────
+
+  // ── Messagerie interne (conversations 1-à-1 et groupes) ─────────────────────
+
+  const getProfileDisplayName = async (tenantId: string, userId: string): Promise<string> => {
+    const { data } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).eq('tenant_id', tenantId).maybeSingle();
+    return (data as any)?.name || 'Utilisateur';
+  };
+
+  const assertParticipant = async (tenantId: string, conversationId: string, userId: string) => {
+    const { data } = await supabaseAdmin.from('conversation_participants').select('id')
+      .eq('conversation_id', conversationId).eq('user_id', userId).eq('tenant_id', tenantId).maybeSingle();
+    if (!data) {
+      const err: any = new Error("Vous ne participez pas à cette conversation");
+      err.status = 403;
+      throw err;
+    }
+  };
+
+  app.get("/api/conversations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: myParticipations } = await supabaseAdmin.from('conversation_participants')
+        .select('conversation_id, last_read_at').eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      const convIds = (myParticipations || []).map((p: any) => p.conversation_id);
+      if (!convIds.length) return res.json([]);
+
+      const lastReadByConv = new Map((myParticipations || []).map((p: any) => [p.conversation_id, p.last_read_at]));
+
+      const [{ data: conversations }, { data: allParticipants }] = await Promise.all([
+        supabaseAdmin.from('conversations').select('*').in('id', convIds).order('last_message_at', { ascending: false }),
+        supabaseAdmin.from('conversation_participants').select('conversation_id, user_id, profiles(id, name, avatar)').in('conversation_id', convIds),
+      ]);
+
+      const result = await Promise.all((conversations || []).map(async (conv: any) => {
+        const participants = (allParticipants || []).filter((p: any) => p.conversation_id === conv.id);
+        const others = participants.filter((p: any) => p.user_id !== req.user.id).map((p: any) => p.profiles).filter(Boolean);
+
+        const { data: lastMsg } = await supabaseAdmin.from('messages').select('content, attachment_name, sender_name, created_at')
+          .eq('conversation_id', conv.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+        const lastRead = lastReadByConv.get(conv.id) || new Date(0).toISOString();
+        const { count: unreadCount } = await supabaseAdmin.from('messages').select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conv.id).neq('sender_id', req.user.id).gt('created_at', lastRead);
+
+        const displayName = conv.is_group ? (conv.name || 'Groupe') : (others[0]?.name || 'Utilisateur');
+        const displayAvatar = conv.is_group ? null : (others[0]?.avatar || null);
+
+        return {
+          id: conv.id,
+          is_group: conv.is_group,
+          name: displayName,
+          avatar: displayAvatar,
+          participants: participants.map((p: any) => p.profiles).filter(Boolean),
+          last_message: (lastMsg as any)?.content || ((lastMsg as any)?.attachment_name ? `📎 ${(lastMsg as any).attachment_name}` : null),
+          last_message_at: conv.last_message_at,
+          unread_count: unreadCount || 0,
+        };
+      }));
+
+      res.json(result.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()));
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.post("/api/conversations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { participant_ids, is_group, name } = req.body;
+      const otherIds: string[] = (participant_ids || []).filter((id: string) => id && id !== req.user.id);
+      if (!otherIds.length) return res.status(400).json({ error: "Au moins un destinataire est requis" });
+
+      // Reuse the existing 1:1 conversation instead of creating a duplicate
+      if (!is_group && otherIds.length === 1) {
+        const { data: myConvs } = await supabaseAdmin.from('conversation_participants').select('conversation_id').eq('user_id', req.user.id).eq('tenant_id', tenantId);
+        const myConvIds = (myConvs || []).map((c: any) => c.conversation_id);
+        if (myConvIds.length) {
+          const { data: theirConvs } = await supabaseAdmin.from('conversation_participants').select('conversation_id').eq('user_id', otherIds[0]).eq('tenant_id', tenantId).in('conversation_id', myConvIds);
+          for (const tc of theirConvs || []) {
+            const { data: conv } = await supabaseAdmin.from('conversations').select('id, is_group').eq('id', (tc as any).conversation_id).eq('tenant_id', tenantId).maybeSingle();
+            if (conv && !(conv as any).is_group) {
+              return res.json({ id: (conv as any).id, existing: true });
+            }
+          }
+        }
+      }
+
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error: convErr } = await supabaseAdmin.from('conversations').insert({
+        id, tenant_id: tenantId, is_group: !!is_group, name: is_group ? (name || 'Groupe') : null, created_by: req.user.id, created_at: now, last_message_at: now
+      });
+      if (convErr) throw convErr;
+
+      const participantRows = [req.user.id, ...otherIds].map(uid => ({
+        id: crypto.randomUUID(), tenant_id: tenantId, conversation_id: id, user_id: uid, last_read_at: now, joined_at: now
+      }));
+      const { error: partErr } = await supabaseAdmin.from('conversation_participants').insert(participantRows);
+      if (partErr) throw partErr;
+
+      res.status(201).json({ id, existing: false });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to create conversation" });
+    }
+  });
+
+  app.get("/api/conversations/:id/messages", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      await assertParticipant(tenantId, id, req.user.id);
+      const { data, error } = await supabaseAdmin.from('messages').select('*').eq('conversation_id', id).eq('tenant_id', tenantId)
+        .order('created_at', { ascending: true }).limit(200);
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) {
+      res.status(e.status || 500).json({ error: e.message || "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/conversations/:id/messages", upload.single('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      await assertParticipant(tenantId, id, req.user.id);
+      const { content } = req.body;
+      const file = req.file;
+      if (!content?.trim() && !file) return res.status(400).json({ error: "Message vide" });
+
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('message-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
+      const senderName = await getProfileDisplayName(tenantId, req.user.id);
+      const msgId = crypto.randomUUID();
+      const created_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('messages').insert({
+        id: msgId, tenant_id: tenantId, conversation_id: id, sender_id: req.user.id, sender_name: senderName,
+        content: content?.trim() || null, attachment_url, attachment_name, attachment_type, created_at
+      });
+      if (error) throw error;
+      await supabaseAdmin.from('conversations').update({ last_message_at: created_at }).eq('id', id).eq('tenant_id', tenantId);
+      // Sending counts as having read the thread up to now
+      await supabaseAdmin.from('conversation_participants').update({ last_read_at: created_at }).eq('conversation_id', id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+
+      res.status(201).json({
+        id: msgId, conversation_id: id, sender_id: req.user.id, sender_name: senderName,
+        content: content?.trim() || null, attachment_url, attachment_name, attachment_type, created_at
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.status(e.status || 500).json({ error: e.message || "Failed to send message" });
+    }
+  });
+
+  app.post("/api/conversations/:id/read", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const now = new Date().toISOString();
+      await supabaseAdmin.from('conversation_participants').update({ last_read_at: now })
+        .eq('conversation_id', id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      res.json({ success: true, last_read_at: now });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to mark conversation as read" });
+    }
+  });
+
+  app.get("/api/messages/unread-count", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: myParticipations } = await supabaseAdmin.from('conversation_participants')
+        .select('conversation_id, last_read_at').eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      const counts = await Promise.all((myParticipations || []).map(async (p: any) => {
+        const { count } = await supabaseAdmin.from('messages').select('id', { count: 'exact', head: true })
+          .eq('conversation_id', p.conversation_id).neq('sender_id', req.user.id).gt('created_at', p.last_read_at);
+        return count || 0;
+      }));
+      res.json({ count: counts.reduce((a, b) => a + b, 0) });
+    } catch (e: any) {
+      res.json({ count: 0 });
+    }
+  });
+
+  app.post("/api/conversations/:id/participants", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      await assertParticipant(tenantId, id, req.user.id);
+      const { data: conv } = await supabaseAdmin.from('conversations').select('is_group').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!(conv as any)?.is_group) return res.status(400).json({ error: "Impossible d'ajouter des participants à une conversation 1-à-1" });
+      const { user_ids } = req.body;
+      const now = new Date().toISOString();
+      const rows = (user_ids || []).map((uid: string) => ({
+        id: crypto.randomUUID(), tenant_id: tenantId, conversation_id: id, user_id: uid, last_read_at: now, joined_at: now
+      }));
+      if (rows.length) await supabaseAdmin.from('conversation_participants').upsert(rows, { onConflict: 'conversation_id,user_id', ignoreDuplicates: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(e.status || 500).json({ error: e.message || "Failed to add participants" });
+    }
+  });
+
+  app.delete("/api/conversations/:id/participants/:userId", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id, userId } = req.params;
+      // Anyone can leave; only self-removal is allowed for now (no group admin concept yet)
+      if (userId !== req.user.id) return res.status(403).json({ error: "Vous ne pouvez retirer que vous-même du groupe" });
+      await supabaseAdmin.from('conversation_participants').delete().eq('conversation_id', id).eq('user_id', userId).eq('tenant_id', tenantId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to leave conversation" });
+    }
+  });
+
+  // ── End Messagerie ───────────────────────────────────────────────────────────
 
   app.post("/api/send-email", async (req: any, res: any) => {
     try {

@@ -10,6 +10,8 @@ import {
   IconCloudUpload,
   IconCheck,
   IconLogout,
+  IconMessageCircle,
+  IconUser,
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -52,6 +54,8 @@ import AgencySetup from './pages/AgencySetup';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import Notifications from './pages/Notifications';
+import Profile from './pages/Profile';
+import Messages from './pages/Messages';
 import Reunions from './pages/Reunions';
 import OrdresDeService from './pages/OrdresDeService';
 import Contrats from './pages/Contrats';
@@ -164,6 +168,7 @@ function Header() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ projects: any[]; contacts: any[]; tenders: any[]; invoices: any[] }>({ projects: [], contacts: [], tenders: [], invoices: [] });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -179,6 +184,9 @@ function Header() {
     if (location.pathname === '/notifications') {
       setUnreadCount(0);
     }
+    if (location.pathname === '/messages') {
+      setUnreadMessages(0);
+    }
   }, [location.pathname, t, setHeaderTitle]);
 
   useEffect(() => {
@@ -192,6 +200,20 @@ function Header() {
     };
     fetchUnread();
     const interval = setInterval(fetchUnread, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchUnreadMessages = async () => {
+      try {
+        const data = await apiFetch<{ count: number }>('/api/messages/unread-count');
+        setUnreadMessages(data.count || 0);
+      } catch {
+        // ignore
+      }
+    };
+    fetchUnreadMessages();
+    const interval = setInterval(fetchUnreadMessages, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -406,6 +428,26 @@ function Header() {
             {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
           </button>
 
+          {/* Messages */}
+          <button
+            onClick={() => navigate('/messages')}
+            className="p-1.5 rounded transition-colors relative"
+            style={{ color: 'var(--tblr-muted)' }}
+            onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+            onMouseOut={e => (e.currentTarget.style.background = '')}
+            title="Messages"
+          >
+            <IconMessageCircle size={18} />
+            {unreadMessages > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                style={{ background: 'var(--tblr-danger)' }}
+              >
+                {unreadMessages > 99 ? '99+' : unreadMessages}
+              </span>
+            )}
+          </button>
+
           {/* Notifications */}
           <button
             onClick={() => navigate('/notifications')}
@@ -482,6 +524,16 @@ function Header() {
                       </div>
                     </div>
                     <div className="p-1">
+                      <button
+                        onClick={() => { navigate('/profile'); setIsUserMenuOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        style={{ color: 'var(--tblr-text)' }}
+                        onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseOut={e => (e.currentTarget.style.background = '')}
+                      >
+                        <IconUser size={15} style={{ color: 'var(--tblr-muted)' }} />
+                        Mon profil
+                      </button>
                       <button
                         onClick={() => { navigate('/settings'); setIsUserMenuOpen(false); }}
                         className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
@@ -671,6 +723,9 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/:userId" element={<Profile />} />
+              <Route path="/messages" element={<Messages />} />
               <Route path="/reunions" element={<Reunions />} />
               <Route path="/ordres-de-service" element={<OrdresDeService />} />
               <Route path="/contrats" element={<Contrats />} />
