@@ -3,12 +3,14 @@ import { IconPaperclip, IconLink, IconAlignLeft, IconChevronDown, IconHeart, Ico
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions } from '../lib/mentions';
 
 interface FeedComment {
   id: string;
   user_name: string;
   content: string;
   created_at: string;
+  mentions_me?: boolean;
 }
 
 interface FeedItem {
@@ -25,6 +27,7 @@ interface FeedItem {
   created_at: string;
   likes_count: number;
   liked: boolean;
+  mentions_me?: boolean;
   comments: FeedComment[];
   comments_count: number;
 }
@@ -44,25 +47,6 @@ function timeAgo(dateStr: string): string {
 
 function initials(name: string) {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
-
-interface TeamMember {
-  id: string;
-  name: string;
-  email?: string;
-}
-
-interface MentionTrigger {
-  start: number;
-  query: string;
-}
-
-// Finds an "@query" being typed right before the cursor, e.g. "hello @jul" -> { start: 6, query: 'jul' }
-function findMentionTrigger(text: string, cursor: number): MentionTrigger | null {
-  const before = text.slice(0, cursor);
-  const match = before.match(/(?:^|\s)@(\w*)$/);
-  if (!match) return null;
-  return { start: before.lastIndexOf('@'), query: match[1] };
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -117,33 +101,78 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   );
 }
 
+function MentionBadge() {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+      @ Vous êtes mentionné(e)
+    </span>
+  );
+}
+
+function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string) => void }) {
+  const composer = useMentionComposer(teamMembers);
+
+  const submit = () => {
+    const content = composer.value.trim();
+    if (!content) return;
+    composer.setValue('');
+    onSubmit(content);
+  };
+
+  return (
+    <div className="flex-1 relative">
+      <div className="flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
+        <input
+          ref={composer.ref as React.RefObject<HTMLInputElement>}
+          type="text"
+          placeholder="Ajouter un commentaire... (@ pour mentionner)"
+          className="flex-1 bg-transparent text-xs outline-none"
+          style={{ color: 'var(--tblr-text)' }}
+          value={composer.value}
+          onChange={composer.handleChange}
+          onKeyDown={e => composer.handleKeyDown(e, submit)}
+          onBlur={composer.handleBlur}
+        />
+        <button
+          onClick={submit}
+          disabled={!composer.value.trim()}
+          className="disabled:opacity-30 transition-colors shrink-0"
+          style={{ color: 'var(--tblr-primary)' }}
+        >
+          <IconSend size={13} />
+        </button>
+      </div>
+      <MentionDropdown
+        suggestions={composer.suggestions}
+        activeIndex={composer.mentionIndex}
+        top={composer.mentionTop}
+        onHover={composer.setMentionIndex}
+        onSelect={composer.selectMention}
+        renderAvatar={name => <Avatar name={name} size={20} />}
+      />
+    </div>
+  );
+}
+
 export default function ActivityFeed() {
   const { currentUser } = useUser();
   const [items, setItems] = useState<FeedItem[]>([]);
-  const [message, setMessage] = useState('');
   const [isPosting, setIsPosting] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
-  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [showHiddenMenu, setShowHiddenMenu] = useState(false);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [mention, setMention] = useState<MentionTrigger | null>(null);
-  const [mentionIndex, setMentionIndex] = useState(0);
-  const [mentionTop, setMentionTop] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenMenuRef = useRef<HTMLDivElement>(null);
+  const autoExpandedRef = useRef<Set<string>>(new Set());
 
   const authErrorCount = useRef(0);
+  const composer = useMentionComposer(teamMembers);
 
   useEffect(() => {
     if (!currentUser) return;
-    apiFetch<TeamMember[]>('/api/team').then(setTeamMembers).catch(() => {});
+    apiFetch<TeamMemberLite[]>('/api/team').then(setTeamMembers).catch(() => {});
   }, [currentUser]);
-
-  const mentionSuggestions = mention
-    ? teamMembers.filter(m => m.name?.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6)
-    : [];
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -170,6 +199,18 @@ export default function ActivityFeed() {
     return () => clearInterval(interval);
   }, [fetchFeed, currentUser]);
 
+  // Automatically open the comments of any item that mentions the current user,
+  // once, so the mention is visible without an extra click.
+  useEffect(() => {
+    const toExpand = items.filter(i => i.mentions_me && !autoExpandedRef.current.has(i.id));
+    if (toExpand.length === 0) return;
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      toExpand.forEach(i => { next.add(i.id); autoExpandedRef.current.add(i.id); });
+      return next;
+    });
+  }, [items]);
+
   // Close hidden menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -182,10 +223,10 @@ export default function ActivityFeed() {
   }, []);
 
   const handlePost = async () => {
-    if (!message.trim() || isPosting) return;
+    const content = composer.value.trim();
+    if (!content || isPosting) return;
     setIsPosting(true);
-    const content = message.trim();
-    setMessage('');
+    composer.setValue('');
     try {
       const newItem = await apiFetch<FeedItem>('/api/feed/posts', {
         method: 'POST',
@@ -194,64 +235,10 @@ export default function ActivityFeed() {
       setItems(prev => [newItem, ...prev]);
     } catch (err) {
       console.error(err);
-      setMessage(content);
+      composer.setValue(content);
     } finally {
       setIsPosting(false);
     }
-  };
-
-  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setMessage(value);
-    const cursor = e.target.selectionStart ?? value.length;
-    const trigger = findMentionTrigger(value, cursor);
-    setMention(trigger);
-    setMentionIndex(0);
-    if (trigger) {
-      setMentionTop(e.target.offsetTop + e.target.offsetHeight + 4);
-    }
-  };
-
-  const selectMention = (member: TeamMember) => {
-    if (!mention) return;
-    const before = message.slice(0, mention.start);
-    const after = message.slice(mention.start + 1 + mention.query.length);
-    const insertion = `@${member.name} `;
-    setMessage(before + insertion + after);
-    setMention(null);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        const pos = before.length + insertion.length;
-        el.focus();
-        el.setSelectionRange(pos, pos);
-      }
-    });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mention && mentionSuggestions.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setMentionIndex(i => (i + 1) % mentionSuggestions.length);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setMentionIndex(i => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length);
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        selectMention(mentionSuggestions[mentionIndex]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setMention(null);
-        return;
-      }
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost();
   };
 
   const handleLike = async (item: FeedItem) => {
@@ -274,10 +261,7 @@ export default function ActivityFeed() {
     }
   };
 
-  const handleComment = async (itemId: string) => {
-    const content = commentDraft[itemId]?.trim();
-    if (!content) return;
-    setCommentDraft(d => ({ ...d, [itemId]: '' }));
+  const handleComment = async (itemId: string, content: string) => {
     try {
       const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
         method: 'POST',
@@ -353,15 +337,15 @@ export default function ActivityFeed() {
       <div className="p-4 relative" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
           <textarea
-            ref={textareaRef}
+            ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
             placeholder="Partagez quelque chose. Utilisez @ pour mentionner des personnes."
             className="w-full bg-transparent px-4 pt-3 pb-1 outline-none text-sm resize-none"
             style={{ color: 'var(--tblr-text)' }}
             rows={2}
-            value={message}
-            onChange={handleMessageChange}
-            onKeyDown={handleKeyDown}
-            onBlur={() => setTimeout(() => setMention(null), 100)}
+            value={composer.value}
+            onChange={composer.handleChange}
+            onKeyDown={e => composer.handleKeyDown(e, () => { if (e.ctrlKey || e.metaKey) handlePost(); })}
+            onBlur={composer.handleBlur}
           />
           <div className="flex justify-between items-center px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
             <div className="flex gap-3">
@@ -384,7 +368,7 @@ export default function ActivityFeed() {
             </div>
             <button
               onClick={handlePost}
-              disabled={!message.trim() || isPosting}
+              disabled={!composer.value.trim() || isPosting}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
@@ -395,26 +379,14 @@ export default function ActivityFeed() {
         </div>
         <p className="text-[10px] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
 
-        {mention && mentionSuggestions.length > 0 && (
-          <div
-            className="absolute left-4 z-30 rounded-lg shadow-lg py-1 min-w-[200px]"
-            style={{ top: mentionTop, background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
-          >
-            {mentionSuggestions.map((m, i) => (
-              <button
-                key={m.id}
-                type="button"
-                onMouseDown={e => { e.preventDefault(); selectMention(m); }}
-                onMouseEnter={() => setMentionIndex(i)}
-                className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs transition-colors"
-                style={{ background: i === mentionIndex ? 'var(--tblr-surface-2)' : 'transparent', color: 'var(--tblr-text)' }}
-              >
-                <Avatar name={m.name || 'U'} size={22} />
-                <span className="truncate">{m.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        <MentionDropdown
+          suggestions={composer.suggestions}
+          activeIndex={composer.mentionIndex}
+          top={composer.mentionTop}
+          onHover={composer.setMentionIndex}
+          onSelect={composer.selectMention}
+          renderAvatar={name => <Avatar name={name} size={22} />}
+        />
       </div>
 
       {/* Feed */}
@@ -442,7 +414,9 @@ export default function ActivityFeed() {
                       {item.action}
                     </p>
                   ) : (
-                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{item.content}</p>
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>
+                      {renderTextWithMentions(item.content || '', teamMembers)}
+                    </p>
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
@@ -458,6 +432,7 @@ export default function ActivityFeed() {
                         </span>
                       </>
                     )}
+                    {item.mentions_me && <MentionBadge />}
                   </div>
 
                   <div className="flex items-center gap-4 mt-2">
@@ -489,33 +464,18 @@ export default function ActivityFeed() {
                         <div key={c.id} className="flex gap-2">
                           <Avatar name={c.user_name || 'U'} size={24} />
                           <div className="flex-1 rounded-lg px-3 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
-                            <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
-                            <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{c.content}</p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>{c.user_name}</span>
+                              {c.mentions_me && <MentionBadge />}
+                            </div>
+                            <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{renderTextWithMentions(c.content, teamMembers)}</p>
                           </div>
                         </div>
                       ))}
                       {item.kind === 'post' && (
                         <div className="flex gap-2 items-center">
                           <Avatar name={currentUser?.name || 'U'} size={24} />
-                          <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
-                            <input
-                              type="text"
-                              placeholder="Ajouter un commentaire..."
-                              className="flex-1 bg-transparent text-xs outline-none"
-                              style={{ color: 'var(--tblr-text)' }}
-                              value={commentDraft[item.id] || ''}
-                              onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
-                              onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
-                            />
-                            <button
-                              onClick={() => handleComment(item.id)}
-                              disabled={!commentDraft[item.id]?.trim()}
-                              className="disabled:opacity-30 transition-colors"
-                              style={{ color: 'var(--tblr-primary)' }}
-                            >
-                              <IconSend size={13} />
-                            </button>
-                          </div>
+                          <CommentBox teamMembers={teamMembers} onSubmit={content => handleComment(item.id, content)} />
                         </div>
                       )}
                     </div>

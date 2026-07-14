@@ -4346,6 +4346,39 @@ async function startServer() {
     return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
+  // Matches "@Full Name" against known tenant members — longest names first so
+  // "Jean Dupont" isn't shadowed by a coincidental "Jean" member.
+  const extractMentionedUserIds = (content: string, members: { id: string; name: string }[]): string[] => {
+    const ids = new Set<string>();
+    const candidates = members.filter(m => m.name?.trim()).sort((a, b) => b.name.length - a.name.length);
+    for (const m of candidates) {
+      const escaped = m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`@${escaped}(?=[\\s.,!?;:]|$)`, 'u');
+      if (re.test(content)) ids.add(m.id);
+    }
+    return [...ids];
+  };
+
+  const createMentionsForContent = async (
+    tenantId: string, authorId: string, authorName: string, content: string,
+    itemType: 'post' | 'comment', itemId: string, postId: string
+  ) => {
+    try {
+      const { data: members } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId);
+      const mentionedIds = extractMentionedUserIds(content, (members || []).filter((m: any) => m.id !== authorId));
+      if (!mentionedIds.length) return;
+      const rows = mentionedIds.map(uid => ({
+        id: crypto.randomUUID(), tenant_id: tenantId, mentioned_user_id: uid,
+        author_id: authorId, author_name: authorName, item_type: itemType, item_id: itemId, post_id: postId,
+        content_snippet: content.slice(0, 200), created_at: new Date().toISOString()
+      }));
+      const { error } = await supabaseAdmin.from('mentions').insert(rows);
+      if (error) console.error('[mentions] insert failed:', error);
+    } catch (e) {
+      console.error('[mentions] unexpected error:', e);
+    }
+  };
+
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -4369,6 +4402,10 @@ async function startServer() {
         ? await supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true })
         : { data: [] };
 
+      // Items/comments that mention the requesting user, so the UI can surface them
+      const { data: myMentions } = await supabaseAdmin.from('mentions').select('item_id').eq('tenant_id', tenantId).eq('mentioned_user_id', req.user.id);
+      const mentionedItemIds = new Set((myMentions || []).map((m: any) => m.item_id));
+
       const feedItems = [
         ...(acts || []).map((a: any) => ({
           id: a.id,
@@ -4387,20 +4424,25 @@ async function startServer() {
           comments: [],
           comments_count: 0
         })),
-        ...(posts || []).map((p: any) => ({
-          id: p.id,
-          kind: 'post',
-          user_name: p.user_name,
-          user_id: p.user_id,
-          content: p.content,
-          category: 'Messages',
-          created_at: p.created_at,
-          likes_count: p.likes_count || 0,
-          liked: likedSet.has(`post:${p.id}`),
-          unread: p.created_at > lastSeen,
-          comments: (allComments || []).filter((c: any) => c.post_id === p.id),
-          comments_count: (allComments || []).filter((c: any) => c.post_id === p.id).length
-        }))
+        ...(posts || []).map((p: any) => {
+          const postComments = (allComments || []).filter((c: any) => c.post_id === p.id)
+            .map((c: any) => ({ ...c, mentions_me: mentionedItemIds.has(c.id) }));
+          return {
+            id: p.id,
+            kind: 'post',
+            user_name: p.user_name,
+            user_id: p.user_id,
+            content: p.content,
+            category: 'Messages',
+            created_at: p.created_at,
+            likes_count: p.likes_count || 0,
+            liked: likedSet.has(`post:${p.id}`),
+            unread: p.created_at > lastSeen,
+            mentions_me: mentionedItemIds.has(p.id) || postComments.some((c: any) => c.mentions_me),
+            comments: postComments,
+            comments_count: postComments.length
+          };
+        })
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       res.json(feedItems);
@@ -4423,6 +4465,7 @@ async function startServer() {
       const created_at = new Date().toISOString();
       const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
       if (insertError) throw insertError;
+      createMentionsForContent(tenantId, req.user.id, userName, content.trim(), 'post', id, id);
       res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
     } catch (err: any) {
       console.error(err);
@@ -4487,6 +4530,7 @@ async function startServer() {
       const created_at = new Date().toISOString();
       const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
       if (insertError) throw insertError;
+      createMentionsForContent(tenantId, req.user.id, userName, content.trim(), 'comment', commentId, id);
       res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
     } catch (err: any) {
       console.error(err);

@@ -9,12 +9,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
+import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions } from '../lib/mentions';
 
 interface FeedComment {
   id: string;
   user_name: string;
   content: string;
   created_at: string;
+  mentions_me?: boolean;
 }
 
 interface FeedItem {
@@ -32,6 +34,7 @@ interface FeedItem {
   likes_count: number;
   liked: boolean;
   unread: boolean;
+  mentions_me?: boolean;
   comments: FeedComment[];
   comments_count: number;
 }
@@ -91,6 +94,57 @@ function Avatar({ name, size = 38 }: { name: string; size?: number }) {
   );
 }
 
+function MentionBadge() {
+  return (
+    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[9px] font-bold uppercase tracking-wide">
+      @ Vous êtes mentionné(e)
+    </span>
+  );
+}
+
+function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string) => void }) {
+  const composer = useMentionComposer(teamMembers);
+
+  const submit = () => {
+    const content = composer.value.trim();
+    if (!content) return;
+    composer.setValue('');
+    onSubmit(content);
+  };
+
+  return (
+    <div className="flex-1 relative">
+      <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
+        <input
+          ref={composer.ref as React.RefObject<HTMLInputElement>}
+          type="text"
+          placeholder="Répondre... (@ pour mentionner)"
+          className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+          value={composer.value}
+          onChange={composer.handleChange}
+          onKeyDown={e => composer.handleKeyDown(e, submit)}
+          onBlur={composer.handleBlur}
+        />
+        <button
+          onClick={submit}
+          disabled={!composer.value.trim()}
+          className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors shrink-0"
+        >
+          <IconSend size={13} />
+        </button>
+      </div>
+      <MentionDropdown
+        suggestions={composer.suggestions}
+        activeIndex={composer.mentionIndex}
+        top={composer.mentionTop}
+        onHover={composer.setMentionIndex}
+        onSelect={composer.selectMention}
+        renderAvatar={name => <Avatar name={name} size={20} />}
+      />
+    </div>
+  );
+}
+
 export default function Notifications() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
@@ -99,11 +153,17 @@ export default function Notifications() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
-  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
-  const [newPost, setNewPost] = useState('');
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
   const [isPosting, setIsPosting] = useState(false);
+  const composer = useMentionComposer(teamMembers);
 
   const authErrorCount = useRef(0);
+  const autoExpandedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!currentUser) return;
+    apiFetch<TeamMemberLite[]>('/api/team').then(setTeamMembers).catch(() => {});
+  }, [currentUser]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -130,6 +190,17 @@ export default function Notifications() {
     }, 30000);
     return () => clearInterval(interval);
   }, [fetchItems, currentUser]);
+
+  // Automatically open the comments of any item that mentions the current user
+  useEffect(() => {
+    const toExpand = items.filter(i => i.mentions_me && !autoExpandedRef.current.has(i.id));
+    if (toExpand.length === 0) return;
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      toExpand.forEach(i => { next.add(i.id); autoExpandedRef.current.add(i.id); });
+      return next;
+    });
+  }, [items]);
 
   const markAllRead = async () => {
     setIsMarkingRead(true);
@@ -161,10 +232,7 @@ export default function Notifications() {
     }
   };
 
-  const handleComment = async (itemId: string) => {
-    const content = commentDraft[itemId]?.trim();
-    if (!content) return;
-    setCommentDraft(d => ({ ...d, [itemId]: '' }));
+  const handleComment = async (itemId: string, content: string) => {
     try {
       const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
         method: 'POST',
@@ -180,10 +248,10 @@ export default function Notifications() {
   };
 
   const handlePost = async () => {
-    if (!newPost.trim() || isPosting) return;
-    const content = newPost.trim();
+    const content = composer.value.trim();
+    if (!content || isPosting) return;
     setIsPosting(true);
-    setNewPost('');
+    composer.setValue('');
     try {
       const item = await apiFetch<FeedItem>('/api/feed/posts', {
         method: 'POST',
@@ -192,7 +260,7 @@ export default function Notifications() {
       setItems(prev => [item, ...prev]);
     } catch (err) {
       console.error(err);
-      setNewPost(content);
+      composer.setValue(content);
     } finally {
       setIsPosting(false);
     }
@@ -257,22 +325,24 @@ export default function Notifications() {
       </div>
 
       {/* Compose box */}
-      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm p-4">
+      <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm p-4 relative">
         <div className="flex gap-3">
           <Avatar name={currentUser?.name || 'U'} size={36} />
           <div className="flex-1">
             <textarea
+              ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
               rows={2}
-              placeholder="Partagez quelque chose avec l'équipe... (Ctrl+Entrée pour publier)"
+              placeholder="Partagez quelque chose avec l'équipe... (@ pour mentionner, Ctrl+Entrée pour publier)"
               className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition-all"
-              value={newPost}
-              onChange={e => setNewPost(e.target.value)}
-              onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handlePost(); }}
+              value={composer.value}
+              onChange={composer.handleChange}
+              onKeyDown={e => composer.handleKeyDown(e, () => { if (e.ctrlKey || e.metaKey) handlePost(); })}
+              onBlur={composer.handleBlur}
             />
             <div className="flex justify-end mt-2">
               <button
                 onClick={handlePost}
-                disabled={!newPost.trim() || isPosting}
+                disabled={!composer.value.trim() || isPosting}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 shadow-sm"
               >
                 <IconSend size={14} />
@@ -281,6 +351,14 @@ export default function Notifications() {
             </div>
           </div>
         </div>
+        <MentionDropdown
+          suggestions={composer.suggestions}
+          activeIndex={composer.mentionIndex}
+          top={composer.mentionTop}
+          onHover={composer.setMentionIndex}
+          onSelect={composer.selectMention}
+          renderAvatar={name => <Avatar name={name} size={22} />}
+        />
       </div>
 
       {/* Filter tabs */}
@@ -364,7 +442,9 @@ export default function Notifications() {
                             {item.action}
                           </p>
                         ) : (
-                          <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                          <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">
+                            {renderTextWithMentions(item.content || '', teamMembers)}
+                          </p>
                         )}
 
                         {/* Metadata row */}
@@ -386,6 +466,7 @@ export default function Notifications() {
                               Nouveau
                             </span>
                           )}
+                          {item.mentions_me && <MentionBadge />}
                         </div>
 
                         {/* Action bar */}
@@ -430,8 +511,11 @@ export default function Notifications() {
                                 <div key={c.id} className="flex gap-2">
                                   <Avatar name={c.user_name || 'U'} size={26} />
                                   <div className="flex-1 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
-                                    <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
-                                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{c.content}</p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{c.user_name}</span>
+                                      {c.mentions_me && <MentionBadge />}
+                                    </div>
+                                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</p>
                                     <p className="text-[10px] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
                                   </div>
                                 </div>
@@ -442,23 +526,7 @@ export default function Notifications() {
                               {item.kind === 'post' && (
                                 <div className="flex gap-2 items-center pt-1">
                                   <Avatar name={currentUser?.name || 'U'} size={26} />
-                                  <div className="flex-1 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700/50 rounded-xl px-3 py-2">
-                                    <input
-                                      type="text"
-                                      placeholder="Répondre..."
-                                      className="flex-1 bg-transparent text-xs outline-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
-                                      value={commentDraft[item.id] || ''}
-                                      onChange={e => setCommentDraft(d => ({ ...d, [item.id]: e.target.value }))}
-                                      onKeyDown={e => e.key === 'Enter' && handleComment(item.id)}
-                                    />
-                                    <button
-                                      onClick={() => handleComment(item.id)}
-                                      disabled={!commentDraft[item.id]?.trim()}
-                                      className="text-blue-500 disabled:opacity-30 hover:text-blue-600 transition-colors shrink-0"
-                                    >
-                                      <IconSend size={13} />
-                                    </button>
-                                  </div>
+                                  <CommentBox teamMembers={teamMembers} onSubmit={content => handleComment(item.id, content)} />
                                 </div>
                               )}
                             </motion.div>
