@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { IconPaperclip, IconLink, IconQuote, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected } from '@tabler/icons-react';
+import { IconPaperclip, IconLink, IconQuote, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected, IconDownload } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
-interface FeedComment {
+interface Attachment {
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
+}
+
+interface FeedComment extends Attachment {
   id: string;
   user_name: string;
   content: string;
@@ -13,7 +20,7 @@ interface FeedComment {
   mentions_me?: boolean;
 }
 
-interface FeedItem {
+interface FeedItem extends Attachment {
   id: string;
   kind: 'activity' | 'post';
   user_name: string;
@@ -30,6 +37,40 @@ interface FeedItem {
   mentions_me?: boolean;
   comments: FeedComment[];
   comments_count: number;
+}
+
+// Authenticated multipart POST — apiFetch forces a JSON Content-Type header
+// whenever a body is present, which corrupts a FormData upload's boundary.
+async function postForm<T>(url: string, form: FormData): Promise<T> {
+  const token = await getAccessToken();
+  const res = await fetch(url, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
+}
+
+function AttachmentView({ item }: { item: Attachment }) {
+  if (!item.attachment_url) return null;
+  if (item.attachment_type?.startsWith('image/')) {
+    return (
+      <a href={item.attachment_url} target="_blank" rel="noreferrer">
+        <img src={item.attachment_url} alt={item.attachment_name || 'pièce jointe'} className="mt-1.5 rounded-lg max-w-full max-h-56" />
+      </a>
+    );
+  }
+  return (
+    <a href={item.attachment_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs mt-1.5 hover:underline w-fit" style={{ color: 'var(--tblr-primary)' }}>
+      <IconFile size={13} /> {item.attachment_name || 'Pièce jointe'} <IconDownload size={12} />
+    </a>
+  );
+}
+
+function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] w-fit" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+      <IconFile size={12} /> {file.name}
+      <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
+    </div>
+  );
 }
 
 function timeAgo(dateStr: string): string {
@@ -109,38 +150,54 @@ function MentionBadge() {
   );
 }
 
-function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string) => void }) {
+function CommentBox({ teamMembers, onSubmit }: { teamMembers: TeamMemberLite[]; onSubmit: (content: string, file: File | null) => void }) {
   const composer = useMentionComposer(teamMembers);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const submit = () => {
     const content = composer.value.trim();
-    if (!content) return;
+    if (!content && !attachment) return;
     composer.setValue('');
-    onSubmit(content);
+    setAttachment(null);
+    onSubmit(content, attachment);
   };
 
   return (
     <div className="flex-1 relative">
-      <div className="flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
-        <input
-          ref={composer.ref as React.RefObject<HTMLInputElement>}
-          type="text"
-          placeholder="Ajouter un commentaire... (@ pour mentionner)"
-          className="flex-1 bg-transparent text-xs outline-none"
-          style={{ color: 'var(--tblr-text)' }}
-          value={composer.value}
-          onChange={composer.handleChange}
-          onKeyDown={e => composer.handleKeyDown(e, submit)}
-          onBlur={composer.handleBlur}
-        />
-        <button
-          onClick={submit}
-          disabled={!composer.value.trim()}
-          className="disabled:opacity-30 transition-colors shrink-0"
-          style={{ color: 'var(--tblr-primary)' }}
-        >
-          <IconSend size={13} />
-        </button>
+      <div className="rounded-lg px-3 py-1.5 space-y-1" style={{ background: 'var(--tblr-surface-2)' }}>
+        {attachment && <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />}
+        <div className="flex items-center gap-2">
+          <textarea
+            ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
+            rows={1}
+            placeholder="Ajouter un commentaire... (@ pour mentionner)"
+            className="flex-1 bg-transparent text-xs outline-none resize-none"
+            style={{ color: 'var(--tblr-text)' }}
+            value={composer.value}
+            onChange={composer.handleChange}
+            onKeyDown={e => composer.handleKeyDown(e, ke => { if (!ke.shiftKey) { ke.preventDefault(); submit(); } })}
+            onBlur={composer.handleBlur}
+          />
+          <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
+          <button onClick={() => fileInputRef.current?.click()} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier">
+            <IconPaperclip size={13} />
+          </button>
+          <button onClick={() => insertLinkInto(composer)} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Insérer un lien">
+            <IconLink size={13} />
+          </button>
+          <button onClick={() => insertQuoteInto(composer)} className="transition-colors shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Citation">
+            <IconQuote size={13} />
+          </button>
+          <button
+            onClick={submit}
+            disabled={!composer.value.trim() && !attachment}
+            className="disabled:opacity-30 transition-colors shrink-0"
+            style={{ color: 'var(--tblr-primary)' }}
+          >
+            <IconSend size={13} />
+          </button>
+        </div>
       </div>
       <MentionDropdown
         suggestions={composer.suggestions}
@@ -162,6 +219,7 @@ export default function ActivityFeed() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [showHiddenMenu, setShowHiddenMenu] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const [attachment, setAttachment] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenMenuRef = useRef<HTMLDivElement>(null);
   const autoExpandedRef = useRef<Set<string>>(new Set());
@@ -224,18 +282,29 @@ export default function ActivityFeed() {
 
   const handlePost = async () => {
     const content = composer.value.trim();
-    if (!content || isPosting) return;
+    if ((!content && !attachment) || isPosting) return;
     setIsPosting(true);
     composer.setValue('');
+    const file = attachment;
+    setAttachment(null);
     try {
-      const newItem = await apiFetch<FeedItem>('/api/feed/posts', {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let newItem: FeedItem;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        newItem = await postForm<FeedItem>('/api/feed/posts', fd);
+      } else {
+        newItem = await apiFetch<FeedItem>('/api/feed/posts', {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => [newItem, ...prev]);
     } catch (err) {
       console.error(err);
       composer.setValue(content);
+      setAttachment(file);
     } finally {
       setIsPosting(false);
     }
@@ -261,12 +330,20 @@ export default function ActivityFeed() {
     }
   };
 
-  const handleComment = async (itemId: string, content: string) => {
+  const handleComment = async (itemId: string, content: string, file: File | null) => {
     try {
-      const comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ content })
-      });
+      let comment: FeedComment;
+      if (file) {
+        const fd = new FormData();
+        if (content) fd.append('content', content);
+        fd.append('file', file);
+        comment = await postForm<FeedComment>(`/api/feed/posts/${itemId}/comments`, fd);
+      } else {
+        comment = await apiFetch<FeedComment>(`/api/feed/posts/${itemId}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ content })
+        });
+      }
       setItems(prev => prev.map(i => i.id === itemId
         ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
         : i
@@ -344,12 +421,17 @@ export default function ActivityFeed() {
             rows={2}
             value={composer.value}
             onChange={composer.handleChange}
-            onKeyDown={e => composer.handleKeyDown(e, () => { if (e.ctrlKey || e.metaKey) handlePost(); })}
+            onKeyDown={e => composer.handleKeyDown(e, ke => { if (ke.ctrlKey || ke.metaKey) { ke.preventDefault(); handlePost(); } })}
             onBlur={composer.handleBlur}
           />
+          {attachment && (
+            <div className="px-4 pb-2">
+              <AttachmentChip file={attachment} onRemove={() => setAttachment(null)} />
+            </div>
+          )}
           <div className="flex justify-between items-center px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
             <div className="flex gap-3">
-              <input type="file" ref={fileInputRef} className="hidden" />
+              <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
               <button onClick={() => fileInputRef.current?.click()} className="transition-colors" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier"
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-text)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}>
@@ -368,7 +450,7 @@ export default function ActivityFeed() {
             </div>
             <button
               onClick={handlePost}
-              disabled={!composer.value.trim() || isPosting}
+              disabled={(!composer.value.trim() && !attachment) || isPosting}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
@@ -416,6 +498,7 @@ export default function ActivityFeed() {
                   ) : (
                     <div className="text-[13px] leading-relaxed" style={{ color: 'var(--tblr-text)' }}>
                       {renderTextWithMentions(item.content || '', teamMembers)}
+                      <AttachmentView item={item} />
                     </div>
                   )}
 
@@ -469,13 +552,14 @@ export default function ActivityFeed() {
                               {c.mentions_me && <MentionBadge />}
                             </div>
                             <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{renderTextWithMentions(c.content, teamMembers)}</div>
+                            <AttachmentView item={c} />
                           </div>
                         </div>
                       ))}
                       {item.kind === 'post' && (
                         <div className="flex gap-2 items-center">
                           <Avatar name={currentUser?.name || 'U'} size={24} />
-                          <CommentBox teamMembers={teamMembers} onSubmit={content => handleComment(item.id, content)} />
+                          <CommentBox teamMembers={teamMembers} onSubmit={(content, file) => handleComment(item.id, content, file)} />
                         </div>
                       )}
                     </div>

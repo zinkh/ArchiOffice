@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   IconSend, IconPaperclip, IconPlus, IconX, IconSearch, IconUsersGroup,
-  IconArrowLeft, IconFile, IconDownload, IconMessageCircle, IconLogout, IconCheck
+  IconArrowLeft, IconFile, IconDownload, IconMessageCircle, IconLogout, IconCheck,
+  IconLink, IconQuote
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
+import { renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
 
 interface Participant {
   id: string;
@@ -183,6 +185,7 @@ export default function Messages() {
   const [showMobileList, setShowMobileList] = useState(!searchParams.get('c'));
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const knownMessageIds = useRef<Set<string>>(new Set());
 
@@ -416,11 +419,14 @@ export default function Messages() {
                 return (
                   <div key={msg.id} className={cn("flex gap-2", isMine ? "flex-row-reverse" : "flex-row")}>
                     <Avatar name={msg.sender_name || 'U'} size={26} />
-                    <div className={cn("max-w-[70%] rounded-2xl px-3 py-2", isMine ? "bg-blue-600 text-white" : "bg-zinc-100 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200")}>
+                    <div
+                      className={cn("max-w-[70%] rounded-2xl px-3 py-2", isMine ? "bg-blue-600 text-white" : "bg-zinc-100 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200")}
+                      style={isMine ? ({ '--tblr-primary': '#ffffff', '--tblr-border': 'rgba(255,255,255,0.5)' } as React.CSSProperties) : undefined}
+                    >
                       {!isMine && selectedConversation.is_group && (
                         <p className="text-[10px] font-bold opacity-70 mb-0.5">{msg.sender_name}</p>
                       )}
-                      {msg.content && <p className="text-sm whitespace-pre-wrap">{msg.content}</p>}
+                      {msg.content && <div className="text-sm">{renderTextWithMentions(msg.content, [])}</div>}
                       {msg.attachment_url && (
                         msg.attachment_type?.startsWith('image/') ? (
                           <a href={msg.attachment_url} target="_blank" rel="noreferrer">
@@ -447,17 +453,25 @@ export default function Messages() {
                   <button onClick={() => setAttachment(null)} className="text-zinc-400 hover:text-red-500"><IconX size={12} /></button>
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex items-end gap-2">
                 <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachment(e.target.files?.[0] || null)} />
-                <button onClick={() => fileInputRef.current?.click()} className="p-2 text-zinc-400 hover:text-blue-600 transition-colors shrink-0">
+                <button onClick={() => fileInputRef.current?.click()} className="p-2 text-zinc-400 hover:text-blue-600 transition-colors shrink-0" title="Joindre un fichier">
                   <IconPaperclip size={18} />
                 </button>
-                <input
-                  className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white"
+                <button onClick={() => insertLinkInto({ value: draft, setValue: setDraft, ref: messageInputRef })} className="p-2 text-zinc-400 hover:text-blue-600 transition-colors shrink-0" title="Insérer un lien">
+                  <IconLink size={18} />
+                </button>
+                <button onClick={() => insertQuoteInto({ value: draft, setValue: setDraft, ref: messageInputRef })} className="p-2 text-zinc-400 hover:text-blue-600 transition-colors shrink-0" title="Citation">
+                  <IconQuote size={18} />
+                </button>
+                <textarea
+                  ref={messageInputRef}
+                  rows={1}
+                  className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white resize-none"
                   placeholder="Écrire un message..."
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && send()}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                 />
                 <button
                   onClick={send}

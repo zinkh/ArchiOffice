@@ -1347,7 +1347,7 @@ async function startServer() {
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'cv', 'message-attachments']) {
+    for (const bucket of ['documents', 'cv', 'message-attachments', 'feed-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
@@ -4433,6 +4433,9 @@ async function startServer() {
             user_name: p.user_name,
             user_id: p.user_id,
             content: p.content,
+            attachment_url: p.attachment_url,
+            attachment_name: p.attachment_name,
+            attachment_type: p.attachment_type,
             category: 'Messages',
             created_at: p.created_at,
             likes_count: p.likes_count || 0,
@@ -4452,21 +4455,37 @@ async function startServer() {
     }
   });
 
-  app.post("/api/feed/posts", async (req: any, res: any) => {
+  app.post("/api/feed/posts", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { content } = req.body;
-      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+      const file = req.file;
+      if (!content?.trim() && !file) return res.status(400).json({ error: "Content required" });
 
       // Get user name
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
 
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('feed-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({ id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at, likes_count: 0 });
+      const trimmedContent = content?.trim() || null;
+      const { error: insertError } = await supabaseAdmin.from('feed_posts').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: trimmedContent,
+        attachment_url, attachment_name, attachment_type, created_at, likes_count: 0
+      });
       if (insertError) throw insertError;
-      createMentionsForContent(tenantId, req.user.id, userName, content.trim(), 'post', id, id);
-      res.status(201).json({ id, kind: 'post', user_name: userName, user_id: req.user.id, content: content.trim(), created_at, likes_count: 0, liked: false, comments: [], comments_count: 0 });
+      if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'post', id, id);
+      res.status(201).json({
+        id, kind: 'post', user_name: userName, user_id: req.user.id, content: trimmedContent,
+        attachment_url, attachment_name, attachment_type, created_at, likes_count: 0, liked: false, comments: [], comments_count: 0
+      });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: "Failed to create post" });
@@ -4519,19 +4538,33 @@ async function startServer() {
     }
   });
 
-  app.post("/api/feed/posts/:id/comments", async (req: any, res: any) => {
+  app.post("/api/feed/posts/:id/comments", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { content } = req.body;
-      if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+      const file = req.file;
+      if (!content?.trim() && !file) return res.status(400).json({ error: "Content required" });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
+
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('feed-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const commentId = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({ id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName, content: content.trim(), created_at });
+      const trimmedContent = content?.trim() || null;
+      const { error: insertError } = await supabaseAdmin.from('feed_comments').insert({
+        id: commentId, post_id: id, tenant_id: tenantId, user_id: req.user.id, user_name: userName,
+        content: trimmedContent, attachment_url, attachment_name, attachment_type, created_at
+      });
       if (insertError) throw insertError;
-      createMentionsForContent(tenantId, req.user.id, userName, content.trim(), 'comment', commentId, id);
-      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: content.trim(), created_at });
+      if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'comment', commentId, id);
+      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: trimmedContent, attachment_url, attachment_name, attachment_type, created_at });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: "Failed to add comment" });

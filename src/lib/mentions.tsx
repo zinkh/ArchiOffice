@@ -64,14 +64,18 @@ export function useMentionComposer(members: TeamMemberLite[], initialValue = '')
     setMention(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, onSubmit?: () => void) => {
+  // onSubmit decides for itself whether this particular Enter should submit
+  // (and must call e.preventDefault() when it does) — a multi-line composer
+  // wants plain Enter to insert a newline and only Ctrl+Enter to submit,
+  // while a single-line comment box wants the reverse.
+  const handleKeyDown = (e: React.KeyboardEvent, onSubmit?: (e: React.KeyboardEvent) => void) => {
     if (mention && suggestions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % suggestions.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex(i => (i - 1 + suggestions.length) % suggestions.length); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(suggestions[mentionIndex]); return; }
       if (e.key === 'Escape') { setMention(null); return; }
     }
-    if (e.key === 'Enter') onSubmit?.();
+    if (e.key === 'Enter') onSubmit?.(e);
   };
 
   const handleBlur = () => setTimeout(() => setMention(null), 100);
