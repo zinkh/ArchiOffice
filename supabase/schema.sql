@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS milestones (
   project_id TEXT, proposal_id TEXT, tender_id TEXT,
   title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
@@ -254,6 +255,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   vat_rate NUMERIC, zoho_invoice_id TEXT, invoice_type TEXT DEFAULT 'standard',
   mission_id TEXT, mission_name TEXT, advancement_pct NUMERIC DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,
@@ -297,6 +299,7 @@ CREATE TABLE IF NOT EXISTS specifications (
   project_id TEXT, title TEXT NOT NULL, content TEXT,
   last_updated TEXT, is_template INTEGER DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_specifications_tenant_project ON specifications(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS ordres_de_service (
   id TEXT PRIMARY KEY,
@@ -310,6 +313,7 @@ CREATE TABLE IF NOT EXISTS ordres_de_service (
   incidences_couts_type TEXT, montant_devis_presente NUMERIC,
   montant_devis_accepte NUMERIC, date_signature TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_ordres_de_service_tenant_project ON ordres_de_service(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS site_reports (
   id TEXT PRIMARY KEY,
@@ -319,6 +323,7 @@ CREATE TABLE IF NOT EXISTS site_reports (
   meeting_notes TEXT, next_meeting TEXT, meteo TEXT,
   temperature TEXT, effectif_total TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS site_report_notes (
   id TEXT PRIMARY KEY,
@@ -330,6 +335,7 @@ CREATE TABLE IF NOT EXISTS site_report_notes (
   text TEXT, lot_concerne TEXT, photo_url TEXT, position TEXT,
   description TEXT, statut TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_site_report_notes_tenant_report ON site_report_notes(tenant_id, report_id);
 
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
@@ -339,6 +345,7 @@ CREATE TABLE IF NOT EXISTS documents (
   version INTEGER DEFAULT 1, file_url TEXT NOT NULL,
   uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_documents_tenant_project ON documents(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS document_versions (
   id TEXT PRIMARY KEY,
@@ -347,6 +354,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
   version INTEGER NOT NULL, file_url TEXT NOT NULL,
   uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_document_versions_tenant_document ON document_versions(tenant_id, document_id);
 
 CREATE TABLE IF NOT EXISTS visas (
   id TEXT PRIMARY KEY,
@@ -354,6 +362,7 @@ CREATE TABLE IF NOT EXISTS visas (
   project_id TEXT, title TEXT NOT NULL, date TEXT NOT NULL,
   status TEXT DEFAULT 'pending', comments TEXT, document_url TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_visas_tenant_project ON visas(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS receptions (
   id TEXT PRIMARY KEY,
@@ -362,6 +371,7 @@ CREATE TABLE IF NOT EXISTS receptions (
   has_reserves INTEGER DEFAULT 0, reserves_count INTEGER DEFAULT 0,
   document_url TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_receptions_tenant_project ON receptions(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
@@ -369,6 +379,7 @@ CREATE TABLE IF NOT EXISTS plans (
   project_id TEXT, name TEXT NOT NULL, file_url TEXT NOT NULL,
   uploaded_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_plans_tenant_project ON plans(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS reserves (
   id TEXT PRIMARY KEY,
@@ -378,6 +389,7 @@ CREATE TABLE IF NOT EXISTS reserves (
   lots TEXT, entreprises TEXT, created_at TEXT, due_date TEXT,
   plan_id TEXT, x NUMERIC, y NUMERIC, number INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_reserves_tenant_project ON reserves(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS dpgf_items (
   id TEXT PRIMARY KEY,
@@ -385,6 +397,7 @@ CREATE TABLE IF NOT EXISTS dpgf_items (
   project_id TEXT, designation TEXT NOT NULL, unite TEXT NOT NULL,
   quantite_prevue NUMERIC NOT NULL, prix_unitaire_ht NUMERIC NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_dpgf_items_tenant_project ON dpgf_items(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS situations (
   id TEXT PRIMARY KEY,
@@ -392,6 +405,7 @@ CREATE TABLE IF NOT EXISTS situations (
   project_id TEXT, numero_situation INTEGER NOT NULL,
   date_situation TEXT NOT NULL, etat TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_situations_tenant_project ON situations(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS detail_situations (
   id TEXT PRIMARY KEY,
