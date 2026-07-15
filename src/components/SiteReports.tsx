@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { SiteReport, SiteReportNote, ProjectLot, Project } from '../types';
 import { IconPlus, IconFileText, IconCheck, IconEdit, IconFileDownload, IconTrash, IconCalendar, IconGripVertical } from '@tabler/icons-react';
 import ObservationsTable from './ObservationsTable';
-import jsPDF from 'jspdf';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 
 interface SiteReportsProps {
@@ -82,6 +81,7 @@ export default function SiteReports({ project, lots_list }: SiteReportsProps) {
     icons.forEach(icon => icon.style.display = 'none');
 
     try {
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF(pageFormat === 'portrait' ? 'p' : 'l', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       

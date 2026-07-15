@@ -12,8 +12,6 @@ import type { ContratMOE, ContratMOEMission, ContratCotraitant, ContratSousTrait
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { cn } from '../lib/utils';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -80,7 +78,11 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── PDF Generation ───────────────────────────────────────────────────────────
 
-function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
+async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210;
   const margin = 20;

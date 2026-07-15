@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { IconFileExport, IconDownload, IconX, IconPlus, IconTrash, IconEye, IconEdit } from '@tabler/icons-react';
-import jsPDF from 'jspdf';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 
 const MISSION_COURTE_TITLE = "MISSION LIMITÉE AU PROJET ARCHITECTURAL NÉCESSAIRE À LA DEMANDE DE L'AUTORISATION D'URBANISME";
@@ -310,6 +309,7 @@ export function ProposalGenerator({ initialData, onClose }: ProposalGeneratorPro
     icons.forEach(icon => icon.style.display = 'none');
     
     try {
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF(data.pageFormat === 'portrait' ? 'p' : 'l', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       

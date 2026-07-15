@@ -49,8 +49,6 @@ import {
   IconCalendarStats,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn } from '../lib/utils';
@@ -761,7 +759,11 @@ export default function ProjectDetail() {
     }
   };
 
-  const generateAvenantPdf = (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+  const generateAvenantPdf = async (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const W = 210, margin = 20;
     const TYPE_LABELS: Record<string, string> = {
@@ -916,7 +918,11 @@ export default function ProjectDetail() {
     finally { setArSaving(false); }
   };
 
-  const generateOsPdf = (os: OrdreDeService) => {
+  const generateOsPdf = async (os: OrdreDeService) => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     doc.setFillColor(30, 64, 175);
     doc.rect(0, 0, 210, 28, 'F');
@@ -995,7 +1001,11 @@ export default function ProjectDetail() {
     doc.save(`OS_${os.os_number}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
   };
 
-  const generatePvPdf = (rec: Reception, pvReserves: Reserve[], projectName: string, signataires: { nom: string; role: string }[]) => {
+  const generatePvPdf = async (rec: Reception, pvReserves: Reserve[], projectName: string, signataires: { nom: string; role: string }[]) => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const blue: [number, number, number] = [30, 64, 175];
     // Header

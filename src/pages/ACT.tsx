@@ -4,7 +4,6 @@ import { IconPlus, IconTrash, IconCalculator, IconCheck, IconAlertTriangle, Icon
 import { cn, formatCurrency } from '../lib/utils';
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
-import { jsPDF } from 'jspdf';
 import { saveAs } from 'file-saver';
 import { loadImageAsDataUrl } from '../lib/imageUtils';
 
@@ -142,6 +141,7 @@ export default function ACT({ projectId }: { projectId: string }) {
   };
 
   const exportToPDF = async () => {
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     let textY = 18;
 
