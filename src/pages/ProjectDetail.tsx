@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ChangeEvent, useRef } from 'react';
+import React, { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
 import Select, { StylesConfig } from 'react-select';
 import CreatableSelect from 'react-select/creatable';
 import chroma from 'chroma-js';
@@ -347,6 +347,48 @@ export default function ProjectDetail() {
       fetchDoeDocuments();
     }
   }, [activeTab, id]);
+
+  // Memoized derived data — these were recomputed inline with filter()/reduce()
+  // in several places in the JSX below (up to 4x for the MOE avenants alone),
+  // rescanning ordresDeService/invoices/reserves on every render even when
+  // typing in an unrelated form field elsewhere in this component.
+  const moeAvenants = useMemo(
+    () => ordresDeService.filter(o => o.type === 'contrat_moe'),
+    [ordresDeService]
+  );
+  const moeAvenantsApprouves = useMemo(
+    () => moeAvenants.filter(o => o.status === 'approved'),
+    [moeAvenants]
+  );
+  const cumulAvenantsApprouves = useMemo(
+    () => moeAvenantsApprouves.reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0),
+    [moeAvenantsApprouves]
+  );
+  const totalInvoicesPaid = useMemo(
+    () => invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + i.amount, 0),
+    [invoices]
+  );
+  // Groups reserves by reception_id once instead of re-filtering the whole
+  // reserves array for every reception row in the PV table below.
+  const reservesByReceptionId = useMemo(() => {
+    const map = new Map<string, Reserve[]>();
+    for (const r of reserves) {
+      if (!r.reception_id) continue;
+      const list = map.get(r.reception_id);
+      if (list) list.push(r); else map.set(r.reception_id, [r]);
+    }
+    return map;
+  }, [reserves]);
+  const reserveStats = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const in7 = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return {
+      ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
+      retard: reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) < today).length,
+      urgentes: reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) >= today && new Date(r.due_date) <= in7).length,
+      levees: reserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length,
+    };
+  }, [reserves]);
 
   const fetchProjectMembers = async () => {
     if (!id) return;
@@ -1426,16 +1468,15 @@ export default function ProjectDetail() {
                     {/* KPIs */}
                     {(() => {
                       const honInit = Number(project.remuneration) || 0;
-                      const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
-                      const cumul = moeAvenants.filter(o => o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                      const cumul = cumulAvenantsApprouves;
                       const honRevises = honInit + cumul;
-                      const encaisses = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + i.amount, 0);
+                      const encaisses = totalInvoicesPaid;
                       const restant = honRevises - encaisses;
                       return (
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                           {[
                             { label: 'Honoraires initiaux', value: honInit, color: 'blue', sub: 'Contrat MOE signé' },
-                            { label: 'Cumul avenants', value: cumul, color: cumul >= 0 ? 'green' : 'red', sub: `${moeAvenants.filter(o => o.status === 'approved').length} avenant(s) approuvé(s)` },
+                            { label: 'Cumul avenants', value: cumul, color: cumul >= 0 ? 'green' : 'red', sub: `${moeAvenantsApprouves.length} avenant(s) approuvé(s)` },
                             { label: 'Honoraires révisés', value: honRevises, color: 'indigo', sub: 'Total contractuel' },
                             { label: 'Restant à percevoir', value: restant, color: restant > 0 ? 'amber' : 'green', sub: `${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(encaisses)} encaissés` },
                           ].map(kpi => (
@@ -1555,7 +1596,7 @@ export default function ProjectDetail() {
                           <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">N° Avenant *</label>
                           <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.os_number} onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
-                            placeholder={`A${String((ordresDeService.filter(o => o.type === 'contrat_moe').length + 1)).padStart(2, '0')}`} />
+                            placeholder={`A${String(moeAvenants.length + 1).padStart(2, '0')}`} />
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Type d'avenant</label>
@@ -1642,9 +1683,8 @@ export default function ProjectDetail() {
                   )}
                   {/* Barre récap cumulée */}
                   {(() => {
-                    const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
-                    const approuves = moeAvenants.filter(o => o.status === 'approved');
-                    const cumul = approuves.reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                    const approuves = moeAvenantsApprouves;
+                    const cumul = cumulAvenantsApprouves;
                     const honInit = Number(project.remuneration) || 0;
                     if (moeAvenants.length === 0) return null;
                     return (
@@ -1681,8 +1721,7 @@ export default function ProjectDetail() {
                             revision_honoraires: 'Révision hon.', imprevus: 'Imprévus', autre: 'Autre',
                           };
                           const honorairesInitiaux = Number(project.remuneration) || 0;
-                          const moeAvenants = ordresDeService.filter(o => o.type === 'contrat_moe');
-                          const cumulTotal = moeAvenants.filter(o => o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                          const cumulTotal = cumulAvenantsApprouves;
                           return moeAvenants.map((os) => (
                             <tr key={os.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
                               <td className="px-4 py-3 font-mono font-black text-[var(--tblr-text)] whitespace-nowrap text-xs">Av.{os.os_number}</td>
@@ -1726,7 +1765,7 @@ export default function ProjectDetail() {
                             </tr>
                           ));
                         })()}
-                        {ordresDeService.filter(o => o.type === 'contrat_moe').length === 0 && (
+                        {moeAvenants.length === 0 && (
                           <tr><td colSpan={10} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun avenant. Cliquez sur "Nouvel avenant" pour commencer.</td></tr>
                         )}
                       </tbody>
@@ -2867,11 +2906,11 @@ export default function ProjectDetail() {
                   />
                   <StatTile
                     label="Total Payé"
-                    value={<span className="text-green-600">{formatCurrency(invoices.filter(i => i.status === 'Paid').reduce((acc, i) => acc + i.amount, 0))}</span>}
+                    value={<span className="text-green-600">{formatCurrency(totalInvoicesPaid)}</span>}
                   />
                   <StatTile
                     label="Reste à payer"
-                    value={<span className="text-blue-600">{formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0) - invoices.filter(i => i.status === 'Paid').reduce((acc, i) => acc + i.amount, 0))}</span>}
+                    value={<span className="text-blue-600">{formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0) - totalInvoicesPaid)}</span>}
                   />
                 </div>
 
@@ -3279,22 +3318,12 @@ export default function ProjectDetail() {
             {activeTab === 'AOR' && (
               <div className="space-y-8">
                 {/* Cartes d'alertes réserves */}
-                {(() => {
-                  const today = new Date(); today.setHours(0,0,0,0);
-                  const in7 = new Date(today.getTime() + 7*24*60*60*1000);
-                  const ouvertes = reserves.filter(r => r.status === 'A faire' || r.status === 'En cours');
-                  const retard = reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) < today);
-                  const urgentes = reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) >= today && new Date(r.due_date) <= in7);
-                  const levees = reserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis');
-                  return (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <StatTile label="Réserves ouvertes" color="blue" icon={IconAlertTriangle} value={ouvertes.length} sub="A faire + En cours" />
-                      <StatTile label="En retard" color="red" icon={IconAlertCircle} value={retard.length} sub="Échéance dépassée" />
-                      <StatTile label="Urgentes" color="orange" icon={IconClock} value={urgentes.length} sub="Dans les 7 jours" />
-                      <StatTile label="Levées" color="green" icon={IconCheck} value={levees.length} sub="Levée + Quitus" />
-                    </div>
-                  );
-                })()}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <StatTile label="Réserves ouvertes" color="blue" icon={IconAlertTriangle} value={reserveStats.ouvertes} sub="A faire + En cours" />
+                  <StatTile label="En retard" color="red" icon={IconAlertCircle} value={reserveStats.retard} sub="Échéance dépassée" />
+                  <StatTile label="Urgentes" color="orange" icon={IconClock} value={reserveStats.urgentes} sub="Dans les 7 jours" />
+                  <StatTile label="Levées" color="green" icon={IconCheck} value={reserveStats.levees} sub="Levée + Quitus" />
+                </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
@@ -3923,7 +3952,7 @@ export default function ProjectDetail() {
                         {receptions.map((rec) => {
                           const dlimit = rec.date_limite_levee ? new Date(rec.date_limite_levee) : null;
                           const isUrgent = dlimit && (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
-                          const pvReserves = reserves.filter(r => r.reception_id === rec.id);
+                          const pvReserves = reservesByReceptionId.get(rec.id) ?? [];
                           const isExpanded = expandedPvId === rec.id;
                           const reservesLevees = pvReserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length;
                           return (
