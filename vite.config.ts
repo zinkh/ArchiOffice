@@ -11,6 +11,26 @@ export default defineConfig(({mode}) => {
   return {
     build: {
       outDir: 'dist',
+      rollupOptions: {
+        output: {
+          // Pin the heaviest third-party libraries to their own stable chunk
+          // names. Rollup's automatic splitting already keeps them out of
+          // page bundles that don't use them, but without this they can
+          // still be re-bundled together with whichever app code imports
+          // them — so a change to one page's own code can invalidate the
+          // cached copy of a multi-hundred-KB library for every returning
+          // visitor. Isolating them means those chunks only change (and
+          // need re-downloading) when the library itself is upgraded.
+          manualChunks(id) {
+            if (id.includes('/node_modules/maplibre-gl/')) return 'vendor-maplibre';
+            if (id.includes('/node_modules/recharts/')) return 'vendor-recharts';
+            if (id.includes('/node_modules/jspdf/') || id.includes('/node_modules/jspdf-autotable/')) return 'vendor-jspdf';
+            if (id.includes('/node_modules/xlsx/')) return 'vendor-xlsx';
+            if (id.includes('/node_modules/docx/')) return 'vendor-docx';
+            if (id.includes('/node_modules/html2canvas/')) return 'vendor-html2canvas';
+          },
+        },
+      },
     },
     define: {
       // Use process.env directly — guaranteed to read DigitalOcean OS env vars at build time
