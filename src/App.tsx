@@ -15,7 +15,7 @@ import {
 } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -25,45 +25,46 @@ import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
-import './i18n';
 
-// Pages
-import Dashboard from './pages/Dashboard';
-import Projects from './pages/Projects';
-import Proposals from './pages/Proposals';
-import Invoices from './pages/Invoices';
-import Tenders from './pages/Tenders';
-import Specifications from './pages/Specifications';
-import Team from './pages/Team';
-import Gantt from './pages/Gantt';
-import Kanban from './pages/Kanban';
-import Contacts from './pages/Contacts';
-import ProjectTemplates from './pages/ProjectTemplates';
-import ProjectDetail from './pages/ProjectDetail';
-import References from './pages/References';
-import Documents from './pages/Documents';
-import Settings from './pages/Settings';
-import Billing from './pages/Billing';
-import TenderDetail from './pages/TenderDetail';
-import ProposalModule from './components/ProposalModule';
-import Login from './pages/Login';
-import CloudImportProgress from './pages/CloudImportProgress';
-import Register from './pages/Register';
-import Onboarding from './pages/Onboarding';
-import AgencySetup from './pages/AgencySetup';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import TermsOfUse from './pages/TermsOfUse';
-import Notifications from './pages/Notifications';
-import Profile from './pages/Profile';
-import Messages from './pages/Messages';
-import Reunions from './pages/Reunions';
-import OrdresDeService from './pages/OrdresDeService';
-import Contrats from './pages/Contrats';
-import GoogleAuthCallback from './pages/GoogleAuthCallback';
-import AdminDashboard from './pages/AdminDashboard';
-import MafDeclaration from './pages/MafDeclaration';
-import SuperPDPPortal from './pages/SuperPDPPortal';
-import ChorusProPortal from './pages/ChorusProPortal';
+// Pages — lazy-loaded so each route's JS is only fetched when it's visited,
+// instead of every page (ProjectDetail alone is ~270KB) landing in one
+// upfront bundle.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Projects = lazy(() => import('./pages/Projects'));
+const Proposals = lazy(() => import('./pages/Proposals'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const Tenders = lazy(() => import('./pages/Tenders'));
+const Specifications = lazy(() => import('./pages/Specifications'));
+const Team = lazy(() => import('./pages/Team'));
+const Gantt = lazy(() => import('./pages/Gantt'));
+const Kanban = lazy(() => import('./pages/Kanban'));
+const Contacts = lazy(() => import('./pages/Contacts'));
+const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
+const References = lazy(() => import('./pages/References'));
+const Documents = lazy(() => import('./pages/Documents'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Billing = lazy(() => import('./pages/Billing'));
+const TenderDetail = lazy(() => import('./pages/TenderDetail'));
+const ProposalModule = lazy(() => import('./components/ProposalModule'));
+const Login = lazy(() => import('./pages/Login'));
+const CloudImportProgress = lazy(() => import('./pages/CloudImportProgress'));
+const Register = lazy(() => import('./pages/Register'));
+const Onboarding = lazy(() => import('./pages/Onboarding'));
+const AgencySetup = lazy(() => import('./pages/AgencySetup'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfUse = lazy(() => import('./pages/TermsOfUse'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Messages = lazy(() => import('./pages/Messages'));
+const Reunions = lazy(() => import('./pages/Reunions'));
+const OrdresDeService = lazy(() => import('./pages/OrdresDeService'));
+const Contrats = lazy(() => import('./pages/Contrats'));
+const GoogleAuthCallback = lazy(() => import('./pages/GoogleAuthCallback'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const MafDeclaration = lazy(() => import('./pages/MafDeclaration'));
+const SuperPDPPortal = lazy(() => import('./pages/SuperPDPPortal'));
+const ChorusProPortal = lazy(() => import('./pages/ChorusProPortal'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import { AgentChatProvider, Agents, AgentConfig } from '@zinkh/archioffice-agents/client';
 
@@ -626,6 +627,17 @@ function Header() {
   );
 }
 
+function PageLoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+      <div
+        className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
+        style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
+      />
+    </div>
+  );
+}
+
 function ProtectedLayout() {
   const { currentUser, isLoading } = useUser();
   const { t } = useTranslation();
@@ -693,6 +705,7 @@ export default function App() {
       <UserProvider>
         <UpdateBanner />
         <Router>
+          <Suspense fallback={<PageLoadingFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/cloud-import-progress" element={<CloudImportProgress />} />
@@ -737,6 +750,7 @@ export default function App() {
               <Route path="/chorus-pro" element={<ChorusProPortal />} />
             </Route>
           </Routes>
+          </Suspense>
         </Router>
       </UserProvider>
     </ThemeProvider>

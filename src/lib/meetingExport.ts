@@ -1,8 +1,7 @@
-import jsPDF from 'jspdf';
-import {
-  Document, Packer, Paragraph, TextRun, ImageRun, Table, TableRow, TableCell,
-  AlignmentType, WidthType, BorderStyle, ShadingType,
-} from 'docx';
+// jsPDF/docx are only pulled in when an export actually runs (dynamic
+// import below) — they're sizable libraries that shouldn't ship with every
+// page that merely links to a meeting export button.
+import type { Paragraph, TextRun, ImageRun, Table, TableRow } from 'docx';
 import type { Meeting, MeetingAttendee } from '../types';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -90,6 +89,7 @@ export async function exportMeetingToPDF(
   settings: AgencySettings,
   projectName: string,
 ): Promise<void> {
+  const { default: jsPDF } = await import('jspdf');
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageW = 210;
   const pageH = 297;
@@ -292,13 +292,6 @@ export async function exportMeetingToPDF(
 
 // ── DOCX export ───────────────────────────────────────────────────────────────
 
-const NO_BORDER = {
-  top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-  bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-  left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-  right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-};
-
 // docx transformation values are in pixels (library handles EMU conversion internally)
 // 1 inch = 96px; 1mm ≈ 3.78px at 96dpi
 const MM_TO_PX = 3.78;
@@ -309,6 +302,18 @@ export async function exportMeetingToDocx(
   settings: AgencySettings,
   projectName: string,
 ): Promise<void> {
+  const {
+    Document, Packer, Paragraph, TextRun, ImageRun, Table, TableRow, TableCell,
+    WidthType, BorderStyle, ShadingType,
+  } = await import('docx');
+
+  const NO_BORDER = {
+    top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  };
+
   const typeLabel = SUBSECTION_LABELS[meeting.type] || meeting.type;
 
   // ── Logo ─────────────────────────────────────────────────────────────────

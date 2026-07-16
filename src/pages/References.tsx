@@ -26,8 +26,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
 import type { Project, Contact, ProjectCategory } from '../types';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { loadImageAsDataUrl } from '../lib/imageUtils';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -806,6 +804,10 @@ export default function References() {
   }
 
   const exportToPDF = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const selected = filteredItems.filter(p => selectedIds.has(p.id));
     const doc = new jsPDF();
     let startY = 20;

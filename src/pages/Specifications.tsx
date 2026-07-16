@@ -14,8 +14,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { Specification, SpecSection, Project } from '../types';
 import { useTranslation } from 'react-i18next';
-import { jsPDF } from 'jspdf';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
 import { saveAs } from 'file-saver';
 import MarkdownEditor from '../components/MarkdownEditor';
 import { fetchJson } from '../lib/api';
@@ -173,8 +171,9 @@ export default function Specifications() {
     }
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     if (!activeSpec) return;
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const project = projects.find(p => p.id === activeSpec.project_id);
 

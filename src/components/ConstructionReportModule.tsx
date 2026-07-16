@@ -21,8 +21,6 @@ import {
   IconPrinter
 } from '@tabler/icons-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { PillTabs } from './ui/PillTabs';
 import { cn } from '../lib/utils';
 
@@ -336,6 +334,10 @@ export default function ConstructionReportModule({ project, lots_list }: Constru
     if (!pdfTemplateRef.current || !selectedReport) return;
     setIsGeneratingPdf(true);
     try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
       const canvas = await html2canvas(pdfTemplateRef.current, {
         scale: 2,
         useCORS: true,

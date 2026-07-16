@@ -2,7 +2,6 @@ import * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
-import jsPDF from 'jspdf';
 import { formatCurrency } from '../lib/utils';
 import type { Invoice, Project, InvoiceItem } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
@@ -207,6 +206,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     icons.forEach(icon => icon.style.display = 'none');
     
     try {
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       

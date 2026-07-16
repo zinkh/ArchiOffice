@@ -2,7 +2,7 @@ import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
-import { isOfflineBuild, getStoredLocalSession, clearLocalSession } from './lib/authToken';
+import { isOfflineBuild, getStoredLocalSession, clearLocalSession, clearSupabaseAuthStorage, withTimeout, AUTH_TIMEOUT_MS } from './lib/authToken';
 
 // Structurally compatible with both a real Supabase Session/User and our
 // locally-signed offline session (src/lib/authToken.ts) — the functions below
@@ -132,22 +132,31 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
-      if (error) {
-        supabase.auth.signOut();
+    withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS)
+      .then(async ({ data: { session }, error }) => {
+        if (error) {
+          supabase.auth.signOut();
+          setCurrentUser(null);
+        } else if (session) {
+          sessionRef.current = session;
+          const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
+          setCurrentUser(user);
+          setTenantPlan(billing.plan);
+          setTrialEndsAt(billing.trial_ends_at);
+          setIsTrialExpired(billing.is_expired);
+        } else {
+          setCurrentUser(null);
+        }
+        setIsLoading(false);
+      })
+      .catch(() => {
+        // getSession() hung (e.g. a stuck cross-tab lock or a poisoned stored
+        // token) — clear the stored token and fall back to the login screen
+        // instead of leaving the app stuck behind the loading spinner forever.
+        clearSupabaseAuthStorage();
         setCurrentUser(null);
-      } else if (session) {
-        sessionRef.current = session;
-        const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
-        setCurrentUser(user);
-        setTenantPlan(billing.plan);
-        setTrialEndsAt(billing.trial_ends_at);
-        setIsTrialExpired(billing.is_expired);
-      } else {
-        setCurrentUser(null);
-      }
-      setIsLoading(false);
-    });
+        setIsLoading(false);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       sessionRef.current = session;

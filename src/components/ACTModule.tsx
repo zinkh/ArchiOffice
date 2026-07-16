@@ -6,8 +6,6 @@ import {
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
   IconX, IconEdit, IconEye, IconSend, IconCircleCheck,
 } from '@tabler/icons-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
@@ -143,12 +141,16 @@ function fmt(n?: number) {
 
 // ── RAO PDF ───────────────────────────────────────────────────────────────────
 
-function generateRAO(
+async function generateRAO(
   lots: ProjectLot[],
   consultation: Consultation,
   projectName: string,
   lotId?: string
 ) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = 297;
   const margin = 14;

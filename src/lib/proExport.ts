@@ -1,6 +1,3 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { DPGF, Lot, Chapitre, Ligne } from '../types/dpgf';
 
@@ -43,7 +40,11 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 // ── DPGF PDF ─────────────────────────────────────────────────────────────────
 
-export function exportDPGFtoPDF(dpgf: DPGF, projectName?: string) {
+export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
   doc.setFontSize(14);
@@ -99,7 +100,11 @@ export function exportDPGFtoPDF(dpgf: DPGF, projectName?: string) {
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
 
-export function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
+export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   doc.setFontSize(14);
@@ -146,7 +151,8 @@ export function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
 
 // ── DPGF Excel ────────────────────────────────────────────────────────────────
 
-export function exportDPGFtoExcel(dpgf: DPGF, projectName?: string) {
+export async function exportDPGFtoExcel(dpgf: DPGF, projectName?: string) {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const rows = flattenDPGF(dpgf.lots);
 
@@ -169,7 +175,8 @@ export function exportDPGFtoExcel(dpgf: DPGF, projectName?: string) {
 
 // ── Estimation Excel ──────────────────────────────────────────────────────────
 
-export function exportEstimationtoExcel(dpgf: DPGF, projectName?: string) {
+export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string) {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   const detailData: any[][] = [

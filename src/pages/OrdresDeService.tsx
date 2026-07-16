@@ -11,8 +11,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -49,7 +47,11 @@ function formatCurrency(n?: number) {
 }
 
 // ── PDF generation
-function generateOsPdf(os: OrdreDeService, project?: Project) {
+async function generateOsPdf(os: OrdreDeService, project?: Project) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210, margin = 20;
 
