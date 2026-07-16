@@ -25,7 +25,6 @@ import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
-import './i18n';
 
 // Pages — lazy-loaded so each route's JS is only fetched when it's visited,
 // instead of every page (ProjectDetail alone is ~270KB) landing in one

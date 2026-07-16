@@ -11,6 +11,7 @@ import {
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
@@ -1661,14 +1662,14 @@ export default function Settings() {
             <span className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{t('language')}</span>
           </div>
           <div className="flex rounded-lg overflow-hidden w-fit" style={{ border: '1px solid var(--tblr-border)' }}>
-            <button type="button" onClick={() => i18n.changeLanguage('fr')}
+            <button type="button" onClick={() => changeLanguageLazy('fr')}
               className="px-5 py-2 text-sm font-medium transition-colors"
               style={i18n.language.startsWith('fr')
                 ? { background: 'var(--tblr-primary)', color: '#fff' }
                 : { background: 'var(--tblr-surface)', color: 'var(--tblr-muted)' }}>
               Français
             </button>
-            <button type="button" onClick={() => i18n.changeLanguage('en')}
+            <button type="button" onClick={() => changeLanguageLazy('en')}
               className="px-5 py-2 text-sm font-medium transition-colors"
               style={i18n.language.startsWith('en')
                 ? { background: 'var(--tblr-primary)', color: '#fff', borderLeft: '1px solid var(--tblr-border)' }
