@@ -15,6 +15,7 @@ const DISMISS_SNOOZE_MS = 4 * 60 * 60 * 1000;
 export function UpdateBanner() {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
@@ -40,6 +41,29 @@ export function UpdateBanner() {
     return () => clearTimeout(timer);
   }, [dismissed]);
 
+  // updateServiceWorker() only posts the SKIP_WAITING message — despite its
+  // `reloadPage` argument, vite-plugin-pwa's registerSW() never reloads
+  // itself. The actual reload is wired separately, to a 'controlling'
+  // listener registered back when the banner first appeared. On a tab that's
+  // been backgrounded for a while (common on mobile, since the banner can sit
+  // untapped for minutes/hours), that listener can miss the event or the
+  // waiting worker it targeted can already be stale, so nothing visibly
+  // happens when the button is tapped. Listen for the real controllerchange
+  // ourselves and, in case it never fires, force the reload anyway after a
+  // short delay.
+  const handleUpdate = () => {
+    setIsUpdating(true);
+    let reloaded = false;
+    const reload = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker?.addEventListener('controllerchange', reload, { once: true });
+    updateServiceWorker(true);
+    setTimeout(reload, 3000);
+  };
+
   if (!needRefresh || dismissed) return null;
 
   return (
@@ -58,13 +82,17 @@ export function UpdateBanner() {
         </p>
         <div className="flex items-center gap-2 mt-3">
           <button
-            onClick={() => updateServiceWorker(true)}
-            className="px-3 py-1.5 rounded text-xs font-semibold text-white"
+            type="button"
+            disabled={isUpdating}
+            onClick={handleUpdate}
+            className="px-3 py-1.5 rounded text-xs font-semibold text-white disabled:opacity-70"
             style={{ background: 'var(--tblr-primary)' }}
           >
-            {t('update_now')}
+            {isUpdating ? t('updating') : t('update_now')}
           </button>
           <button
+            type="button"
+            disabled={isUpdating}
             onClick={() => setDismissed(true)}
             className="px-3 py-1.5 rounded text-xs font-medium"
             style={{ color: 'var(--tblr-muted)' }}

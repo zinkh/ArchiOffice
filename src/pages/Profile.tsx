@@ -75,7 +75,7 @@ function SectionCard({ title, icon: Icon, action, children }: { title: string; i
 
 export default function Profile() {
   const { userId: paramUserId } = useParams();
-  const { currentUser } = useUser();
+  const { currentUser, setCurrentUser } = useUser();
   const navigate = useNavigate();
   const targetUserId = paramUserId || currentUser?.id;
   const isViewingSelf = !paramUserId || paramUserId === currentUser?.id;
@@ -130,6 +130,8 @@ export default function Profile() {
       if (res.ok) {
         const { url } = await res.json();
         setProfile(p => p ? { ...p, avatar: url } : p);
+        // Keep the header avatar (driven by UserContext) in sync with the one just uploaded
+        if (isViewingSelf && currentUser) setCurrentUser({ ...currentUser, avatar: url });
       }
     } finally {
       setIsUploadingAvatar(false);

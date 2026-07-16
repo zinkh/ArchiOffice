@@ -5386,7 +5386,7 @@ async function startServer() {
 
   app.put("/api/settings", async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const data = req.body;
       // Convert camelCase → snake_case
       const snakeData: any = {};
@@ -5447,7 +5447,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating settings:", error);
-      res.status(500).json({ error: "Failed to update settings: " + error.message });
+      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update settings: " + error.message });
     }
   });
 
