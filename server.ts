@@ -2826,7 +2826,10 @@ async function startServer() {
 
   app.put("/api/team/:id", async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      // Self-service profile edit — anyone else's profile requires admin rights
+      const tenantId = req.params.id === req.user.id
+        ? await getTenantId(req.user.id)
+        : await requireTenantAdmin(req.user.id);
       const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar } = req.body;
       const { data, error } = await supabaseAdmin.from('profiles').update({
         sender_option: senderOption,
@@ -2839,7 +2842,7 @@ async function startServer() {
       }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update profile: " + e.message }); }
+    } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update profile: " + e.message }); }
   });
 
   app.post("/api/team", async (req: any, res: any) => {
