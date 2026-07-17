@@ -1137,10 +1137,10 @@ async function startServer() {
     }
     // Canonicalize bare apex → www so all assets and the HTML share the same origin.
     // Only the exact apex domain is redirected — tenant subdomains (e.g.
-    // aacz.archimanager.fr) and www itself must pass through untouched.
+    // aacz.archioffice.fr) and www itself must pass through untouched.
     const host = req.headers.host || '';
-    if (host === 'archimanager.fr') {
-      return res.redirect(301, `https://www.archimanager.fr${req.url}`);
+    if (host === 'archioffice.fr') {
+      return res.redirect(301, `https://www.archioffice.fr${req.url}`);
     }
     next();
   });

@@ -1,8 +1,8 @@
 RewriteEngine On
 
 # Redirect non-www to www
-RewriteCond %{HTTP_HOST} ^archimanager\.fr$ [NC]
-RewriteRule ^(.*)$ https://www.archimanager.fr/$1 [R=301,L]
+RewriteCond %{HTTP_HOST} ^archioffice\.fr$ [NC]
+RewriteRule ^(.*)$ https://www.archioffice.fr/$1 [R=301,L]
 
 # Force HTTPS
 RewriteCond %{HTTPS} off
