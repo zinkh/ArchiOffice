@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { IconCommand, IconCloud, IconDeviceDesktop } from '@tabler/icons-react';
+import { IconCloud, IconDeviceDesktop } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { isOfflineBuild } from '../lib/authToken';
 import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
+import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -32,9 +33,7 @@ function LocalLoginShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
       <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
         <div className="flex justify-center mb-6">
-          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
-            <IconCommand size={32} />
-          </div>
+          <ArchiOfficeLogo size={48} />
         </div>
         {children}
       </div>
@@ -383,9 +382,7 @@ function CloudLogin() {
           {tenantBranding?.logoUrl ? (
             <img src={tenantBranding.logoUrl} alt={tenantBranding.name} className="h-14 max-w-[200px] object-contain" />
           ) : (
-            <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
-              <IconCommand size={32} />
-            </div>
+            <ArchiOfficeLogo size={48} />
           )}
         </div>
         <h2 className={`text-2xl font-bold text-center text-zinc-900 dark:text-white ${tenantBranding ? 'mb-1' : 'mb-8'}`}>

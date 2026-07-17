@@ -59,6 +59,12 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
     if (!profile) return base;
     return {
       ...base,
+      // Authoritative role lives in `profiles` (DB), not Supabase Auth
+      // app_metadata — without this override every user falls back to the
+      // `?? 'admin'` default in mapSupabaseUser above, since app_metadata.system_role
+      // is never actually set on the auth user.
+      system_role: profile.system_role ?? base.system_role,
+      role: profile.role ?? base.role,
       // Custom avatar overrides OAuth avatar if set
       avatar: profile.avatar || base.avatar,
       phone: profile.phone ?? undefined,

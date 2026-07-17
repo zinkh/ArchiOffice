@@ -141,6 +141,7 @@ export default {
       "update_available_title": "Update available",
       "update_available_message": "A new version of ArchiOffice is available.",
       "update_now": "Update now",
+      "updating": "Updating...",
       "update_dismiss": "Later",
       "account_settings": "Account Settings",
       "switch_user_demo": "Switch User (Demo)",
