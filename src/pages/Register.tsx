@@ -169,10 +169,10 @@ export default function Register() {
                 className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white outline-none min-w-0"
                 required
               />
-              <span className="px-3 py-2 bg-zinc-50 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-400 text-sm border-l border-zinc-300 dark:border-zinc-600 whitespace-nowrap">.archimanager.fr</span>
+              <span className="px-3 py-2 bg-zinc-50 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-400 text-sm border-l border-zinc-300 dark:border-zinc-600 whitespace-nowrap">.archioffice.fr</span>
             </div>
             {form.slug && (
-              <p className="mt-1 text-xs text-zinc-400">Votre espace : <span className="font-mono text-blue-500">{form.slug}.archimanager.fr</span></p>
+              <p className="mt-1 text-xs text-zinc-400">Votre espace : <span className="font-mono text-blue-500">{form.slug}.archioffice.fr</span></p>
             )}
           </div>
 
