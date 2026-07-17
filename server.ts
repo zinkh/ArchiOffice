@@ -2844,7 +2844,7 @@ async function startServer() {
 
   app.post("/api/team", async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await checkQuota(tenantId, 'users');
       const { name, email, role, system_role } = req.body;
       if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
@@ -2925,7 +2925,7 @@ async function startServer() {
 
   app.put("/api/team/:id/role", async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { id } = req.params;
       const { role } = req.body;
       const { error } = await supabaseAdmin.from('profiles').update({ system_role: role }).eq('id', id).eq('tenant_id', tenantId);
@@ -2933,7 +2933,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error updating user role:", e);
-      res.status(500).json({ error: "Failed to update role" });
+      res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update role" });
     }
   });
 
