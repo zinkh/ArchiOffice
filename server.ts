@@ -5430,20 +5430,33 @@ async function startServer() {
         .eq('tenant_id', tenantId)
         .maybeSingle();
 
+      // A column can be in validCols (known to this server build) but still missing from
+      // the DB if its migration hasn't been applied there yet (has happened before — see
+      // PR #55). Rather than hard-failing the whole save, drop the offending column(s)
+      // reported by Postgres and retry, so unrelated fields still get saved.
+      const droppedCols: string[] = [];
       let saveError: any;
-      if (existing) {
-        // Row exists — update without touching id or tenant_id
-        const { error } = await supabaseAdmin
-          .from('settings')
-          .update(filteredData)
-          .eq('tenant_id', tenantId);
-        saveError = error;
-      } else {
-        // No row yet — insert with a fresh id
-        const { error } = await supabaseAdmin
-          .from('settings')
-          .insert({ ...filteredData, id: crypto.randomUUID(), tenant_id: tenantId });
-        saveError = error;
+      for (let attempt = 0; attempt < 20 && Object.keys(filteredData).length > 0; attempt++) {
+        if (existing) {
+          const { error } = await supabaseAdmin
+            .from('settings')
+            .update(filteredData)
+            .eq('tenant_id', tenantId);
+          saveError = error;
+        } else {
+          const { error } = await supabaseAdmin
+            .from('settings')
+            .insert({ ...filteredData, id: crypto.randomUUID(), tenant_id: tenantId });
+          saveError = error;
+        }
+        if (!saveError) break;
+        const missingCol = saveError.code === '42703' ? /column "([^"]+)"/.exec(saveError.message)?.[1] : undefined;
+        if (!missingCol || !(missingCol in filteredData)) break;
+        delete filteredData[missingCol];
+        droppedCols.push(missingCol);
+      }
+      if (droppedCols.length) {
+        console.warn(`[Settings] Column(s) missing in DB, migration likely pending — dropped from save: ${droppedCols.join(', ')}`);
       }
 
       if (saveError) throw saveError;
