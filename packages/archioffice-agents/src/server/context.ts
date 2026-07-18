@@ -32,15 +32,21 @@ export async function buildAgentContext(
     fetches.push(
       supabaseAdmin.from('projects').select('id, name, status, client, start_date, end_date')
         .eq('tenant_id', tenantId).neq('status', 'Completed')
-        .order('created_at', { ascending: false }).limit(30)
-        .then((r: any) => { ctx.projects = r.data || []; })
+        .order('updated_at', { ascending: false }).limit(30)
+        .then((r: any) => {
+          if (r.error) console.warn('[agent context] projects fetch failed:', r.error.message);
+          ctx.projects = r.data || [];
+        })
     );
   }
   if (scopes.includes('contacts')) {
     fetches.push(
       supabaseAdmin.from('contacts').select('id, first_name, last_name, company_name, email')
         .eq('tenant_id', tenantId).limit(50)
-        .then((r: any) => { ctx.contacts = r.data || []; })
+        .then((r: any) => {
+          if (r.error) console.warn('[agent context] contacts fetch failed:', r.error.message);
+          ctx.contacts = r.data || [];
+        })
     );
   }
   if (scopes.includes('meetings')) {
@@ -48,14 +54,20 @@ export async function buildAgentContext(
       supabaseAdmin.from('meetings').select('id, title, date, project_id')
         .eq('tenant_id', tenantId).gte('date', new Date().toISOString())
         .order('date', { ascending: true }).limit(10)
-        .then((r: any) => { ctx.upcomingMeetings = r.data || []; })
+        .then((r: any) => {
+          if (r.error) console.warn('[agent context] meetings fetch failed:', r.error.message);
+          ctx.upcomingMeetings = r.data || [];
+        })
     );
   }
   if (scopes.includes('documents')) {
     fetches.push(
       supabaseAdmin.from('documents').select('id, name, project_id, phase, uploaded_at, file_url')
         .eq('tenant_id', tenantId).order('uploaded_at', { ascending: false }).limit(15)
-        .then((r: any) => { ctx.recentDocuments = r.data || []; })
+        .then((r: any) => {
+          if (r.error) console.warn('[agent context] documents fetch failed:', r.error.message);
+          ctx.recentDocuments = r.data || [];
+        })
     );
   }
   if (scopes.includes('tasks')) {
@@ -63,7 +75,10 @@ export async function buildAgentContext(
       supabaseAdmin.from('tasks').select('id, title, status, due_date, project_id')
         .eq('tenant_id', tenantId).neq('status', 'done')
         .order('due_date', { ascending: true }).limit(20)
-        .then((r: any) => { ctx.tasks = r.data || []; })
+        .then((r: any) => {
+          if (r.error) console.warn('[agent context] tasks fetch failed:', r.error.message);
+          ctx.tasks = r.data || [];
+        })
     );
   }
 
