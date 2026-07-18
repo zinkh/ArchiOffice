@@ -108,6 +108,7 @@ export default function Agents() {
   const [activeTab, setActiveTab] = useState<'team' | 'catalog'>('team');
   const [loading, setLoading] = useState(true);
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -119,7 +120,7 @@ export default function Agents() {
       setMyAgents(agentsData as Agent[]);
       setTemplates(templatesData as Agent[]);
 
-      apiFetch('/api/agents/token-balance').then((d: any) => setTokenBalance(d.balance)).catch(() => {});
+      apiFetch('/api/agents/token-balance').then((d: any) => setTokenBalance(d.balance_eur_cents)).catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -128,10 +129,13 @@ export default function Agents() {
   useEffect(() => { fetchData(); }, []);
 
   const activateTemplate = async (templateId: string) => {
+    setActivateError(null);
     try {
       await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify({ from_template_id: templateId }) });
       await fetchData();
-    } catch {}
+    } catch (err: any) {
+      setActivateError(err?.message || "Échec de l'activation de l'agent.");
+    }
   };
 
   const activeSlugs = new Set(myAgents.map((a: Agent) => a.slug));
@@ -159,10 +163,19 @@ export default function Agents() {
             style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
           >
             <IconCheck size={14} style={{ color: '#2fb344' }} />
-            <span>{tokenBalance.toLocaleString('fr-FR')} tokens disponibles</span>
+            <span>{(tokenBalance / 100).toFixed(2)} € de crédit IA disponible</span>
           </div>
         )}
       </div>
+
+      {activateError && (
+        <div
+          className="px-3 py-2 rounded-lg border text-[13px]"
+          style={{ borderColor: '#f1416c', background: '#f1416c15', color: '#f1416c' }}
+        >
+          {activateError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
