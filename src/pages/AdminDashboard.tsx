@@ -5,7 +5,7 @@ import { apiFetch } from '../lib/api';
 import {
   IconUsers, IconBuildingSkyscraper, IconCreditCard,
   IconLoader2, IconRefresh, IconChevronDown, IconTrash,
-  IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX,
+  IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX, IconCoin,
   IconCircleCheck,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
@@ -313,6 +313,76 @@ function ExtendTrialDialog({ tenant, onClose, onExtended }: {
   );
 }
 
+// ─── Add AI Credit Dialog ──────────────────────────────────────────────────────
+
+function AddAiCreditDialog({ tenant, onClose, onAdded }: {
+  tenant: TenantRow; onClose: () => void; onAdded: (balanceEurCents: number) => void;
+}) {
+  const [amount, setAmount] = useState(10);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleAdd() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ ok: boolean; balance_eur_cents: number }>(`/api/admin/tenants/${tenant.id}/ai-credit`, {
+        method: 'PATCH',
+        body: JSON.stringify({ amount_cents: Math.round(amount * 100) }),
+      });
+      onAdded(res.balance_eur_cents);
+      onClose();
+    } catch (e: any) {
+      setError(e.message || 'Erreur');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div
+        className="w-full max-w-sm rounded-xl shadow-xl p-6 relative"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+      >
+        <button onClick={onClose} className="absolute top-4 right-4" style={{ color: 'var(--tblr-muted)' }}>
+          <IconX size={18} />
+        </button>
+        <h2 className="text-base font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Ajouter du crédit IA</h2>
+        <p className="text-sm mb-1" style={{ color: 'var(--tblr-muted)' }}>{tenant.name}</p>
+        <p className="text-[12px] mb-4 font-mono" style={{ color: 'var(--tblr-muted)' }}>
+          Solde actuel : {((tenant.ai_credit_balance_eur_cents ?? 0) / 100).toFixed(2)} €
+        </p>
+        {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
+        <div className="flex items-center gap-3 mb-4">
+          <input
+            type="number" step="0.01"
+            value={amount}
+            onChange={e => setAmount(Number(e.target.value))}
+            className="w-28 p-2 rounded-lg text-sm text-center"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+          />
+          <span className="text-sm" style={{ color: 'var(--tblr-muted)' }}>€ à créditer (négatif pour retirer)</span>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm border" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            Annuler
+          </button>
+          <button
+            onClick={handleAdd}
+            disabled={loading || !amount}
+            className="flex-1 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
+            style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? <IconLoader2 size={14} className="animate-spin" /> : null}
+            Créditer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Delete Confirmation Dialog ───────────────────────────────────────────────
 
 function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
@@ -397,6 +467,7 @@ export default function AdminDashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [extendTarget, setExtendTarget] = useState<TenantRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TenantRow | null>(null);
+  const [creditTarget, setCreditTarget] = useState<TenantRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -432,6 +503,10 @@ export default function AdminDashboard() {
 
   function handleTrialExtended(tenantId: string, newDate: string) {
     setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, trial_ends_at: newDate, plan: 'trial' } : t));
+  }
+
+  function handleCreditAdded(tenantId: string, balanceEurCents: number) {
+    setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, ai_credit_balance_eur_cents: balanceEurCents } : t));
   }
 
   function handleDeleted(tenantId: string) {
@@ -477,6 +552,13 @@ export default function AdminDashboard() {
           tenant={deleteTarget}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => handleDeleted(deleteTarget.id)}
+        />
+      )}
+      {creditTarget && (
+        <AddAiCreditDialog
+          tenant={creditTarget}
+          onClose={() => setCreditTarget(null)}
+          onAdded={balance => { handleCreditAdded(creditTarget.id, balance); setCreditTarget(null); }}
         />
       )}
 
@@ -684,6 +766,14 @@ export default function AdminDashboard() {
                               <IconCalendar size={14} />
                             </button>
                           )}
+                          <button
+                            onClick={() => setCreditTarget(t)}
+                            title="Ajouter du crédit IA"
+                            className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"
+                            style={{ color: 'var(--tblr-primary)' }}
+                          >
+                            <IconCoin size={14} />
+                          </button>
                           <button
                             onClick={() => setDeleteTarget(t)}
                             title="Supprimer ce cabinet"
