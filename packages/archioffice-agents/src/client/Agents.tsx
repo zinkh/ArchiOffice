@@ -100,8 +100,8 @@ function AgentCard({ agent, isAdmin, onActivate }: { agent: Agent; isAdmin: bool
 
 export default function Agents() {
   const { t } = useTranslation();
-  const { profile } = useUser() as any;
-  const isAdmin = profile?.system_role === 'admin';
+  const { currentUser } = useUser() as any;
+  const isAdmin = currentUser?.system_role === 'admin';
 
   const [myAgents, setMyAgents] = useState<Agent[]>([]);
   const [templates, setTemplates] = useState<Agent[]>([]);

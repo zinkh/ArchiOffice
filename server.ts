@@ -8579,6 +8579,20 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.patch('/api/admin/tenants/:id/ai-credit', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { amount_cents } = req.body;
+      if (typeof amount_cents !== 'number' || !Number.isFinite(amount_cents) || Math.round(amount_cents) === 0) {
+        return res.status(400).json({ error: 'Montant invalide' });
+      }
+      const { error: rpcErr } = await supabaseAdmin.rpc('increment_ai_credits', { p_tenant_id: req.params.id, p_amount_cents: Math.round(amount_cents) });
+      if (rpcErr) throw rpcErr;
+      const { data: tenant, error } = await supabaseAdmin.from('tenants').select('ai_credit_balance_eur_cents').eq('id', req.params.id).single();
+      if (error) throw error;
+      res.json({ ok: true, balance_eur_cents: (tenant as any).ai_credit_balance_eur_cents });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.post('/api/admin/tenants', requireSuperAdmin, async (req: any, res: any) => {
     try {
       const { name, slug, adminEmail, adminName, plan = 'trial' } = req.body;
