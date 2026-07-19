@@ -76,18 +76,37 @@ export async function getAccessToken(): Promise<string | null> {
     return getStoredLocalSession()?.access_token ?? null;
   }
 
+  let session: { access_token: string; expires_at?: number } | null = null;
   try {
-    let { data: { session } } = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
-    if (!session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000)) {
-      const { data: refreshed } = await withTimeout(supabase.auth.refreshSession(), AUTH_TIMEOUT_MS);
-      if (refreshed.session) session = refreshed.session;
-    }
-    return session?.access_token ?? null;
+    const result = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
+    session = result.data.session;
   } catch {
-    // Timed out or errored — clear the possibly-stuck token so the next call/reload starts clean.
-    clearSupabaseAuthStorage();
+    // getSession() hung rather than answering (slow network, a stuck cross-tab
+    // lock) — that's inconclusive, not proof the session is invalid. Fail this
+    // one call without wiping a possibly-still-good token; forcing a fresh
+    // login over a transient timeout is worse than letting the caller retry.
     return null;
   }
+
+  const needsRefresh = !session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000);
+  if (needsRefresh) {
+    try {
+      const { data: refreshed, error } = await withTimeout(supabase.auth.refreshSession(), AUTH_TIMEOUT_MS);
+      if (refreshed.session) {
+        session = refreshed.session;
+      } else if (error) {
+        // Supabase actually responded and confirmed the refresh token itself
+        // is dead (expired/revoked) — the session really is over.
+        clearSupabaseAuthStorage();
+        return null;
+      }
+    } catch {
+      // refreshSession() hung — same as above, inconclusive. Keep whatever
+      // session we already had rather than forcing a re-login over it.
+    }
+  }
+
+  return session?.access_token ?? null;
 }
 
 export { withTimeout, AUTH_TIMEOUT_MS };

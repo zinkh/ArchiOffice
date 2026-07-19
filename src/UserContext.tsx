@@ -2,7 +2,7 @@ import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
-import { isOfflineBuild, getStoredLocalSession, clearLocalSession, clearSupabaseAuthStorage, withTimeout, AUTH_TIMEOUT_MS } from './lib/authToken';
+import { isOfflineBuild, getStoredLocalSession, clearLocalSession, withTimeout, AUTH_TIMEOUT_MS } from './lib/authToken';
 
 // Structurally compatible with both a real Supabase Session/User and our
 // locally-signed offline session (src/lib/authToken.ts) — the functions below
@@ -156,10 +156,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
       })
       .catch(() => {
-        // getSession() hung (e.g. a stuck cross-tab lock or a poisoned stored
-        // token) — clear the stored token and fall back to the login screen
-        // instead of leaving the app stuck behind the loading spinner forever.
-        clearSupabaseAuthStorage();
+        // getSession() hung (e.g. a stuck cross-tab lock, or a slow network
+        // while it silently refreshed an expired access token) rather than
+        // answering — that's inconclusive, not proof the session is dead.
+        // Fall back to the login screen for this load, but don't wipe the
+        // stored token over a transient timeout: forcing a fresh login every
+        // time the refresh is merely slow is worse than occasionally leaving
+        // a stale token around, and the user's next successful load (or
+        // login) sorts it out either way.
         setCurrentUser(null);
         setIsLoading(false);
       });
