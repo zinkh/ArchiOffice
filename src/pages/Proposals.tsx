@@ -303,6 +303,29 @@ export default function Proposals() {
     }
   };
 
+  // A draft was never sent to the client, so there's nothing to "reject" —
+  // deleting it outright makes more sense than marking it Rejected. Once a
+  // proposal has actually been sent, delete no longer applies (server also
+  // enforces this): the cross instead rejects it, keeping a record of it.
+  const handleCrossClick = async (proposal: Proposal) => {
+    if (proposal.status !== 'Draft') {
+      return handleUpdateStatus(proposal, 'Rejected');
+    }
+    if (!confirm(`Supprimer définitivement le brouillon "${proposal.title}" ?`)) return;
+    try {
+      const res = await fetch(`/api/proposals/${proposal.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setProposals(proposals.filter(p => p.id !== proposal.id));
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        alert(`Échec de la suppression : ${errorData.error || 'Erreur inconnue'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Échec de la suppression du devis.');
+    }
+  };
+
   const addSpecialtyRow = () => {
     const newList = [...(newProposal.specialties_list || []), { id: `new-${Date.now()}`, proposal_id: '', specialty_name: '', contact_id: '' }];
     setNewProposal({ ...newProposal, specialties_list: newList });
@@ -622,10 +645,10 @@ export default function Proposals() {
                           >
                             <IconCircleCheck size={20} />
                           </button>
-                          <button 
-                            onClick={() => handleUpdateStatus(proposal, 'Rejected')}
+                          <button
+                            onClick={() => handleCrossClick(proposal)}
                             className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Reject"
+                            title={proposal.status === 'Draft' ? 'Supprimer le brouillon' : 'Rejeter'}
                           >
                             <IconX size={20} />
                           </button>

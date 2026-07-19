@@ -3503,6 +3503,27 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/proposals/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: proposal } = await supabaseAdmin.from('proposals').select('title, status').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if ((proposal as any)?.status !== 'Draft') {
+        return res.status(400).json({ error: "Seuls les devis en brouillon peuvent être supprimés. Rejetez ce devis à la place." });
+      }
+      await supabaseAdmin.from('proposal_specialties').delete().eq('proposal_id', id).eq('tenant_id', tenantId);
+      const { error } = await supabaseAdmin.from('proposals').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const title = (proposal as any)?.title || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du devis "${title}"`, title, id, 'proposal', 'Devis');
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error deleting proposal:", e);
+      res.status(500).json({ error: "Failed to delete proposal: " + e.message });
+    }
+  });
+
   app.get("/api/proposals/:id/export", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

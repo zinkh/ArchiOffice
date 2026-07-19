@@ -32,7 +32,9 @@ export interface AgentResourceDef {
 export const AGENT_RESOURCES: AgentResourceDef[] = [
   { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true, list: true,
     fields: 'first_name*, last_name*, company_name, email, phone, category, address, city, zip, notes' },
-  { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: false, list: true, identityField: 'title',
+  // Delete only actually succeeds server-side while status is Draft — a
+  // proposal that's already been sent can't be deleted, only rejected.
+  { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, client_id*, amount, status (Draft/Sent/Accepted/Rejected), description' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
     fields: 'name*, client*, status*, client_id, budget, category, start_date, end_date, description, address' },
