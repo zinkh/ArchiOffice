@@ -633,5 +633,12 @@ export default {
       "zoho_callback_hint_desc": "Add this URL as \"Authorized Redirect URI\" in the Zoho API Console.",
       "zoho_api_console_btn": "Zoho API Console",
       "zoho_sync_btn": "Sync Zoho",
-      "zoho_sync_result": "Sync complete: {{pushed}} sent, {{pulled}} updated"
+      "zoho_sync_result": "Sync complete: {{pushed}} sent, {{pulled}} updated",
+
+      // AI agent chat — loading feedback
+      "agent_chat_thinking_slow": "Still working on it…",
+      "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",
+      "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
+      "agent_chat_cancel": "Cancel",
+      "agent_chat_cancelled": "Request cancelled."
 };

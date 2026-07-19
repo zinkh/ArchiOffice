@@ -8,6 +8,7 @@ import fs from "fs";
 import axios from "axios";
 import https from "https";
 import { createClient } from "@supabase/supabase-js";
+import * as Sentry from "@sentry/node";
 
 interface GeoJSONGeometry {
   type: string;
@@ -8787,6 +8788,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       res.json({ articles });
     } catch (e: any) {
       console.error("AI suggest-articles error:", e.message);
+      Sentry.captureException(e, { tags: { feature: 'ai-suggest-articles' } });
       res.status(500).json({ error: "AI suggestion failed: " + e.message });
     }
   });
@@ -9417,6 +9419,12 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     });
   });
 
+  // Must be registered after all routes but before the SPA fallback below —
+  // catches anything that reaches Express's default error handling (routes
+  // that call next(err), or throw outside a try/catch) that the per-route
+  // catch blocks above didn't already report via captureConsoleIntegration.
+  Sentry.setupExpressErrorHandler(app);
+
   const distPath = path.join(process.cwd(), "dist");
   const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(path.join(distPath, "index.html"));
 
@@ -9476,5 +9484,6 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
 
 startServer().catch((err) => {
   console.error("Failed to start server:", err);
+  Sentry.captureException(err);
   process.exit(1);
 });

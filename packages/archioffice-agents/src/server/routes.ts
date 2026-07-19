@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import type { AgentRow } from '../types.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
@@ -205,7 +206,16 @@ export function registerAgentRoutes(
         config: { systemInstruction: systemPrompt },
         history: geminiHistory,
       });
-      const result = await chat.sendMessage({ message });
+      // Bounds how long a stuck/slow Gemini call can hold the request open —
+      // shorter than the client's own abort timeout so the client always gets
+      // this explicit message instead of a silent connection drop.
+      const AGENT_CHAT_TIMEOUT_MS = 55000;
+      const result = await Promise.race([
+        chat.sendMessage({ message }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(Object.assign(new Error("L'agent IA n'a pas répondu à temps."), { code: 'AGENT_TIMEOUT' })), AGENT_CHAT_TIMEOUT_MS)
+        ),
+      ]);
       const rawText = result.text ?? '';
 
       const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
@@ -254,6 +264,15 @@ export function registerAgentRoutes(
       });
     } catch (e: any) {
       console.error('[agent chat error]', e.message);
+      // Richer than captureConsoleIntegration's plain-string capture — tags
+      // this by agent so failures for a specific agent are easy to isolate.
+      Sentry.captureException(e, {
+        tags: { feature: 'agent-chat', agent_id: req.params?.id, timeout: e.code === 'AGENT_TIMEOUT' },
+        extra: { userId: req.user?.id },
+      });
+      if (e.code === 'AGENT_TIMEOUT') {
+        return res.status(504).json({ error: e.message, code: 'AGENT_TIMEOUT' });
+      }
       res.status(500).json({ error: `Erreur lors de la communication avec l'agent : ${e.message}` });
     }
   });
