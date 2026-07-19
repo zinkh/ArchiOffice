@@ -13,6 +13,16 @@ export function initSentry(): void {
     // Mirrors the backend: every existing console.error across the app
     // becomes a Sentry event without touching each call site.
     integrations: [Sentry.captureConsoleIntegration({ levels: ['error'] })],
+    beforeSend(event) {
+      // WebGL context loss is a normal, recoverable GPU/browser condition
+      // (low memory, backgrounded tab, too many contexts on lower-end
+      // devices) — MapLibreCadastre already shows dedicated recovery UI for
+      // it. Drop it here as a backstop in case it ever reaches Sentry
+      // through a path other than the console.error one we handle directly.
+      const message = event.exception?.values?.[0]?.value || event.message || '';
+      if (/webgl context was lost/i.test(message)) return null;
+      return event;
+    },
   });
 }
 

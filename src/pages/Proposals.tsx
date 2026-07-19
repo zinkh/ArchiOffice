@@ -15,6 +15,7 @@ import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
+import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { ProposalGenerator } from '../components/ProposalGenerator';
@@ -300,6 +301,29 @@ export default function Proposals() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // A draft was never sent to the client, so there's nothing to "reject" —
+  // deleting it outright makes more sense than marking it Rejected. Once a
+  // proposal has actually been sent, delete no longer applies (server also
+  // enforces this): the cross instead rejects it, keeping a record of it.
+  const handleCrossClick = async (proposal: Proposal) => {
+    if (proposal.status !== 'Draft') {
+      return handleUpdateStatus(proposal, 'Rejected');
+    }
+    if (!confirm(`Supprimer définitivement le brouillon "${proposal.title}" ?`)) return;
+    try {
+      const res = await fetch(`/api/proposals/${proposal.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setProposals(proposals.filter(p => p.id !== proposal.id));
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        alert(`Échec de la suppression : ${errorData.error || 'Erreur inconnue'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Échec de la suppression du devis.');
     }
   };
 
@@ -622,10 +646,10 @@ export default function Proposals() {
                           >
                             <IconCircleCheck size={20} />
                           </button>
-                          <button 
-                            onClick={() => handleUpdateStatus(proposal, 'Rejected')}
+                          <button
+                            onClick={() => handleCrossClick(proposal)}
                             className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Reject"
+                            title={proposal.status === 'Draft' ? 'Supprimer le brouillon' : 'Rejeter'}
                           >
                             <IconX size={20} />
                           </button>
@@ -863,31 +887,33 @@ export default function Proposals() {
                       {t('proposals_section_urban_risks')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <RNBInfo address={newProposal.adresse_terrain || ''} />
-                      <BDNBInfo 
-                        address={newProposal.adresse_terrain || ''} 
-                        banId={newProposal.ban_id_terrain}
-                        cityCode={newProposal.city_code_terrain}
-                      />
-                      <CadastreDownload address={newProposal.adresse_terrain || ''} />
-                      <UrbanPlanningInfo address={newProposal.adresse_terrain || ''} />
-                      <GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
-                      <HistoricalMonuments address={newProposal.adresse_terrain || ''} />
+                      <InfoPanelBoundary label="RNB"><RNBInfo address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="BDNB">
+                        <BDNBInfo
+                          address={newProposal.adresse_terrain || ''}
+                          banId={newProposal.ban_id_terrain}
+                          cityCode={newProposal.city_code_terrain}
+                        />
+                      </InfoPanelBoundary>
+                      <InfoPanelBoundary label="Cadastre"><CadastreDownload address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
                     </div>
 
                     <div className="space-y-4">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                          <InfoPanelBoundary label="Cadastre"><GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Cadastre</div>
                         </div>
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <GoogleMap address={newProposal.adresse_terrain || ''} />
+                          <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">OpenStreetMap</div>
                         </div>
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} />
+                          <InfoPanelBoundary label="Géorisques"><GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
                         </div>
                       </div>
