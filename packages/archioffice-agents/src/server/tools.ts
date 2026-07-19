@@ -5,10 +5,10 @@ import { AGENT_RESOURCES, type AgentResourceDef } from '../types.js';
 // would duplicate — and drift from — the validation, id/reference
 // generation, and side effects already implemented in server.ts for every
 // human-facing form), these tools are generic (create_record / update_record
-// / delete_record) and execute by calling the app's own REST API over an
-// internal HTTP loopback, forwarding the caller's own auth token. An agent
-// action therefore always behaves exactly like a human submitting the same
-// form — same validation, same activity log entries, same everything.
+// / delete_record / search_records) and execute by calling the app's own REST
+// API over an internal HTTP loopback, forwarding the caller's own auth token.
+// An agent action therefore always behaves exactly like a human submitting
+// the same form — same validation, same activity log entries, same everything.
 
 export interface FunctionDeclarationLike {
   name: string;
@@ -23,6 +23,7 @@ export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike
   const creatable = authorized.filter(r => r.create).map(r => r.key);
   const updatable = authorized.filter(r => r.update).map(r => r.key);
   const deletable = authorized.filter(r => r.delete).map(r => r.key);
+  const searchable = authorized.filter(r => r.list && (r.identityField || r.key === 'contacts')).map(r => r.key);
 
   const tools: FunctionDeclarationLike[] = [];
 
@@ -31,12 +32,18 @@ export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike
       name: 'create_record',
       description:
         "Crée un nouvel enregistrement dans une des ressources du cabinet auxquelles tu as accès en écriture. " +
-        "Consulte la section SCHÉMA DES RESSOURCES AUTORISÉES du prompt système pour connaître les champs attendus par ressource (les champs suivis d'un * sont obligatoires).",
+        "Consulte la section SCHÉMA DES RESSOURCES AUTORISÉES du prompt système pour connaître les champs attendus par ressource (les champs suivis d'un * sont obligatoires). " +
+        "Le système vérifie automatiquement les doublons potentiels : si la réponse contient needs_confirmation, NE PAS créer sans confirmation explicite de l'utilisateur (voir la description du champ confirm).",
       parametersJsonSchema: {
         type: 'object',
         properties: {
           resource: { type: 'string', enum: creatable, description: 'Type de ressource à créer' },
           data: { type: 'object', description: "Champs de l'enregistrement, selon le schéma de la ressource" },
+          confirm: {
+            type: 'boolean',
+            description:
+              "Laisser vide/false lors du premier essai. Ne mettre à true que dans un appel ultérieur, après qu'un précédent appel a renvoyé needs_confirmation ET que l'utilisateur a explicitement confirmé vouloir créer un nouvel enregistrement malgré le doublon potentiel détecté.",
+          },
         },
         required: ['resource', 'data'],
       },
@@ -46,7 +53,7 @@ export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike
   if (updatable.length > 0) {
     tools.push({
       name: 'update_record',
-      description: "Met à jour un enregistrement existant. Seuls les champs fournis dans data sont modifiés, les autres restent inchangés.",
+      description: "Met à jour un enregistrement existant. Seuls les champs fournis dans data sont modifiés, les autres restent inchangés. Utilise search_records au préalable si tu ne connais pas déjà l'identifiant de l'enregistrement.",
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -75,6 +82,24 @@ export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike
     });
   }
 
+  if (searchable.length > 0) {
+    tools.push({
+      name: 'search_records',
+      description:
+        "Recherche des enregistrements existants par mot-clé (nom, société, titre...) dans une ressource. " +
+        "À utiliser AVANT de créer un enregistrement pour vérifier qu'il n'existe pas déjà (en plus de la vérification automatique de create_record), " +
+        "ou pour retrouver l'identifiant d'un enregistrement à mettre à jour ou supprimer quand l'utilisateur ne le donne pas directement.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          resource: { type: 'string', enum: searchable, description: 'Type de ressource dans laquelle chercher' },
+          query: { type: 'string', description: 'Mot-clé à rechercher (nom, société, titre...)' },
+        },
+        required: ['resource', 'query'],
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -84,7 +109,8 @@ export function describeAuthorizedResources(actionScopes: string[]): string {
   return authorized
     .map(r => {
       const ops = [r.create && 'créer', r.update && 'modifier', r.delete && 'supprimer'].filter(Boolean).join(', ');
-      return `- ${r.label} (resource: "${r.key}") — actions autorisées : ${ops}. Champs : ${r.fields}`;
+      const searchNote = (r.list && (r.identityField || r.key === 'contacts')) ? ' — recherche disponible (search_records)' : '';
+      return `- ${r.label} (resource: "${r.key}") — actions autorisées : ${ops}${searchNote}. Champs : ${r.fields}`;
     })
     .join('\n');
 }
@@ -99,14 +125,29 @@ export interface AgentActionResult {
   summary?: string;
 }
 
-function deriveRecordLabel(data?: Record<string, unknown>): string {
-  if (!data) return '';
-  const candidates = ['title', 'name', 'os_number', 'entreprise_nom', 'numero', 'reference'];
-  for (const key of candidates) {
-    if (data[key]) return String(data[key]);
+// Contacts don't have a single "name" column, so their identity is derived;
+// every other resource that supports duplicate-checking has one field
+// (identityField) that plausibly identifies "the same" record.
+function getRecordIdentity(resourceKey: string, resource: AgentResourceDef, record: Record<string, unknown>): string {
+  if (resourceKey === 'contacts') {
+    const company = record.company_name ? String(record.company_name).trim() : '';
+    if (company) return company;
+    return `${record.first_name || ''} ${record.last_name || ''}`.trim();
   }
-  if (data.first_name || data.last_name) return `${data.first_name || ''} ${data.last_name || ''}`.trim();
-  return '';
+  const field = resource.identityField;
+  return field && record[field] ? String(record[field]).trim() : '';
+}
+
+async function fetchResourceList(baseUrl: string, authHeader: string, resource: AgentResourceDef): Promise<Record<string, unknown>[]> {
+  if (!resource.list) return [];
+  try {
+    const res = await fetch(baseUrl + resource.basePath, { headers: { Authorization: authHeader } });
+    if (!res.ok) return [];
+    const json = await res.json().catch(() => []);
+    return Array.isArray(json) ? json : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function executeAgentAction(
@@ -127,14 +168,49 @@ export async function executeAgentAction(
     return { response: { error: 'Session non authentifiée — action impossible.' } };
   }
 
+  if (name === 'search_records') {
+    if (!resource.list || !(resource.identityField || resourceKey === 'contacts')) {
+      return { response: { error: `Recherche non disponible pour "${resourceKey}".` } };
+    }
+    const q = String(args.query || '').toLowerCase().trim();
+    if (!q) return { response: { error: 'query est requis.' } };
+    const list = await fetchResourceList(baseUrl, authHeader, resource);
+    const matches = list
+      .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
+      .filter(r => r.identity && r.identity.toLowerCase().includes(q))
+      .slice(0, 10);
+    return { response: { count: matches.length, matches } };
+  }
+
   let method: 'POST' | 'PUT' | 'DELETE';
   let path = resource.basePath;
   let body: Record<string, unknown> | undefined;
 
   if (name === 'create_record') {
     if (!resource.create) return { response: { error: `Création non supportée pour "${resourceKey}".` } };
-    method = 'POST';
     body = (args.data as Record<string, unknown>) || {};
+
+    const hasIdentity = resourceKey === 'contacts' || !!resource.identityField;
+    const identity = getRecordIdentity(resourceKey, resource, body);
+    if (resource.list && hasIdentity && identity && args.confirm !== true) {
+      const list = await fetchResourceList(baseUrl, authHeader, resource);
+      const duplicates = list
+        .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
+        .filter(r => r.identity && r.identity.toLowerCase() === identity.toLowerCase())
+        .slice(0, 5);
+      if (duplicates.length > 0) {
+        return {
+          response: {
+            needs_confirmation: true,
+            existing_matches: duplicates,
+            instruction:
+              "Un ou plusieurs enregistrements existent déjà avec une identité proche. Ne crée PAS de nouvel enregistrement maintenant : présente ces correspondances (avec leur id) à l'utilisateur et demande explicitement s'il veut mettre à jour l'un d'eux (update_record) ou créer quand même un nouvel enregistrement (rappelle create_record avec confirm: true, uniquement après son accord explicite).",
+          },
+        };
+      }
+    }
+
+    method = 'POST';
   } else if (name === 'update_record') {
     if (!resource.update) return { response: { error: `Modification non supportée pour "${resourceKey}".` } };
     const id = String(args.id || '');
@@ -168,7 +244,7 @@ export async function executeAgentAction(
     }
 
     const verb = name === 'create_record' ? 'créé' : name === 'update_record' ? 'modifié' : 'supprimé';
-    const label = name === 'delete_record' ? String(args.id) : deriveRecordLabel(body) || json?.id || '';
+    const label = name === 'delete_record' ? String(args.id) : (body ? getRecordIdentity(resourceKey, resource, body) : '') || json?.id || '';
     return {
       response: { success: true, ...json },
       summary: `${resource.label} ${verb}${label ? ` : ${label}` : ''}`,

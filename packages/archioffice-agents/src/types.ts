@@ -16,42 +16,52 @@ export interface AgentResourceDef {
   create: boolean;
   update: boolean;
   delete: boolean;
+  /** Whether GET basePath returns the full tenant list — needed for the
+   * duplicate check on create and for search_records. False for resources
+   * whose list endpoint is scoped by a path param instead (e.g. per-project). */
+  list: boolean;
+  /** Field holding this resource's "name" for duplicate detection and search
+   * (e.g. title, name). Omit if there's no natural identity field — the
+   * duplicate check and search_records are then skipped for that resource.
+   * Contacts are special-cased (company_name, else first_name + last_name). */
+  identityField?: string;
   /** Human-readable field hint injected into the agent's system prompt. */
   fields: string;
 }
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
-  { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true,
+  { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true, list: true,
     fields: 'first_name*, last_name*, company_name, email, phone, category, address, city, zip, notes' },
-  { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: false,
+  { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: false, list: true, identityField: 'title',
     fields: 'title*, client_id*, amount, status (Draft/Sent/Accepted/Rejected), description' },
-  { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true,
+  { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
     fields: 'name*, client*, status*, client_id, budget, category, start_date, end_date, description, address' },
-  { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true,
+  { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, client*, submission_deadline*, status*, description, amount' },
-  { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false,
+  { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false, list: true,
     fields: 'status* (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date' },
-  { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true,
+  { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, project_id, description, content' },
-  { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true,
+  { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, start_date*, end_date*, project_id, status, description' },
-  { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true,
+  { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, due_date*, project_id, status' },
-  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true,
+  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes" },
-  { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true,
+  { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     fields: 'client_id, project_id, type_contrat, type_moa, montant_honoraires, intitule_projet' },
-  { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true,
+  { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'os_number*, title*, date*, project_id' },
-  { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true,
+  { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, date*, project_id' },
-  { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true,
+  { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true, list: true,
     fields: 'date*, type*, project_id' },
-  { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true,
+  { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, project_id' },
-  { key: 'marches_entreprises', label: 'Marchés entreprises', basePath: '/api/marches-entreprises', create: true, update: true, delete: true,
+  // GET /api/marches-entreprises/:projectId is project-scoped, not a tenant-wide list.
+  { key: 'marches_entreprises', label: 'Marchés entreprises', basePath: '/api/marches-entreprises', create: true, update: true, delete: true, list: false,
     fields: 'project_id*, entreprise_nom*, lot_numero, lot_titre, montant_ht' },
-  { key: 'notes_honoraires', label: "Notes d'honoraires", basePath: '/api/notes_honoraires', create: true, update: true, delete: true,
+  { key: 'notes_honoraires', label: "Notes d'honoraires", basePath: '/api/notes_honoraires', create: true, update: true, delete: true, list: true, identityField: 'objet',
     fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
 ];
 

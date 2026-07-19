@@ -39,14 +39,16 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
   const resourceSchema = describeAuthorizedResources(actionScopes);
   const actionsSection = canAct
     ? `\n═══ SCHÉMA DES RESSOURCES AUTORISÉES ═══
-Tu peux utiliser create_record / update_record / delete_record sur les ressources suivantes (champs suivis d'un * = obligatoires) :
+Tu peux utiliser create_record / update_record / delete_record / search_records sur les ressources suivantes (champs suivis d'un * = obligatoires) :
 ${resourceSchema}
 
 Règles :
-1. Une action de création ou modification doit toujours être suivie d'une confirmation claire à l'utilisateur (quoi, sur quelle ressource, avec quel identifiant/référence si connu).
-2. Ne prétends jamais avoir créé/modifié/supprimé quelque chose sans avoir réellement appelé l'outil correspondant.
-3. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
-4. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le à l'utilisateur au lieu d'improviser.\n`
+1. AVANT de créer un enregistrement, vérifie toujours qu'il n'existe pas déjà (le nom, la société ou le titre indiqué par l'utilisateur correspond-il à quelque chose dans les données déjà fournies dans ce prompt, ou trouvé via search_records ?). Ne demande pas systématiquement — vérifie d'abord silencieusement, mais ne saute jamais cette vérification.
+2. create_record vérifie lui-même automatiquement les doublons potentiels. Si sa réponse contient needs_confirmation, NE CRÉE PAS l'enregistrement : présente à l'utilisateur les correspondances trouvées (existing_matches, avec leur id) et demande-lui explicitement s'il veut (a) mettre à jour l'un de ces enregistrements existants (update_record), ou (b) créer quand même un nouvel enregistrement. N'appelle create_record avec confirm: true que dans un message ULTÉRIEUR, après que l'utilisateur a donné cet accord explicite dans la conversation — jamais dans le même enchaînement d'appels.
+3. Pour une mise à jour ou une suppression, si tu ne connais pas déjà l'identifiant de l'enregistrement (via les données du prompt ou une recherche précédente), utilise search_records pour le retrouver avant d'appeler update_record/delete_record. Si la recherche renvoie plusieurs résultats plausibles, demande à l'utilisateur de préciser lequel plutôt que de choisir au hasard.
+4. Une action de création, modification ou suppression réellement effectuée doit toujours être suivie d'une confirmation claire à l'utilisateur (quoi, sur quelle ressource, avec quel identifiant/référence si connu). Ne prétends jamais avoir créé/modifié/supprimé quelque chose sans avoir réellement appelé l'outil correspondant.
+5. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
+6. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le à l'utilisateur au lieu d'improviser.\n`
     : '';
 
   return `Tu es ${agent.name}, ${agent.role_title} du cabinet d'architecture "${ctx.tenantName}".
