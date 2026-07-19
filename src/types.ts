@@ -179,6 +179,7 @@ export interface Project {
   mission_bim?: boolean;
   type_moa?: string;
   nature_travaux_maf?: string;
+  maf_intercalaire?: MafIntercalaire;
   taux_mission?: number;
   part_interet?: number;
 }
@@ -488,6 +489,10 @@ export interface Proposal {
   effectif_personnel?: string;
   ind?: string;
   date_modification?: string;
+  // MAF — type de mission (circulaire d'activités)
+  maf_intercalaire?: MafIntercalaire;
+  taux_mission?: number;
+  part_interet?: number;
   specialties_list?: ProposalSpecialty[];
   fee_distribution?: string; // JSON string for reactgrid data
 

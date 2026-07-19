@@ -2461,7 +2461,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       // Generate project code: YYNNN
@@ -2482,7 +2483,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       });
       if (pe) throw pe;
       if (cotraitants_list?.length) {
@@ -2522,7 +2524,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       const { error: ue } = await supabaseAdmin.from('projects').update({
@@ -2535,7 +2538,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
       // Update related lists (delete + reinsert)
@@ -3482,7 +3486,8 @@ async function startServer() {
           surface_plancher: p.surface_plancher, surface_plancher_ext: p.surface_plancher_ext,
           surface_erp: p.surface_erp, surface_ert: p.surface_ert,
           effectif_public: p.effectif_public, effectif_personnel: p.effectif_personnel,
-          ind: p.ind, date_modification: p.date_modification
+          ind: p.ind, date_modification: p.date_modification,
+          maf_intercalaire: p.maf_intercalaire, taux_mission: p.taux_mission, part_interet: p.part_interet
         });
         if (projErr) throw projErr;
         // Copy specialties to cotraitants

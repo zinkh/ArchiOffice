@@ -72,6 +72,7 @@ import SiteReports from '../components/SiteReports';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
 import Situations from './Situations';
+import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
@@ -2480,6 +2481,35 @@ export default function ProjectDetail() {
                             <FormField label="Type Et Cat" value={project.type_et_cat} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)} />
                             <FormField label="Type" value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
                             <FormField label="Catégorie" value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
+                            <div className="space-y-1">
+                              <label className="block text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Type de mission (circulaire MAF)</label>
+                              <select
+                                className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
+                                value={project.maf_intercalaire ?? ''}
+                                onChange={(e) => setProject(prev => prev ? ({
+                                  ...prev,
+                                  maf_intercalaire: (e.target.value || undefined) as any,
+                                  taux_mission: e.target.value === 'jaune' ? prev.taux_mission : undefined,
+                                }) : null)}
+                              >
+                                <option value="">Select Type de mission</option>
+                                {MAF_INTERCALAIRE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                              </select>
+                            </div>
+                            {project.maf_intercalaire === 'jaune' && (
+                              <div className="space-y-1">
+                                <label className="block text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux de la mission (T)</label>
+                                <select
+                                  className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
+                                  value={project.taux_mission ?? ''}
+                                  onChange={(e) => setProject(prev => prev ? ({...prev, taux_mission: e.target.value ? Number(e.target.value) : undefined}) : null)}
+                                >
+                                  <option value="">Select Taux</option>
+                                  {TAUX_MISSION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                </select>
+                              </div>
+                            )}
+                            <FormField label="Part d'intérêt (P) %" type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
                           </div>
                         </div>
 
