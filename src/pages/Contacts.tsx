@@ -169,30 +169,16 @@ export default function Contacts() {
       const url = isEditing ? `/api/contacts/${editingId}` : '/api/contacts';
       const method = isEditing ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(contact)
-      });
+      await apiFetch(url, { method, body: JSON.stringify(contact) });
 
-      if (res.ok) {
-        setIsModalOpen(false);
-        setIsEditing(false);
-        setEditingId(null);
-        setNewContact({});
-        fetchContacts();
-      } else {
-        const text = await res.text();
-        try {
-          const errorData = JSON.parse(text);
-          console.error('Failed to save contact:', errorData);
-          alert(`Failed to save contact: ${errorData.error || 'Unknown error'}`);
-        } catch (e) {
-          console.error('Failed to save contact (non-JSON response):', text);
-          alert(`Failed to save contact: Server returned ${res.status} ${res.statusText}`);
-        }
-      }
+      setIsModalOpen(false);
+      setIsEditing(false);
+      setEditingId(null);
+      setNewContact({});
+      fetchContacts();
+      showToast(isEditing ? 'Contact modifié' : 'Contact créé');
     } catch (err: any) {
+      console.error('Failed to save contact:', err);
       showToast(err?.message || 'Erreur lors de la sauvegarde du contact', 'error');
     }
   };
@@ -315,6 +301,7 @@ export default function Contacts() {
 
     const handleConfirm = async () => {
       if (!importData) return;
+      let failed = 0;
       for (const row of importData.data) {
         const contact: Contact = {
           ...defaultContact,
@@ -338,15 +325,20 @@ export default function Contacts() {
         contact.country = contact.address_work_country || '';
         contact.ca_amount = Number(contact.ca_amount) || 0;
 
-        await fetch('/api/contacts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(contact)
-        });
+        try {
+          await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(contact) });
+        } catch (err) {
+          console.error('Failed to import contact:', err);
+          failed++;
+        }
       }
       fetchContacts();
       setIsMappingModalOpen(false);
       setImportData(null);
+      showToast(
+        failed > 0 ? `Import terminé avec ${failed} échec(s)` : 'Import terminé',
+        failed > 0 ? 'error' : 'success'
+      );
     };
 
     if (!isMappingModalOpen || !importData) return null;
