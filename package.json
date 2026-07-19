@@ -11,8 +11,8 @@
   ],
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "tsx server.ts",
+    "dev": "tsx --import ./instrument.ts server.ts",
+    "start": "tsx --import ./instrument.ts server.ts",
     "build": "mkdir -p dist && vite build && cp proxy.json dist/",
     "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:vite --external:@modelcontextprotocol/sdk",
     "preview": "vite preview",
@@ -23,6 +23,8 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sentry/node": "^10.66.0",
+    "@sentry/react": "^10.66.0",
     "@supabase/supabase-js": "^2.106.0",
     "@table-library/react-table-library": "^4.1.15",
     "@tabler/icons-react": "^3.37.1",

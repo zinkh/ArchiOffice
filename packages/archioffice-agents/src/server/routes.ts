@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import type { AgentRow } from '../types.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
@@ -263,6 +264,12 @@ export function registerAgentRoutes(
       });
     } catch (e: any) {
       console.error('[agent chat error]', e.message);
+      // Richer than captureConsoleIntegration's plain-string capture — tags
+      // this by agent so failures for a specific agent are easy to isolate.
+      Sentry.captureException(e, {
+        tags: { feature: 'agent-chat', agent_id: req.params?.id, timeout: e.code === 'AGENT_TIMEOUT' },
+        extra: { userId: req.user?.id },
+      });
       if (e.code === 'AGENT_TIMEOUT') {
         return res.status(504).json({ error: e.message, code: 'AGENT_TIMEOUT' });
       }

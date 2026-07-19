@@ -39,6 +39,7 @@ export default defineConfig(({mode}) => {
       // Set only in the offline desktop build's .env — switches auth to the local
       // account flow instead of Supabase Auth (see src/lib/authToken.ts).
       'import.meta.env.VITE_OFFLINE_MODE': JSON.stringify(process.env.VITE_OFFLINE_MODE || ''),
+      'import.meta.env.VITE_SENTRY_DSN': JSON.stringify(process.env.VITE_SENTRY_DSN || ''),
     },
     plugins: [
       react(),
