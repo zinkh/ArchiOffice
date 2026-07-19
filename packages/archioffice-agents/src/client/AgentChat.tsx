@@ -202,10 +202,28 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const [attachedDocs, setAttachedDocs] = useState<{ id: string; name: string }[]>([]);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortReasonRef = useRef<'user' | 'timeout' | null>(null);
 
   const activeAgent: Agent | null = agents.find(a => a.id === activeAgentId) ?? null;
+
+  // Surfaces "still working" feedback while a request is in flight, instead of
+  // leaving the user staring at bouncing dots with no sense of progress.
+  useEffect(() => {
+    if (!loading) { setElapsedSec(0); return; }
+    const start = Date.now();
+    const id = setInterval(() => setElapsedSec(Math.round((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [loading]);
+
+  const loadingLabel = elapsedSec < 6
+    ? t('agent_chat_thinking')
+    : elapsedSec < 18
+      ? t('agent_chat_thinking_slow')
+      : t('agent_chat_thinking_long');
 
   useEffect(() => {
     apiFetch('/api/agents')
@@ -269,10 +287,23 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setAttachedDocs([]);
     setLoading(true);
     setErrorMsg(null);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    abortReasonRef.current = null;
+    // Safety net so a hung Gemini call (or dropped connection) doesn't leave
+    // the user staring at the "thinking" indicator forever — the server has
+    // its own shorter timeout, this is the client-side backstop.
+    const hardTimeout = setTimeout(() => {
+      abortReasonRef.current = 'timeout';
+      controller.abort();
+    }, 60000);
+
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
         method: 'POST',
         body: JSON.stringify({ message: input.trim(), document_ids: docsToSend.map(d => d.id) }),
+        signal: controller.signal,
       });
       const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
         id: crypto.randomUUID(),
@@ -287,7 +318,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
     } catch (e: any) {
       const errText: string = e?.message ?? t('agent_chat_error');
-      if (errText.includes('Enterprise') || errText.includes('ENTERPRISE_REQUIRED')) {
+      if (e?.name === 'AbortError') {
+        setErrorMsg(abortReasonRef.current === 'user' ? t('agent_chat_cancelled') : t('agent_chat_timeout'));
+      } else if (e?.status === 504 || errText.includes('AGENT_TIMEOUT')) {
+        setErrorMsg(t('agent_chat_timeout'));
+      } else if (errText.includes('Enterprise') || errText.includes('ENTERPRISE_REQUIRED')) {
         setErrorMsg('enterprise');
       } else if (errText.includes('token') || errText.includes('NO_TOKENS')) {
         setErrorMsg('tokens');
@@ -296,9 +331,16 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       }
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
     } finally {
+      clearTimeout(hardTimeout);
+      abortControllerRef.current = null;
       setLoading(false);
       setTimeout(() => textareaRef.current?.focus(), 50);
     }
+  };
+
+  const cancelRequest = () => {
+    abortReasonRef.current = 'user';
+    abortControllerRef.current?.abort();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -426,15 +468,29 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} />
               ))}
               {loading && (
-                <div className="flex gap-2 justify-start">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: activeAgent?.avatar_color ?? '#206bc4' }}>
-                    <IconRobot size={13} color="white" />
+                <div className="flex flex-col gap-1">
+                  <div className="flex gap-2 justify-start">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: activeAgent?.avatar_color ?? '#206bc4' }}>
+                      <IconRobot size={13} color="white" />
+                    </div>
+                    <div className="px-3 py-2 rounded-xl flex flex-col gap-1" style={{ background: 'var(--tblr-surface-2)' }}>
+                      <div className="flex gap-1 items-center">
+                        {[0, 1, 2].map(i => (
+                          <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--tblr-muted)', animationDelay: `${i * 0.15}s` }} />
+                        ))}
+                      </div>
+                      <div className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{loadingLabel}</div>
+                    </div>
                   </div>
-                  <div className="px-3 py-2 rounded-xl flex gap-1 items-center" style={{ background: 'var(--tblr-surface-2)' }}>
-                    {[0, 1, 2].map(i => (
-                      <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--tblr-muted)', animationDelay: `${i * 0.15}s` }} />
-                    ))}
-                  </div>
+                  {elapsedSec >= 8 && (
+                    <button
+                      onClick={cancelRequest}
+                      className="self-start ml-8 text-[11px] hover:underline"
+                      style={{ color: 'var(--tblr-muted)' }}
+                    >
+                      {t('agent_chat_cancel')}
+                    </button>
+                  )}
                 </div>
               )}
               {errorMsg === 'enterprise' && (
