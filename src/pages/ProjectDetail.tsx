@@ -73,6 +73,9 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import { ProTab } from '../components/pro/ProTab';
 import Situations from './Situations';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
+import { useMafCost } from '../hooks/useMafCost';
+import { useSettings } from '../hooks/useSettings';
+import { MafCostBadge } from '../components/MafCostBadge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
@@ -189,6 +192,8 @@ export default function ProjectDetail() {
   const { t } = useTranslation();
   
   const [project, setProject] = useState<Project | null>(null);
+  const { settings } = useSettings();
+  const mafCost = useMafCost({ project, mafEnabled: !!(settings as any)?.maf_enabled, tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0) });
 
   useEffect(() => {
     if (project) {
@@ -2511,6 +2516,11 @@ export default function ProjectDetail() {
                             )}
                             <FormField label="Part d'intérêt (P) %" type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
                           </div>
+                          {mafCost && (
+                            <div className="mt-4">
+                              <MafCostBadge result={mafCost} showDetails />
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-4 pt-8 border-t border-[var(--tblr-border)]">

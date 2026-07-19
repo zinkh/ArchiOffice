@@ -20,6 +20,9 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { ProposalGenerator } from '../components/ProposalGenerator';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
+import { useMafCost } from '../hooks/useMafCost';
+import { useSettings } from '../hooks/useSettings';
+import { MafCostBadge } from '../components/MafCostBadge';
 
 import { saveAs } from 'file-saver';
 
@@ -193,6 +196,13 @@ export default function Proposals() {
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
   const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const { settings } = useSettings();
+  const mafCost = useMafCost({
+    project: newProposal,
+    proposal: newProposal,
+    mafEnabled: !!(settings as any)?.maf_enabled,
+    tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0),
+  });
 
   useEffect(() => {
     const loadData = async () => {
@@ -879,6 +889,11 @@ export default function Proposals() {
                       />
                     )}
                   </div>
+                  {mafCost && (
+                    <div className="mt-2">
+                      <MafCostBadge result={mafCost} showDetails />
+                    </div>
+                  )}
                 </div>
 
                 {/* Section 5: Surfaces & Capacity */}
