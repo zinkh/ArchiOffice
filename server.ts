@@ -1246,14 +1246,15 @@ async function startServer() {
 
   // ─── AI Token Pricing ────────────────────────────────────────────────────────
   // Recalibrated for the gemini-3-flash-preview migration (see server.ts's
-  // genai.models.generateContent call and archioffice-agents' chat route):
-  // gemini-2.5-flash cost Google $0.30/$2.50 per M input/output tokens, against
-  // which the previous defaults (€0.40 / €1.65) were a ~1.333x / ~0.66x markup.
-  // gemini-3-flash-preview costs $0.50/$3.00 — applying those same two factors
-  // keeps the markup unchanged rather than silently shrinking (input) or
-  // growing (output) it just because the underlying model changed.
+  // genai.models.generateContent call and archioffice-agents' chat route).
+  // gemini-2.5-flash cost Google $0.30/M input; the old €0.40 default was a
+  // ~1.333x markup on that. gemini-3-flash-preview costs $0.50/$3.00 per M
+  // input/output — both prices below apply that same ~1.333x markup to the
+  // new cost (output used to run at a ~0.66x markup, i.e. below cost,
+  // subsidized by the input side; now deliberately unsubsidized, same factor
+  // on both).
   const AI_PRICE_EUR_PER_M_INPUT  = parseFloat(process.env.AI_PRICE_INPUT_PER_M  || '0.67');
-  const AI_PRICE_EUR_PER_M_OUTPUT = parseFloat(process.env.AI_PRICE_OUTPUT_PER_M || '1.98');
+  const AI_PRICE_EUR_PER_M_OUTPUT = parseFloat(process.env.AI_PRICE_OUTPUT_PER_M || '4.00');
 
   function calcCostEurCents(inputTokens: number, outputTokens: number): number {
     const cost = (inputTokens / 1_000_000) * AI_PRICE_EUR_PER_M_INPUT
