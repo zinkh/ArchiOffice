@@ -85,9 +85,17 @@ CREATE POLICY "tenant_isolation" ON agent_token_usage
   USING (tenant_id = my_tenant_id());
 
 -- ── Seed : 13 templates système (tenant_id NULL = template global) ─────────
+-- WHERE NOT EXISTS guards this whole block: ON CONFLICT DO NOTHING alone
+-- does NOT make this idempotent, because tenant_id IS NULL on every row here
+-- and Postgres never considers two NULLs equal for a UNIQUE(tenant_id, slug)
+-- constraint — re-running this insert (e.g. an offline install replaying
+-- every not-yet-applied migration once, see electron/applySchema.cjs) would
+-- otherwise silently duplicate all 13 templates (confirmed against the real
+-- constraint: inserting a second 'secretaire' row with tenant_id NULL is
+-- accepted, not rejected).
 INSERT INTO agents (tenant_id, slug, name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, is_active, is_system_template)
-VALUES
-  (NULL, 'secretaire',         'Sophie',    'Secrétaire Administrative',         'SA', '#206bc4',
+SELECT * FROM (VALUES
+  (NULL::uuid, 'secretaire',  'Sophie',    'Secrétaire Administrative',         'SA', '#206bc4',
    'Professionnel, organisé, accueillant',
    'Vérifier toujours la disponibilité de l''architecte avant de confirmer un rendez-vous. Classer les documents par numéro de projet. Ne jamais communiquer d''informations financières confidentielles.',
    ARRAY['meetings','contacts','projects','documents'], TRUE, TRUE),
@@ -151,5 +159,6 @@ VALUES
    'Institutionnel, précis, réglementaire',
    'Toujours vérifier le PLU/PLUi en vigueur. Distinguer CU opérationnel et d''information. Mentionner les délais d''instruction réglementaires.',
    ARRAY['projects','documents','contacts'], FALSE, TRUE)
-
+) AS v(tenant_id, slug, name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, is_active, is_system_template)
+WHERE NOT EXISTS (SELECT 1 FROM agents WHERE is_system_template = TRUE)
 ON CONFLICT DO NOTHING;

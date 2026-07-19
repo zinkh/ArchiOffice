@@ -24,12 +24,50 @@ function orderedSqlFiles() {
   return ['schema.sql', 'fix_trigger_and_email.sql', ...migrations];
 }
 
+// Tracks which of the files above have already been applied to *this*
+// local Postgres data directory, so an app update that ships new
+// migrate_*.sql files (added after a user's first launch — pgBootstrap.cjs
+// only ever calls applyLocalSchema on that very first launch, and a local
+// pgdata/ directory otherwise persists across every later app update) can
+// still apply just the new ones on next startup, instead of the local DB
+// silently drifting out of sync with server.ts forever — the exact class of
+// bug found across several supabase/migrate_*.sql files never having been
+// run against the production cloud project (fixed there directly; this is
+// the same risk for every existing offline install). Deliberately local-only
+// bookkeeping (see server/localPendingPush.ts for the same pattern) — never
+// part of the cloud schema, never synced.
+async function ensureMigrationsTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS _local_applied_migrations (
+      filename TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+}
+
+async function getAppliedFilenames(client) {
+  const { rows } = await client.query('SELECT filename FROM _local_applied_migrations');
+  return new Set(rows.map((r) => r.filename));
+}
+
 /**
+ * Applies every SQL file from orderedSqlFiles() not yet recorded in
+ * _local_applied_migrations. Safe to call on every app startup: a brand new
+ * database applies everything (first launch); an existing one only applies
+ * whatever's new since it was last opened.
  * @param {import('pg').Client} client
  * @param {(msg: string) => void} [log]
  */
 async function applyLocalSchema(client, log = () => {}) {
-  const files = orderedSqlFiles();
+  await ensureMigrationsTable(client);
+  const applied = await getAppliedFilenames(client);
+  const files = orderedSqlFiles().filter((f) => !applied.has(f));
+
+  if (files.length === 0) {
+    log('[applySchema] no new migrations to apply');
+    return;
+  }
+
   /** @type {{ file: string, stmt: string }[]} */
   const pending = [];
 
@@ -63,7 +101,11 @@ async function applyLocalSchema(client, log = () => {}) {
     throw new Error(`applyLocalSchema: ${stillFailing.length} statement(s) failed after retry`);
   }
 
-  log(`[applySchema] applied ${files.length} SQL files successfully`);
+  for (const file of files) {
+    await client.query('INSERT INTO _local_applied_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
+  }
+
+  log(`[applySchema] applied ${files.length} new SQL file(s) successfully`);
 }
 
 module.exports = { applyLocalSchema, orderedSqlFiles };
