@@ -3,6 +3,7 @@ import type { AgentRow } from '../types.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
+import { buildAgentTools, executeAgentAction } from './tools.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
@@ -17,6 +18,12 @@ interface BillingHelpers {
   deductAiCredit: DeductAiCreditFn;
   maybeRefreshMonthlyCredits: (tenantId: string, plan: string) => Promise<void>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
+  logActivity: (
+    tenantId: string, userId: string, userName: string,
+    action: string, target: string, targetId: string, targetType: string, category: string
+  ) => Promise<void>;
+  getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
+  getNextDocNumber: (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) => Promise<string>;
 }
 
 export function registerAgentRoutes(
@@ -50,7 +57,7 @@ export function registerAgentRoutes(
   app.post('/api/agents', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { slug, name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, system_prompt_override, from_template_id } = req.body;
+      const { slug, name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, system_prompt_override, from_template_id } = req.body;
 
       let agentData: any = { tenant_id: tenantId };
 
@@ -58,10 +65,12 @@ export function registerAgentRoutes(
         const { data: template, error: tErr } = await supabaseAdmin.from('agents').select('*').eq('id', from_template_id).is('tenant_id', null).single();
         if (tErr || !template) return res.status(404).json({ error: 'Template not found' });
         const t = template as any;
-        agentData = { ...agentData, slug: t.slug, name: t.name, role_title: t.role_title, avatar_initials: t.avatar_initials, avatar_color: t.avatar_color, tone: t.tone, directives: t.directives, context_scopes: t.context_scopes, is_active: true, is_system_template: false };
+        // Write permissions are never inherited from a template — the tenant
+        // must opt in explicitly per activated agent.
+        agentData = { ...agentData, slug: t.slug, name: t.name, role_title: t.role_title, avatar_initials: t.avatar_initials, avatar_color: t.avatar_color, tone: t.tone, directives: t.directives, context_scopes: t.context_scopes, action_scopes: [], is_active: true, is_system_template: false };
       } else {
         if (!slug || !name || !role_title) return res.status(400).json({ error: 'slug, name, role_title required' });
-        agentData = { ...agentData, slug, name, role_title, avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4', tone, directives, context_scopes: context_scopes || [], system_prompt_override, is_active: true, is_system_template: false };
+        agentData = { ...agentData, slug, name, role_title, avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4', tone, directives, context_scopes: context_scopes || [], action_scopes: action_scopes || [], system_prompt_override, is_active: true, is_system_template: false };
       }
 
       const { data, error } = await supabaseAdmin.from('agents').insert(agentData).select().single();
@@ -75,8 +84,8 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, system_prompt_override, is_active } = req.body;
-      const { data, error } = await supabaseAdmin.from('agents').update({ name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, system_prompt_override, is_active }).eq('id', id).eq('tenant_id', tenantId).select().single();
+      const { name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, system_prompt_override, is_active } = req.body;
+      const { data, error } = await supabaseAdmin.from('agents').update({ name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, system_prompt_override, is_active }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -201,28 +210,64 @@ export function registerAgentRoutes(
         parts: [{ text: m.content }],
       }));
 
+      const actionScopes: string[] = (agent as any).action_scopes || [];
+      const tools = buildAgentTools(actionScopes);
+
       const chat = genai.chats.create({
         model: 'gemini-3-flash-preview',
-        config: { systemInstruction: systemPrompt },
+        config: {
+          systemInstruction: systemPrompt,
+          ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools as any }] } : {}),
+        },
         history: geminiHistory,
       });
       // Bounds how long a stuck/slow Gemini call can hold the request open —
       // shorter than the client's own abort timeout so the client always gets
       // this explicit message instead of a silent connection drop.
       const AGENT_CHAT_TIMEOUT_MS = 55000;
-      const result = await Promise.race([
-        chat.sendMessage({ message }),
+      const withTimeout = <T>(p: Promise<T>): Promise<T> => Promise.race([
+        p,
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(Object.assign(new Error("L'agent IA n'a pas répondu à temps."), { code: 'AGENT_TIMEOUT' })), AGENT_CHAT_TIMEOUT_MS)
         ),
       ]);
+
+      let result = await withTimeout(chat.sendMessage({ message }));
+      let inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
+      let outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+
+      // Function-calling loop: the model may chain several tool calls (e.g.
+      // create_contact then create_proposal with the returned id) before it
+      // produces a final natural-language reply.
+      const actionSummaries: string[] = [];
+      const MAX_FUNCTION_ROUNDS = 4;
+      let round = 0;
+      if (tools.length > 0 && billing) {
+        const userNameForActions = await billing.getUserName(tenantId, req.user.id, req.user.email);
+        while (result.functionCalls && result.functionCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
+          round++;
+          const responseParts: { functionResponse: { name?: string; response: Record<string, unknown> } }[] = [];
+          for (const call of result.functionCalls) {
+            const { response, summary } = await executeAgentAction(
+              supabaseAdmin, tenantId, req.user.id, userNameForActions, actionScopes,
+              { logActivity: billing.logActivity, getNextDocNumber: billing.getNextDocNumber },
+              call
+            );
+            if (summary) actionSummaries.push(summary);
+            responseParts.push({ functionResponse: { name: call.name, response } });
+          }
+          result = await withTimeout(chat.sendMessage({ message: responseParts }));
+          inputTokens  += (result as any).usageMetadata?.promptTokenCount ?? 0;
+          outputTokens += (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+        }
+      }
+
       const rawText = result.text ?? '';
 
-      const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
-      const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
-
       const { cleanText, spec } = parseArtifactFromText(rawText);
-      const reply = cleanText;
+      const reply = actionSummaries.length > 0
+        ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + cleanText
+        : cleanText;
       const artifact = spec ? generateArtifact(spec) : undefined;
 
       let newBalance = balance;

@@ -663,6 +663,8 @@ export default {
       "agent_config_identity": "Identité",
       "agent_config_directives": "Directives",
       "agent_config_scopes": "Accès aux données",
+      "agent_config_actions": "Actions autorisées",
+      "agent_config_actions_hint": "Ces actions permettent à l'agent de créer des données dans le cabinet. À activer uniquement pour les agents de confiance.",
       "agent_config_prompt": "Prompt avancé",
       "agent_config_prompt_hint": "Laisser vide pour utiliser le prompt généré automatiquement",
       "agent_config_save": "Enregistrer",

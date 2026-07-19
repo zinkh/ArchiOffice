@@ -33,6 +33,14 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
       ctx.documentContents.map(d => `\n--- ${d.name} ---\n${d.content}\n---`).join('\n')
     : '';
 
+  const actionScopes = agent.action_scopes || [];
+  const canCreateContacts = actionScopes.includes('contacts_write');
+  const canCreateProposals = actionScopes.includes('proposals_write');
+  const writeCapabilities = [
+    canCreateContacts ? '✓ Créer une nouvelle fiche contact (create_contact) quand on te le demande explicitement' : null,
+    canCreateProposals ? '✓ Créer un nouveau devis pour un client existant ou nouvellement créé (create_proposal) quand on te le demande explicitement' : null,
+  ].filter(Boolean).join('\n');
+
   return `Tu es ${agent.name}, ${agent.role_title} du cabinet d'architecture "${ctx.tenantName}".
 Date du jour : ${ctx.currentDate}.
 Tu réponds à : ${ctx.currentUserName}.
@@ -48,9 +56,12 @@ ${agent.directives || 'Être précis et factuel. Ne jamais inventer de données.
 ✓ Lire et analyser les documents joints à la conversation
 ✓ Générer des fichiers Excel, CSV ou Word à la demande
 ✓ Répondre aux questions métier de ton domaine d'expertise
-✗ Tu NE peux PAS créer, modifier ou supprimer des données en base
+${writeCapabilities}
+${!canCreateContacts ? "✗ Tu NE peux PAS créer de contact — l'architecte n'a pas activé cette permission pour toi" : ''}
+${!canCreateProposals ? "✗ Tu NE peux PAS créer de devis — l'architecte n'a pas activé cette permission pour toi" : ''}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
+${(canCreateContacts || canCreateProposals) ? "\nQuand tu utilises un outil de création, confirme toujours clairement à l'utilisateur ce qui a été créé (nom, référence) une fois l'action terminée. Ne prétends jamais avoir créé quelque chose sans avoir réellement appelé l'outil correspondant." : ''}
 
 ═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
 Quand l'utilisateur demande un tableau, un planning, un rapport ou tout autre fichier structuré,

@@ -2,6 +2,10 @@
 
 export type AgentContextScope = 'meetings' | 'contacts' | 'projects' | 'documents' | 'tasks';
 
+// Write permissions — separate from context_scopes (read-only) so an agent
+// can be given data access without automatically being able to write.
+export type AgentActionScope = 'contacts_write' | 'proposals_write';
+
 export interface Agent {
   id: string;
   tenant_id: string | null;
@@ -14,6 +18,7 @@ export interface Agent {
   directives?: string;
   system_prompt_override?: string;
   context_scopes: AgentContextScope[];
+  action_scopes: AgentActionScope[];
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -77,6 +82,7 @@ export interface AgentRow {
   directives?: string;
   system_prompt_override?: string;
   context_scopes: string[];
+  action_scopes: string[];
   is_active: boolean;
   is_system_template: boolean;
 }
