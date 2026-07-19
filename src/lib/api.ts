@@ -5,7 +5,20 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
   const res = await fetchFn(url, options);
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+    // Most endpoints reply with a JSON body ({ error: "..." }) describing what
+    // actually went wrong server-side — surface that instead of a bare status
+    // code, which by itself gives no way to tell a 500 apart from another.
+    let message = `Failed to fetch ${url}: ${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+      else if (body?.message) message = body.message;
+    } catch {
+      // Body wasn't JSON (e.g. an HTML error page) — keep the generic message.
+    }
+    const err: any = new Error(message);
+    err.status = res.status;
+    throw err;
   }
 
   const contentType = res.headers.get('content-type');

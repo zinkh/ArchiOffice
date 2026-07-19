@@ -73,20 +73,25 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
   }
   await pg.start();
 
-  if (isFirstRun) {
+  // Runs every launch, not just the first: applyLocalSchema() only actually
+  // applies whatever migrate_*.sql files aren't yet recorded as applied (see
+  // electron/applySchema.cjs) — a brand new database applies everything here,
+  // an existing one picks up just what's new since an app update. This is the
+  // only place a returning user's local DB ever gets new tables/columns; there
+  // is no other migration trigger.
+  try {
+    const client = await pg.getPgClient();
+    await client.connect();
     try {
-      const client = await pg.getPgClient();
-      await client.connect();
-      try {
-        await client.query(`GRANT ALL ON SCHEMA public TO ${PG_USER}`);
-        await applyLocalSchema(client, log);
-        await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PG_USER}`);
-        await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_USER}`);
-        log('[pgBootstrap] local schema applied');
-      } finally {
-        await client.end();
-      }
-    } catch (err) {
+      await client.query(`GRANT ALL ON SCHEMA public TO ${PG_USER}`);
+      await applyLocalSchema(client, log);
+      await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PG_USER}`);
+      await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_USER}`);
+    } finally {
+      await client.end();
+    }
+  } catch (err) {
+    if (isFirstRun) {
       // Without this, a failed first run leaves a half-initialised pgdata/
       // directory behind — isFirstRun is based on that directory's mere
       // existence, so every subsequent launch would silently skip
@@ -94,11 +99,28 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
       // the user to manually find and delete the AppData folder (confirmed
       // painful across several real-Windows bug reports in a row). Instead,
       // clean up so the next launch is a true first run and retries on its own.
+      // Safe specifically because this is a brand new directory with no real
+      // data in it yet — see the non-first-run branch below for why this must
+      // never happen to an existing install.
       log('[pgBootstrap] first-run setup failed, cleaning up for a fresh retry on next launch:', err);
       await pg.stop().catch(() => {});
       fs.rmSync(databaseDir, { recursive: true, force: true });
       throw err;
     }
+    // An existing install with real business data in it — never delete
+    // pgdata/ here, that would destroy the user's data over a migration
+    // hiccup, and never block the app from starting over it either: this
+    // machine may simply be offline right now (this whole feature exists so
+    // the app works without a network connection at all), or hit some other
+    // transient issue. Swallow the error and keep going with whatever schema
+    // is already there — the local DB is untouched, Postgres is already
+    // running, and the app remains fully usable at its current schema
+    // version. Whatever migrations succeeded before the failing one are
+    // already committed and recorded (per-file granularity in
+    // applySchema.cjs), so the very next launch — once conditions are
+    // better, e.g. the network is back, if that's what caused this — picks
+    // up exactly where this one left off instead of starting over.
+    log('[pgBootstrap] schema update failed on an existing install — continuing with the current local schema, will retry on next launch:', err);
   }
 
   return pg;

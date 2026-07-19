@@ -16,3 +16,8 @@ CREATE TABLE IF NOT EXISTS document_diffusions (
   acknowledged_at TEXT,
   notes TEXT
 );
+
+ALTER TABLE document_diffusions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON document_diffusions
+  USING (tenant_id = my_tenant_id());
