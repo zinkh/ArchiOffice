@@ -201,7 +201,7 @@ export function registerAgentRoutes(
       }));
 
       const chat = genai.chats.create({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash-preview',
         config: { systemInstruction: systemPrompt },
         history: geminiHistory,
       });
