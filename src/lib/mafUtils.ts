@@ -31,6 +31,27 @@ export const MAF_INTERCALAIRE_LABELS: Record<MafIntercalaire, string> = {
   puc: 'Police Unique de Chantier (PUC)',
 };
 
+// Ordre d'affichage des intercalaires (reprend l'ordre de la circulaire MAF)
+export const MAF_INTERCALAIRE_ORDER: MafIntercalaire[] = [
+  'jaune', 'vert', 'ami', 'grand_chantier',
+  'violet', 'orange_clair', 'orange_fonce', 'bleu',
+  'rose', 'tabac', 'gris', 'puc',
+];
+
+// Options {id, name} prêtes à l'emploi pour un <select> (proposals, projets)
+export const MAF_INTERCALAIRE_OPTIONS = MAF_INTERCALAIRE_ORDER.map((id) => ({
+  id,
+  name: `${id.replace('_', ' ')} — ${MAF_INTERCALAIRE_LABELS[id]}`,
+}));
+
+// Taux T de la mission de maîtrise d'œuvre (intercalaire jaune uniquement — § 2.1 de la circulaire)
+export const TAUX_MISSION_OPTIONS = [
+  { value: 30, label: 'Mission limitée au projet architectural (30%)' },
+  { value: 60, label: 'Mission de conception générale sans direction (60%)' },
+  { value: 100, label: 'Mission complète ou assimilable (100%)' },
+  { value: 110, label: 'Mission complète élargie (110%)' },
+];
+
 // ─── Calcul de la part d'intérêt pondérée depuis fee_distribution ─────────────
 
 interface FeeDistributionMission {

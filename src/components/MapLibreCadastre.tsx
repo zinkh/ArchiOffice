@@ -4,6 +4,16 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 
 const CADASTRE_MIN_ZOOM = 13;
 
+export interface CadastreParcel {
+  id: string;
+  section: string;
+  numero: string;
+  prefixe: string;
+  commune: string;
+  insee: string;
+  contenance?: number;
+}
+
 const MAP_STYLE = (lon: number, lat: number): any => ({
   version: 8,
   sources: {
@@ -13,30 +23,85 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
       tileSize: 256,
       attribution: '&copy; OpenStreetMap contributors',
     },
-    cadastre: {
-      type: 'raster',
-      tiles: [
-        'https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=CADASTRALPARCELS.PARCELS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
-      ],
-      tileSize: 256,
-      attribution: '&copy; IGN',
-      minzoom: CADASTRE_MIN_ZOOM,
+    parcelles: {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      generateId: true,
     },
   },
   layers: [
     { id: 'osm-layer', type: 'raster', source: 'osm' },
-    { id: 'cadastre-layer', type: 'raster', source: 'cadastre', paint: { 'raster-opacity': 0.7 }, minzoom: CADASTRE_MIN_ZOOM },
+    {
+      id: 'parcelles-fill',
+      type: 'fill',
+      source: 'parcelles',
+      minzoom: CADASTRE_MIN_ZOOM,
+      paint: {
+        'fill-color': '#3b82f6',
+        'fill-opacity': [
+          'case',
+          ['boolean', ['feature-state', 'selected'], false], 0.35,
+          ['boolean', ['feature-state', 'hover'], false], 0.2,
+          0.05,
+        ],
+      },
+    },
+    {
+      id: 'parcelles-line',
+      type: 'line',
+      source: 'parcelles',
+      minzoom: CADASTRE_MIN_ZOOM,
+      paint: {
+        'line-color': ['case', ['boolean', ['feature-state', 'selected'], false], '#f59e0b', '#3b82f6'],
+        'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 2.5, 1],
+      },
+    },
   ],
   center: [lon, lat],
   zoom: 17,
 });
 
-export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => {
+export const MapLibreCadastre = ({
+  lat,
+  lon,
+  onParcelSelect,
+}: {
+  lat: number;
+  lon: number;
+  onParcelSelect?: (parcel: CadastreParcel) => void;
+}) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
   const [contextLost, setContextLost] = useState(false);
   const [zoom, setZoom] = useState(17);
+  const hoveredId = useRef<number | string | null>(null);
+  const selectedId = useRef<number | string | null>(null);
+  const fetchAbort = useRef<AbortController | null>(null);
+  const onParcelSelectRef = useRef(onParcelSelect);
+  onParcelSelectRef.current = onParcelSelect;
+
+  const fetchParcelles = useCallback((instance: maplibregl.Map) => {
+    if (instance.getZoom() < CADASTRE_MIN_ZOOM) return;
+    const source = instance.getSource('parcelles') as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    fetchAbort.current?.abort();
+    const controller = new AbortController();
+    fetchAbort.current = controller;
+
+    const b = instance.getBounds();
+    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+
+    fetch(`/api/cadastre/parcel?bbox=${bbox}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.features) source.setData(data);
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') console.warn('[MapLibreCadastre] parcel fetch failed', err);
+      });
+  }, []);
 
   const initMap = useCallback(() => {
     if (!mapContainer.current) return;
@@ -58,9 +123,44 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
         .addTo(instance);
       setZoom(Math.round(instance.getZoom()));
       setTimeout(() => instance.resize(), 100);
+      fetchParcelles(instance);
     });
 
     instance.on('zoomend', () => setZoom(Math.round(instance.getZoom())));
+    instance.on('moveend', () => fetchParcelles(instance));
+
+    instance.on('mousemove', 'parcelles-fill', (e) => {
+      if (!e.features?.length) return;
+      const id = e.features[0].id;
+      if (id === undefined || id === hoveredId.current) return;
+      if (hoveredId.current !== null) {
+        instance.setFeatureState({ source: 'parcelles', id: hoveredId.current }, { hover: false });
+      }
+      hoveredId.current = id;
+      instance.setFeatureState({ source: 'parcelles', id }, { hover: true });
+      instance.getCanvas().style.cursor = 'pointer';
+    });
+
+    instance.on('mouseleave', 'parcelles-fill', () => {
+      if (hoveredId.current !== null) {
+        instance.setFeatureState({ source: 'parcelles', id: hoveredId.current }, { hover: false });
+        hoveredId.current = null;
+      }
+      instance.getCanvas().style.cursor = '';
+    });
+
+    instance.on('click', 'parcelles-fill', (e) => {
+      if (!e.features?.length) return;
+      const feature = e.features[0];
+      const id = feature.id;
+      if (id === undefined) return;
+      if (selectedId.current !== null) {
+        instance.setFeatureState({ source: 'parcelles', id: selectedId.current }, { selected: false });
+      }
+      selectedId.current = id;
+      instance.setFeatureState({ source: 'parcelles', id }, { selected: true });
+      onParcelSelectRef.current?.(feature.properties as CadastreParcel);
+    });
 
     // Without a listener, MapLibre's own fallback is to print any internal
     // error (WebGL context loss included) via console.error — which Sentry

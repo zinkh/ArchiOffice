@@ -11,17 +11,14 @@ import {
 import type { MafProjectData, MafIntercalaire, Project } from '../types';
 import {
   computeAssiette, computeCotisation,
-  MAF_TAUX_FIXES, MAF_INTERCALAIRE_LABELS,
+  MAF_TAUX_FIXES, MAF_INTERCALAIRE_LABELS, MAF_INTERCALAIRE_ORDER,
+  TAUX_MISSION_OPTIONS,
   computePartInteret,
 } from '../lib/mafUtils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const INTERCALAIRES: MafIntercalaire[] = [
-  'jaune', 'vert', 'ami', 'grand_chantier',
-  'violet', 'orange_clair', 'orange_fonce', 'bleu',
-  'rose', 'tabac', 'gris', 'puc',
-];
+const INTERCALAIRES: MafIntercalaire[] = MAF_INTERCALAIRE_ORDER;
 
 const INTERCALAIRE_DESCRIPTIONS: Record<MafIntercalaire, string> = {
   jaune: 'Missions complètes ou partielles de maîtrise d\'œuvre (formule M × T × P). Chantiers ouverts ou en cours.',
@@ -37,13 +34,6 @@ const INTERCALAIRE_DESCRIPTIONS: Record<MafIntercalaire, string> = {
   gris: 'Missions VIR (vente d\'immeuble à rénover) et VEFA (vente d\'immeuble à construire).',
   puc: 'Police Unique de Chantier — chantiers couverts par une PUC souscrite par le maître d\'ouvrage.',
 };
-
-const TAUX_MISSION_OPTIONS = [
-  { value: 30, label: 'Mission limitée au projet architectural (30%)' },
-  { value: 60, label: 'Mission de conception générale sans direction (60%)' },
-  { value: 100, label: 'Mission complète ou assimilable (100%)' },
-  { value: 110, label: 'Mission complète élargie (110%)' },
-];
 
 const SISMICITE_OPTIONS = ['Très faible', 'Faible', 'Modérée', 'Moyenne', 'Forte'];
 const RETRAIT_ARGILES_OPTIONS = ['Non exposée', 'Faible', 'Moyen', 'Fort'];
@@ -208,6 +198,12 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
               <option value="">— Aucun projet lié —</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name} {p.client ? `— ${p.client}` : ''}</option>)}
             </select>
+            {linkedProject?.maf_intercalaire && linkedProject.maf_intercalaire !== intercalaire && (
+              <p className="mt-1 text-[11px] flex items-center gap-1" style={{ color: '#e67700' }}>
+                <IconAlertTriangle size={12} />
+                Ce projet est déclaré en type de mission « {MAF_INTERCALAIRE_LABELS[linkedProject.maf_intercalaire]} » ({linkedProject.maf_intercalaire.replace('_', ' ')}) — vérifiez que l'intercalaire {intercalaire} est le bon.
+              </p>
+            )}
           </div>
 
           {!isHonoraires && (

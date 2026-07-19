@@ -2461,7 +2461,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       // Generate project code: YYNNN
@@ -2482,7 +2483,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       });
       if (pe) throw pe;
       if (cotraitants_list?.length) {
@@ -2522,7 +2524,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       const { error: ue } = await supabaseAdmin.from('projects').update({
@@ -2535,7 +2538,8 @@ async function startServer() {
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
-        surface_ert, effectif_public, effectif_personnel, ind, date_modification
+        surface_ert, effectif_public, effectif_personnel, ind, date_modification,
+        maf_intercalaire, taux_mission, part_interet
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
       // Update related lists (delete + reinsert)
@@ -3482,7 +3486,8 @@ async function startServer() {
           surface_plancher: p.surface_plancher, surface_plancher_ext: p.surface_plancher_ext,
           surface_erp: p.surface_erp, surface_ert: p.surface_ert,
           effectif_public: p.effectif_public, effectif_personnel: p.effectif_personnel,
-          ind: p.ind, date_modification: p.date_modification
+          ind: p.ind, date_modification: p.date_modification,
+          maf_intercalaire: p.maf_intercalaire, taux_mission: p.taux_mission, part_interet: p.part_interet
         });
         if (projErr) throw projErr;
         // Copy specialties to cotraitants
@@ -4265,14 +4270,30 @@ async function startServer() {
 
   app.get("/api/cadastre/parcel", async (req, res) => {
     try {
-      const { lon, lat } = req.query;
-      console.log(`[Cadastre] Lookup request: lon=${lon}, lat=${lat}`);
-      
-      if (!lon || !lat) {
-        return res.status(400).json({ error: "Missing longitude or latitude parameters" });
+      const { lon, lat, bbox } = req.query;
+
+      let geom: { type: string; coordinates: any };
+      if (bbox) {
+        const parts = String(bbox).split(',').map(Number);
+        if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+          return res.status(400).json({ error: "Invalid bbox parameter, expected minLon,minLat,maxLon,maxLat" });
+        }
+        const [minLon, minLat, maxLon, maxLat] = parts;
+        geom = {
+          type: 'Polygon',
+          coordinates: [[
+            [minLon, minLat], [maxLon, minLat], [maxLon, maxLat], [minLon, maxLat], [minLon, minLat],
+          ]],
+        };
+        console.log(`[Cadastre] Lookup request: bbox=${bbox}`);
+      } else if (lon && lat) {
+        geom = { type: 'Point', coordinates: [Number(lon), Number(lat)] };
+        console.log(`[Cadastre] Lookup request: lon=${lon}, lat=${lat}`);
+      } else {
+        return res.status(400).json({ error: "Missing longitude/latitude or bbox parameters" });
       }
 
-      const apiUrl = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B${lon}%2C${lat}%5D%7D`;
+      const apiUrl = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=1000`;
       console.log(`[Cadastre] Fetching from IGN: ${apiUrl}`);
 
       const response = await fetchWithTimeout(apiUrl, {
@@ -4326,19 +4347,22 @@ async function startServer() {
         console.log(`[Cadastre] Mapping: IGN=${p.idu} -> Etalab=${id15} (URL Commune: ${urlCommune}, INSEE: ${p.code_insee})`);
 
         return {
+          type: 'Feature',
+          geometry: f.geometry,
           properties: {
             id: id15,
             section: id15.substring(8, 10),
             numero: id15.substring(10),
             prefixe: id15.substring(5, 8),
             commune: urlCommune,
-            insee: p.code_insee || urlCommune
+            insee: p.code_insee || urlCommune,
+            contenance: p.contenance
           }
         };
       });
 
       console.log(`[Cadastre] Success: Found ${mappedFeatures.length} parcels`);
-      res.json({ features: mappedFeatures });
+      res.json({ type: 'FeatureCollection', features: mappedFeatures });
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.error("[Cadastre] Request timed out");

@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react';
-import { MapLibreCadastre } from './MapLibreCadastre';
+import { MapLibreCadastre, CadastreParcel } from './MapLibreCadastre';
 import { cn } from '../lib/utils';
 
-export const GeoportailMap = ({ address, banId }: { address: string; banId?: string }) => {
+export const GeoportailMap = ({
+  address,
+  banId,
+  onParcelSelect,
+}: {
+  address: string;
+  banId?: string;
+  onParcelSelect?: (parcel: CadastreParcel) => void;
+}) => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,7 +60,7 @@ export const GeoportailMap = ({ address, banId }: { address: string; banId?: str
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
 
-  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} />;
+  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onParcelSelect={onParcelSelect} />;
 };
 
 export const GoogleMap = ({ address }: { address: string }) => {

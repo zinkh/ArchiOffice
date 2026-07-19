@@ -19,6 +19,10 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { ProposalGenerator } from '../components/ProposalGenerator';
+import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
+import { useMafCost } from '../hooks/useMafCost';
+import { useSettings } from '../hooks/useSettings';
+import { MafCostBadge } from '../components/MafCostBadge';
 
 import { saveAs } from 'file-saver';
 
@@ -171,6 +175,8 @@ export default function Proposals() {
     effectif_personnel: '',
     ind: 'A',
     date_modification: new Date().toLocaleDateString('fr-FR'),
+    maf_intercalaire: undefined,
+    taux_mission: undefined,
     specialties_list: [],
     fee_distribution: JSON.stringify({ 
       missions: DEFAULT_MISSIONS.map(m => ({ 
@@ -190,6 +196,13 @@ export default function Proposals() {
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
   const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const { settings } = useSettings();
+  const mafCost = useMafCost({
+    project: newProposal,
+    proposal: newProposal,
+    mafEnabled: !!(settings as any)?.maf_enabled,
+    tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0),
+  });
 
   useEffect(() => {
     const loadData = async () => {
@@ -859,7 +872,28 @@ export default function Proposals() {
                     <FormField label="Type Et Cat" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
                     <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
                     <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
+                    <FormField
+                      label="Type de mission (circulaire MAF)"
+                      type="select"
+                      options={MAF_INTERCALAIRE_OPTIONS}
+                      value={newProposal.maf_intercalaire}
+                      onChange={(v: any) => setNewProposal(prev => ({ ...prev, maf_intercalaire: v || undefined, taux_mission: v === 'jaune' ? prev.taux_mission : undefined }))}
+                    />
+                    {newProposal.maf_intercalaire === 'jaune' && (
+                      <FormField
+                        label="Taux de la mission (T)"
+                        type="select"
+                        options={TAUX_MISSION_OPTIONS.map(o => ({ id: o.value, name: o.label }))}
+                        value={newProposal.taux_mission}
+                        onChange={(v: any) => setNewProposal(prev => ({ ...prev, taux_mission: v ? Number(v) : undefined }))}
+                      />
+                    )}
                   </div>
+                  {mafCost && (
+                    <div className="mt-2">
+                      <MafCostBadge result={mafCost} showDetails />
+                    </div>
+                  )}
                 </div>
 
                 {/* Section 5: Surfaces & Capacity */}
