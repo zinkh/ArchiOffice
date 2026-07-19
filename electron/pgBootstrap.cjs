@@ -109,13 +109,18 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
     }
     // An existing install with real business data in it — never delete
     // pgdata/ here, that would destroy the user's data over a migration
-    // hiccup. Surface the error and let the app fail to start cleanly instead;
-    // the local DB stays exactly as it was (whatever migrations succeeded
-    // before the failing one are already committed and recorded, so the next
-    // launch resumes from there rather than re-attempting from scratch).
-    log('[pgBootstrap] schema update failed on an existing install — leaving pgdata/ untouched:', err);
-    await pg.stop().catch(() => {});
-    throw err;
+    // hiccup, and never block the app from starting over it either: this
+    // machine may simply be offline right now (this whole feature exists so
+    // the app works without a network connection at all), or hit some other
+    // transient issue. Swallow the error and keep going with whatever schema
+    // is already there — the local DB is untouched, Postgres is already
+    // running, and the app remains fully usable at its current schema
+    // version. Whatever migrations succeeded before the failing one are
+    // already committed and recorded (per-file granularity in
+    // applySchema.cjs), so the very next launch — once conditions are
+    // better, e.g. the network is back, if that's what caused this — picks
+    // up exactly where this one left off instead of starting over.
+    log('[pgBootstrap] schema update failed on an existing install — continuing with the current local schema, will retry on next launch:', err);
   }
 
   return pg;
