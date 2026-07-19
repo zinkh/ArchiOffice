@@ -8756,7 +8756,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
 - "unite": unité de mesure (m², ml, u, forfait, etc.)
 - "prescriptionsTechniques": normes et prescriptions techniques applicables (1-2 phrases)`;
 
-      const result = await genai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const result = await genai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
       const text = result.text ?? '';
 
       // Track token usage and deduct cost
