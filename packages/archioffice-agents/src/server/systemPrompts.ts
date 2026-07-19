@@ -1,4 +1,5 @@
 import type { AgentRow, AgentContext } from '../types.js';
+import { describeAuthorizedResources } from './tools.js';
 
 export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): string {
   if (agent.system_prompt_override) {
@@ -34,12 +35,19 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
     : '';
 
   const actionScopes = agent.action_scopes || [];
-  const canCreateContacts = actionScopes.includes('contacts_write');
-  const canCreateProposals = actionScopes.includes('proposals_write');
-  const writeCapabilities = [
-    canCreateContacts ? '✓ Créer une nouvelle fiche contact (create_contact) quand on te le demande explicitement' : null,
-    canCreateProposals ? '✓ Créer un nouveau devis pour un client existant ou nouvellement créé (create_proposal) quand on te le demande explicitement' : null,
-  ].filter(Boolean).join('\n');
+  const canAct = actionScopes.length > 0;
+  const resourceSchema = describeAuthorizedResources(actionScopes);
+  const actionsSection = canAct
+    ? `\n═══ SCHÉMA DES RESSOURCES AUTORISÉES ═══
+Tu peux utiliser create_record / update_record / delete_record sur les ressources suivantes (champs suivis d'un * = obligatoires) :
+${resourceSchema}
+
+Règles :
+1. Une action de création ou modification doit toujours être suivie d'une confirmation claire à l'utilisateur (quoi, sur quelle ressource, avec quel identifiant/référence si connu).
+2. Ne prétends jamais avoir créé/modifié/supprimé quelque chose sans avoir réellement appelé l'outil correspondant.
+3. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
+4. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le à l'utilisateur au lieu d'improviser.\n`
+    : '';
 
   return `Tu es ${agent.name}, ${agent.role_title} du cabinet d'architecture "${ctx.tenantName}".
 Date du jour : ${ctx.currentDate}.
@@ -56,13 +64,12 @@ ${agent.directives || 'Être précis et factuel. Ne jamais inventer de données.
 ✓ Lire et analyser les documents joints à la conversation
 ✓ Générer des fichiers Excel, CSV ou Word à la demande
 ✓ Répondre aux questions métier de ton domaine d'expertise
-${writeCapabilities}
-${!canCreateContacts ? "✗ Tu NE peux PAS créer de contact — l'architecte n'a pas activé cette permission pour toi" : ''}
-${!canCreateProposals ? "✗ Tu NE peux PAS créer de devis — l'architecte n'a pas activé cette permission pour toi" : ''}
+${canAct
+  ? "✓ Créer, modifier ou supprimer des données dans les ressources listées ci-dessous (section SCHÉMA DES RESSOURCES AUTORISÉES), via les outils create_record / update_record / delete_record"
+  : "✗ Tu NE peux PAS créer, modifier ou supprimer de données — l'architecte n'a activé aucune permission d'écriture pour toi"}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
-${(canCreateContacts || canCreateProposals) ? "\nQuand tu utilises un outil de création, confirme toujours clairement à l'utilisateur ce qui a été créé (nom, référence) une fois l'action terminée. Ne prétends jamais avoir créé quelque chose sans avoir réellement appelé l'outil correspondant." : ''}
-
+${actionsSection}
 ═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
 Quand l'utilisateur demande un tableau, un planning, un rapport ou tout autre fichier structuré,
 génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse, selon ce format :

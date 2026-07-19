@@ -4,7 +4,56 @@ export type AgentContextScope = 'meetings' | 'contacts' | 'projects' | 'document
 
 // Write permissions — separate from context_scopes (read-only) so an agent
 // can be given data access without automatically being able to write.
-export type AgentActionScope = 'contacts_write' | 'proposals_write';
+// One scope = one resource = the same create/update/delete surface a human
+// has in that section of the app, exposed to the agent via the app's own
+// REST API (see server/tools.ts) so behavior always matches the UI exactly.
+export type AgentActionScope = string;
+
+export interface AgentResourceDef {
+  key: string;
+  label: string;
+  basePath: string;
+  create: boolean;
+  update: boolean;
+  delete: boolean;
+  /** Human-readable field hint injected into the agent's system prompt. */
+  fields: string;
+}
+
+export const AGENT_RESOURCES: AgentResourceDef[] = [
+  { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true,
+    fields: 'first_name*, last_name*, company_name, email, phone, category, address, city, zip, notes' },
+  { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: false,
+    fields: 'title*, client_id*, amount, status (Draft/Sent/Accepted/Rejected), description' },
+  { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true,
+    fields: 'name*, client*, status*, client_id, budget, category, start_date, end_date, description, address' },
+  { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true,
+    fields: 'title*, client*, submission_deadline*, status*, description, amount' },
+  { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false,
+    fields: 'status* (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date' },
+  { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true,
+    fields: 'title*, project_id, description, content' },
+  { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true,
+    fields: 'title*, start_date*, end_date*, project_id, status, description' },
+  { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true,
+    fields: 'title*, due_date*, project_id, status' },
+  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true,
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes" },
+  { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true,
+    fields: 'client_id, project_id, type_contrat, type_moa, montant_honoraires, intitule_projet' },
+  { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true,
+    fields: 'os_number*, title*, date*, project_id' },
+  { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true,
+    fields: 'title*, date*, project_id' },
+  { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true,
+    fields: 'date*, type*, project_id' },
+  { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true,
+    fields: 'title*, project_id' },
+  { key: 'marches_entreprises', label: 'Marchés entreprises', basePath: '/api/marches-entreprises', create: true, update: true, delete: true,
+    fields: 'project_id*, entreprise_nom*, lot_numero, lot_titre, montant_ht' },
+  { key: 'notes_honoraires', label: "Notes d'honoraires", basePath: '/api/notes_honoraires', create: true, update: true, delete: true,
+    fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
+];
 
 export interface Agent {
   id: string;

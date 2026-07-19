@@ -18,12 +18,11 @@ interface BillingHelpers {
   deductAiCredit: DeductAiCreditFn;
   maybeRefreshMonthlyCredits: (tenantId: string, plan: string) => Promise<void>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
-  logActivity: (
-    tenantId: string, userId: string, userName: string,
-    action: string, target: string, targetId: string, targetType: string, category: string
-  ) => Promise<void>;
-  getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
-  getNextDocNumber: (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) => Promise<string>;
+  // Base URL the agent action tools call back into (e.g. http://127.0.0.1:PORT)
+  // — actions execute through the app's own REST API, forwarding the
+  // caller's auth token, so they run through the exact same validation and
+  // side effects as a human using the UI.
+  baseUrl: string;
 }
 
 export function registerAgentRoutes(
@@ -242,17 +241,13 @@ export function registerAgentRoutes(
       const actionSummaries: string[] = [];
       const MAX_FUNCTION_ROUNDS = 4;
       let round = 0;
-      if (tools.length > 0 && billing) {
-        const userNameForActions = await billing.getUserName(tenantId, req.user.id, req.user.email);
+      if (tools.length > 0 && billing?.baseUrl) {
+        const authHeader = req.headers.authorization as string | undefined;
         while (result.functionCalls && result.functionCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
           round++;
           const responseParts: { functionResponse: { name?: string; response: Record<string, unknown> } }[] = [];
           for (const call of result.functionCalls) {
-            const { response, summary } = await executeAgentAction(
-              supabaseAdmin, tenantId, req.user.id, userNameForActions, actionScopes,
-              { logActivity: billing.logActivity, getNextDocNumber: billing.getNextDocNumber },
-              call
-            );
+            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, call);
             if (summary) actionSummaries.push(summary);
             responseParts.push({ functionResponse: { name: call.name, response } });
           }

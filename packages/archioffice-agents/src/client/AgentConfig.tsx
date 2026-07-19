@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconRobot, IconChevronDown } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
 import type { Agent, AgentContextScope, AgentActionScope } from '../types.js';
+import { AGENT_RESOURCES } from '../types.js';
 
 const AVATAR_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#1098ad', '#e8590c'];
 
@@ -15,10 +16,9 @@ const SCOPES: { key: AgentContextScope; label: string }[] = [
   { key: 'tasks',     label: 'Tâches' },
 ];
 
-const ACTION_SCOPES: { key: AgentActionScope; label: string }[] = [
-  { key: 'contacts_write',  label: 'Créer des contacts' },
-  { key: 'proposals_write', label: 'Créer des devis' },
-];
+// One toggle per resource grants that resource's full create/update/delete
+// surface — the same surface a human has in that section of the app.
+const ALL_ACTION_KEYS: AgentActionScope[] = AGENT_RESOURCES.map(r => r.key);
 
 export default function AgentConfig() {
   const { id } = useParams<{ id: string }>();
@@ -70,6 +70,11 @@ export default function AgentConfig() {
     setActionScopes((prev: AgentActionScope[]) =>
       prev.includes(scope) ? prev.filter((s: AgentActionScope) => s !== scope) : [...prev, scope]
     );
+  };
+
+  const allActionsSelected = ALL_ACTION_KEYS.every(k => actionScopes.includes(k));
+  const toggleAllActionScopes = () => {
+    setActionScopes(allActionsSelected ? [] : [...ALL_ACTION_KEYS]);
   };
 
   const handleSave = async () => {
@@ -207,10 +212,19 @@ export default function AgentConfig() {
 
       {/* Actions — write permissions */}
       <section className="p-5 rounded-xl border space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
-        <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_actions')}</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_actions')}</h2>
+          <button
+            onClick={toggleAllActionScopes}
+            className="text-[12px] font-medium hover:underline shrink-0"
+            style={{ color: 'var(--tblr-primary)' }}
+          >
+            {allActionsSelected ? t('agent_config_actions_clear_all') : t('agent_config_actions_select_all')}
+          </button>
+        </div>
         <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_actions_hint')}</p>
         <div className="space-y-2">
-          {ACTION_SCOPES.map(scope => (
+          {AGENT_RESOURCES.map(scope => (
             <label key={scope.key} className="flex items-center gap-3 cursor-pointer group">
               <input
                 type="checkbox"

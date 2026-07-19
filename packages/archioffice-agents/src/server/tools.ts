@@ -1,8 +1,14 @@
+import { AGENT_RESOURCES, type AgentResourceDef } from '../types.js';
+
 // ── Gemini function-calling tools — gated per agent by action_scopes ────────
-// Read-only context (buildAgentContext) stays separate from these: an agent
-// can be given data visibility (context_scopes) without being able to write,
-// and a write action is only exposed when the tenant explicitly enabled it
-// for that agent (agents.action_scopes, set from AgentConfig).
+// Rather than hand-writing bespoke Supabase-write logic per resource (which
+// would duplicate — and drift from — the validation, id/reference
+// generation, and side effects already implemented in server.ts for every
+// human-facing form), these tools are generic (create_record / update_record
+// / delete_record) and execute by calling the app's own REST API over an
+// internal HTTP loopback, forwarding the caller's own auth token. An agent
+// action therefore always behaves exactly like a human submitting the same
+// form — same validation, same activity log entries, same everything.
 
 export interface FunctionDeclarationLike {
   name: string;
@@ -11,49 +17,60 @@ export interface FunctionDeclarationLike {
 }
 
 export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike[] {
+  const authorized = AGENT_RESOURCES.filter(r => actionScopes.includes(r.key));
+  if (authorized.length === 0) return [];
+
+  const creatable = authorized.filter(r => r.create).map(r => r.key);
+  const updatable = authorized.filter(r => r.update).map(r => r.key);
+  const deletable = authorized.filter(r => r.delete).map(r => r.key);
+
   const tools: FunctionDeclarationLike[] = [];
 
-  if (actionScopes.includes('contacts_write')) {
+  if (creatable.length > 0) {
     tools.push({
-      name: 'create_contact',
+      name: 'create_record',
       description:
-        "Crée une nouvelle fiche contact (client particulier, entreprise ou intervenant) dans le cabinet. " +
-        "À utiliser quand l'utilisateur demande d'ajouter ou d'enregistrer un nouveau contact/client qui n'existe pas encore dans la liste de contacts fournie en contexte.",
+        "Crée un nouvel enregistrement dans une des ressources du cabinet auxquelles tu as accès en écriture. " +
+        "Consulte la section SCHÉMA DES RESSOURCES AUTORISÉES du prompt système pour connaître les champs attendus par ressource (les champs suivis d'un * sont obligatoires).",
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          first_name: { type: 'string', description: 'Prénom du contact' },
-          last_name: { type: 'string', description: 'Nom de famille du contact' },
-          company_name: { type: 'string', description: "Raison sociale de l'entreprise, si le contact en représente une" },
-          email: { type: 'string', description: 'Adresse email' },
-          phone: { type: 'string', description: 'Numéro de téléphone' },
-          category: { type: 'string', description: 'Catégorie du contact, par ex. Client, Entreprise, Partenaire' },
-          address: { type: 'string', description: 'Adresse postale' },
-          city: { type: 'string', description: 'Ville' },
-          zip: { type: 'string', description: 'Code postal' },
-          notes: { type: 'string', description: 'Notes libres sur le contact' },
+          resource: { type: 'string', enum: creatable, description: 'Type de ressource à créer' },
+          data: { type: 'object', description: "Champs de l'enregistrement, selon le schéma de la ressource" },
         },
-        required: ['first_name', 'last_name'],
+        required: ['resource', 'data'],
       },
     });
   }
 
-  if (actionScopes.includes('proposals_write')) {
+  if (updatable.length > 0) {
     tools.push({
-      name: 'create_proposal',
-      description:
-        "Crée un nouveau devis (proposition commerciale) pour un client. " +
-        "Utilise le client_id d'un contact existant, trouvé dans la liste de contacts fournie en contexte ou renvoyé par un appel create_contact précédent dans cette même conversation. " +
-        "Si le client n'existe pas encore, crée-le d'abord avec create_contact.",
+      name: 'update_record',
+      description: "Met à jour un enregistrement existant. Seuls les champs fournis dans data sont modifiés, les autres restent inchangés.",
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Objet / intitulé de la mission, par ex. "Extension maison individuelle à Lyon"' },
-          client_id: { type: 'string', description: "Identifiant du contact client" },
-          amount: { type: 'number', description: 'Montant HT estimé des honoraires, si connu' },
-          description: { type: 'string', description: 'Description du projet ou de la mission' },
+          resource: { type: 'string', enum: updatable, description: 'Type de ressource à modifier' },
+          id: { type: 'string', description: "Identifiant de l'enregistrement à modifier" },
+          data: { type: 'object', description: 'Champs à mettre à jour' },
         },
-        required: ['title', 'client_id'],
+        required: ['resource', 'id', 'data'],
+      },
+    });
+  }
+
+  if (deletable.length > 0) {
+    tools.push({
+      name: 'delete_record',
+      description:
+        "Supprime définitivement un enregistrement existant. Action IRRÉVERSIBLE : ne l'utilise que si l'utilisateur a demandé explicitement et sans ambiguïté la suppression de cet enregistrement précis dans le message en cours.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          resource: { type: 'string', enum: deletable, description: 'Type de ressource à supprimer' },
+          id: { type: 'string', description: "Identifiant de l'enregistrement à supprimer" },
+        },
+        required: ['resource', 'id'],
       },
     });
   }
@@ -61,12 +78,15 @@ export function buildAgentTools(actionScopes: string[]): FunctionDeclarationLike
   return tools;
 }
 
-export interface AgentActionHelpers {
-  logActivity: (
-    tenantId: string, userId: string, userName: string,
-    action: string, target: string, targetId: string, targetType: string, category: string
-  ) => Promise<void>;
-  getNextDocNumber: (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) => Promise<string>;
+export function describeAuthorizedResources(actionScopes: string[]): string {
+  const authorized = AGENT_RESOURCES.filter(r => actionScopes.includes(r.key));
+  if (authorized.length === 0) return '';
+  return authorized
+    .map(r => {
+      const ops = [r.create && 'créer', r.update && 'modifier', r.delete && 'supprimer'].filter(Boolean).join(', ');
+      return `- ${r.label} (resource: "${r.key}") — actions autorisées : ${ops}. Champs : ${r.fields}`;
+    })
+    .join('\n');
 }
 
 export interface AgentActionCall {
@@ -79,93 +99,81 @@ export interface AgentActionResult {
   summary?: string;
 }
 
+function deriveRecordLabel(data?: Record<string, unknown>): string {
+  if (!data) return '';
+  const candidates = ['title', 'name', 'os_number', 'entreprise_nom', 'numero', 'reference'];
+  for (const key of candidates) {
+    if (data[key]) return String(data[key]);
+  }
+  if (data.first_name || data.last_name) return `${data.first_name || ''} ${data.last_name || ''}`.trim();
+  return '';
+}
+
 export async function executeAgentAction(
-  supabaseAdmin: any,
-  tenantId: string,
-  userId: string,
-  userName: string,
+  baseUrl: string,
+  authHeader: string | undefined,
   actionScopes: string[],
-  helpers: AgentActionHelpers,
   call: AgentActionCall
 ): Promise<AgentActionResult> {
   const name = call.name;
   const args = call.args || {};
-  const str = (v: unknown): string | null => (v === undefined || v === null || v === '') ? null : String(v);
+  const resourceKey = String(args.resource || '');
+  const resource: AgentResourceDef | undefined = AGENT_RESOURCES.find(r => r.key === resourceKey);
+
+  if (!resource || !actionScopes.includes(resourceKey)) {
+    return { response: { error: `Ressource "${resourceKey}" non autorisée pour cet agent.` } };
+  }
+  if (!authHeader) {
+    return { response: { error: 'Session non authentifiée — action impossible.' } };
+  }
+
+  let method: 'POST' | 'PUT' | 'DELETE';
+  let path = resource.basePath;
+  let body: Record<string, unknown> | undefined;
+
+  if (name === 'create_record') {
+    if (!resource.create) return { response: { error: `Création non supportée pour "${resourceKey}".` } };
+    method = 'POST';
+    body = (args.data as Record<string, unknown>) || {};
+  } else if (name === 'update_record') {
+    if (!resource.update) return { response: { error: `Modification non supportée pour "${resourceKey}".` } };
+    const id = String(args.id || '');
+    if (!id) return { response: { error: 'id est requis pour une modification.' } };
+    method = 'PUT';
+    path = `${resource.basePath}/${encodeURIComponent(id)}`;
+    body = (args.data as Record<string, unknown>) || {};
+  } else if (name === 'delete_record') {
+    if (!resource.delete) return { response: { error: `Suppression non supportée pour "${resourceKey}".` } };
+    const id = String(args.id || '');
+    if (!id) return { response: { error: 'id est requis pour une suppression.' } };
+    method = 'DELETE';
+    path = `${resource.basePath}/${encodeURIComponent(id)}`;
+  } else {
+    return { response: { error: `Fonction inconnue : ${name}` } };
+  }
 
   try {
-    if (name === 'create_contact') {
-      if (!actionScopes.includes('contacts_write')) {
-        return { response: { error: "Cette action n'est pas autorisée pour cet agent." } };
-      }
-      const first_name = String(args.first_name || '').trim();
-      const last_name = String(args.last_name || '').trim();
-      if (!first_name || !last_name) {
-        return { response: { error: 'first_name et last_name sont requis.' } };
-      }
+    const res = await fetch(baseUrl + path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: authHeader,
+      },
+      body: method === 'DELETE' ? undefined : JSON.stringify(body),
+    });
 
-      const id = crypto.randomUUID();
-      const contact = {
-        id, tenant_id: tenantId,
-        first_name, last_name,
-        company_name: str(args.company_name),
-        email: str(args.email),
-        phone: str(args.phone),
-        category: str(args.category),
-        address: str(args.address),
-        city: str(args.city),
-        zip: str(args.zip),
-        notes: str(args.notes),
-        created_at: new Date().toISOString(),
-      };
-      const { error } = await supabaseAdmin.from('contacts').insert(contact);
-      if (error) return { response: { error: error.message } };
-
-      const contactName = contact.company_name || `${first_name} ${last_name}`.trim();
-      await helpers.logActivity(tenantId, userId, userName, `Création du contact "${contactName}" par l'agent IA`, contactName, id, 'contact', 'Contacts');
-
-      return {
-        response: { success: true, id, name: contactName },
-        summary: `Contact créé : ${contactName}`,
-      };
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { response: { error: json?.error || `Échec de l'opération (HTTP ${res.status}).` } };
     }
 
-    if (name === 'create_proposal') {
-      if (!actionScopes.includes('proposals_write')) {
-        return { response: { error: "Cette action n'est pas autorisée pour cet agent." } };
-      }
-      const title = String(args.title || '').trim();
-      const client_id = str(args.client_id);
-      if (!title || !client_id) {
-        return { response: { error: "title et client_id sont requis. Crée d'abord le contact avec create_contact si nécessaire." } };
-      }
-
-      const { data: client } = await supabaseAdmin.from('contacts').select('id').eq('id', client_id).eq('tenant_id', tenantId).maybeSingle();
-      if (!client) return { response: { error: 'client_id introuvable pour ce cabinet.' } };
-
-      const id = crypto.randomUUID();
-      const reference = await helpers.getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
-      const amount = typeof args.amount === 'number' ? args.amount : Number(args.amount) || 0;
-      const proposal = {
-        id, tenant_id: tenantId,
-        title, client_id, amount,
-        status: 'Draft',
-        description: str(args.description),
-        reference,
-        created_at: new Date().toISOString(),
-      };
-      const { error } = await supabaseAdmin.from('proposals').insert(proposal);
-      if (error) return { response: { error: error.message } };
-
-      await helpers.logActivity(tenantId, userId, userName, `Création du devis "${reference}" par l'agent IA`, title, id, 'proposal', 'Devis');
-
-      return {
-        response: { success: true, id, reference },
-        summary: `Devis créé : ${reference} — ${title}`,
-      };
-    }
-
-    return { response: { error: `Fonction inconnue : ${name}` } };
+    const verb = name === 'create_record' ? 'créé' : name === 'update_record' ? 'modifié' : 'supprimé';
+    const label = name === 'delete_record' ? String(args.id) : deriveRecordLabel(body) || json?.id || '';
+    return {
+      response: { success: true, ...json },
+      summary: `${resource.label} ${verb}${label ? ` : ${label}` : ''}`,
+    };
   } catch (e: any) {
-    return { response: { error: e?.message || 'Erreur inconnue lors de l\'exécution de l\'action.' } };
+    return { response: { error: e?.message || "Erreur inconnue lors de l'exécution de l'action." } };
   }
 }

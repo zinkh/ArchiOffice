@@ -8800,9 +8800,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     deductAiCredit,
     maybeRefreshMonthlyCredits,
     PLAN_AI_MONTHLY_CREDIT_CENTS,
-    logActivity,
-    getUserName,
-    getNextDocNumber,
+    baseUrl: `http://127.0.0.1:${PORT}`,
   });
 
 
