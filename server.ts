@@ -4354,7 +4354,9 @@ async function startServer() {
   };
 
   const getUserName = async (tenantId: string, userId: string, email?: string): Promise<string> => {
-    const { data: me } = await supabaseAdmin.from('team_members').select('name').eq('user_id', userId).eq('tenant_id', tenantId).maybeSingle();
+    // profiles is the live source of truth for a user's display name — team_members
+    // is no longer written to anywhere (POST/PUT /api/team both write to profiles).
+    const { data: me } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).eq('tenant_id', tenantId).maybeSingle();
     return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
@@ -4397,7 +4399,7 @@ async function startServer() {
       const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: member }] = await Promise.all([
         supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
-        supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
+        supabaseAdmin.from('team_members').select('notifications_last_seen').eq('auth_user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
       ]);
       if (actsError) console.error('[GET /api/feed] activities query failed:', actsError);
       if (postsError) console.error('[GET /api/feed] feed_posts query failed:', postsError);
@@ -4586,7 +4588,7 @@ async function startServer() {
   app.get("/api/notifications/unread-count", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: member } = await supabaseAdmin.from('team_members').select('notifications_last_seen').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      const { data: member } = await supabaseAdmin.from('team_members').select('notifications_last_seen').eq('auth_user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
       const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
 
       const [{ count: actCount }, { count: postCount }] = await Promise.all([
@@ -4604,7 +4606,7 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const now = new Date().toISOString();
-      await supabaseAdmin.from('team_members').update({ notifications_last_seen: now }).eq('user_id', req.user.id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('team_members').update({ notifications_last_seen: now }).eq('auth_user_id', req.user.id).eq('tenant_id', tenantId);
       res.json({ success: true, last_seen: now });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to mark notifications as read" });

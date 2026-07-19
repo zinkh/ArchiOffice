@@ -1,9 +1,9 @@
 import React, { useState, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { IconMail, IconPhone, IconPlus } from '@tabler/icons-react';
+import { IconMail, IconPhone, IconAlertTriangle } from '@tabler/icons-react';
 import type { Contact } from '../types';
-import { fetchJson } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 interface ContactModalProps {
   isOpen: boolean;
@@ -18,6 +18,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     category: initialCategory || ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const defaultContact: Contact = {
     id: '',
@@ -77,8 +78,9 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError(null);
     setIsSubmitting(true);
-    
+
     const contactData = {
       ...newContact,
       id: `c${Date.now()}-${Math.random()}`,
@@ -104,24 +106,13 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     };
 
     try {
-      const res = await fetch('/api/contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(contact)
-      });
-      
-      if (res.ok) {
-        onSuccess(contact);
-        onClose();
-        setNewContact({ category: initialCategory || '' });
-      } else {
-        const errorData = await res.json();
-        console.error('Failed to save contact:', errorData);
-        alert(`Failed to save contact: ${errorData.error || 'Unknown error'}`);
-      }
-    } catch (err) {
+      await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(contact) });
+      onSuccess(contact);
+      onClose();
+      setNewContact({ category: initialCategory || '' });
+    } catch (err: any) {
       console.error('Error submitting contact:', err);
-      alert('Failed to save contact. Please check the console for details.');
+      setError(err?.message || 'Échec de la sauvegarde du contact.');
     } finally {
       setIsSubmitting(false);
     }
@@ -147,6 +138,12 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
             ✕
           </button>
         </div>
+        {error && (
+          <div className="mx-6 mt-4 px-3 py-2 rounded-lg border text-sm flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400">
+            <IconAlertTriangle size={16} className="shrink-0" />
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="p-6 space-y-8">
           {/* Identité Section */}
           <div className="space-y-4">
