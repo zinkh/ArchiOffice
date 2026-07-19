@@ -65,6 +65,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
+import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ConstructionReportModule from '../components/ConstructionReportModule';
 import SiteReports from '../components/SiteReports';
@@ -2236,18 +2237,18 @@ export default function ProjectDetail() {
                       {project.address && (
                         <div className="space-y-6 p-6">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <RNBInfo address={project.address} />
-                            <CadastreDownload address={project.address} />
-                            <HistoricalMonuments address={project.address} />
+                            <InfoPanelBoundary label="RNB"><RNBInfo address={project.address} /></InfoPanelBoundary>
+                            <InfoPanelBoundary label="Cadastre"><CadastreDownload address={project.address} /></InfoPanelBoundary>
+                            <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={project.address} /></InfoPanelBoundary>
                           </div>
                           <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-hidden border border-[var(--tblr-border)]">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
                               <div className="bg-white dark:bg-zinc-900 relative">
-                                <GeoportailMap address={project.address} />
+                                <InfoPanelBoundary label="Cadastre"><GeoportailMap address={project.address} /></InfoPanelBoundary>
                                 <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">Cadastre</div>
                               </div>
                               <div className="bg-white dark:bg-zinc-900 relative">
-                                <GoogleMap address={project.address} />
+                                <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={project.address} /></InfoPanelBoundary>
                                 <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">OpenStreetMap</div>
                               </div>
                             </div>
