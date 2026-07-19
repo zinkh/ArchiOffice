@@ -30,3 +30,24 @@ export function ArchiOfficeLogo({ className, size = 32 }: ArchiOfficeLogoProps) 
     </svg>
   );
 }
+
+interface BrandLogoProps {
+  logoUrl?: string | null;
+  className?: string;
+  size?: number;
+}
+
+/** Tenant logo when one has been uploaded, resized to the same height as the default mark; falls back to the ArchiOffice mark otherwise. */
+export function BrandLogo({ logoUrl, className, size = 32 }: BrandLogoProps) {
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt="Logo"
+        className={className}
+        style={{ height: size, width: 'auto', maxWidth: size * 3.5, objectFit: 'contain' }}
+      />
+    );
+  }
+  return <ArchiOfficeLogo className={className} size={size} />;
+}

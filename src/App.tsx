@@ -13,7 +13,7 @@ import {
   IconMessageCircle,
   IconUser,
 } from '@tabler/icons-react';
-import { ArchiOfficeLogo } from './components/ArchiOfficeLogo';
+import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,6 +25,7 @@ import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
+import { useSettings } from './hooks/useSettings';
 
 // Pages — lazy-loaded so each route's JS is only fetched when it's visited,
 // instead of every page (ProjectDetail alone is ~270KB) landing in one
@@ -164,6 +165,7 @@ function Header() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const { currentUser, headerTitle, setHeaderTitle, signOut } = useUser();
+  const { settings } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -296,7 +298,7 @@ function Header() {
             className="md:hidden flex items-center gap-2 font-bold text-sm"
             style={{ color: 'var(--tblr-text)' }}
           >
-            <ArchiOfficeLogo size={24} />
+            <BrandLogo logoUrl={settings?.logoUrl} size={24} />
             ArchiOffice
           </Link>
           <h1
@@ -594,7 +596,7 @@ function Header() {
                 className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
                 style={{ borderColor: 'var(--tblr-border)' }}
               >
-                <ArchiOfficeLogo size={28} />
+                <BrandLogo logoUrl={settings?.logoUrl} size={28} />
                 <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
               </div>
               {/* Nav items */}

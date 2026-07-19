@@ -29,7 +29,7 @@ import {
   IconCloudUpload,
   IconBuildingBank,
 } from '@tabler/icons-react';
-import { ArchiOfficeLogo } from './ArchiOfficeLogo';
+import { BrandLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { apiFetch } from '../lib/api';
@@ -172,7 +172,7 @@ export function Sidebar() {
           className="flex items-center gap-2 font-bold text-base tracking-tight"
           style={{ color: 'var(--tblr-text)' }}
         >
-          <ArchiOfficeLogo size={28} />
+          <BrandLogo logoUrl={settings?.logoUrl} size={28} />
           <span>ArchiOffice</span>
         </Link>
         {settings?.agencyName && (
