@@ -62,6 +62,15 @@ export const MapLibreCadastre = ({ lat, lon }: { lat: number; lon: number }) => 
 
     instance.on('zoomend', () => setZoom(Math.round(instance.getZoom())));
 
+    // Without a listener, MapLibre's own fallback is to print any internal
+    // error (WebGL context loss included) via console.error — which Sentry
+    // captures as a tracked error. We already show dedicated recovery UI for
+    // context loss below, and other internal errors (e.g. a tile request
+    // failing) are non-fatal, so just log them quietly instead.
+    instance.on('error', (e) => {
+      console.warn('[MapLibreCadastre]', e.error?.message || e.error);
+    });
+
     // Handle WebGL context loss — show a reload button
     instance.getCanvas().addEventListener('webglcontextlost', () => {
       setContextLost(true);
