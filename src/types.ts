@@ -332,6 +332,29 @@ export interface Tender {
   archived?: boolean;
 }
 
+export interface TenderRssSource {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  include_keywords: string[];
+  exclude_keywords: string[];
+  last_polled_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface TenderRssMatch {
+  id: string;
+  source_id: string;
+  source_name?: string | null;
+  title: string;
+  link?: string | null;
+  description?: string | null;
+  pub_date?: string | null;
+  status: 'new' | 'read' | 'dismissed' | 'converted';
+  tender_id?: string | null;
+}
+
 export interface Specification {
   id: string;
   project_id: string;

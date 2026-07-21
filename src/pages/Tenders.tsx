@@ -1,12 +1,13 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye } from '@tabler/icons-react';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { TenderRssWatch } from '../components/TenderRssWatch';
 import type { Tender, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
@@ -42,6 +43,7 @@ export default function Tenders() {
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterType, setFilterType] = useState<string>('All');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
+  const [activeTab, setActiveTab] = useState<'list' | 'watch'>('list');
 
   useEffect(() => {
     const loadData = async () => {
@@ -244,6 +246,7 @@ export default function Tenders() {
           <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tenders')}</h2>
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_subtitle')}</p>
         </div>
+        {activeTab === 'list' && (
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
@@ -254,8 +257,38 @@ export default function Tenders() {
           <IconPlus size={18} />
           {t('create_bid')}
         </motion.button>
+        )}
       </div>
 
+      <div className="flex items-center gap-2 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+        <button
+          onClick={() => setActiveTab('list')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'list' ? 'var(--tblr-primary)' : 'transparent',
+            color: activeTab === 'list' ? 'var(--tblr-primary)' : 'var(--tblr-muted)'
+          }}
+        >
+          <IconList size={16} />
+          {t('tenders')}
+        </button>
+        <button
+          onClick={() => setActiveTab('watch')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'watch' ? 'var(--tblr-primary)' : 'transparent',
+            color: activeTab === 'watch' ? 'var(--tblr-primary)' : 'var(--tblr-muted)'
+          }}
+        >
+          <IconRss size={16} />
+          {t('tender_rss_tab_label')}
+        </button>
+      </div>
+
+      {activeTab === 'watch' && <TenderRssWatch />}
+
+      {activeTab === 'list' && (
+      <>
       <div
         className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-lg shadow-sm"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
@@ -926,6 +959,8 @@ export default function Tenders() {
           loadContacts();
         }}
       />
+      </>
+      )}
     </div>
   );
 }
