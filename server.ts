@@ -9,6 +9,7 @@ import axios from "axios";
 import https from "https";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
+import { startTenderRssPolling, pollAllTenderRssSources } from "./server/tenderRssPoller";
 
 interface GeoJSONGeometry {
   type: string;
@@ -3078,6 +3079,113 @@ async function startServer() {
       const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
       res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
+  });
+
+  // --- Veille RSS des appels d'offres ---
+
+  app.get("/api/tender-rss-sources", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('tender_rss_sources').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender RSS sources" }); }
+  });
+
+  app.post("/api/tender-rss-sources", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('tender_rss_sources').insert({
+        id, tenant_id: tenantId, name, url, enabled: enabled !== false,
+        include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
+      });
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Ajout de la source de veille RSS "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
+      res.status(201).json({ id });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender RSS source: " + e.message }); }
+  });
+
+  app.put("/api/tender-rss-sources/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
+      const { error } = await supabaseAdmin.from('tender_rss_sources').update({
+        name, url, enabled: !!enabled, include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS source: " + e.message }); }
+  });
+
+  app.delete("/api/tender-rss-sources/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: source } = await supabaseAdmin.from('tender_rss_sources').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      const { error } = await supabaseAdmin.from('tender_rss_sources').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const name = (source as any)?.name || '';
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la source de veille RSS "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender RSS source" }); }
+  });
+
+  app.post("/api/tender-rss-sources/poll-now", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      await pollAllTenderRssSources(supabaseAdmin, tenantId);
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to poll tender RSS sources: " + e.message }); }
+  });
+
+  app.get("/api/tender-rss-matches", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      let query = supabaseAdmin.from('tender_rss_matches').select('*, tender_rss_sources(name)').eq('tenant_id', tenantId).order('pub_date', { ascending: false, nullsFirst: false });
+      if (req.query.status) query = query.eq('status', req.query.status as string);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json((data || []).map((m: any) => ({ ...m, source_name: m.tender_rss_sources?.name || null, tender_rss_sources: undefined })));
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender RSS matches" }); }
+  });
+
+  app.put("/api/tender-rss-matches/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { status } = req.body;
+      const { error } = await supabaseAdmin.from('tender_rss_matches').update({ status }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS match" }); }
+  });
+
+  app.post("/api/tender-rss-matches/:id/convert", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: match, error: me } = await supabaseAdmin.from('tender_rss_matches').select('*').eq('id', id).eq('tenant_id', tenantId).single();
+      if (me || !match) return res.status(404).json({ error: "Tender RSS match not found" });
+
+      const tenderId = crypto.randomUUID();
+      const notes = [match.link, match.description].filter(Boolean).join('\n\n');
+      const { error: te } = await supabaseAdmin.from('tenders').insert({
+        id: tenderId, tenant_id: tenantId, title: match.title, client: '',
+        submission_deadline: '', status: 'Draft', value: 0, notes, archived: false
+      });
+      if (te) throw te;
+
+      await supabaseAdmin.from('tender_rss_matches').update({ status: 'converted', tender_id: tenderId }).eq('id', id).eq('tenant_id', tenantId);
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Appel d'offres créé depuis la veille RSS "${match.title}"`, match.title, tenderId, 'tender', 'Appels d\'offres');
+      res.status(201).json({ id: tenderId });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to convert tender RSS match: " + e.message }); }
   });
 
   app.get("/api/milestones", async (req: any, res: any) => {
@@ -9527,6 +9635,10 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();
     }
+    // Veille RSS des appels d'offres — sondage périodique (server/tenderRssPoller.ts).
+    // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
+    // shim REST de ce même serveur, qui n'accepte les requêtes qu'une fois à l'écoute.
+    startTenderRssPolling(supabaseAdmin);
   });
 }
 
