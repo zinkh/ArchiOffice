@@ -169,6 +169,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (_event === 'PASSWORD_RECOVERY') {
+        // Session temporaire créée par le lien de réinitialisation de mot de passe —
+        // ne pas authentifier automatiquement l'utilisateur dans l'app, la page
+        // /reset-password gère ce flux séparément.
+        return;
+      }
       sessionRef.current = session;
       if (session) {
         const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);

@@ -1571,6 +1571,38 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Envoyer un email de réinitialisation de mot de passe (ne révèle jamais si le compte existe).
+  app.post("/api/public/forgot-password", async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim();
+      if (!email) return res.status(400).json({ error: "Email requis" });
+
+      const { data: profile } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
+      if (profile) {
+        const appUrl = process.env.APP_URL || 'http://localhost:3000';
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'recovery',
+          email,
+          options: { redirectTo: `${appUrl}/reset-password` },
+        });
+        if (linkData?.properties?.action_link) {
+          await sendPlatformMail(
+            email,
+            "Réinitialisation de votre mot de passe — ArchiOffice",
+            `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+               <h2 style="color: #2563eb;">Réinitialisation de mot de passe</h2>
+               <p>Vous avez demandé la réinitialisation du mot de passe de votre compte ArchiOffice.</p>
+               <p style="margin: 24px 0;"><a href="${linkData.properties.action_link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Réinitialiser mon mot de passe</a></p>
+               <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${linkData.properties.action_link}</p>
+               <p style="color: #64748b; font-size: 14px;">Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.</p>
+             </div>`
+          );
+        }
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // Public: get tenant branding info by slug (used on subdomain login page)
   app.get("/api/public/tenant/:slug", async (req: any, res: any) => {
     try {

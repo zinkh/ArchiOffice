@@ -421,7 +421,12 @@ function CloudLogin() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{t('password')}</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('password')}</label>
+              <Link to="/forgot-password" className="text-xs text-blue-600 hover:underline font-medium">
+                {t('login_forgot_password')}
+              </Link>
+            </div>
             <input
               type="password"
               value={password}

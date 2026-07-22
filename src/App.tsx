@@ -51,6 +51,8 @@ const ProposalModule = lazy(() => import('./components/ProposalModule'));
 const Login = lazy(() => import('./pages/Login'));
 const CloudImportProgress = lazy(() => import('./pages/CloudImportProgress'));
 const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const AgencySetup = lazy(() => import('./pages/AgencySetup'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
@@ -712,6 +714,8 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/cloud-import-progress" element={<CloudImportProgress />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/agency-setup" element={<AgencySetup />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
