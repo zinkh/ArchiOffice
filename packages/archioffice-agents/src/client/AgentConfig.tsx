@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconArrowLeft, IconRobot, IconChevronDown } from '@tabler/icons-react';
+import { IconArrowLeft, IconRobot, IconChevronDown, IconAlertTriangle } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
 import type { Agent, AgentContextScope, AgentActionScope } from '../types.js';
 import { AGENT_RESOURCES } from '../types.js';
@@ -39,6 +39,7 @@ export default function AgentConfig() {
   const [directives, setDirectives] = useState('');
   const [contextScopes, setContextScopes] = useState<AgentContextScope[]>([]);
   const [actionScopes, setActionScopes] = useState<AgentActionScope[]>([]);
+  const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function AgentConfig() {
         setDirectives(found.directives ?? '');
         setContextScopes(found.context_scopes as AgentContextScope[]);
         setActionScopes((found.action_scopes ?? []) as AgentActionScope[]);
+        setWebFetchEnabled(!!found.web_fetch_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -88,6 +90,7 @@ export default function AgentConfig() {
           avatar_color: avatarColor, tone, directives,
           context_scopes: contextScopes,
           action_scopes: actionScopes,
+          web_fetch_enabled: webFetchEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -237,6 +240,25 @@ export default function AgentConfig() {
             </label>
           ))}
         </div>
+      </section>
+
+      {/* Web access — high-risk capability, off by default */}
+      <section className="p-5 rounded-xl border space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: '#ffc9c9' }}>
+        <h2 className="font-semibold text-[14px]" style={{ color: '#c92a2a' }}>{t('agent_config_web_fetch')}</h2>
+        <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
+          <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
+          <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_web_fetch_warning')}</p>
+        </div>
+        <label className="flex items-center gap-3 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={webFetchEnabled}
+            onChange={() => setWebFetchEnabled((v: boolean) => !v)}
+            className="w-4 h-4 rounded"
+            style={{ accentColor: '#c92a2a' }}
+          />
+          <span className="text-[13px] font-medium" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_web_fetch_toggle')}</span>
+        </label>
       </section>
 
       {/* Advanced prompt */}

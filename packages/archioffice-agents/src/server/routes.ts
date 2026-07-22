@@ -64,12 +64,12 @@ export function registerAgentRoutes(
         const { data: template, error: tErr } = await supabaseAdmin.from('agents').select('*').eq('id', from_template_id).is('tenant_id', null).single();
         if (tErr || !template) return res.status(404).json({ error: 'Template not found' });
         const t = template as any;
-        // Write permissions are never inherited from a template — the tenant
-        // must opt in explicitly per activated agent.
-        agentData = { ...agentData, slug: t.slug, name: t.name, role_title: t.role_title, avatar_initials: t.avatar_initials, avatar_color: t.avatar_color, tone: t.tone, directives: t.directives, context_scopes: t.context_scopes, action_scopes: [], is_active: true, is_system_template: false };
+        // Write permissions and web access are never inherited from a
+        // template — the tenant must opt in explicitly per activated agent.
+        agentData = { ...agentData, slug: t.slug, name: t.name, role_title: t.role_title, avatar_initials: t.avatar_initials, avatar_color: t.avatar_color, tone: t.tone, directives: t.directives, context_scopes: t.context_scopes, action_scopes: [], web_fetch_enabled: false, is_active: true, is_system_template: false };
       } else {
         if (!slug || !name || !role_title) return res.status(400).json({ error: 'slug, name, role_title required' });
-        agentData = { ...agentData, slug, name, role_title, avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4', tone, directives, context_scopes: context_scopes || [], action_scopes: action_scopes || [], system_prompt_override, is_active: true, is_system_template: false };
+        agentData = { ...agentData, slug, name, role_title, avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4', tone, directives, context_scopes: context_scopes || [], action_scopes: action_scopes || [], web_fetch_enabled: false, system_prompt_override, is_active: true, is_system_template: false };
       }
 
       const { data, error } = await supabaseAdmin.from('agents').insert(agentData).select().single();
@@ -83,8 +83,8 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, system_prompt_override, is_active } = req.body;
-      const { data, error } = await supabaseAdmin.from('agents').update({ name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, system_prompt_override, is_active }).eq('id', id).eq('tenant_id', tenantId).select().single();
+      const { name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, web_fetch_enabled, system_prompt_override, is_active } = req.body;
+      const { data, error } = await supabaseAdmin.from('agents').update({ name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, web_fetch_enabled: !!web_fetch_enabled, system_prompt_override, is_active }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -210,7 +210,8 @@ export function registerAgentRoutes(
       }));
 
       const actionScopes: string[] = (agent as any).action_scopes || [];
-      const tools = buildAgentTools(actionScopes);
+      const webFetchEnabled: boolean = !!(agent as any).web_fetch_enabled;
+      const tools = buildAgentTools(actionScopes, webFetchEnabled);
 
       const chat = genai.chats.create({
         model: 'gemini-3-flash-preview',
@@ -247,7 +248,7 @@ export function registerAgentRoutes(
           round++;
           const responseParts: { functionResponse: { name?: string; response: Record<string, unknown> } }[] = [];
           for (const call of result.functionCalls) {
-            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, call);
+            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, webFetchEnabled, call);
             if (summary) actionSummaries.push(summary);
             responseParts.push({ functionResponse: { name: call.name, response } });
           }
