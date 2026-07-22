@@ -114,13 +114,15 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE TABLE IF NOT EXISTS contact_categories (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  UNIQUE (tenant_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS project_categories (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  UNIQUE (tenant_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS projects (

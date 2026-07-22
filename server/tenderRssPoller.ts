@@ -7,11 +7,32 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import axios from 'axios';
 import Parser from 'rss-parser';
+import iconv from 'iconv-lite';
 
 const DEFAULT_INTERVAL_MINUTES = 30;
 const FETCH_TIMEOUT_MS = 15000;
 
 const parser = new Parser();
+
+// Many French tender RSS feeds (BOAMP mirrors, marchesonline.com, etc.) are
+// still published as ISO-8859-1/Windows-1252, not UTF-8. Fetching as
+// responseType 'text' would let axios/Node decode the raw bytes as UTF-8
+// unconditionally, mangling accented characters (é, è...) into U+FFFD
+// replacement characters before rss-parser even sees the XML. Fetching raw
+// bytes instead and decoding with the encoding the feed actually declares
+// avoids that.
+async function fetchFeedXml(url: string): Promise<string> {
+  const response = await axios.get<Buffer>(url, { timeout: FETCH_TIMEOUT_MS, responseType: 'arraybuffer' });
+  const buffer = Buffer.from(response.data);
+
+  const contentType = String(response.headers['content-type'] || '');
+  const headerCharsetMatch = contentType.match(/charset=([^;]+)/i);
+  const prologMatch = buffer.subarray(0, 200).toString('ascii').match(/encoding=["']([^"']+)["']/i);
+  const declaredCharset = (headerCharsetMatch?.[1] || prologMatch?.[1] || 'utf-8').trim();
+
+  const charset = iconv.encodingExists(declaredCharset) ? declaredCharset : 'utf-8';
+  return iconv.decode(buffer, charset);
+}
 
 interface TenderRssSourceRow {
   id: string;
@@ -37,8 +58,8 @@ async function pollSource(supabaseAdmin: SupabaseClient, source: TenderRssSource
   const excludeKeywords = source.exclude_keywords || [];
 
   try {
-    const response = await axios.get(source.url, { timeout: FETCH_TIMEOUT_MS, responseType: 'text' });
-    const feed = await parser.parseString(response.data);
+    const xml = await fetchFeedXml(source.url);
+    const feed = await parser.parseString(xml);
 
     const rows = (feed.items || [])
       .filter(item => matchesKeywords(`${item.title || ''} ${item.contentSnippet || item.content || ''}`, includeKeywords, excludeKeywords))

@@ -180,7 +180,7 @@ export default function TenderDetail() {
             <div>
               <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_deadline')}</p>
               <p className="text-xl font-bold text-zinc-900 dark:text-white">
-                {new Date(tender.submission_deadline).toLocaleDateString()}
+                {tender.submission_deadline ? new Date(tender.submission_deadline).toLocaleDateString() : '—'}
               </p>
             </div>
           </div>

@@ -80,6 +80,7 @@ export interface Agent {
   system_prompt_override?: string;
   context_scopes: AgentContextScope[];
   action_scopes: AgentActionScope[];
+  web_fetch_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -144,6 +145,7 @@ export interface AgentRow {
   system_prompt_override?: string;
   context_scopes: string[];
   action_scopes: string[];
+  web_fetch_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }

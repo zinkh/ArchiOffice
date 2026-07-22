@@ -4549,15 +4549,15 @@ async function startServer() {
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: member }] = await Promise.all([
+      const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: profile }] = await Promise.all([
         supabaseAdmin.from('activities').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('feed_posts').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
-        supabaseAdmin.from('team_members').select('notifications_last_seen').eq('auth_user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle()
+        supabaseAdmin.from('profiles').select('notifications_last_seen').eq('id', req.user.id).maybeSingle()
       ]);
       if (actsError) console.error('[GET /api/feed] activities query failed:', actsError);
       if (postsError) console.error('[GET /api/feed] feed_posts query failed:', postsError);
 
-      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
+      const lastSeen = (profile as any)?.notifications_last_seen || new Date(0).toISOString();
 
       // Fetch likes for current user
       const { data: myLikes } = await supabaseAdmin.from('feed_likes').select('item_id, item_type').eq('tenant_id', tenantId).eq('user_id', req.user.id);
@@ -4741,8 +4741,8 @@ async function startServer() {
   app.get("/api/notifications/unread-count", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: member } = await supabaseAdmin.from('team_members').select('notifications_last_seen').eq('auth_user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
-      const lastSeen = (member as any)?.notifications_last_seen || new Date(0).toISOString();
+      const { data: profile } = await supabaseAdmin.from('profiles').select('notifications_last_seen').eq('id', req.user.id).maybeSingle();
+      const lastSeen = (profile as any)?.notifications_last_seen || new Date(0).toISOString();
 
       const [{ count: actCount }, { count: postCount }] = await Promise.all([
         supabaseAdmin.from('activities').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gt('created_at', lastSeen),
@@ -4757,9 +4757,8 @@ async function startServer() {
 
   app.post("/api/notifications/mark-read", async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
       const now = new Date().toISOString();
-      await supabaseAdmin.from('team_members').update({ notifications_last_seen: now }).eq('auth_user_id', req.user.id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('profiles').update({ notifications_last_seen: now }).eq('id', req.user.id);
       res.json({ success: true, last_seen: now });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to mark notifications as read" });

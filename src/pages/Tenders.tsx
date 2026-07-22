@@ -448,7 +448,7 @@ export default function Tenders() {
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     <div className="flex flex-col">
-                      <span>{new Date(tender.submission_deadline).toLocaleDateString()}</span>
+                      <span>{tender.submission_deadline ? new Date(tender.submission_deadline).toLocaleDateString() : '---'}</span>
                       {tender.withdrawal_deadline && (
                         <span className="text-[10px]" style={{ color: 'var(--tblr-danger)' }}>{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
                       )}
@@ -575,7 +575,7 @@ export default function Tenders() {
                         </span>
                       </td>
                       <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
-                        {new Date(tender.submission_deadline).toLocaleDateString()}
+                        {tender.submission_deadline ? new Date(tender.submission_deadline).toLocaleDateString() : '---'}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   IconBell, IconBriefcase, IconFileInvoice, IconClipboardList,
@@ -80,6 +81,46 @@ const CATEGORY_STYLES: Record<string, string> = {
   "Appels d'offres":   'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   'Messages':          'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300',
 };
+
+// Routes that resolve to a specific item; other known types fall back to
+// their list page (better than nothing), and unlisted types stay unlinked.
+const TARGET_TYPE_PATH: Record<string, (id: string) => string> = {
+  project: id => `/projects/${id}`,
+  tender: id => `/tenders/${id}`,
+  specification: id => `/specifications/${id}`,
+  contact: () => '/contacts',
+  proposal: () => '/proposals',
+  invoice: () => '/invoices',
+  document: () => '/documents',
+  meeting: () => '/reunions',
+  ordre_de_service: () => '/ordres-de-service',
+  tender_rss_source: () => '/tenders',
+};
+
+// item.action is a pre-formatted sentence with the target's name embedded in
+// quotes (e.g. `Création du contact "Nom"`, see logActivity call sites in
+// server.ts). Turn that embedded name into a link to the item when we know
+// where it lives, keeping the rest of the sentence as plain text.
+function renderActionWithLink(item: FeedItem): React.ReactNode {
+  const action = item.action || '';
+  const pathFor = item.target_type ? TARGET_TYPE_PATH[item.target_type] : undefined;
+  if (!pathFor || !item.target || !item.target_id) return action;
+
+  const idx = action.indexOf(item.target);
+  if (idx === -1) return action;
+
+  const before = action.slice(0, idx);
+  const after = action.slice(idx + item.target.length);
+  return (
+    <>
+      {before}
+      <Link to={pathFor(item.target_id)} className="hover:underline text-blue-600 dark:text-blue-400" onClick={e => e.stopPropagation()}>
+        {item.target}
+      </Link>
+      {after}
+    </>
+  );
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -547,7 +588,7 @@ export default function Notifications() {
                         {/* Content */}
                         {item.kind === 'activity' ? (
                           <p className="text-sm font-semibold text-zinc-900 dark:text-white leading-snug">
-                            {item.action}
+                            {renderActionWithLink(item)}
                           </p>
                         ) : (
                           <div className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed">
