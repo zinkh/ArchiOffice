@@ -8878,6 +8878,64 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to remove project member" }); }
   });
 
+  // ─── Project phase history (ESQ/APS/APD/PC/PRO/DCE/ACT/VISA/DET/AOR) ───────
+  app.get("/api/projects/:id/phase-history", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await supabaseAdmin.from('project_phase_history')
+        .select('*')
+        .eq('project_id', req.params.id)
+        .eq('tenant_id', tenantId)
+        .order('entered_at', { ascending: true });
+      if (error) { res.json([]); return; }
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.json([]); }
+  });
+
+  app.post("/api/projects/:id/phase", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: projectId } = req.params;
+      const { phase } = req.body;
+      if (!phase) return res.status(400).json({ error: "phase is required" });
+
+      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).single();
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const { data: current } = await supabaseAdmin.from('project_phase_history')
+        .select('*')
+        .eq('project_id', projectId).eq('tenant_id', tenantId)
+        .is('exited_at', null)
+        .maybeSingle();
+
+      if (current && (current as any).phase === phase) {
+        res.json(current);
+        return;
+      }
+
+      const now = new Date().toISOString();
+      if (current) {
+        const { error: exitErr } = await supabaseAdmin.from('project_phase_history')
+          .update({ exited_at: now }).eq('id', (current as any).id).eq('tenant_id', tenantId);
+        if (exitErr) throw exitErr;
+      }
+
+      const id = crypto.randomUUID();
+      const { data: created, error } = await supabaseAdmin.from('project_phase_history')
+        .insert({ id, tenant_id: tenantId, project_id: projectId, phase, entered_at: now, exited_at: null })
+        .select().single();
+      if (error) throw error;
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Passage du projet "${(project as any).name}" en phase ${phase}`, (project as any).name, projectId, 'project', 'Projets');
+
+      res.status(201).json(created);
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to update project phase" });
+    }
+  });
+
   // ─── Global Search ─────────────────────────────────────────────────────────
   app.get("/api/search", async (req: any, res: any) => {
     try {

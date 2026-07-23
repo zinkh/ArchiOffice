@@ -1,5 +1,13 @@
 export type DocumentPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE' | 'ACT' | 'VISA' | 'DET' | 'AOR' | 'Général';
 
+export interface ProjectPhaseHistoryEntry {
+  id: string;
+  project_id: string;
+  phase: DocumentPhase;
+  entered_at: string;
+  exited_at: string | null;
+}
+
 export interface Document {
   id: string;
   project_id: string;

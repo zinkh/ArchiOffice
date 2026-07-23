@@ -401,6 +401,16 @@ CREATE TABLE IF NOT EXISTS dpgf_items (
 );
 CREATE INDEX IF NOT EXISTS idx_dpgf_items_tenant_project ON dpgf_items(tenant_id, project_id);
 
+CREATE TABLE IF NOT EXISTS project_phase_history (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  phase TEXT NOT NULL,
+  entered_at TEXT NOT NULL,
+  exited_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_phase_history_tenant_project ON project_phase_history(tenant_id, project_id);
+
 CREATE TABLE IF NOT EXISTS situations (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -564,6 +574,7 @@ ALTER TABLE receptions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reserves             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_phase_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE situations           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detail_situations    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cctps                ENABLE ROW LEVEL SECURITY;
@@ -638,6 +649,8 @@ CREATE POLICY "tenant_isolation" ON plans
 CREATE POLICY "tenant_isolation" ON reserves
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON dpgf_items
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON project_phase_history
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON situations
   USING (tenant_id = my_tenant_id());

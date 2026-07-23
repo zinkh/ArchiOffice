@@ -41,6 +41,47 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
       ctx.documentContents.map(d => `\n--- ${d.name} ---\n${d.content}\n---`).join('\n')
     : '';
 
+  // Gated on the scope itself, not on data presence — unlike the sections
+  // above, this one carries comparatively heavy content (price catalog, CCTP
+  // excerpts) and the tenant is billed per token on every message, so agents
+  // that didn't opt into 'firm_knowledge' must not pay for it.
+  const hasFirmKnowledge = (agent.context_scopes || []).includes('firm_knowledge');
+  const fk = ctx.firmKnowledge;
+
+  const phaseBenchmarksText = fk.phaseBenchmarks.length > 0
+    ? fk.phaseBenchmarks.map(p => `- ${p.phase} : ${p.avgDurationDays} j en moyenne (sur ${p.sampleSize} phase(s) terminée(s))`).join('\n')
+    : "Pas encore assez d'historique de phases terminées pour ce cabinet (minimum 2 par phase). N'invente jamais une durée dans ce cas — indique que cette donnée n'est pas encore disponible.";
+
+  const priceCatalogText = fk.priceCatalog.length > 0
+    ? fk.priceCatalog.map(a => `- ${a.designation} (${a.categorie || '—'}) — ${a.prix_unitaire} € / ${a.unite}`).join('\n')
+    : "Aucun article n'est encore renseigné dans la bibliothèque de prix de ce cabinet.";
+
+  const costHistoryText = fk.projectCostHistory.length > 0
+    ? fk.projectCostHistory.map(c => `- ${c.designation} — ${c.avgPrixUnitaireHt} € / ${c.unite} (moyenne sur ${c.occurrences} DPGF)`).join('\n')
+    : "Aucun historique de DPGF chiffré n'est encore disponible pour ce cabinet.";
+
+  const cctpExcerptsText = fk.cctpExcerpts.length > 0
+    ? fk.cctpExcerpts.map(s => `--- ${s.title} ---\n${s.excerpt}`).join('\n\n')
+    : "Aucun CCTP existant n'est disponible comme référence de style pour ce cabinet.";
+
+  const firmKnowledgeSection = hasFirmKnowledge
+    ? `\n═══ RÉFÉRENTIEL INTERNE DU CABINET (durées, prix, CCTP) ═══
+Ces données proviennent de l'historique réel de ce cabinet — utilise-les comme référence pour des suggestions réalistes et propres à ce cabinet, jamais comme des moyennes universelles du secteur. Si une donnée manque ou est insuffisante, dis-le clairement plutôt que d'inventer un chiffre.
+
+[DURÉE DES PHASES DE MISSION]
+${phaseBenchmarksText}
+
+[BIBLIOTHÈQUE DE PRIX DU CABINET]
+${priceCatalogText}
+
+[HISTORIQUE DE PRIX ISSU DES DPGF DU CABINET]
+${costHistoryText}
+
+[EXTRAITS DE CCTP DE RÉFÉRENCE DU CABINET]
+${cctpExcerptsText}
+`
+    : '';
+
   const actionScopes = agent.action_scopes || [];
   const canAct = actionScopes.length > 0;
   const resourceSchema = describeAuthorizedResources(actionScopes);
@@ -89,6 +130,9 @@ ${canAct
 ${canFetchWeb
   ? "✓ Récupérer le contenu d'une page web publique via fetch_url (voir section ACCÈS WEB) — uniquement sur une URL fournie par l'utilisateur"
   : "✗ Tu NE peux PAS accéder à Internet ni consulter de site web — l'architecte n'a pas activé cette capacité pour toi"}
+${hasFirmKnowledge
+  ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"
+  : "✗ Tu n'as pas accès à l'historique du cabinet (durées, prix, CCTP) — l'architecte n'a pas activé cette source pour toi"}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
 ${actionsSection}${webFetchSection}
@@ -130,7 +174,7 @@ ${documentsList}
 
 [TÂCHES]
 ${tasksList}
-${docContentsSection}
+${docContentsSection}${firmKnowledgeSection}
 
 ═══ RÈGLES DE RÉPONSE ═══
 1. Si une information est absente de tes données, dis-le clairement et propose une action concrète.
