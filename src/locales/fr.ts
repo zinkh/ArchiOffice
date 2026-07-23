@@ -23,6 +23,7 @@ export default {
       "tenders": "Appels d'offres",
       "specifications": "Cahier des charges",
       "gantt": "Planning Gantt",
+      "calendar": "Calendrier",
       "kanban": "Tableau Kanban",
       "reunions": "Réunions",
       "ordres_de_service": "Ordres de Service",
@@ -748,5 +749,37 @@ export default {
       "billing_mode_prepaid": "Prépayé",
       "billing_mode_payperuse": "À l'utilisation",
       "enterprise_required": "Fonctionnalité Enterprise",
-      "enterprise_required_desc": "Les agents IA sont disponibles avec l'abonnement Enterprise. Passez à l'offre supérieure pour accéder à votre équipe virtuelle."
+      "enterprise_required_desc": "Les agents IA sont disponibles avec l'abonnement Enterprise. Passez à l'offre supérieure pour accéder à votre équipe virtuelle.",
+
+      // Loading / error states
+      "error_loading_title": "Impossible de charger les données",
+      "error_loading_desc": "Une erreur est survenue lors du chargement. Vérifiez votre connexion puis réessayez.",
+      "retry_btn": "Réessayer",
+
+      // Dashboard — budget tracking
+      "dashboard_budget_tracking": "Suivi budgétaire",
+      "budget_estimated": "Budget estimé",
+      "budget_actual": "Facturé (payé)",
+      "budget_no_data": "Aucun projet avec budget renseigné pour le moment.",
+
+      // Dashboard — proactive AI suggestions
+      "dashboard_ai_suggestions": "Suggestions IA",
+      "ai_suggestions_empty": "Aucune alerte pour le moment, tout est sous contrôle.",
+      "ai_draft_reminder_btn": "Rédiger un rappel avec l'IA",
+      "ai_suggestion_overdue_milestone": "{{count}} jalon(s) en retard sur le projet « {{project}} ».",
+      "ai_draft_overdue_milestone": "Rédige un e-mail de relance courtois pour le client {{client}} concernant le projet {{project}} : les jalons suivants sont en retard : {{titles}}. Propose une nouvelle échéance.",
+      "ai_suggestion_project_behind": "Le projet « {{project}} » n'est avancé qu'à {{progress}}% alors que l'échéance arrive dans {{days}} jour(s).",
+      "ai_draft_project_behind": "Rédige un message interne pour l'équipe rappelant que le projet {{project}} (client {{client}}) est avancé à {{progress}}% alors qu'il reste {{days}} jour(s) avant l'échéance. Propose des actions pour rattraper le retard.",
+      "ai_suggestion_invoice_overdue": "La facture {{number}} ({{client}}) est en retard de paiement.",
+      "ai_draft_invoice_overdue": "Rédige un e-mail de relance de paiement poli pour la facture {{number}} d'un montant de {{amount}} auprès de {{client}}.",
+
+      // Calendar page
+      "calendar_page_subtitle": "Jalons et tâches, par semaine et par mois",
+      "calendar_today_btn": "Aujourd'hui",
+      "calendar_this_week": "Cette semaine",
+      "calendar_no_events_week": "Aucun jalon ni tâche cette semaine.",
+      "calendar_no_events_day": "Aucun évènement ce jour.",
+      "calendar_milestone": "Jalon",
+      "calendar_task": "Tâche",
+      "calendar_select_day_hint": "Cliquez sur un jour pour voir le détail."
 };

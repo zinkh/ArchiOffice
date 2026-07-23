@@ -8,7 +8,12 @@ import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
 // ── Context ──────────────────────────────────────────────────────────────────
 
 interface AgentChatContextValue {
-  openChat: (agentId?: string) => void;
+  /**
+   * Opens the chat panel. `draftMessage`, when given, prefills the input so
+   * the user can review/edit an AI-suggested message before sending it —
+   * callers should never use this to auto-send on the user's behalf.
+   */
+  openChat: (agentId?: string, draftMessage?: string) => void;
   closeChat: () => void;
 }
 
@@ -261,9 +266,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (isOpen && activeAgentId) loadConversation(activeAgentId);
   }, [isOpen, activeAgentId, loadConversation]);
 
-  const openChat = useCallback((agentId?: string): void => {
+  const openChat = useCallback((agentId?: string, draftMessage?: string): void => {
     if (agentId) setActiveAgentId(agentId);
+    if (draftMessage) setInput(draftMessage);
     setIsOpen(true);
+    if (draftMessage) setTimeout(() => textareaRef.current?.focus(), 50);
   }, []);
 
   const closeChat = useCallback((): void => {

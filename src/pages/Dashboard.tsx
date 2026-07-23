@@ -17,9 +17,12 @@ import {
   IconReceiptOff,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
+import { ErrorState, StatCardSkeletonGrid, ListSkeleton } from '../components/DataState';
+import { useAgentChat } from '@zinkh/archioffice-agents/client';
 import {
   ResponsiveContainer,
   PieChart,
@@ -32,9 +35,12 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
+import { IconSparkles, IconAlertTriangle } from '@tabler/icons-react';
 
 const PIE_COLORS = ['#2fb344', '#206bc4', '#f76707', '#6c7a91'];
 const BAR_COLOR  = '#206bc4';
+const BUDGET_ESTIMATED_COLOR = '#6c7a91';
+const BUDGET_ACTUAL_COLOR = '#2fb344';
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string }> = {
@@ -142,7 +148,7 @@ function TblrTooltip({ active, payload, label }: any) {
   );
 }
 
-function SectionCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function SectionCard({ title, action, children }: { title: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div
       className="rounded-xl overflow-hidden"
@@ -185,19 +191,40 @@ function QuickAction({ icon: Icon, label, to, color }: { icon: React.ElementType
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { openChat } = useAgentChat();
   const [projects,   setProjects]   = useState<Project[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [tenders,    setTenders]    = useState<any[]>([]);
   const [invoices,   setInvoices]   = useState<any[]>([]);
   const [proposals,  setProposals]  = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch('/api/projects').then(r => r.ok ? r.json() : []).then(setProjects).catch(() => {});
-    fetch('/api/milestones').then(r => r.ok ? r.json() : []).then(setMilestones).catch(() => {});
-    fetch('/api/tenders').then(r => r.ok ? r.json() : []).then(setTenders).catch(() => {});
-    fetch('/api/invoices').then(r => r.ok ? r.json() : []).then(setInvoices).catch(() => {});
-    fetch('/api/proposals').then(r => r.ok ? r.json() : []).then(setProposals).catch(() => {});
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [projectsData, milestonesData, tendersData, invoicesData, proposalsData] = await Promise.all([
+        fetchJson('/api/projects'),
+        fetchJson('/api/milestones'),
+        fetchJson('/api/tenders'),
+        fetchJson('/api/invoices'),
+        fetchJson('/api/proposals'),
+      ]);
+      setProjects(Array.isArray(projectsData) ? projectsData : []);
+      setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
+      setTenders(Array.isArray(tendersData) ? tendersData : []);
+      setInvoices(Array.isArray(invoicesData) ? invoicesData : []);
+      setProposals(Array.isArray(proposalsData) ? proposalsData : []);
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+      setLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const pendingTenders   = tenders.filter(t => !t.status || t.status === 'pending' || t.status === 'Pending').length;
   const overdueInvoices  = invoices.filter(inv => inv.status === 'overdue' || inv.status === 'Overdue').length;
@@ -224,9 +251,97 @@ export default function Dashboard() {
     return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
   }, [projects]);
 
-  return (
-    <div className="space-y-5">
+  // ── Budget tracking: estimated (devis budget) vs actual (paid invoices) per project ──
+  const budgetByProject = React.useMemo(() => {
+    const actualByProjectId: Record<string, number> = {};
+    invoices
+      .filter(inv => inv.status === 'paid' || inv.status === 'Paid')
+      .forEach(inv => {
+        const key = inv.project_id;
+        if (!key) return;
+        actualByProjectId[key] = (actualByProjectId[key] || 0) + (inv.total_amount || inv.amount || 0);
+      });
+    return projects
+      .filter(p => p.budget > 0)
+      .map(p => ({
+        name: p.name.length > 16 ? `${p.name.slice(0, 15)}…` : p.name,
+        fullName: p.name,
+        estimated: p.budget,
+        actual: actualByProjectId[p.id] || 0,
+      }))
+      .sort((a, b) => b.estimated - a.estimated)
+      .slice(0, 6);
+  }, [projects, invoices]);
 
+  const totalEstimatedBudget = React.useMemo(() => projects.reduce((s, p) => s + (p.budget || 0), 0), [projects]);
+  const totalActualBudget = React.useMemo(
+    () => invoices.filter(inv => inv.status === 'paid' || inv.status === 'Paid').reduce((s, inv) => s + (inv.total_amount || inv.amount || 0), 0),
+    [invoices]
+  );
+
+  // ── Proactive AI suggestions — simple rule-based read of the data already
+  // on this page (no extra network round-trip). Each suggestion opens the
+  // agent chat with a prefilled draft the user reviews before sending, so
+  // the AI never acts without the user's go-ahead. ──
+  type Suggestion = { id: string; tone: 'danger' | 'warning'; text: string; draft: string };
+  const suggestions = React.useMemo<Suggestion[]>(() => {
+    const list: Suggestion[] = [];
+    const now = new Date();
+
+    const overdueMilestonesByProject = new Map<string, Milestone[]>();
+    milestones
+      .filter(m => !m.completed && m.project_id && new Date(m.due_date) < now)
+      .forEach(m => {
+        const arr = overdueMilestonesByProject.get(m.project_id!) || [];
+        arr.push(m);
+        overdueMilestonesByProject.set(m.project_id!, arr);
+      });
+    for (const [projectId, ms] of overdueMilestonesByProject) {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) continue;
+      list.push({
+        id: `overdue-milestone-${projectId}`,
+        tone: 'danger',
+        text: t('ai_suggestion_overdue_milestone', { count: ms.length, project: project.name }),
+        draft: t('ai_draft_overdue_milestone', {
+          project: project.name,
+          client: project.client,
+          titles: ms.map(m => m.title).join(', '),
+        }),
+      });
+    }
+
+    projects
+      .filter(p => p.status === 'In Progress' && p.end_date)
+      .forEach(p => {
+        const daysLeft = Math.ceil((new Date(p.end_date).getTime() - now.getTime()) / 86400000);
+        if (daysLeft >= 0 && daysLeft <= 14 && (p.progression || 0) < 80) {
+          list.push({
+            id: `behind-schedule-${p.id}`,
+            tone: 'warning',
+            text: t('ai_suggestion_project_behind', { project: p.name, progress: p.progression || 0, days: daysLeft }),
+            draft: t('ai_draft_project_behind', { project: p.name, client: p.client, progress: p.progression || 0, days: daysLeft }),
+          });
+        }
+      });
+
+    invoices
+      .filter(inv => inv.status === 'overdue' || inv.status === 'Overdue')
+      .slice(0, 3)
+      .forEach(inv => {
+        list.push({
+          id: `overdue-invoice-${inv.id}`,
+          tone: 'danger',
+          text: t('ai_suggestion_invoice_overdue', { number: inv.invoice_number, client: inv.project_name || inv.client || '' }),
+          draft: t('ai_draft_invoice_overdue', { number: inv.invoice_number, client: inv.project_name || inv.client || '', amount: formatEur(inv.total_amount || inv.amount || 0) }),
+        });
+      });
+
+    return list.slice(0, 5);
+  }, [milestones, projects, invoices, t]);
+
+  const dashboardHeader = (
+    <>
       {/* Page header */}
       <div className="flex items-center justify-between pb-4 hidden sm:flex" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div>
@@ -245,6 +360,49 @@ export default function Dashboard() {
           {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
       </div>
+    </>
+  );
+
+  // First load: show skeleton placeholders instead of an empty-looking dashboard.
+  if (loading && projects.length === 0 && tenders.length === 0 && invoices.length === 0 && !loadError) {
+    return (
+      <div className="space-y-5">
+        {dashboardHeader}
+        <StatCardSkeletonGrid count={4} />
+        <StatCardSkeletonGrid count={4} />
+        <div className="hidden lg:grid grid-cols-2 gap-4">
+          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+            <ListSkeleton rows={4} />
+          </div>
+          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+            <ListSkeleton rows={4} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Fetch failed and we have nothing cached to fall back to — show a clear,
+  // retry-able error instead of a dashboard that silently looks empty.
+  if (loadError && projects.length === 0 && tenders.length === 0 && invoices.length === 0) {
+    return (
+      <div className="space-y-5">
+        {dashboardHeader}
+        <ErrorState message={loadError} onRetry={loadAll} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+
+      {dashboardHeader}
+
+      {/* Stale-but-visible data plus a dismissible-by-retry banner, for the
+          case a background refresh failed but we still have the last good load. */}
+      {loadError && (projects.length > 0 || tenders.length > 0 || invoices.length > 0) && (
+        <ErrorState compact message={loadError} onRetry={loadAll} />
+      )}
 
       {/* ── Financial summary cards (2 cols on mobile) ── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -398,6 +556,97 @@ export default function Dashboard() {
           )}
         </SectionCard>
       </div>
+
+      {/* ── Budget tracking: estimated vs actual (paid) per project ── */}
+      <SectionCard
+        title={t('dashboard_budget_tracking')}
+        action={
+          <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full inline-block" style={{ background: BUDGET_ESTIMATED_COLOR }} />
+              {t('budget_estimated')}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full inline-block" style={{ background: BUDGET_ACTUAL_COLOR }} />
+              {t('budget_actual')}
+            </span>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_estimated')}</p>
+            <p className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>{formatEur(totalEstimatedBudget)}</p>
+          </div>
+          <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_actual')}</p>
+            <p className="text-lg font-bold" style={{ color: totalActualBudget > totalEstimatedBudget ? '#d63939' : 'var(--tblr-text)' }}>
+              {formatEur(totalActualBudget)}
+            </p>
+          </div>
+        </div>
+        {budgetByProject.length === 0 ? (
+          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
+        ) : (
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <RechartsBarChart data={budgetByProject} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tblr-border)" />
+                <XAxis dataKey="name" tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={56} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                <Tooltip content={<TblrTooltip />} cursor={{ fill: 'var(--tblr-surface-2)' }} />
+                <Bar dataKey="estimated" name={t('budget_estimated')} fill={BUDGET_ESTIMATED_COLOR} radius={[3, 3, 0, 0]} barSize={16} />
+                <Bar dataKey="actual" name={t('budget_actual')} fill={BUDGET_ACTUAL_COLOR} radius={[3, 3, 0, 0]} barSize={16} />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Proactive AI suggestions ── */}
+      <SectionCard
+        title={
+          <span className="flex items-center gap-1.5">
+            {t('dashboard_ai_suggestions')}
+            <span
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
+              style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+            >
+              <IconSparkles size={10} /> IA
+            </span>
+          </span>
+        }
+      >
+        {suggestions.length === 0 ? (
+          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('ai_suggestions_empty')}</p>
+        ) : (
+          <div className="space-y-2.5">
+            {suggestions.map(s => (
+              <div
+                key={s.id}
+                className="flex items-start gap-3 p-3 rounded-lg"
+                style={{
+                  background: s.tone === 'danger' ? '#fff5f5' : '#fff4e6',
+                  border: `1px solid ${s.tone === 'danger' ? '#ffc9c9' : '#ffd8a8'}`,
+                }}
+              >
+                <IconAlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? '#c92a2a' : '#e67700' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                  <button
+                    onClick={() => openChat(undefined, s.draft)}
+                    className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold hover:underline"
+                    style={{ color: 'var(--tblr-primary)' }}
+                  >
+                    <IconSparkles size={12} />
+                    {t('ai_draft_reminder_btn')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       {/* Recent projects */}
       <SectionCard
