@@ -38,6 +38,7 @@ const Tenders = lazy(() => import('./pages/Tenders'));
 const Specifications = lazy(() => import('./pages/Specifications'));
 const Team = lazy(() => import('./pages/Team'));
 const Gantt = lazy(() => import('./pages/Gantt'));
+const CalendarPage = lazy(() => import('./pages/Calendar'));
 const Kanban = lazy(() => import('./pages/Kanban'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
@@ -735,6 +736,7 @@ export default function App() {
               <Route path="/specifications/:specId" element={<Specifications />} />
               <Route path="/team" element={<Team />} />
               <Route path="/gantt" element={<Gantt />} />
+              <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/kanban" element={<Kanban />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/templates" element={<ProjectTemplates />} />

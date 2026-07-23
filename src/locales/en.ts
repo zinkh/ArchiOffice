@@ -23,6 +23,7 @@ export default {
       "tenders": "Tenders",
       "specifications": "Specifications",
       "gantt": "Gantt Planning",
+      "calendar": "Calendar",
       "kanban": "Kanban Board",
       "reunions": "Meetings",
       "ordres_de_service": "Service Orders",
@@ -700,5 +701,37 @@ export default {
       "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
       "agent_chat_cancel": "Cancel",
-      "agent_chat_cancelled": "Request cancelled."
+      "agent_chat_cancelled": "Request cancelled.",
+
+      // Loading / error states
+      "error_loading_title": "Couldn't load the data",
+      "error_loading_desc": "Something went wrong while loading. Check your connection and try again.",
+      "retry_btn": "Retry",
+
+      // Dashboard — budget tracking
+      "dashboard_budget_tracking": "Budget Tracking",
+      "budget_estimated": "Estimated budget",
+      "budget_actual": "Invoiced (paid)",
+      "budget_no_data": "No project with a budget yet.",
+
+      // Dashboard — proactive AI suggestions
+      "dashboard_ai_suggestions": "AI Suggestions",
+      "ai_suggestions_empty": "No alerts right now, everything's under control.",
+      "ai_draft_reminder_btn": "Draft a reminder with AI",
+      "ai_suggestion_overdue_milestone": "{{count}} overdue milestone(s) on project \"{{project}}\".",
+      "ai_draft_overdue_milestone": "Draft a courteous follow-up email to client {{client}} about project {{project}}: the following milestones are overdue: {{titles}}. Suggest a new deadline.",
+      "ai_suggestion_project_behind": "Project \"{{project}}\" is only {{progress}}% complete with {{days}} day(s) left until the deadline.",
+      "ai_draft_project_behind": "Draft an internal message to the team noting that project {{project}} (client {{client}}) is {{progress}}% complete with {{days}} day(s) left until the deadline. Suggest actions to catch up.",
+      "ai_suggestion_invoice_overdue": "Invoice {{number}} ({{client}}) is overdue.",
+      "ai_draft_invoice_overdue": "Draft a polite payment follow-up email for invoice {{number}} for {{amount}} addressed to {{client}}.",
+
+      // Calendar page
+      "calendar_page_subtitle": "Milestones and tasks, by week and by month",
+      "calendar_today_btn": "Today",
+      "calendar_this_week": "This week",
+      "calendar_no_events_week": "No milestones or tasks this week.",
+      "calendar_no_events_day": "No events this day.",
+      "calendar_milestone": "Milestone",
+      "calendar_task": "Task",
+      "calendar_select_day_hint": "Click a day to see the details."
 };

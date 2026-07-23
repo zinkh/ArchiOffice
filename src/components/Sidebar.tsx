@@ -22,6 +22,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconClipboardList,
+  IconCalendarWeek,
   IconContract,
   IconRobot,
   IconShieldLock,
@@ -45,6 +46,7 @@ export const NAV_ITEMS = [
   { name: 'tenders',        path: '/tenders',        icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconFileText },
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
+  { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
   { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
@@ -85,6 +87,7 @@ const NAV_SECTIONS = [
     items: [
       { name: 'specifications', path: '/specifications', icon: IconFileText },
       { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
+      { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
       { name: 'reunions',       path: '/reunions',        icon: IconMessages },
       { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },

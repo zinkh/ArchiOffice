@@ -13,6 +13,7 @@ import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
+import { ProjectCardSkeletonGrid, ErrorState } from '../components/DataState';
 import { Link } from 'react-router-dom';
 
 export default function Projects() {
@@ -42,6 +43,8 @@ export default function Projects() {
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   const optimizeImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -221,18 +224,28 @@ export default function Projects() {
 
     // 2. Fetch from API
     if (navigator.onLine) {
+      setProjectsError(null);
       try {
         const data = await fetchJson('/api/projects');
-        
+
         // 3. Update IndexedDB
         await db.projects.clear();
         await db.projects.bulkPut(data);
-        
+
         // 4. Update UI
         if (Array.isArray(data)) setProjects(data.map((p: any) => ({ ...p, is_complete_mission: !!p.is_complete_mission })));
       } catch (err) {
         console.error(err);
+        // Only surface the error if we have nothing (even stale/local) to show —
+        // otherwise the user keeps working from cached data while we retry quietly.
+        if (localData.length === 0) {
+          setProjectsError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        setProjectsLoading(false);
       }
+    } else {
+      setProjectsLoading(false);
     }
   };
 
@@ -632,7 +645,13 @@ export default function Projects() {
         </div>
       </div>
 
-      {viewMode === 'grid' ? (
+      {projectsError && projects.length === 0 && (
+        <ErrorState message={projectsError} onRetry={fetchProjects} />
+      )}
+
+      {projectsLoading && projects.length === 0 && !projectsError ? (
+        <ProjectCardSkeletonGrid />
+      ) : projectsError && projects.length === 0 ? null : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {filteredProjects.map((project, i) => (
             <motion.div
