@@ -14,6 +14,7 @@ const SCOPES: { key: AgentContextScope; label: string }[] = [
   { key: 'contacts',  label: 'Contacts' },
   { key: 'documents', label: 'Documents' },
   { key: 'tasks',     label: 'Tâches' },
+  { key: 'firm_knowledge', label: 'Historique du cabinet (durées de phase, prix, CCTP de référence)' },
 ];
 
 // One toggle per resource grants that resource's full create/update/delete
@@ -197,6 +198,9 @@ export default function AgentConfig() {
       {/* Scopes */}
       <section className="p-5 rounded-xl border space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
         <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_scopes')}</h2>
+        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+          « Historique du cabinet » ajoute des données agrégées (durées, prix, extraits de CCTP) à chaque message — n'active que pour les agents qui en ont vraiment besoin.
+        </p>
         <div className="space-y-2">
           {SCOPES.map(scope => (
             <label key={scope.key} className="flex items-center gap-3 cursor-pointer group">

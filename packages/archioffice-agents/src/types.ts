@@ -1,6 +1,6 @@
 // ── Shared types for @zinkh/archioffice-agents ───────────────────────────────
 
-export type AgentContextScope = 'meetings' | 'contacts' | 'projects' | 'documents' | 'tasks';
+export type AgentContextScope = 'meetings' | 'contacts' | 'projects' | 'documents' | 'tasks' | 'firm_knowledge';
 
 // Write permissions — separate from context_scopes (read-only) so an agent
 // can be given data access without automatically being able to write.
@@ -160,4 +160,10 @@ export interface AgentContext {
   recentDocuments: { id: string; name: string; project_id: string; phase: string; uploaded_at: string; file_url: string }[];
   tasks: { id: string; title: string; status: string; due_date: string; project_id: string }[];
   documentContents: { id: string; name: string; content: string }[];
+  firmKnowledge: {
+    phaseBenchmarks: { phase: string; avgDurationDays: number; sampleSize: number }[];
+    priceCatalog: { designation: string; unite: string; prix_unitaire: number; categorie: string | null }[];
+    projectCostHistory: { designation: string; unite: string; avgPrixUnitaireHt: number; occurrences: number }[];
+    cctpExcerpts: { title: string; excerpt: string }[];
+  };
 }

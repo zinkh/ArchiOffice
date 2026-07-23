@@ -53,7 +53,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
-import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, Plan } from '../types';
+import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { useUser } from '../UserContext';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -185,6 +185,8 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
   </div>
 );
 
+const MISSION_PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR'];
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -203,6 +205,7 @@ export default function ProjectDetail() {
   }, [project, setHeaderTitle]);
   const [team, setTeam] = useState<any[]>([]);
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
+  const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
@@ -346,6 +349,7 @@ export default function ProjectDetail() {
       fetchTeam();
       fetchProjectTenders();
       fetchProjectMembers();
+      fetchPhaseHistory();
     }
   }, [id]);
 
@@ -403,6 +407,26 @@ export default function ProjectDetail() {
       const res = await fetch(`/api/projects/${id}/members`);
       if (res.ok) { const data = await res.json(); setProjectMembers(Array.isArray(data) ? data : []); }
     } catch (err) { console.error('Failed to fetch project members:', err); }
+  };
+
+  const fetchPhaseHistory = async () => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/projects/${id}/phase-history`);
+      if (res.ok) { const data = await res.json(); setPhaseHistory(Array.isArray(data) ? data : []); }
+    } catch (err) { console.error('Failed to fetch project phase history:', err); }
+  };
+
+  const handleSetPhase = async (phase: DocumentPhase) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/projects/${id}/phase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase }),
+      });
+      if (res.ok) fetchPhaseHistory();
+    } catch (err) { console.error('Failed to update project phase:', err); }
   };
 
   const fetchFullProject = async () => {
@@ -2615,6 +2639,41 @@ export default function ProjectDetail() {
                           </label>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
+                      <div className="flex flex-wrap gap-2">
+                        {MISSION_PHASES.map(phase => {
+                          const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
+                          return (
+                            <button
+                              key={phase}
+                              type="button"
+                              onClick={() => handleSetPhase(phase)}
+                              className="px-3 py-1.5 rounded-full text-xs font-bold transition-colors"
+                              style={isCurrent
+                                ? { background: 'var(--tblr-primary)', color: 'white' }
+                                : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                            >
+                              {phase}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {phaseHistory.length > 0 && (
+                        <div className="pt-3 border-t border-[var(--tblr-border)] space-y-1.5">
+                          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_history')}</p>
+                          {[...phaseHistory].reverse().map(entry => (
+                            <div key={entry.id} className="flex items-center justify-between text-xs" style={{ color: 'var(--tblr-text)' }}>
+                              <span className="font-semibold">{entry.phase}</span>
+                              <span style={{ color: 'var(--tblr-muted)' }}>
+                                {new Date(entry.entered_at).toLocaleDateString()} → {entry.exited_at ? new Date(entry.exited_at).toLocaleDateString() : t('project_phase_ongoing')}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
