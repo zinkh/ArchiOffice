@@ -56,6 +56,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const AgencySetup = lazy(() => import('./pages/AgencySetup'));
+const Landing = lazy(() => import('./pages/Landing'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfUse = lazy(() => import('./pages/TermsOfUse'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -646,6 +647,7 @@ function PageLoadingFallback() {
 function ProtectedLayout() {
   const { currentUser, isLoading } = useUser();
   const { t } = useTranslation();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -659,6 +661,12 @@ function ProtectedLayout() {
   }
 
   if (!currentUser) {
+    // The public marketing landing page only lives at "/", and only for the
+    // cloud web app — the offline desktop build is an installed app with no
+    // anonymous-visitor scenario, so it keeps the plain login redirect.
+    if (location.pathname === '/' && !isOfflineBuild()) {
+      return <Landing />;
+    }
     return <Navigate to="/login" replace />;
   }
 
