@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose, IconUpload } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
@@ -208,6 +208,9 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const [attachedDocs, setAttachedDocs] = useState<{ id: string; name: string }[]>([]);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState<string | null>(null);
+  const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -350,20 +353,76 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     abortControllerRef.current?.abort();
   };
 
+  // Uploads a new file straight from the chat (drag-and-drop or otherwise)
+  // and attaches the resulting document, instead of requiring it to already
+  // exist in the Documents module before it can be picked.
+  const uploadAndAttach = async (file: File) => {
+    setUploadingFile(file.name);
+    setErrorMsg(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('name', file.name);
+      form.append('category', 'Assistant IA');
+      const res = await fetch('/api/documents', { method: 'POST', body: form });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setAttachedDocs(prev => prev.some(d => d.id === data.id) ? prev : [...prev, { id: data.id, name: file.name }]);
+    } catch {
+      setErrorMsg(t('agent_chat_upload_error'));
+    } finally {
+      setUploadingFile(null);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes('Files')) return;
+    dragCounterRef.current += 1;
+    setIsDragOver(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    files.forEach(uploadAndAttach);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
   };
 
   const resetConversation = async () => {
     if (!activeAgentId) return;
-    await apiFetch(`/api/agents/${activeAgentId}/conversation`, { method: 'DELETE' });
+    try {
+      await apiFetch(`/api/agents/${activeAgentId}/conversation`, { method: 'DELETE' });
+    } catch (e) {
+      console.error('Failed to reset conversation:', e);
+    }
     setMessages([]);
     setErrorMsg(null);
+    // A fresh conversation shouldn't carry over documents attached to the
+    // previous one — otherwise they linger as "already attached" and the
+    // picker/drop zone looks like it can't add anything new.
+    setAttachedDocs([]);
   };
 
   const switchAgent = (agentId: string): void => {
     setActiveAgentId(agentId);
     setAgentSelectorOpen(false);
+    setAttachedDocs([]);
   };
 
   return (
@@ -396,7 +455,29 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             }}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
+            {/* Drag-and-drop overlay */}
+            <AnimatePresence>
+              {isDragOver && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 pointer-events-none border-2 border-dashed rounded-xl"
+                  style={{ background: 'var(--tblr-primary-lt)', borderColor: 'var(--tblr-primary)' }}
+                >
+                  <IconUpload size={28} style={{ color: 'var(--tblr-primary)' }} />
+                  <p className="text-[13px] font-semibold px-4 text-center" style={{ color: 'var(--tblr-primary)' }}>
+                    {t('agent_chat_drop_hint')}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Header */}
             <div
               className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
@@ -467,7 +548,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   {activeAgent && <AgentAvatar agent={activeAgent} size={48} />}
                   <p className="text-[13px] text-center" style={{ color: 'var(--tblr-muted)' }}>{t('agent_chat_empty')}</p>
                   <p className="text-[11px] text-center" style={{ color: 'var(--tblr-muted)' }}>
-                    💡 Joignez un document avec 📎 pour l'analyser
+                    💡 Joignez un document avec 📎, ou glissez-déposez-le ici
                   </p>
                 </div>
               )}
@@ -522,6 +603,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
             {/* Footer */}
             <div className="shrink-0 border-t px-3 py-2" style={{ borderColor: 'var(--tblr-border)' }}>
+              {uploadingFile && (
+                <div className="flex items-center gap-2 text-[11px] mb-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                  <div className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+                  {t('agent_chat_uploading', { name: uploadingFile })}
+                </div>
+              )}
               {tokenBalance !== null && (
                 <div className="text-[10px] mb-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
                   {(tokenBalance / 100).toFixed(2)} € de crédits IA restants

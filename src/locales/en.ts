@@ -485,7 +485,10 @@ export default {
       "team_system_access": "System Access",
       "team_role_user": "User (View only/Limited)",
       "team_role_pm": "Project Manager",
+      "team_role_manager": "Manager",
       "team_role_admin": "Administrator",
+      "team_manager_label": "Assigned manager",
+      "team_no_manager": "No manager",
       "team_add_member_title": "Add New Team Member",
       "team_full_name_label": "Full Name",
       "team_full_name_placeholder": "John Doe",
@@ -705,6 +708,9 @@ export default {
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
       "agent_chat_cancel": "Cancel",
       "agent_chat_cancelled": "Request cancelled.",
+      "agent_chat_drop_hint": "Drop a document here to attach it",
+      "agent_chat_uploading": "Uploading {{name}}…",
+      "agent_chat_upload_error": "Failed to upload the document.",
 
       // Loading / error states
       "error_loading_title": "Couldn't load the data",
@@ -716,6 +722,16 @@ export default {
       "budget_estimated": "Estimated budget",
       "budget_actual": "Invoiced (paid)",
       "budget_no_data": "No project with a budget yet.",
+      "kpi_active_permits": "Active permits",
+      "kpi_upcoming_deadlines": "Upcoming deadlines",
+      "kpi_meetings_week": "Meetings this week",
+      "kpi_rfis_pending": "RFIs pending",
+      "kpi_opr_tracking": "OPR reserves",
+      "kpi_gpa_tracking": "GPA reserves",
+      "kpi_budget_vs_fees": "Fees consumed vs planned",
+      "kpi_late_count": "{{count}} overdue",
+      "kpi_team_revenue": "Revenue collected (team)",
+      "kpi_team_overdue_invoices": "Overdue invoices (team)",
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "AI Suggestions",

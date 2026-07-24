@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
-import { getAllUsers, updateUserRole, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
+import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { useUser } from '../UserContext';
 
 export default function Team() {
@@ -56,13 +56,23 @@ export default function Team() {
     }
   };
 
-  const handleRoleChange = async (id: string, newRole: 'admin' | 'pm' | 'user') => {
+  const handleRoleChange = async (id: string, newRole: 'admin' | 'manager' | 'pm' | 'user') => {
     try {
       await updateUserRole(id, newRole);
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
     } catch (err) {
       console.error(err);
       alert('Failed to update role.');
+    }
+  };
+
+  const handleManagerChange = async (id: string, managerId: string) => {
+    try {
+      await updateUserManager(id, managerId || null);
+      setTeam(team.map(member => member.id === id ? { ...member, manager_id: managerId || null } : member));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update manager.');
     }
   };
 
@@ -183,6 +193,7 @@ export default function Team() {
                 >
                   <option value="user">{t('team_role_user')}</option>
                   <option value="pm">{t('team_role_pm')}</option>
+                  <option value="manager">{t('team_role_manager')}</option>
                   <option value="admin">{t('team_role_admin')}</option>
                 </select>
               ) : (
@@ -191,6 +202,22 @@ export default function Team() {
                 </div>
               )}
             </div>
+
+            {isAdmin && (
+              <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
+                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
+                <select
+                  value={member.manager_id || ''}
+                  onChange={(e) => handleManagerChange(member.id, e.target.value)}
+                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white text-sm"
+                >
+                  <option value="">{t('team_no_manager')}</option>
+                  {team.filter(m => m.id !== member.id && (m.system_role === 'manager' || m.system_role === 'admin')).map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </motion.div>
         ))}
       </div>
@@ -252,6 +279,7 @@ export default function Team() {
                   >
                     <option value="user">{t('team_role_user')}</option>
                     <option value="pm">{t('team_role_pm')}</option>
+                    <option value="manager">{t('team_role_manager')}</option>
                     <option value="admin">{t('team_role_admin')}</option>
                   </select>
                 </div>
