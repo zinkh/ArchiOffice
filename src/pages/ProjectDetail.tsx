@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
-import Select, { StylesConfig } from 'react-select';
 import CreatableSelect from 'react-select/creatable';
-import chroma from 'chroma-js';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   IconArrowLeft, 
@@ -53,7 +51,8 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
-import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -81,65 +80,6 @@ import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 
 import { useTranslation } from 'react-i18next';
-
-interface CategoryOption {
-  value: string;
-  label: string;
-  color: string;
-}
-
-const colourStyles: StylesConfig<CategoryOption, true> = {
-  control: (styles) => ({ ...styles, backgroundColor: 'white' }),
-  option: (styles, { data, isDisabled, isFocused, isSelected }) => {
-    const color = chroma(data.color);
-    return {
-      ...styles,
-      backgroundColor: isDisabled
-        ? undefined
-        : isSelected
-        ? data.color
-        : isFocused
-        ? color.alpha(0.1).css()
-        : undefined,
-      color: isDisabled
-        ? '#ccc'
-        : isSelected
-        ? chroma.contrast(color, 'white') > 2
-          ? 'white'
-          : 'black'
-        : data.color,
-      cursor: isDisabled ? 'not-allowed' : 'default',
-
-      ':active': {
-        ...styles[':active'],
-        backgroundColor: !isDisabled
-          ? isSelected
-            ? data.color
-            : color.alpha(0.3).css()
-          : undefined,
-      },
-    };
-  },
-  multiValue: (styles, { data }) => {
-    const color = chroma(data.color);
-    return {
-      ...styles,
-      backgroundColor: color.alpha(0.1).css(),
-    };
-  },
-  multiValueLabel: (styles, { data }) => ({
-    ...styles,
-    color: data.color,
-  }),
-  multiValueRemove: (styles, { data }) => ({
-    ...styles,
-    color: data.color,
-    ':hover': {
-      backgroundColor: data.color,
-      color: 'white',
-    },
-  }),
-};
 
 const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id }: any) => (
   <div className="space-y-1">
@@ -212,6 +152,9 @@ export default function ProjectDetail() {
   const [visas, setVisas] = useState<Visa[]>([]);
   const [receptions, setReceptions] = useState<Reception[]>([]);
   const [reserves, setReserves] = useState<Reserve[]>([]);
+  const [gpaReserves, setGpaReserves] = useState<GpaReserve[]>([]);
+  const [permits, setPermits] = useState<Permit[]>([]);
+  const [rfis, setRfis] = useState<Rfi[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [projectTenders, setProjectTenders] = useState<Tender[]>([]);
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
@@ -275,23 +218,10 @@ export default function ProjectDetail() {
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [isAddingSpec, setIsAddingSpec] = useState(false);
   const [newSpecTitle, setNewSpecTitle] = useState('');
-  const [isAddingReserve, setIsAddingReserve] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [isAnnotating, setIsAnnotating] = useState(false);
-  const [annotationCoords, setAnnotationCoords] = useState<{ x: number, y: number } | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [editingReserveId, setEditingReserveId] = useState<string | null>(null);
-  const [editReserveData, setEditReserveData] = useState<Reserve | null>(null);
-  const [newReserve, setNewReserve] = useState({
-    title: '',
-    batiment: '',
-    local: '',
-    status: 'A faire',
-    lots: [] as any[],
-    entreprises: [] as any[],
-    created_at: new Date().toISOString().split('T')[0],
-    due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-  });
+  const [isAddingPermit, setIsAddingPermit] = useState(false);
+  const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
+  const [isAddingRfi, setIsAddingRfi] = useState(false);
+  const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [activeTab, setActiveTab] = useState('INFOS');
@@ -350,6 +280,9 @@ export default function ProjectDetail() {
       fetchProjectTenders();
       fetchProjectMembers();
       fetchPhaseHistory();
+      fetchGpaReserves();
+      fetchPermits();
+      fetchRfis();
     }
   }, [id]);
 
@@ -389,16 +322,6 @@ export default function ProjectDetail() {
       if (list) list.push(r); else map.set(r.reception_id, [r]);
     }
     return map;
-  }, [reserves]);
-  const reserveStats = useMemo(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const in7 = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return {
-      ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
-      retard: reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) < today).length,
-      urgentes: reserves.filter(r => r.status !== 'Levée' && r.status !== 'Quitus Transmis' && new Date(r.due_date) >= today && new Date(r.due_date) <= in7).length,
-      levees: reserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length,
-    };
   }, [reserves]);
 
   const fetchProjectMembers = async () => {
@@ -473,6 +396,33 @@ export default function ProjectDetail() {
     try {
       const res = await fetch(`/api/reserves?project_id=${id}`);
       if (res.ok) setReserves(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchGpaReserves = async () => {
+    try {
+      const res = await fetch(`/api/gpa-reserves?project_id=${id}`);
+      if (res.ok) setGpaReserves(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchPermits = async () => {
+    try {
+      const res = await fetch(`/api/permits?project_id=${id}`);
+      if (res.ok) setPermits(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchRfis = async () => {
+    try {
+      const res = await fetch(`/api/rfis?project_id=${id}`);
+      if (res.ok) setRfis(await res.json());
     } catch (err) {
       console.error(err);
     }
@@ -2742,6 +2692,204 @@ export default function ProjectDetail() {
                     )}
                   </div>
                 </div>
+
+                {/* Permits Section */}
+                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                  <CardHeader
+                    icon={IconRubberStamp}
+                    title={
+                      <span className="flex items-center gap-2">
+                        Permis
+                        <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{permits.length}</span>
+                      </span>
+                    }
+                    action={
+                      <button
+                        onClick={() => setIsAddingPermit(!isAddingPermit)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                      >
+                        <IconPlus size={14} />
+                        {isAddingPermit ? 'Annuler' : 'Ajouter'}
+                      </button>
+                    }
+                  />
+                  {isAddingPermit && (
+                    <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.type} onChange={e => setNewPermit(prev => ({ ...prev, type: e.target.value as any }))}>
+                          <option value="PC">PC</option>
+                          <option value="DP">DP</option>
+                          <option value="AT">AT</option>
+                        </select>
+                        <input type="text" placeholder="Référence" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.reference} onChange={e => setNewPermit(prev => ({ ...prev, reference: e.target.value }))} />
+                        <input type="date" placeholder="Date de dépôt" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.submission_date} onChange={e => setNewPermit(prev => ({ ...prev, submission_date: e.target.value }))} />
+                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.status} onChange={e => setNewPermit(prev => ({ ...prev, status: e.target.value as any }))}>
+                          <option value="en_instruction">En instruction</option>
+                          <option value="accorde">Accordé</option>
+                          <option value="refuse">Refusé</option>
+                          <option value="recours">Recours</option>
+                        </select>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={async () => {
+                            if (!id) return;
+                            try {
+                              const res = await fetch('/api/permits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newPermit, project_id: id }) });
+                              if (res.ok) {
+                                const data = await res.json();
+                                setPermits(prev => [...prev, data]);
+                                setIsAddingPermit(false);
+                                setNewPermit({ type: 'PC', reference: '', submission_date: '', decision_date: '', status: 'en_instruction', notes: '' });
+                              }
+                            } catch (err) { console.error(err); }
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                        >
+                          Ajouter
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-4">
+                    {permits.length === 0 ? (
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun permis pour ce projet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {permits.map(p => (
+                          <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
+                              <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
+                              <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <select
+                                className="text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
+                                value={p.status}
+                                onChange={async (e) => {
+                                  const status = e.target.value;
+                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
+                                  if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
+                                }}
+                              >
+                                <option value="en_instruction">En instruction</option>
+                                <option value="accorde">Accordé</option>
+                                <option value="refuse">Refusé</option>
+                                <option value="recours">Recours</option>
+                              </select>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Supprimer ce permis ?')) return;
+                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
+                                  if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
+                                }}
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                title="Supprimer"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* RFI Section */}
+                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                  <CardHeader
+                    icon={IconMessageDots}
+                    title={
+                      <span className="flex items-center gap-2">
+                        RFI — Demandes d'information
+                        <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{rfis.length}</span>
+                      </span>
+                    }
+                    action={
+                      <button
+                        onClick={() => setIsAddingRfi(!isAddingRfi)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                      >
+                        <IconPlus size={14} />
+                        {isAddingRfi ? 'Annuler' : 'Ajouter'}
+                      </button>
+                    }
+                  />
+                  {isAddingRfi && (
+                    <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
+                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
+                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={async () => {
+                            if (!id || !newRfi.question) return;
+                            try {
+                              const res = await fetch('/api/rfis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newRfi, project_id: id }) });
+                              if (res.ok) {
+                                const data = await res.json();
+                                setRfis(prev => [...prev, data]);
+                                setIsAddingRfi(false);
+                                setNewRfi({ question: '', asked_by: '', due_date: '' });
+                              }
+                            } catch (err) { console.error(err); }
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                        >
+                          Ajouter
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-4">
+                    {rfis.length === 0 ? (
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucune RFI pour ce projet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {rfis.map(r => (
+                          <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{r.question}</p>
+                              <p className="text-[10px] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <select
+                                className={cn(
+                                  "text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
+                                  r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                )}
+                                value={r.status}
+                                onChange={async (e) => {
+                                  const status = e.target.value;
+                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status, answered_date: status === 'repondu' ? new Date().toISOString().split('T')[0] : null }) });
+                                  if (res.ok) setRfis(prev => prev.map(x => x.id === r.id ? { ...x, status: status as any } : x));
+                                }}
+                              >
+                                <option value="en_attente">En attente</option>
+                                <option value="repondu">Répondu</option>
+                              </select>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Supprimer cette RFI ?')) return;
+                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
+                                  if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
+                                }}
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                title="Supprimer"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -3417,421 +3565,28 @@ export default function ProjectDetail() {
 
             {activeTab === 'AOR' && (
               <div className="space-y-8">
-                {/* Cartes d'alertes réserves */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatTile label="Réserves ouvertes" color="blue" icon={IconAlertTriangle} value={reserveStats.ouvertes} sub="A faire + En cours" />
-                  <StatTile label="En retard" color="red" icon={IconAlertCircle} value={reserveStats.retard} sub="Échéance dépassée" />
-                  <StatTile label="Urgentes" color="orange" icon={IconClock} value={reserveStats.urgentes} sub="Dans les 7 jours" />
-                  <StatTile label="Levées" color="green" icon={IconCheck} value={reserveStats.levees} sub="Levée + Quitus" />
-                </div>
+                <ReserveTracker
+                  projectId={id || ''}
+                  apiBase="/api/reserves"
+                  title="Réserves"
+                  reserves={reserves}
+                  setReserves={setReserves}
+                  plans={plans}
+                  lotsList={project?.lots_list}
+                />
+
+                <ReserveTracker
+                  projectId={id || ''}
+                  apiBase="/api/gpa-reserves"
+                  title="Réserves GPA"
+                  reserves={gpaReserves}
+                  setReserves={setGpaReserves}
+                  plans={plans}
+                  lotsList={project?.lots_list}
+                />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
-                    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                      <CardHeader
-                        icon={IconClipboardCheck}
-                        title="Réserves"
-                        action={
-                        <div className="flex items-center gap-2">
-                          {plans.length > 0 && (
-                            <select
-                              className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none"
-                              value={selectedPlanId || ''}
-                              onChange={e => setSelectedPlanId(e.target.value || null)}
-                            >
-                              <option value="">Sélectionner un plan</option>
-                              {plans.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                              ))}
-                            </select>
-                          )}
-                          <button
-                            onClick={() => {
-                              setIsAddingReserve(!isAddingReserve);
-                              if (isAddingReserve) {
-                                setIsAnnotating(false);
-                                setAnnotationCoords(null);
-                              }
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
-                          >
-                            <IconPlus size={14} />
-                            {isAddingReserve ? 'Annuler' : 'Créer une réserve'}
-                          </button>
-                        </div>
-                        }
-                      />
-
-                      {isAddingReserve && (
-                        <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
-                          {selectedPlanId && !annotationCoords && (
-                            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg text-blue-600 dark:text-blue-400 text-xs font-medium flex items-center gap-3">
-                              <IconPlus size={16} />
-                              Cliquez sur le plan à droite pour placer la réserve
-                            </div>
-                          )}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Intitulé</label>
-                          <input 
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.title}
-                            onChange={e => setNewReserve(prev => ({ ...prev, title: e.target.value }))}
-                            placeholder="ex: Peinture à reprendre"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Bâtiment</label>
-                          <input 
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.batiment}
-                            onChange={e => setNewReserve(prev => ({ ...prev, batiment: e.target.value }))}
-                            placeholder="ex: Bâtiment A"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Local</label>
-                          <input 
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.local}
-                            onChange={e => setNewReserve(prev => ({ ...prev, local: e.target.value }))}
-                            placeholder="ex: Salon"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
-                          <select 
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.status}
-                            onChange={e => setNewReserve(prev => ({ ...prev, status: e.target.value as any }))}
-                          >
-                            <option value="A faire">A faire</option>
-                            <option value="En cours">En cours</option>
-                            <option value="Levée">Levée</option>
-                            <option value="Refusée par l'entreprise">Refusée par l'entreprise</option>
-                            <option value="Quitus Transmis">Quitus Transmis</option>
-                            <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Lots</label>
-                          <Select
-                            isMulti
-                            options={project?.lots_list?.map(l => ({ value: l.id, label: l.lot_title, color: '#3b82f6' })) || []}
-                            styles={colourStyles as any}
-                            className="text-sm"
-                            onChange={(vals: any) => setNewReserve(prev => ({ ...prev, lots: vals }))}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Entreprises</label>
-                          <Select
-                            isMulti
-                            options={project?.lots_list?.filter(l => l.contact_name).map(l => ({ value: l.contact_id || l.contact_name, label: l.contact_name, color: '#10b981' })) || []}
-                            styles={colourStyles as any}
-                            className="text-sm"
-                            onChange={(vals: any) => setNewReserve(prev => ({ ...prev, entreprises: vals }))}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date de création</label>
-                          <input 
-                            type="date"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.created_at}
-                            onChange={e => {
-                              const newDate = e.target.value;
-                              const dueDate = new Date(new Date(newDate).getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                              setNewReserve(prev => ({ ...prev, created_at: newDate, due_date: dueDate }));
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date d'échéance</label>
-                          <input 
-                            type="date"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newReserve.due_date}
-                            onChange={e => setNewReserve(prev => ({ ...prev, due_date: e.target.value }))}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end gap-3">
-                        <button 
-                          onClick={() => setIsAddingReserve(false)}
-                          className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
-                        >
-                          Annuler
-                        </button>
-                        <button 
-                          onClick={async () => {
-                            if (!newReserve.title) return;
-                            try {
-                              const res = await fetch('/api/reserves', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  id: window.crypto.randomUUID(),
-                                  project_id: id,
-                                  title: newReserve.title,
-                                  batiment: newReserve.batiment,
-                                  local: newReserve.local,
-                                  status: newReserve.status,
-                                  lots: JSON.stringify(newReserve.lots.map(l => l.label)),
-                                  entreprises: JSON.stringify(newReserve.entreprises.map(e => e.label)),
-                                  created_at: newReserve.created_at,
-                                  due_date: newReserve.due_date,
-                                  plan_id: selectedPlanId,
-                                  x: annotationCoords?.x,
-                                  y: annotationCoords?.y
-                                })
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setReserves(prev => [...prev, data]);
-                                setIsAddingReserve(false);
-                                setNewReserve({
-                                  title: '',
-                                  batiment: '',
-                                  local: '',
-                                  status: 'A faire',
-                                  lots: [],
-                                  entreprises: [],
-                                  created_at: new Date().toISOString().split('T')[0],
-                                  due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-                                });
-                              }
-                            } catch (err) {
-                              console.error(err);
-                            }
-                          }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
-                        >
-                          Ajouter
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-4 py-3 text-left w-12">N°</th>
-                          <th className="px-4 py-3 text-left">Bâtiment / Local</th>
-                          <th className="px-4 py-3 text-left">Intitulé</th>
-                          <th className="px-4 py-3 text-left">Statut</th>
-                          <th className="px-4 py-3 text-left">Créé le</th>
-                          <th className="px-4 py-3 text-left">Echéance / Retard</th>
-                          <th className="px-4 py-3 text-right w-10"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--tblr-border)]">
-                        {(Object.entries(reserves.reduce((acc, res) => {
-                          const lots = JSON.parse(res.lots || '[]');
-                          const entreprises = JSON.parse(res.entreprises || '[]');
-                          const groupKey = lots.length > 0 ? `${lots.join(', ')} / ${entreprises.join(', ')}` : 'Sans Lot / Entreprise';
-                          if (!acc[groupKey]) acc[groupKey] = [];
-                          acc[groupKey].push(res);
-                          return acc;
-                        }, {} as Record<string, Reserve[]>)) as [string, Reserve[]][]).map(([groupKey, groupReserves]) => (
-                          <React.Fragment key={groupKey}>
-                            <tr
-                              className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
-                              onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                            >
-                              <td colSpan={7} className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  {expandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                                  <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
-                                  <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserves)</span>
-                                </div>
-                              </td>
-                            </tr>
-                            {expandedGroups[groupKey] && groupReserves.map((res) => {
-                              const todayD = new Date(); todayD.setHours(0,0,0,0);
-                              const dueD = new Date(res.due_date); dueD.setHours(0,0,0,0);
-                              const isOverdue = dueD < todayD && res.status !== 'Levée' && res.status !== 'Quitus Transmis';
-                              const retardJours = isOverdue ? Math.floor((todayD.getTime() - dueD.getTime()) / 86400000) : 0;
-                              return (
-                                <tr key={res.id} className={cn("transition-colors group", isOverdue ? "bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50" : "hover:bg-[var(--tblr-surface-2)]")}>
-                                  <td className="px-4 py-4 font-mono text-[10px] text-[var(--tblr-muted)]">
-                                    #{res.number || '-'}
-                                  </td>
-                                  <td className="px-4 py-4">
-                                    {editingReserveId === res.id ? (
-                                      <div className="flex gap-2">
-                                        <input
-                                          type="text"
-                                          className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs w-20"
-                                          value={editReserveData?.batiment}
-                                          onChange={e => setEditReserveData(prev => prev ? ({ ...prev, batiment: e.target.value }) : null)}
-                                        />
-                                        <input
-                                          type="text"
-                                          className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs w-20"
-                                          value={editReserveData?.local}
-                                          onChange={e => setEditReserveData(prev => prev ? ({ ...prev, local: e.target.value }) : null)}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <span className="text-zinc-600 dark:text-zinc-300">{res.batiment} {res.local && `/ ${res.local}`}</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-4">
-                                    {editingReserveId === res.id ? (
-                                      <input
-                                        type="text"
-                                        className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs"
-                                        value={editReserveData?.title}
-                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, title: e.target.value }) : null)}
-                                      />
-                                    ) : (
-                                      <div className="font-medium text-[var(--tblr-text)]">{res.title}</div>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-4">
-                                    {/* Inline status select — saves immediately */}
-                                    <select
-                                      className={cn(
-                                        "border-none rounded-full text-[10px] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer",
-                                        res.status === 'Levée' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                                        res.status === 'Quitus Transmis' ? "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400" :
-                                        res.status === 'En cours' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                                        res.status === 'Refusée par l\'entreprise' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                                        res.status === 'Levée refusée par le MOE' ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400" :
-                                        "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                      )}
-                                      value={res.status}
-                                      onChange={async (e) => {
-                                        const newStatus = e.target.value as Reserve['status'];
-                                        try {
-                                          const updated = { ...res, status: newStatus };
-                                          const response = await fetch(`/api/reserves/${res.id}`, {
-                                            method: 'PUT',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify(updated)
-                                          });
-                                          if (response.ok) {
-                                            setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
-                                          }
-                                        } catch (err) { console.error(err); }
-                                      }}
-                                    >
-                                      <option value="A faire">A faire</option>
-                                      <option value="En cours">En cours</option>
-                                      <option value="Levée">Levée</option>
-                                      <option value="Refusée par l'entreprise">Refusée par l'entreprise</option>
-                                      <option value="Quitus Transmis">Quitus Transmis</option>
-                                      <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
-                                    </select>
-                                  </td>
-                                  <td className="px-4 py-4 text-[10px] text-[var(--tblr-muted)]">
-                                    {new Date(res.created_at).toLocaleDateString('fr-FR')}
-                                  </td>
-                                  <td className="px-4 py-4">
-                                    {editingReserveId === res.id ? (
-                                      <input
-                                        type="date"
-                                        className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs"
-                                        value={editReserveData?.due_date}
-                                        onChange={e => setEditReserveData(prev => prev ? ({ ...prev, due_date: e.target.value }) : null)}
-                                      />
-                                    ) : (
-                                      <div className="space-y-0.5">
-                                        <div className={cn("text-xs font-medium", isOverdue ? "text-red-500" : "text-zinc-600 dark:text-zinc-300")}>
-                                          {new Date(res.due_date).toLocaleDateString('fr-FR')}
-                                        </div>
-                                        {isOverdue && (
-                                          <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[9px] font-bold">
-                                            +{retardJours}j
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      {editingReserveId === res.id ? (
-                                        <>
-                                          <button
-                                            onClick={async () => {
-                                              if (!editReserveData) return;
-                                              try {
-                                                const response = await fetch(`/api/reserves/${editReserveData.id}`, {
-                                                  method: 'PUT',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify(editReserveData)
-                                                });
-                                                if (response.ok) {
-                                                  setReserves(prev => prev.map(r => r.id === editReserveData.id ? editReserveData : r));
-                                                  setEditingReserveId(null);
-                                                  setEditReserveData(null);
-                                                }
-                                              } catch (err) { console.error(err); }
-                                            }}
-                                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
-                                          >
-                                            <IconCheck size={14} />
-                                          </button>
-                                          <button
-                                            onClick={() => { setEditingReserveId(null); setEditReserveData(null); }}
-                                            className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                          >
-                                            <IconX size={14} />
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <button
-                                            onClick={() => { setEditingReserveId(res.id); setEditReserveData({ ...res }); }}
-                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
-                                            title="Modifier"
-                                          >
-                                            <IconFileText size={14} />
-                                          </button>
-                                          <button
-                                            onClick={async () => {
-                                              if (!confirm('Supprimer cette réserve ?')) return;
-                                              try {
-                                                const response = await fetch(`/api/reserves/${res.id}`, { method: 'DELETE' });
-                                                if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
-                                              } catch (err) { console.error(err); }
-                                            }}
-                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                            title="Supprimer"
-                                          >
-                                            <IconTrash size={14} />
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </React.Fragment>
-                        ))}
-                        {reserves.length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucune réserve.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
                 {/* PV de réception */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader

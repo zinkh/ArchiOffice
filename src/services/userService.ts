@@ -2,7 +2,8 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  system_role: 'admin' | 'pm' | 'user';
+  system_role: 'admin' | 'manager' | 'pm' | 'user';
+  manager_id?: string | null;
   role?: string;
   avatar?: string;
 }
@@ -13,13 +14,22 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
   return res.json();
 };
 
-export const updateUserRole = async (id: string, role: 'admin' | 'pm' | 'user'): Promise<void> => {
+export const updateUserRole = async (id: string, role: 'admin' | 'manager' | 'pm' | 'user'): Promise<void> => {
   const res = await fetch(`/api/team/${id}/role`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
   });
   if (!res.ok) throw new Error('Failed to update role');
+};
+
+export const updateUserManager = async (id: string, managerId: string | null): Promise<void> => {
+  const res = await fetch(`/api/team/${id}/manager`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manager_id: managerId }),
+  });
+  if (!res.ok) throw new Error('Failed to update manager');
 };
 
 export const createUser = async (user: Omit<UserProfile, 'id'>): Promise<UserProfile> => {

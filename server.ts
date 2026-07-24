@@ -2220,6 +2220,168 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
   });
 
+  // GPA reserves — same mechanism as OPR `reserves` above, kept in a
+  // separate table since OPR and GPA reserves are distinct tracking sets.
+  app.get("/api/gpa-reserves", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id } = req.query;
+      let query = supabaseAdmin.from('gpa_reserves').select('*').eq('tenant_id', tenantId);
+      if (project_id) query = query.eq('project_id', project_id as string);
+      const { data, error } = await query;
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch GPA reserves" }); }
+  });
+
+  app.post("/api/gpa-reserves", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
+      const { data: lastRow } = await supabaseAdmin.from('gpa_reserves').select('number').eq('tenant_id', tenantId).eq('project_id', project_id).order('number', { ascending: false }).limit(1).single();
+      const nextNumber = ((lastRow as any)?.number || 0) + 1;
+      const id = bodyId || crypto.randomUUID();
+      const { data, error } = await supabaseAdmin.from('gpa_reserves').insert({
+        id, tenant_id: tenantId, project_id, reception_id, title, batiment, local,
+        status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber
+      }).select().single();
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création de la réserve GPA N° ${nextNumber} "${title}"`, title || '', id, 'gpa_reserve', 'Réserves GPA');
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create GPA reserve" }); }
+  });
+
+  app.delete("/api/gpa-reserves/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: reserve } = await supabaseAdmin.from('gpa_reserves').select('title, number').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      const { error } = await supabaseAdmin.from('gpa_reserves').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la réserve GPA N° ${(reserve as any)?.number} "${(reserve as any)?.title || ''}"`, (reserve as any)?.title || '', req.params.id, 'gpa_reserve', 'Réserves GPA');
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete GPA reserve" }); }
+  });
+
+  app.put("/api/gpa-reserves/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { title, batiment, local, status, lots, entreprises, created_at, due_date } = req.body;
+      const { error } = await supabaseAdmin.from('gpa_reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update GPA reserve" }); }
+  });
+
+  // Permits (PC / DP / AT)
+  app.get("/api/permits", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id } = req.query;
+      let query = supabaseAdmin.from('permits').select('*').eq('tenant_id', tenantId);
+      if (project_id) query = query.eq('project_id', project_id as string);
+      const { data, error } = await query;
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch permits" }); }
+  });
+
+  app.post("/api/permits", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, type, reference, submission_date, decision_date, status, notes } = req.body;
+      const { data, error } = await supabaseAdmin.from('permits').insert({
+        id: crypto.randomUUID(), tenant_id: tenantId, project_id, type, reference: reference || null,
+        submission_date: submission_date || null, decision_date: decision_date || null,
+        status: status || 'en_instruction', notes: notes || null, created_at: new Date().toISOString()
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create permit" }); }
+  });
+
+  app.put("/api/permits/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { type, reference, submission_date, decision_date, status, notes } = req.body;
+      const { data, error } = await supabaseAdmin.from('permits').update({
+        type, reference: reference || null, submission_date: submission_date || null,
+        decision_date: decision_date || null, status, notes: notes || null
+      }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update permit" }); }
+  });
+
+  app.delete("/api/permits/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('permits').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete permit" }); }
+  });
+
+  // RFIs (demandes d'information)
+  app.get("/api/rfis", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id } = req.query;
+      let query = supabaseAdmin.from('rfis').select('*').eq('tenant_id', tenantId);
+      if (project_id) query = query.eq('project_id', project_id as string);
+      const { data, error } = await query;
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch RFIs" }); }
+  });
+
+  app.post("/api/rfis", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, question, asked_by, asked_date, due_date, status, answer, answered_date } = req.body;
+      const { data, error } = await supabaseAdmin.from('rfis').insert({
+        id: crypto.randomUUID(), tenant_id: tenantId, project_id, question,
+        asked_by: asked_by || null, asked_date: asked_date || new Date().toISOString().split('T')[0],
+        due_date: due_date || null, status: status || 'en_attente',
+        answer: answer || null, answered_date: answered_date || null, created_at: new Date().toISOString()
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create RFI" }); }
+  });
+
+  app.put("/api/rfis/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { question, asked_by, asked_date, due_date, status, answer, answered_date } = req.body;
+      const { data, error } = await supabaseAdmin.from('rfis').update({
+        question, asked_by: asked_by || null, asked_date, due_date: due_date || null,
+        status, answer: answer || null, answered_date: answered_date || null
+      }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update RFI" }); }
+  });
+
+  app.delete("/api/rfis/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await supabaseAdmin.from('rfis').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete RFI" }); }
+  });
+
   // Plans
   app.get("/api/plans", async (req: any, res: any) => {
     try {
@@ -2705,7 +2867,7 @@ async function startServer() {
   app.get("/api/team", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('tenant_id', tenantId);
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, name, email, role, system_role, manager_id, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('tenant_id', tenantId);
       if (error) throw error;
       res.json((data || []).map((p: any) => ({
         ...p,
@@ -2718,7 +2880,7 @@ async function startServer() {
 
   app.get("/api/me", async (req: any, res: any) => {
     try {
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, tenant_id, name, email, role, system_role, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, tenant_id, name, email, role, system_role, manager_id, avatar, sender_option, default_email_template, phone, address, job_title, department').eq('id', req.user.id).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (!data) return res.json(null);
       res.json({
@@ -2983,6 +3145,20 @@ async function startServer() {
     } catch (e: any) {
       console.error("Error updating user role:", e);
       res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update role" });
+    }
+  });
+
+  app.put("/api/team/:id/manager", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { id } = req.params;
+      const { manager_id } = req.body;
+      const { error } = await supabaseAdmin.from('profiles').update({ manager_id: manager_id || null }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error updating user manager:", e);
+      res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update manager" });
     }
   });
 
@@ -8834,6 +9010,24 @@ async function startServer() {
   // ─── End Super-Admin Dashboard ────────────────────────────────────────────
 
   // ─── Project Members (per-project access control) ─────────────────────────
+  // Tenant-wide project membership lookup (optionally filtered by user_id) —
+  // lets the dashboard resolve "my projects" / "my team's projects" without
+  // looping the per-project endpoint below.
+  app.get("/api/project-members", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { user_id } = req.query;
+      let query = supabaseAdmin.from('project_members').select('*').eq('tenant_id', tenantId);
+      if (user_id) query = query.eq('user_id', user_id as string);
+      const { data, error } = await query;
+      if (error) {
+        if ((error as any).code === '42P01') { res.json([]); return; }
+        throw error;
+      }
+      res.json(data || []);
+    } catch (e: any) { console.error(e); res.json([]); }
+  });
+
   app.get("/api/projects/:id/members", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

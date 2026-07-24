@@ -270,6 +270,51 @@ export interface Reserve {
   number?: number;
 }
 
+export interface Permit {
+  id: string;
+  tenant_id?: string;
+  project_id: string;
+  type: 'PC' | 'DP' | 'AT';
+  reference?: string;
+  submission_date?: string;
+  decision_date?: string;
+  status: 'en_instruction' | 'accorde' | 'refuse' | 'recours';
+  notes?: string;
+  created_at?: string;
+}
+
+export interface Rfi {
+  id: string;
+  tenant_id?: string;
+  project_id: string;
+  question: string;
+  asked_by?: string;
+  asked_date?: string;
+  due_date?: string;
+  status: 'en_attente' | 'repondu';
+  answer?: string;
+  answered_date?: string;
+  created_at?: string;
+}
+
+export interface GpaReserve {
+  id: string;
+  project_id: string;
+  reception_id?: string;
+  title: string;
+  batiment: string;
+  local: string;
+  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE';
+  lots: string; // JSON stringified array
+  entreprises: string; // JSON stringified array
+  created_at: string;
+  due_date: string;
+  plan_id?: string;
+  x?: number;
+  y?: number;
+  number?: number;
+}
+
 export interface Plan {
   id: string;
   project_id: string;
@@ -288,7 +333,8 @@ export interface TeamMember {
   role: string;
   email: string;
   avatar?: string;
-  system_role: 'admin' | 'pm' | 'user';
+  system_role: 'admin' | 'manager' | 'pm' | 'user';
+  manager_id?: string | null;
   senderOption?: 'agency' | 'personal';
   defaultEmailTemplate?: string;
   phone?: string;
