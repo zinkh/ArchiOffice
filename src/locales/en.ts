@@ -708,6 +708,9 @@ export default {
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
       "agent_chat_cancel": "Cancel",
       "agent_chat_cancelled": "Request cancelled.",
+      "agent_chat_drop_hint": "Drop a document here to attach it",
+      "agent_chat_uploading": "Uploading {{name}}…",
+      "agent_chat_upload_error": "Failed to upload the document.",
 
       // Loading / error states
       "error_loading_title": "Couldn't load the data",
