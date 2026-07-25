@@ -1357,7 +1357,7 @@ async function startServer() {
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'cv', 'message-attachments', 'feed-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
@@ -2085,24 +2085,37 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch visas" }); }
   });
 
-  app.post("/api/visas", async (req: any, res: any) => {
+  app.post("/api/visas", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, title, date, status, comments, document_url } = req.body;
+      const { project_id, title, date, status, comments, lot_id } = req.body;
+      const id = crypto.randomUUID();
+      let document_url = req.body.document_url || null;
+      if (req.file) {
+        const storagePath = `${tenantId}/${project_id}/visas/${id}/${sanitizeFilename(req.file.originalname)}`;
+        document_url = await uploadToStorage('documents', storagePath, req.file.buffer, req.file.mimetype);
+      }
       const { data, error } = await supabaseAdmin.from('visas').insert({
-        id: crypto.randomUUID(), tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url
+        id, tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url, lot_id: lot_id || null
       }).select().single();
       if (error) throw error;
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
-  app.put("/api/visas/:id", async (req: any, res: any) => {
+  app.put("/api/visas/:id", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, date, status, comments, document_url } = req.body;
+      const { title, date, status, comments, lot_id } = req.body;
+      const updateFields: any = { title, date, status, comments, lot_id: lot_id || null };
+      if (req.file) {
+        const storagePath = `${tenantId}/${req.body.project_id || 'general'}/visas/${req.params.id}/${sanitizeFilename(req.file.originalname)}`;
+        updateFields.document_url = await uploadToStorage('documents', storagePath, req.file.buffer, req.file.mimetype);
+      } else if (req.body.document_url !== undefined) {
+        updateFields.document_url = req.body.document_url || null;
+      }
       const { data, error } = await supabaseAdmin.from('visas')
-        .update({ title, date, status, comments, document_url })
+        .update(updateFields)
         .eq('id', req.params.id)
         .eq('tenant_id', tenantId)
         .select().single();
@@ -2393,16 +2406,37 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch plans" }); }
   });
 
-  app.post("/api/plans", async (req: any, res: any) => {
+  app.post("/api/plans", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, project_id, name, file_url } = req.body;
+      const { id: bodyId, project_id, name, index, version, parent_id, category } = req.body;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
       const id = bodyId || crypto.randomUUID();
       const uploaded_at = new Date().toISOString();
-      const { error } = await supabaseAdmin.from('plans').insert({ id, tenant_id: tenantId, project_id, name, file_url, uploaded_at });
+      const storagePath = `${tenantId}/${project_id}/${id}/${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('plans', storagePath, file.buffer, file.mimetype);
+      const versionVal = version ? Number(version) : 1;
+      const { error } = await supabaseAdmin.from('plans').insert({
+        id, tenant_id: tenantId, project_id, name, file_url, uploaded_at,
+        index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null
+      });
       if (error) throw error;
-      res.json({ id, project_id, name, file_url, uploaded_at });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create plan" }); }
+      res.json({ id, project_id, name, file_url, uploaded_at, index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create plan" }); }
+  });
+
+  app.delete("/api/plans/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: plan } = await supabaseAdmin.from('plans').select('file_url').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      const { error } = await supabaseAdmin.from('plans').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      if ((plan as any)?.file_url?.includes('/object/public/plans/')) {
+        deleteFromStorage('plans', (plan as any).file_url).catch(() => {});
+      }
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete plan" }); }
   });
 
   // Document Routes
@@ -2432,8 +2466,8 @@ async function startServer() {
       const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
-      const { indice, emetteur, doc_type } = req.body;
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null });
+      const { indice, emetteur, doc_type, contact_id, contact_name } = req.body;
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
@@ -2471,7 +2505,7 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type } = req.body;
+      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type, contact_id, contact_name, validation_status, validation_comments } = req.body;
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
@@ -2487,6 +2521,10 @@ async function startServer() {
         const uploaded_at = new Date().toISOString();
         const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
+        if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
+        if (validation_status !== undefined) updateFields.validation_status = validation_status;
+        if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
         await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
@@ -2494,6 +2532,10 @@ async function startServer() {
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
+        if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
+        if (validation_status !== undefined) updateFields.validation_status = validation_status;
+        if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
       }
@@ -3413,9 +3455,9 @@ async function startServer() {
   app.post("/api/milestones", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, tender_id, proposal_id, title, due_date, completed } = req.body;
+      const { project_id, tender_id, proposal_id, title, due_date, completed, duration_days, dependencies } = req.body;
       const id = crypto.randomUUID();
-      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed }).select().single();
+      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).select().single();
       if (error) throw error;
       res.status(201).json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create milestone: " + e.message }); }
@@ -3425,8 +3467,8 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { title, due_date, completed } = req.body;
-      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed }).eq('id', id).eq('tenant_id', tenantId);
+      const { title, due_date, completed, duration_days, dependencies } = req.body;
+      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update milestone: " + e.message }); }
@@ -3810,6 +3852,41 @@ async function startServer() {
         if (specialties_list && Array.isArray(specialties_list) && specialties_list.length > 0) {
           const cots = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), project_id: projectId, tenant_id: tenantId, specialty: spec.specialty_name, contact_id: spec.contact_id || null }));
           await supabaseAdmin.from('project_cotraitants').insert(cots);
+        }
+
+        // Copy the fee-distribution mission breakdown into a new draft ContratMOE,
+        // so the project's HONOS tab has real mission %/cotraitant data instead of
+        // starting empty (fee_distribution otherwise stays orphaned on the proposal).
+        try {
+          const feeData = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          const missions: any[] = feeData?.missions || [];
+          if (missions.length > 0) {
+            const totalBaseAmount = missions
+              .filter((m: any) => m.category === 'Mission base')
+              .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+            const missions_list = missions.map((m: any) => ({
+              id: m.id, name: m.name, incluse: true,
+              pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
+            }));
+            const totalHonoraires = p.amount || totalBaseAmount || 1;
+            const cotraitants = (specialties_list || []).map((spec: any) => {
+              const montant_honoraires = missions.reduce((acc: number, m: any) =>
+                acc + (m.amount || 0) * ((m.percentages?.[spec.contact_id] || 0) / 100), 0);
+              return {
+                id: crypto.randomUUID(), contact_id: spec.contact_id || null, contact_name: spec.contact_name || null,
+                specialty: spec.specialty_name, montant_honoraires, fee_pct: montant_honoraires / totalHonoraires * 100,
+              };
+            });
+            await supabaseAdmin.from('contrats_moe').insert({
+              id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
+              client_id: p.client_id || null, intitule_projet: p.title,
+              type_contrat: 'construction_neuve', type_moa: 'prive', status: 'Brouillon',
+              mode_honoraires: 'forfait', montant_honoraires: p.amount || null,
+              missions_list, cotraitants,
+            });
+          }
+        } catch (err) {
+          console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
       }
 
