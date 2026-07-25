@@ -748,3 +748,85 @@ CREATE POLICY "tenant_isolation" ON activities USING (tenant_id = my_tenant_id()
 CREATE POLICY "tenant_isolation" ON feed_posts USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON feed_comments USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON feed_likes USING (tenant_id = my_tenant_id());
+
+-- Document templates library (see migrate_add_document_templates.sql)
+CREATE TABLE IF NOT EXISTS document_templates (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Autre',
+  description TEXT,
+  content TEXT NOT NULL,
+  variables JSONB NOT NULL DEFAULT '[]',
+  is_seeded BOOLEAN NOT NULL DEFAULT false,
+  editable BOOLEAN NOT NULL DEFAULT true,
+  source_template_id TEXT REFERENCES document_templates(id) ON DELETE SET NULL,
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_document_templates_tenant_category ON document_templates(tenant_id, category);
+ALTER TABLE document_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON document_templates USING (tenant_id = my_tenant_id());
+
+-- Time tracking + leave management (see migrate_add_time_and_leave.sql)
+CREATE TABLE IF NOT EXISTS time_entries (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id TEXT NOT NULL,
+  project_id TEXT,
+  entry_date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT,
+  description TEXT,
+  source TEXT NOT NULL DEFAULT 'clock',
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_time_entries_tenant_user_date ON time_entries(tenant_id, user_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_time_entries_tenant_project ON time_entries(tenant_id, project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entries_one_open_per_user
+  ON time_entries(tenant_id, user_id) WHERE end_time IS NULL;
+
+CREATE TABLE IF NOT EXISTS leave_requests (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id TEXT NOT NULL,
+  leave_type TEXT NOT NULL CHECK (leave_type IN ('conges_payes','rtt','maladie','sans_solde','exceptionnel')),
+  motif TEXT,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  business_days NUMERIC NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled')),
+  decided_by TEXT,
+  decided_at TEXT,
+  decision_note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_user ON leave_requests(tenant_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant_status ON leave_requests(tenant_id, status);
+
+CREATE TABLE IF NOT EXISTS leave_balances (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id TEXT NOT NULL,
+  year INTEGER NOT NULL,
+  leave_type TEXT NOT NULL CHECK (leave_type IN ('conges_payes','rtt')),
+  allocated_days NUMERIC NOT NULL,
+  created_at TEXT,
+  updated_at TEXT,
+  UNIQUE (tenant_id, user_id, year, leave_type)
+);
+CREATE INDEX IF NOT EXISTS idx_leave_balances_tenant_user_year ON leave_balances(tenant_id, user_id, year);
+
+ALTER TABLE time_entries    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_requests  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_balances  ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON time_entries   USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON leave_requests USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON leave_balances USING (tenant_id = my_tenant_id());
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_conges_payes NUMERIC DEFAULT 25;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_rtt NUMERIC DEFAULT 0;

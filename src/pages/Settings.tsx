@@ -230,6 +230,8 @@ export default function Settings() {
     numPrefixDevis: 'DEVIS',
     numPrefixFacture: 'FAC',
     numPrefixHonoraires: 'NH',
+    defaultLeaveDaysCongesPayes: 25,
+    defaultLeaveDaysRtt: 0,
     maf_enabled: false,
     maf_numero_adherent: '',
     maf_taux_contrat_permil: '',
@@ -1396,6 +1398,32 @@ export default function Settings() {
                 </div>
               );
             })}
+          </div>
+
+          {/* ── RH : congés par défaut ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>RH — Congés par défaut</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Allocation annuelle par défaut appliquée aux employés sans solde personnalisé. Basé sur la convention collective nationale des entreprises d'architecture (IDCC 2332) : 2,5 jours ouvrables/mois de congés payés (30j/an max) ; les RTT dépendent de l'horaire hebdomadaire contractuel (0 à 35h, jusqu'à 23j à 39h) et se règlent par employé dans la page Congés.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Congés payés (jours/an)</label>
+                <input type="number" className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={settings.defaultLeaveDaysCongesPayes}
+                  onChange={e => setSettings({ ...settings, defaultLeaveDaysCongesPayes: parseFloat(e.target.value) || 0 })} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>RTT par défaut (jours/an)</label>
+                <input type="number" className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={settings.defaultLeaveDaysRtt}
+                  onChange={e => setSettings({ ...settings, defaultLeaveDaysRtt: parseFloat(e.target.value) || 0 })} />
+              </div>
+            </div>
           </div>
 
           {/* ── SMTP ── */}

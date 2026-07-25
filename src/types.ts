@@ -12,7 +12,7 @@ export interface Document {
   id: string;
   project_id: string;
   name: string;
-  category: 'Architectural Drawing' | 'Contract' | 'Report' | 'Other';
+  category: 'Architectural Drawing' | 'Contract' | 'Report' | 'Other' | 'Template';
   phase?: DocumentPhase;
   version: number;
   file_url: string;
@@ -62,6 +62,81 @@ export interface ProjectTemplate {
   default_lots_list?: ProjectLot[];
   default_milestones?: { title: string; due_date_offset_days: number }[];
   default_description: string;
+}
+
+export interface DocumentTemplateVariable {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'date' | 'number';
+  required?: boolean;
+  default_value?: string;
+}
+
+export interface DocumentTemplate {
+  id: string;
+  name: string;
+  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'Autre';
+  description?: string;
+  content: string;
+  variables: DocumentTemplateVariable[];
+  is_seeded: boolean;
+  editable: boolean;
+  source_template_id?: string | null;
+  created_at: string;
+}
+
+export interface TimeEntry {
+  id: string;
+  user_id: string;
+  project_id?: string | null;
+  entry_date: string;
+  start_time: string;
+  end_time?: string | null;
+  description?: string;
+  source: 'clock' | 'manual';
+}
+
+export interface TimeWeeklySummary {
+  total_hours: number;
+  by_project: { project_id: string | null; hours: number }[];
+  by_day: { date: string; hours: number }[];
+}
+
+export interface TimeTeamSummaryEntry {
+  user_id: string;
+  name: string;
+  total_hours: number;
+}
+
+export type LeaveType = 'conges_payes' | 'rtt' | 'maladie' | 'sans_solde' | 'exceptionnel';
+export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type LeaveExceptionnelMotif =
+  | 'naissance' | 'mariage_salarie' | 'mariage_enfant' | 'journee_citoyen'
+  | 'paternite' | 'deces_conjoint_enfant' | 'deces_parent' | 'deces_autre_famille';
+
+export interface LeaveRequest {
+  id: string;
+  user_id: string;
+  leave_type: LeaveType;
+  motif?: LeaveExceptionnelMotif | string;
+  start_date: string;
+  end_date: string;
+  business_days: number;
+  reason?: string;
+  status: LeaveStatus;
+  decided_by?: string;
+  decided_at?: string;
+  decision_note?: string;
+  created_at: string;
+}
+
+export interface LeaveBalance {
+  user_id: string;
+  year: number;
+  leave_type: 'conges_payes' | 'rtt';
+  allocated_days: number;
+  used_days: number;
+  remaining_days: number;
 }
 
 export interface Task {

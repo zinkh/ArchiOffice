@@ -10,6 +10,7 @@ import https from "https";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling, pollAllTenderRssSources } from "./server/tenderRssPoller";
+import { SEED_DOCUMENT_TEMPLATES } from "./server/seedDocumentTemplates";
 
 interface GeoJSONGeometry {
   type: string;
@@ -2609,6 +2610,118 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 
+  // ─── Document Templates ──────────────────────────────────────────────────
+  app.get("/api/document_templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { category } = req.query;
+      const { count } = await supabaseAdmin.from('document_templates').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      if (!count) {
+        const now = new Date().toISOString();
+        const seedRows = SEED_DOCUMENT_TEMPLATES.map(t => ({
+          id: crypto.randomUUID(), tenant_id: tenantId, name: t.name, category: t.category,
+          description: t.description, content: t.content, variables: t.variables,
+          is_seeded: true, editable: false, created_at: now, updated_at: now,
+        }));
+        const { error: seedErr } = await supabaseAdmin.from('document_templates').insert(seedRows);
+        if (seedErr) throw seedErr;
+      }
+      let query = supabaseAdmin.from('document_templates').select('*').eq('tenant_id', tenantId).order('category').order('name');
+      if (category) query = query.eq('category', category as string);
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch document templates" }); }
+  });
+
+  app.post("/api/document_templates", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { name, category, description, content, variables } = req.body;
+      if (!name || !content) return res.status(400).json({ error: 'name et content requis' });
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('document_templates').insert({
+        id, tenant_id: tenantId, name, category: category || 'Autre', description: description || null,
+        content, variables: variables || [], is_seeded: false, editable: true,
+        created_by: req.user.id, created_at: now, updated_at: now,
+      });
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Création du modèle "${name}"`, name, id, 'document_template', 'Modèles de documents');
+      res.status(201).json({ id });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create document template" }); }
+  });
+
+  app.put("/api/document_templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('document_templates').select('editable').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Modèle introuvable' });
+      if (!existing.editable) return res.status(403).json({ error: "Ce modèle de base ne peut pas être modifié directement — dupliquez-le" });
+      const { name, category, description, content, variables } = req.body;
+      const { error } = await supabaseAdmin.from('document_templates').update({
+        name, category, description: description || null, content, variables: variables || [],
+        updated_at: new Date().toISOString(),
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to update document template" }); }
+  });
+
+  app.delete("/api/document_templates/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('document_templates').select('editable, name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Modèle introuvable' });
+      if (!existing.editable) return res.status(403).json({ error: "Ce modèle de base ne peut pas être supprimé — dupliquez-le si besoin" });
+      const { error } = await supabaseAdmin.from('document_templates').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression du modèle "${existing.name}"`, existing.name, id, 'document_template', 'Modèles de documents');
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to delete document template" }); }
+  });
+
+  app.post("/api/document_templates/:id/duplicate", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: source } = await supabaseAdmin.from('document_templates').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!source) return res.status(404).json({ error: 'Modèle introuvable' });
+      const newId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('document_templates').insert({
+        id: newId, tenant_id: tenantId, name: `${source.name} (copie)`, category: source.category,
+        description: source.description, content: source.content, variables: source.variables,
+        is_seeded: false, editable: true, source_template_id: id,
+        created_by: req.user.id, created_at: now, updated_at: now,
+      });
+      if (error) throw error;
+      res.status(201).json({ id: newId });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to duplicate document template" }); }
+  });
+
+  app.post("/api/document_templates/:id/generate", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { variable_values } = req.body;
+      const { data: template } = await supabaseAdmin.from('document_templates').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
+      const values = variable_values || {};
+      const missing = (template.variables || []).filter((v: any) => v.required && !values[v.key]).map((v: any) => v.label);
+      if (missing.length > 0) return res.status(400).json({ error: `Champs requis manquants : ${missing.join(', ')}` });
+      let filled = template.content as string;
+      for (const [key, value] of Object.entries(values)) {
+        filled = filled.split(`{{${key}}}`).join(String(value ?? ''));
+      }
+      res.json({ filled_content: filled });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to generate document" }); }
+  });
+
   app.get("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -3215,6 +3328,217 @@ async function startServer() {
     return tenantId;
   }
 
+  // Allows: the person themselves, a tenant admin, or the target's direct manager (profiles.manager_id).
+  async function requireManagerOf(tenantId: string, targetUserId: string, actingUserId: string): Promise<void> {
+    if (targetUserId === actingUserId) return;
+    const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', actingUserId).eq('tenant_id', tenantId).single();
+    if (acting?.system_role === 'admin') return;
+    const { data: target } = await supabaseAdmin.from('profiles').select('manager_id').eq('id', targetUserId).eq('tenant_id', tenantId).single();
+    if (target?.manager_id === actingUserId) return;
+    const err: any = new Error("Réservé au manager de cette personne ou à un administrateur");
+    err.status = 403;
+    throw err;
+  }
+
+  // Resolves the set of profile ids that report to `managerId` (direct reports only).
+  // If `includeAllForAdmin` is true and the manager is a tenant admin, returns every profile in the tenant instead.
+  async function resolveReportIds(tenantId: string, managerId: string, includeAllForAdmin: boolean): Promise<string[]> {
+    if (includeAllForAdmin) {
+      const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', managerId).eq('tenant_id', tenantId).single();
+      if (acting?.system_role === 'admin') {
+        const { data: all } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
+        return (all || []).map((p: any) => p.id);
+      }
+    }
+    const { data: reports } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', managerId);
+    return (reports || []).map((p: any) => p.id);
+  }
+
+  function businessDaysBetween(startDateStr: string, endDateStr: string): number {
+    let count = 0;
+    let d = new Date(startDateStr + 'T00:00:00Z');
+    const end = new Date(endDateStr + 'T00:00:00Z');
+    while (d <= end) {
+      const day = d.getUTCDay();
+      if (day !== 0 && day !== 6) count++;
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return count;
+  }
+
+  // ─── Time Tracking ───────────────────────────────────────────────────────
+  app.post("/api/time_entries/clock-in", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, description } = req.body;
+      const { data: open } = await supabaseAdmin.from('time_entries').select('id').eq('tenant_id', tenantId).eq('user_id', req.user.id).is('end_time', null).maybeSingle();
+      if (open) return res.status(409).json({ error: 'Vous êtes déjà pointé(e)' });
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('time_entries').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, project_id: project_id || null,
+        entry_date: now.split('T')[0], start_time: now, description: description || null,
+        source: 'clock', created_at: now, updated_at: now,
+      });
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Pointage entrée', userName, id, 'time_entry', 'Suivi du temps');
+      res.status(201).json({ id });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to clock in" }); }
+  });
+
+  app.post("/api/time_entries/clock-out", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: open } = await supabaseAdmin.from('time_entries').select('id').eq('tenant_id', tenantId).eq('user_id', req.user.id).is('end_time', null).maybeSingle();
+      if (!open) return res.status(404).json({ error: "Aucun pointage en cours" });
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('time_entries').update({ end_time: now, updated_at: now }).eq('id', open.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, 'Pointage sortie', userName, open.id, 'time_entry', 'Suivi du temps');
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to clock out" }); }
+  });
+
+  app.get("/api/time_entries/current", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data } = await supabaseAdmin.from('time_entries').select('*').eq('tenant_id', tenantId).eq('user_id', req.user.id).is('end_time', null).maybeSingle();
+      res.json(data || null);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  app.get("/api/time_entries", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { start_date, end_date, project_id, user_id } = req.query;
+      const targetUserId = (user_id as string) || req.user.id;
+      if (targetUserId !== req.user.id) await requireManagerOf(tenantId, targetUserId, req.user.id);
+      let query = supabaseAdmin.from('time_entries').select('*').eq('tenant_id', tenantId).eq('user_id', targetUserId);
+      if (start_date) query = query.gte('entry_date', start_date as string);
+      if (end_date) query = query.lte('entry_date', end_date as string);
+      if (project_id) query = query.eq('project_id', project_id as string);
+      const { data, error } = await query.order('entry_date').order('start_time');
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch time entries" }); }
+  });
+
+  app.post("/api/time_entries", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { entry_date, start_time, end_time, project_id, description } = req.body;
+      if (!entry_date || !start_time || !end_time) return res.status(400).json({ error: 'entry_date, start_time et end_time requis' });
+      if (new Date(end_time) <= new Date(start_time)) return res.status(400).json({ error: "L'heure de fin doit être après l'heure de début" });
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('time_entries').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, project_id: project_id || null,
+        entry_date, start_time, end_time, description: description || null,
+        source: 'manual', created_at: now, updated_at: now,
+      });
+      if (error) throw error;
+      res.status(201).json({ id });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create time entry" }); }
+  });
+
+  app.put("/api/time_entries/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('time_entries').select('user_id').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Entrée introuvable' });
+      await requireManagerOf(tenantId, existing.user_id, req.user.id);
+      const { entry_date, start_time, end_time, project_id, description } = req.body;
+      const { error } = await supabaseAdmin.from('time_entries').update({
+        entry_date, start_time, end_time: end_time || null, project_id: project_id || null,
+        description: description || null, updated_at: new Date().toISOString(),
+      }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to update time entry" }); }
+  });
+
+  app.delete("/api/time_entries/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: existing } = await supabaseAdmin.from('time_entries').select('user_id').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Entrée introuvable' });
+      await requireManagerOf(tenantId, existing.user_id, req.user.id);
+      const { error } = await supabaseAdmin.from('time_entries').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to delete time entry" }); }
+  });
+
+  function sumHours(entries: any[]): number {
+    return entries.reduce((sum, e) => {
+      if (!e.end_time) return sum;
+      return sum + (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3_600_000;
+    }, 0);
+  }
+
+  app.get("/api/time_entries/weekly-summary", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { week_start, user_id } = req.query;
+      const targetUserId = (user_id as string) || req.user.id;
+      if (targetUserId !== req.user.id) await requireManagerOf(tenantId, targetUserId, req.user.id);
+      if (!week_start) return res.status(400).json({ error: 'week_start requis' });
+      const start = new Date(week_start as string + 'T00:00:00Z');
+      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+      const { data, error } = await supabaseAdmin.from('time_entries').select('*').eq('tenant_id', tenantId).eq('user_id', targetUserId)
+        .gte('entry_date', start.toISOString().split('T')[0]).lte('entry_date', end.toISOString().split('T')[0]);
+      if (error) throw error;
+      const entries = data || [];
+      const byProjectMap: Record<string, number> = {};
+      const byDayMap: Record<string, number> = {};
+      for (const e of entries) {
+        if (!e.end_time) continue;
+        const hours = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3_600_000;
+        const projKey = e.project_id || '__none__';
+        byProjectMap[projKey] = (byProjectMap[projKey] || 0) + hours;
+        byDayMap[e.entry_date] = (byDayMap[e.entry_date] || 0) + hours;
+      }
+      res.json({
+        total_hours: sumHours(entries),
+        by_project: Object.entries(byProjectMap).map(([project_id, hours]) => ({ project_id: project_id === '__none__' ? null : project_id, hours })),
+        by_day: Object.entries(byDayMap).map(([date, hours]) => ({ date, hours })),
+      });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute weekly summary" }); }
+  });
+
+  app.get("/api/time_entries/team-summary", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { week_start, scope } = req.query;
+      if (!week_start) return res.status(400).json({ error: 'week_start requis' });
+      const reportIds = await resolveReportIds(tenantId, req.user.id, scope === 'all');
+      if (reportIds.length === 0) {
+        const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
+        if (acting?.system_role !== 'admin') {
+          const { data: anyReport } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', req.user.id).limit(1);
+          if (!anyReport || anyReport.length === 0) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+        }
+        return res.json([]);
+      }
+      const start = new Date(week_start as string + 'T00:00:00Z');
+      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+      const { data: entries, error } = await supabaseAdmin.from('time_entries').select('*').eq('tenant_id', tenantId).in('user_id', reportIds)
+        .gte('entry_date', start.toISOString().split('T')[0]).lte('entry_date', end.toISOString().split('T')[0]);
+      if (error) throw error;
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId).in('id', reportIds);
+      const nameById: Record<string, string> = Object.fromEntries((profiles || []).map((p: any) => [p.id, p.name]));
+      const result = reportIds.map(uid => ({
+        user_id: uid, name: nameById[uid] || uid,
+        total_hours: sumHours((entries || []).filter((e: any) => e.user_id === uid)),
+      }));
+      res.json(result);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute team summary" }); }
+  });
+
   app.get("/api/team/join-requests", async (req: any, res: any) => {
     try {
       const tenantId = await requireTenantAdmin(req.user.id);
@@ -3261,6 +3585,142 @@ async function startServer() {
       if (error || !data) return res.status(404).json({ error: 'Demande introuvable' });
       res.json({ success: true });
     } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // ─── Leave / Congés ──────────────────────────────────────────────────────
+  app.get("/api/leave_requests", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { scope, user_id } = req.query;
+      if (scope === 'team') {
+        const reportIds = await resolveReportIds(tenantId, req.user.id, true);
+        if (reportIds.length === 0) {
+          const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
+          if (acting?.system_role !== 'admin') return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+          return res.json([]);
+        }
+        const { data, error } = await supabaseAdmin.from('leave_requests').select('*').eq('tenant_id', tenantId).in('user_id', reportIds).order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.json(data);
+      }
+      const targetUserId = (user_id as string) || req.user.id;
+      if (targetUserId !== req.user.id) await requireManagerOf(tenantId, targetUserId, req.user.id);
+      const { data, error } = await supabaseAdmin.from('leave_requests').select('*').eq('tenant_id', tenantId).eq('user_id', targetUserId).order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch leave requests" }); }
+  });
+
+  app.post("/api/leave_requests", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { leave_type, motif, start_date, end_date, reason } = req.body;
+      const validTypes = ['conges_payes', 'rtt', 'maladie', 'sans_solde', 'exceptionnel'];
+      if (!validTypes.includes(leave_type)) return res.status(400).json({ error: 'Type de congé invalide' });
+      if (!start_date || !end_date) return res.status(400).json({ error: 'start_date et end_date requis' });
+      if (new Date(end_date) < new Date(start_date)) return res.status(400).json({ error: 'end_date doit être après start_date' });
+      const business_days = businessDaysBetween(start_date, end_date);
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('leave_requests').insert({
+        id, tenant_id: tenantId, user_id: req.user.id, leave_type, motif: motif || null,
+        start_date, end_date, business_days, reason: reason || null,
+        status: 'pending', created_at: now, updated_at: now,
+      });
+      if (error) throw error;
+      const LEAVE_LABELS: Record<string, string> = { conges_payes: 'Congés payés', rtt: 'RTT', maladie: 'Maladie', sans_solde: 'Congé sans solde', exceptionnel: 'Congé exceptionnel' };
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Demande de congés (${LEAVE_LABELS[leave_type] || leave_type}) déposée`, userName, id, 'leave_request', 'Congés');
+      res.status(201).json({ id, business_days });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create leave request" }); }
+  });
+
+  app.patch("/api/leave_requests/:id/status", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { status, decision_note } = req.body;
+      const validStatuses = ['approved', 'rejected'];
+      if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      const { data: request } = await supabaseAdmin.from('leave_requests').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!request) return res.status(404).json({ error: 'Demande introuvable' });
+      await requireManagerOf(tenantId, request.user_id, req.user.id);
+      const { data: updated, error } = await supabaseAdmin.from('leave_requests').update({
+        status, decided_by: req.user.id, decided_at: new Date().toISOString(),
+        decision_note: decision_note || null, updated_at: new Date().toISOString(),
+      }).eq('id', id).eq('tenant_id', tenantId).eq('status', 'pending').select().maybeSingle();
+      if (error) throw error;
+      if (!updated) return res.status(404).json({ error: 'Cette demande a déjà été traitée' });
+      const LEAVE_LABELS: Record<string, string> = { conges_payes: 'Congés payés', rtt: 'RTT', maladie: 'Maladie', sans_solde: 'Congé sans solde', exceptionnel: 'Congé exceptionnel' };
+      const STATUS_LABELS: Record<string, string> = { approved: 'approuvés', rejected: 'refusés' };
+      const requesterName = await getUserName(tenantId, request.user_id, undefined);
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Congés (${LEAVE_LABELS[request.leave_type] || request.leave_type}) ${STATUS_LABELS[status]} pour ${requesterName}`, requesterName, id, 'leave_request', 'Congés');
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to update leave request status" }); }
+  });
+
+  app.delete("/api/leave_requests/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: request } = await supabaseAdmin.from('leave_requests').select('user_id, status').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!request) return res.status(404).json({ error: 'Demande introuvable' });
+      if (request.user_id === req.user.id) {
+        if (request.status !== 'pending') return res.status(400).json({ error: 'Seule une demande en attente peut être annulée' });
+      } else {
+        await requireManagerOf(tenantId, request.user_id, req.user.id);
+      }
+      const { error } = await supabaseAdmin.from('leave_requests').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to cancel leave request" }); }
+  });
+
+  app.get("/api/leave_balances", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { user_id, year } = req.query;
+      const targetUserId = (user_id as string) || req.user.id;
+      if (targetUserId !== req.user.id) await requireManagerOf(tenantId, targetUserId, req.user.id);
+      const targetYear = parseInt((year as string) || String(new Date().getFullYear()), 10);
+      const { data: settings } = await supabaseAdmin.from('settings').select('default_leave_days_conges_payes, default_leave_days_rtt').eq('tenant_id', tenantId).maybeSingle();
+      const { data: overrides } = await supabaseAdmin.from('leave_balances').select('*').eq('tenant_id', tenantId).eq('user_id', targetUserId).eq('year', targetYear);
+      const { data: approvedRequests } = await supabaseAdmin.from('leave_requests').select('leave_type, business_days, start_date').eq('tenant_id', tenantId).eq('user_id', targetUserId).eq('status', 'approved');
+      const defaults: Record<string, number> = {
+        conges_payes: settings?.default_leave_days_conges_payes ?? 25,
+        rtt: settings?.default_leave_days_rtt ?? 0,
+      };
+      const overrideByType: Record<string, number> = Object.fromEntries((overrides || []).map((o: any) => [o.leave_type, o.allocated_days]));
+      const balances = ['conges_payes', 'rtt'].map(leaveType => {
+        const allocated = overrideByType[leaveType] ?? defaults[leaveType];
+        const used = (approvedRequests || [])
+          .filter((r: any) => r.leave_type === leaveType && new Date(r.start_date).getFullYear() === targetYear)
+          .reduce((sum: number, r: any) => sum + Number(r.business_days), 0);
+        return { user_id: targetUserId, year: targetYear, leave_type: leaveType, allocated_days: allocated, used_days: used, remaining_days: allocated - used };
+      });
+      res.json(balances);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch leave balances" }); }
+  });
+
+  app.put("/api/leave_balances", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { user_id, year, leave_type, allocated_days } = req.body;
+      if (!user_id || !year || !['conges_payes', 'rtt'].includes(leave_type)) return res.status(400).json({ error: 'Paramètres invalides' });
+      const now = new Date().toISOString();
+      const { data: existing } = await supabaseAdmin.from('leave_balances').select('id').eq('tenant_id', tenantId).eq('user_id', user_id).eq('year', year).eq('leave_type', leave_type).maybeSingle();
+      if (existing) {
+        const { error } = await supabaseAdmin.from('leave_balances').update({ allocated_days, updated_at: now }).eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin.from('leave_balances').insert({
+          id: crypto.randomUUID(), tenant_id: tenantId, user_id, year, leave_type, allocated_days, created_at: now, updated_at: now,
+        });
+        if (error) throw error;
+      }
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to update leave balance" }); }
   });
 
   app.get("/api/tenders", async (req: any, res: any) => {
@@ -5816,6 +6276,8 @@ async function startServer() {
     numPrefixDevis: 'num_prefix_devis',
     numPrefixFacture: 'num_prefix_facture',
     numPrefixHonoraires: 'num_prefix_honoraires',
+    defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
+    defaultLeaveDaysRtt: 'default_leave_days_rtt',
   };
   const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -5861,8 +6323,9 @@ async function startServer() {
         'superpdp_client_id', 'superpdp_client_secret', 'superpdp_sandbox',
         'chorus_pro_piste_client_id', 'chorus_pro_piste_client_secret',
         'chorus_pro_technical_login', 'chorus_pro_technical_password', 'chorus_pro_sandbox',
+        'default_leave_days_conges_payes', 'default_leave_days_rtt',
       ]);
-      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year']);
+      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt']);
       const filteredData: any = Object.fromEntries(
         Object.entries(snakeData)
           .filter(([k]) => validCols.has(k))
