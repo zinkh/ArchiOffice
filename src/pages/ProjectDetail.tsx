@@ -223,6 +223,7 @@ export default function ProjectDetail() {
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [activeTab, setActiveTab] = useState('INFOS');
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
+  const [planUploading, setPlanUploading] = useState(false);
   const planInputRef = useRef<HTMLInputElement>(null);
 
   // Reception PV form state
@@ -1235,80 +1236,63 @@ export default function ProjectDetail() {
   const handlePlanUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !project) return;
-    
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      const name = file.name;
-      
+
+    setPlanUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('project_id', id!);
+
       if (updatingPlanId) {
         // Create a new version of an existing plan
         const parentPlan = plans.find(p => p.id === updatingPlanId);
         if (!parentPlan) return;
-        
+
         // Calculate new index (A -> B, B -> C...)
         let newIndex = 'A';
         if (parentPlan.index) {
           newIndex = String.fromCharCode(parentPlan.index.charCodeAt(0) + 1);
         }
-        
-        const newPlan: Plan = {
-          id: crypto.randomUUID(),
-          project_id: id!,
-          name: parentPlan.name,
-          file_url: base64,
-          uploaded_at: new Date().toISOString(),
-          index: newIndex,
-          version: (parentPlan.version || 1) + 1,
-          parent_id: parentPlan.id,
-          category: parentPlan.category || (activeTab === 'PRO' || activeTab === 'AOR' ? activeTab as 'PRO' | 'AOR' : 'AOR')
-        };
-        
-        try {
-          const res = await fetch('/api/plans', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newPlan)
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setPlans(prev => [...prev, data]);
-            setUpdatingPlanId(null);
-          }
-        } catch (err) {
-          console.error(err);
+
+        form.append('id', crypto.randomUUID());
+        form.append('name', parentPlan.name);
+        form.append('index', newIndex);
+        form.append('version', String((parentPlan.version || 1) + 1));
+        form.append('parent_id', parentPlan.id);
+        form.append('category', parentPlan.category || (activeTab === 'PRO' || activeTab === 'AOR' ? activeTab : 'AOR'));
+
+        const res = await fetch('/api/plans', { method: 'POST', body: form });
+        if (res.ok) {
+          const data = await res.json();
+          setPlans(prev => [...prev, data]);
+          setUpdatingPlanId(null);
+        } else {
+          const err = await res.json().catch(() => null);
+          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
         }
       } else {
         // Create a new plan
-        const newPlan: Plan = {
-          id: crypto.randomUUID(),
-          project_id: id!,
-          name: name,
-          file_url: base64,
-          uploaded_at: new Date().toISOString(),
-          index: 'A',
-          version: 1,
-          category: activeTab === 'PRO' || activeTab === 'AOR' ? activeTab as 'PRO' | 'AOR' : 'AOR'
-        };
-        
-        try {
-          const res = await fetch('/api/plans', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newPlan)
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setPlans(prev => [...prev, data]);
-          }
-        } catch (err) {
-          console.error(err);
+        form.append('name', file.name);
+        form.append('index', 'A');
+        form.append('version', '1');
+        form.append('category', activeTab === 'PRO' || activeTab === 'AOR' ? activeTab : 'AOR');
+
+        const res = await fetch('/api/plans', { method: 'POST', body: form });
+        if (res.ok) {
+          const data = await res.json();
+          setPlans(prev => [...prev, data]);
+        } else {
+          const err = await res.json().catch(() => null);
+          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
         }
       }
-      // Reset input
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de l'upload du plan.");
+    } finally {
+      setPlanUploading(false);
       if (planInputRef.current) planInputRef.current.value = '';
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   if (!project) return <div className="p-8 text-center">Loading project...</div>;
@@ -4130,11 +4114,12 @@ export default function ProjectDetail() {
                               setUpdatingPlanId(null);
                               planInputRef.current?.click();
                             }}
-                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all whitespace-nowrap"
+                            disabled={planUploading}
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all whitespace-nowrap disabled:opacity-50"
                           >
                             <IconUpload size={14} />
-                            <span className="hidden sm:inline">Importer un plan</span>
-                            <span className="sm:hidden">Importer</span>
+                            <span className="hidden sm:inline">{planUploading ? 'Upload...' : 'Importer un plan'}</span>
+                            <span className="sm:hidden">{planUploading ? '...' : 'Importer'}</span>
                           </button>
                         </div>
                         }
@@ -4163,13 +4148,14 @@ export default function ProjectDetail() {
                                 <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString()}</td>
                                 <td className="px-6 py-4 text-right">
                                   <div className="flex items-center justify-end gap-2">
-                                    <button 
+                                    <button
                                       onClick={() => {
                                         setUpdatingPlanId(plan.id);
                                         planInputRef.current?.click();
                                       }}
+                                      disabled={planUploading}
                                       title="Nouvel indice"
-                                      className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors"
+                                      className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors disabled:opacity-50"
                                     >
                                       <IconRefresh size={16} />
                                     </button>

@@ -379,7 +379,8 @@ CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, name TEXT NOT NULL, file_url TEXT NOT NULL,
-  uploaded_at TEXT NOT NULL
+  uploaded_at TEXT NOT NULL,
+  index TEXT, version INTEGER DEFAULT 1, parent_id TEXT, category TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plans_tenant_project ON plans(tenant_id, project_id);
 
