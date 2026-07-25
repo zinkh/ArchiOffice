@@ -11,8 +11,10 @@
 - **Site & meeting management** — log site inspection reports and meeting minutes (*réunions de chantier*), issue work orders (*ordres de service*).
 - **Contacts & team** — a lightweight CRM for clients and contractors, plus team/role management per cabinet.
 - **Maps & urban planning data** — cadastral parcel maps, PLU zoning lookups, heritage monument and geological risk data via French government APIs (IGN, APICARTO, Géorisques).
-- **Document generation & export** — PDF, Word (.docx), and Excel exports for proposals, specs, and reports.
+- **Document generation & export** — PDF export throughout, plus Word (.docx) export for meeting minutes. (Word/Excel export from the Specifications page is a known gap — see [ROADMAP.md](ROADMAP.md#document-export).)
 - **Offline-first desktop option** — an Electron build with local storage and cloud sync for working without a constant connection.
+
+Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](ROADMAP.md). Building an integration or calling the API directly? See [API.md](API.md).
 
 ## Screenshots
 
@@ -102,6 +104,44 @@ npm run build   # outputs the static frontend to dist/
 npm run start   # serves dist/ with the same Express server
 ```
 
+## Your first session
+
+Once the app is running and pointed at a Supabase project, here's the actual path from an empty database to a usable instance.
+
+### 1. Create the first account and cabinet
+
+Go to `/register` and fill in a cabinet (agency) name, an admin name, an email, and a password. This calls `POST /api/public/register`, which creates both the **tenant** (the cabinet) and the admin **profile** in one step. You won't be logged in immediately — confirm the account via the email link (or resend it from the same screen) before signing in at `/login`.
+
+Signing in with Google instead of email/password works too, but a Google account isn't attached to a tenant yet. On first login you'll land on `/agency-setup`, where you either:
+- **Create a new cabinet** (becomes admin of a fresh tenant), or
+- **Join an existing one** by searching for it by name — this sends a join request that sits pending until an admin approves it from the Team page.
+
+Every user belongs to exactly one tenant, and the entire app is scoped to it server-side — there's no manual tenant switching or ID to pass around.
+
+### 2. Invite your team
+
+From **Administration → Équipe** (`/team`), an admin can add teammates directly or approve pending join requests. Roles are `admin`, `manager`, `pm`, and `user` — only admins manage roles and approve joins. The `/onboarding` wizard (agency info → logo → avatar → invite teammates) covers the same ground in one guided flow if you'd rather use that instead of the Team page.
+
+### 3. Follow a project through its lifecycle
+
+ArchiOffice models the real workflow of a French architecture practice. A typical project flows through these pages, roughly in this order:
+
+1. **Appel d'offres** (`/tenders`) — track a public tender/competition you're pursuing: deadlines, mandataire, milestones.
+2. **Devis / Proposition** (`/proposals`) — draft a fee proposal against the *loi MOP* mission breakdown (ESQ, APS, APD, PRO, ACT, VISA, DET, AOR, OPC), with address/cadastre/Géorisques lookups and AI-assisted drafting (Gemini).
+3. **Contrat** (`/contrats`) — once the proposal is accepted, formalize the *maîtrise d'œuvre* contract (construction neuve, réhabilitation, concours, AMO, diagnostic…), tracking co-traitants/sous-traitants and status from Brouillon to Signé.
+4. **Projet** (`/projects/:id`) — the project itself, optionally seeded from a template (`/templates`). `ProjectDetail` is the hub for everything below, organized into tabs per mission phase and gated by whether the project is flagged as *chantier* (active construction site).
+5. **Spécifications / CCTP‑DPGF** (`/specifications`) — write the technical specs (CCTP) and cost breakdown (DPGF), including XML import of existing DPGF files.
+6. **Planification** — `/gantt`, `/kanban`, and `/calendar` for scheduling tasks and milestones.
+7. **Suivi de chantier** — `/ordres-de-service` (work orders, Brouillon → Soumis → Approuvé/Refusé), `/reunions` (site-visit and meeting minutes with photos and attendees, exportable to PDF/DOCX), and construction-phase billing situations inside the project.
+8. **Facturation** (`/invoices`) — invoice per mission phase, Draft → Sent → Paid/Overdue, with French e-invoicing status (Chorus Pro / PDP / Factur-X).
+9. **Documents** (`/documents`) — the versioned document vault, organized by the same mission-phase taxonomy, with diffusion tracking.
+
+Everything above is reachable from four sidebar groups: **Gestion** (Dashboard, Projets, Références, Documents), **Finances** (Propositions, Factures, Appels d'offres, Contrats), **Outils** (Spécifications, Gantt, Calendrier, Kanban, Réunions, Ordres de service, Contacts), and **Administration** (Agents IA, Équipe, Modèles, Paramètres, Facturation).
+
+### 4. Connect integrations (optional)
+
+**Paramètres → Intégrations** (`/settings`) lists third-party connectors. Some are fully wired up today (Zoho Invoice, Zoho Books, Odoo, Ragic, Super PDP, Chorus Pro, MAF declaration); others are shown as **"coming soon"** placeholders in the UI with no backend yet (Stripe, QuickBooks, Google Drive, Dropbox, Salesforce, Slack, Microsoft Teams) — see [ROADMAP.md](ROADMAP.md) for current status before relying on one of those.
+
 ## Docker
 
 ```bash
@@ -120,3 +160,9 @@ docker run -p 8080:8080 \
 ## Desktop (Electron)
 
 ArchiOffice also ships as an offline-first desktop app with local storage and cloud sync. See `electron-builder.yml` and the `electron:build` script in `package.json`.
+
+## Further documentation
+
+- **[ROADMAP.md](ROADMAP.md)** — what's solidly implemented, what's partial/experimental, and what's a UI placeholder with no backend yet.
+- **[API.md](API.md)** — REST API reference for `/api/**`: authentication, conventions, and the full endpoint catalog, for anyone integrating with ArchiOffice directly or building against it as a third party.
+- **[CLAUDE.md](CLAUDE.md)** — repository layout and architecture conventions, aimed at contributors and AI coding assistants working in this codebase.
