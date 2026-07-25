@@ -203,7 +203,10 @@ export default function ProjectDetail() {
   // VISA modal state
   const [isVisaModalOpen, setIsVisaModalOpen] = useState(false);
   const [editingVisa, setEditingVisa] = useState<Visa | null>(null);
-  const [visaForm, setVisaForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending' as Visa['status'], comments: '' });
+  const [visaForm, setVisaForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending' as Visa['status'], comments: '', lot_id: '' });
+  const [visaFile, setVisaFile] = useState<File | null>(null);
+  const [visaSaving, setVisaSaving] = useState(false);
+  const [visaExpandedGroups, setVisaExpandedGroups] = useState<Record<string, boolean>>({});
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isAddingInvoice, setIsAddingInvoice] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
@@ -249,6 +252,11 @@ export default function ProjectDetail() {
   const [doeDocuments, setDoeDocuments] = useState<any[]>([]);
   const doeInputRef = useRef<HTMLInputElement>(null);
   const [doeUploading, setDoeUploading] = useState(false);
+  const [doeContactId, setDoeContactId] = useState('');
+  const [doeExpandedGroups, setDoeExpandedGroups] = useState<Record<string, boolean>>({});
+  const [editingDoeId, setEditingDoeId] = useState<string | null>(null);
+  const [editDoeContactId, setEditDoeContactId] = useState('');
+  const [editDoeComments, setEditDoeComments] = useState('');
 
   useEffect(() => {
     if (project && !project.is_chantier && ['ACT', 'DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
@@ -3332,13 +3340,30 @@ export default function ProjectDetail() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Date</label>
-                          <input
-                            type="date"
-                            value={visaForm.date}
-                            onChange={e => setVisaForm(f => ({ ...f, date: e.target.value }))}
+                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Lot</label>
+                          <select
+                            value={visaForm.lot_id}
+                            onChange={e => setVisaForm(f => ({ ...f, lot_id: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
+                          >
+                            <option value="">Aucun lot</option>
+                            {(project.lots_list || []).map(l => (
+                              <option key={l.id} value={l.id}>{l.lot_title}{l.contact_name ? ` — ${l.contact_name}` : ''}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Document à viser</label>
+                          <input
+                            type="file"
+                            onChange={e => setVisaFile(e.target.files?.[0] || null)}
+                            className="w-full text-xs text-[var(--tblr-muted)] file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-[var(--tblr-text)]"
                           />
+                          {editingVisa?.document_url && !visaFile && (
+                            <a href={editingVisa.document_url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                              <IconExternalLink size={12} /> Document actuel
+                            </a>
+                          )}
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-2">Statut</label>
@@ -3378,39 +3403,53 @@ export default function ProjectDetail() {
                           Annuler
                         </button>
                         <button
-                          disabled={!visaForm.title.trim()}
+                          disabled={!visaForm.title.trim() || visaSaving}
                           onClick={async () => {
-                            if (!visaForm.title.trim()) return;
+                            if (!visaForm.title.trim() || !id) return;
+                            setVisaSaving(true);
                             try {
+                              const form = new FormData();
+                              form.append('project_id', id);
+                              form.append('title', visaForm.title);
+                              form.append('date', visaForm.date || new Date().toISOString());
+                              form.append('status', visaForm.status);
+                              form.append('comments', visaForm.comments);
+                              form.append('lot_id', visaForm.lot_id);
+                              if (visaFile) form.append('file', visaFile);
+
                               if (editingVisa) {
-                                const res = await fetch(`/api/visas/${editingVisa.id}`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ ...editingVisa, ...visaForm })
-                                });
+                                const res = await fetch(`/api/visas/${editingVisa.id}`, { method: 'PUT', body: form });
                                 if (res.ok) {
                                   const updated = await res.json();
                                   setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
+                                } else {
+                                  const err = await res.json().catch(() => null);
+                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
                                 }
                               } else {
-                                const res = await fetch('/api/visas', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ project_id: id, ...visaForm, date: visaForm.date || new Date().toISOString() })
-                                });
+                                const res = await fetch('/api/visas', { method: 'POST', body: form });
                                 if (res.ok) {
                                   const data = await res.json();
                                   setVisas(prev => [...prev, data]);
+                                } else {
+                                  const err = await res.json().catch(() => null);
+                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
                                 }
                               }
                               setIsVisaModalOpen(false);
                               setEditingVisa(null);
-                              setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '' });
-                            } catch (err) { console.error(err); }
+                              setVisaFile(null);
+                              setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
+                            } catch (err) {
+                              console.error(err);
+                              alert("Erreur lors de l'enregistrement du visa.");
+                            } finally {
+                              setVisaSaving(false);
+                            }
                           }}
                           className="flex-1 py-2 px-4 text-sm font-bold text-white bg-[var(--tblr-primary)] hover:opacity-90 disabled:opacity-50 rounded-lg transition-colors"
                         >
-                          {editingVisa ? 'Enregistrer' : 'Créer'}
+                          {visaSaving ? 'Enregistrement...' : editingVisa ? 'Enregistrer' : 'Créer'}
                         </button>
                       </div>
                     </div>
@@ -3430,7 +3469,8 @@ export default function ProjectDetail() {
                       <button
                         onClick={() => {
                           setEditingVisa(null);
-                          setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '' });
+                          setVisaFile(null);
+                          setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                           setIsVisaModalOpen(true);
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
@@ -3452,9 +3492,38 @@ export default function ProjectDetail() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
-                        {visas.map((visa) => (
+                        {Object.entries(visas.reduce((acc, v) => {
+                          const lot = (project.lots_list || []).find(l => l.id === v.lot_id);
+                          const key = lot ? `${lot.lot_title}${lot.contact_name ? ` — ${lot.contact_name}` : ''}` : 'Sans lot';
+                          if (!acc[key]) acc[key] = [];
+                          acc[key].push(v);
+                          return acc;
+                        }, {} as Record<string, Visa[]>)).map(([groupKey, groupVisas]) => (
+                        <React.Fragment key={groupKey}>
+                          <tr
+                            className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
+                            onClick={() => setVisaExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
+                          >
+                            <td colSpan={5} className="px-6 py-3">
+                              <div className="flex items-center gap-2">
+                                {visaExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
+                                <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
+                                <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupVisas.length} visa{groupVisas.length > 1 ? 's' : ''})</span>
+                              </div>
+                            </td>
+                          </tr>
+                          {visaExpandedGroups[groupKey] && groupVisas.map((visa) => (
                           <tr key={visa.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
-                            <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{visa.title}</td>
+                            <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">
+                              <div className="flex items-center gap-2">
+                                {visa.title}
+                                {visa.document_url && (
+                                  <a href={visa.document_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Voir le document" className="text-[var(--tblr-muted)] hover:text-blue-600">
+                                    <IconExternalLink size={13} />
+                                  </a>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(visa.date).toLocaleDateString('fr-FR')}</td>
                             <td className="px-6 py-4">
                               <span className={cn(
@@ -3507,7 +3576,8 @@ export default function ProjectDetail() {
                                   title="Modifier"
                                   onClick={() => {
                                     setEditingVisa(visa);
-                                    setVisaForm({ title: visa.title, date: visa.date.split('T')[0], status: visa.status, comments: visa.comments || '' });
+                                    setVisaFile(null);
+                                    setVisaForm({ title: visa.title, date: visa.date.split('T')[0], status: visa.status, comments: visa.comments || '', lot_id: visa.lot_id || '' });
                                     setIsVisaModalOpen(true);
                                   }}
                                   className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
@@ -3531,6 +3601,8 @@ export default function ProjectDetail() {
                               </div>
                             </td>
                           </tr>
+                          ))}
+                        </React.Fragment>
                         ))}
                         {visas.length === 0 && (
                           <tr>
@@ -4002,95 +4074,247 @@ export default function ProjectDetail() {
                 </div>
 
                 {/* DOE — Dossier des Ouvrages Exécutés */}
-                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                  <CardHeader
-                    icon={IconClipboardCheck}
-                    title="DOE — Dossier des Ouvrages Exécutés"
-                    description="Le DOE regroupe les plans conformes à exécution, notices de fonctionnement et documents remis en fin de chantier."
-                    action={
-                    <div>
-                      <input type="file" className="hidden" ref={doeInputRef} onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file || !id) return;
-                        setDoeUploading(true);
-                        try {
-                          const form = new FormData();
-                          form.append('file', file);
-                          form.append('name', file.name);
-                          form.append('project_id', id);
-                          form.append('doc_type', 'DOE');
-                          form.append('category', 'DOE');
-                          const res = await fetch('/api/documents', { method: 'POST', body: form });
-                          if (res.ok) {
-                            await fetchDoeDocuments();
+                {(() => {
+                  // Dedupe the project lots down to one entry per entreprise (contact),
+                  // for the "assign entreprise" picker.
+                  const doeEntreprises = Object.values(
+                    (project.lots_list || []).filter(l => l.contact_name).reduce((acc, l) => {
+                      const key = l.contact_id || l.contact_name!;
+                      if (!acc[key]) acc[key] = { id: key, name: l.contact_name! };
+                      return acc;
+                    }, {} as Record<string, { id: string; name: string }>)
+                  );
+                  const doeGroups = doeDocuments.reduce<Record<string, any[]>>((acc, doc) => {
+                    const key = doc.contact_name || 'Non assigné';
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(doc);
+                    return acc;
+                  }, {});
+
+                  const updateDoeValidation = async (doc: any, fields: { validation_status?: string; validation_comments?: string; contact_id?: string; contact_name?: string }) => {
+                    const form = new FormData();
+                    form.append('name', doc.name);
+                    form.append('category', doc.category || 'DOE');
+                    form.append('description', doc.description || '');
+                    form.append('validation_status', fields.validation_status ?? doc.validation_status ?? 'pending');
+                    form.append('validation_comments', fields.validation_comments ?? doc.validation_comments ?? '');
+                    form.append('contact_id', fields.contact_id !== undefined ? fields.contact_id : (doc.contact_id || ''));
+                    form.append('contact_name', fields.contact_name !== undefined ? fields.contact_name : (doc.contact_name || ''));
+                    try {
+                      const res = await fetch(`/api/documents/${doc.id}`, { method: 'PUT', body: form });
+                      if (res.ok) await fetchDoeDocuments();
+                    } catch (err) { console.error(err); }
+                  };
+
+                  return (
+                  <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                    <CardHeader
+                      icon={IconClipboardCheck}
+                      title="DOE — Dossier des Ouvrages Exécutés"
+                      description="Le DOE regroupe les plans conformes à exécution, notices de fonctionnement et documents remis en fin de chantier."
+                      action={
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={doeContactId}
+                          onChange={e => setDoeContactId(e.target.value)}
+                          className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none"
+                        >
+                          <option value="">Entreprise (non assigné)</option>
+                          {doeEntreprises.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <input type="file" className="hidden" ref={doeInputRef} onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file || !id) return;
+                          setDoeUploading(true);
+                          try {
+                            const selected = doeEntreprises.find(c => c.id === doeContactId);
+                            const form = new FormData();
+                            form.append('file', file);
+                            form.append('name', file.name);
+                            form.append('project_id', id);
+                            form.append('doc_type', 'DOE');
+                            form.append('category', 'DOE');
+                            if (selected) {
+                              form.append('contact_id', selected.id);
+                              form.append('contact_name', selected.name);
+                            }
+                            const res = await fetch('/api/documents', { method: 'POST', body: form });
+                            if (res.ok) {
+                              await fetchDoeDocuments();
+                            } else {
+                              const err = await res.json().catch(() => null);
+                              alert(`Erreur lors de l'upload du document DOE : ${err?.error || res.statusText}`);
+                            }
+                          } catch (err) {
+                            console.error(err);
+                            alert("Erreur lors de l'upload du document DOE.");
+                          } finally {
+                            setDoeUploading(false);
+                            if (doeInputRef.current) doeInputRef.current.value = '';
                           }
-                        } catch (err) { console.error(err); } finally {
-                          setDoeUploading(false);
-                          if (doeInputRef.current) doeInputRef.current.value = '';
-                        }
-                      }} />
-                      <button
-                        onClick={() => doeInputRef.current?.click()}
-                        disabled={doeUploading}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-                      >
-                        <IconFilePlus size={14} />
-                        {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
-                      </button>
-                    </div>
-                    }
-                  />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3 text-left">Nom</th>
-                          <th className="px-6 py-3 text-left">Type</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-right w-24">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--tblr-border)]">
-                        {doeDocuments.map((doc) => (
-                          <tr key={doc.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
-                            <td className="px-6 py-4 font-medium text-[var(--tblr-text)]">{doc.name}</td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-0.5 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] rounded text-[10px] font-bold">
-                                {doc.category || 'DOE'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(doc.uploaded_at).toLocaleDateString('fr-FR')}</td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title="Télécharger">
-                                  <IconExternalLink size={15} />
-                                </a>
-                                <button
-                                  onClick={async () => {
-                                    if (!confirm('Supprimer ce document DOE ?')) return;
-                                    try {
-                                      const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
-                                      if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
-                                    } catch (err) { console.error(err); }
-                                  }}
-                                  className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                  title="Supprimer"
-                                >
-                                  <IconTrash size={15} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {doeDocuments.length === 0 && (
+                        }} />
+                        <button
+                          onClick={() => doeInputRef.current?.click()}
+                          disabled={doeUploading}
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                        >
+                          <IconFilePlus size={14} />
+                          {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
+                        </button>
+                      </div>
+                      }
+                    />
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
                           <tr>
-                            <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun document DOE. Ajoutez les plans conformes à exécution.</td>
+                            <th className="px-6 py-3 text-left">Nom</th>
+                            <th className="px-6 py-3 text-left">Statut</th>
+                            <th className="px-6 py-3 text-left">Commentaires</th>
+                            <th className="px-6 py-3 text-left">Date</th>
+                            <th className="px-6 py-3 text-right w-32">Actions</th>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--tblr-border)]">
+                          {Object.entries(doeGroups).map(([groupKey, groupDocs]) => (
+                            <React.Fragment key={groupKey}>
+                              <tr
+                                className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
+                                onClick={() => setDoeExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
+                              >
+                                <td colSpan={5} className="px-6 py-3">
+                                  <div className="flex items-center gap-2">
+                                    {doeExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
+                                    <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
+                                    <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupDocs.length} document{groupDocs.length > 1 ? 's' : ''})</span>
+                                  </div>
+                                </td>
+                              </tr>
+                              {doeExpandedGroups[groupKey] && groupDocs.map((doc) => (
+                                <tr key={doc.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
+                                  <td className="px-6 py-4 font-medium text-[var(--tblr-text)]">{doc.name}</td>
+                                  <td className="px-6 py-4">
+                                    <span className={cn(
+                                      "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                      doc.validation_status === 'approved' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                                      doc.validation_status === 'rejected' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                                      doc.validation_status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                                      "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-[var(--tblr-muted)]"
+                                    )}>
+                                      {doc.validation_status === 'approved' ? 'Validé' : doc.validation_status === 'rejected' ? 'Rejeté' : doc.validation_status === 'commented' ? 'Commenté' : 'En attente'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs">
+                                    {editingDoeId === doc.id ? (
+                                      <textarea
+                                        rows={2}
+                                        autoFocus
+                                        value={editDoeComments}
+                                        onChange={e => setEditDoeComments(e.target.value)}
+                                        className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs resize-none"
+                                      />
+                                    ) : (
+                                      <span className="truncate block max-w-48" title={doc.validation_comments}>{doc.validation_comments || <span className="italic text-[var(--tblr-muted)]">—</span>}</span>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(doc.uploaded_at).toLocaleDateString('fr-FR')}</td>
+                                  <td className="px-6 py-4 text-right">
+                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {editingDoeId === doc.id ? (
+                                        <>
+                                          <select
+                                            value={editDoeContactId}
+                                            onChange={e => setEditDoeContactId(e.target.value)}
+                                            className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs mr-1"
+                                          >
+                                            <option value="">Non assigné</option>
+                                            {doeEntreprises.map(c => (
+                                              <option key={c.id} value={c.id}>{c.name}</option>
+                                            ))}
+                                          </select>
+                                          <button
+                                            title="Enregistrer"
+                                            onClick={async () => {
+                                              const selected = doeEntreprises.find(c => c.id === editDoeContactId);
+                                              await updateDoeValidation(doc, {
+                                                validation_comments: editDoeComments,
+                                                contact_id: selected?.id || '',
+                                                contact_name: selected?.name || '',
+                                              });
+                                              setEditingDoeId(null);
+                                            }}
+                                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
+                                          >
+                                            <IconCheck size={14} />
+                                          </button>
+                                          <button
+                                            title="Annuler"
+                                            onClick={() => setEditingDoeId(null)}
+                                            className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                          >
+                                            <IconX size={14} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {doc.validation_status !== 'approved' && (
+                                            <button title="Valider" onClick={() => updateDoeValidation(doc, { validation_status: 'approved' })} className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors">
+                                              <IconCheck size={15} />
+                                            </button>
+                                          )}
+                                          {doc.validation_status !== 'rejected' && (
+                                            <button title="Rejeter" onClick={() => updateDoeValidation(doc, { validation_status: 'rejected' })} className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                                              <IconX size={15} />
+                                            </button>
+                                          )}
+                                          <button
+                                            title="Modifier l'entreprise / commentaires"
+                                            onClick={() => {
+                                              setEditingDoeId(doc.id);
+                                              setEditDoeContactId(doc.contact_id || '');
+                                              setEditDoeComments(doc.validation_comments || '');
+                                            }}
+                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                                          >
+                                            <IconMessageDots size={15} />
+                                          </button>
+                                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title="Télécharger">
+                                            <IconExternalLink size={15} />
+                                          </a>
+                                          <button
+                                            onClick={async () => {
+                                              if (!confirm('Supprimer ce document DOE ?')) return;
+                                              try {
+                                                const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
+                                                if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
+                                              } catch (err) { console.error(err); }
+                                            }}
+                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                            title="Supprimer"
+                                          >
+                                            <IconTrash size={15} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                          {doeDocuments.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun document DOE. Ajoutez les plans conformes à exécution.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                  );
+                })()}
 
                 {/* Plans de l'opération */}
                 {(() => {

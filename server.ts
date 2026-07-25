@@ -2085,24 +2085,37 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch visas" }); }
   });
 
-  app.post("/api/visas", async (req: any, res: any) => {
+  app.post("/api/visas", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, title, date, status, comments, document_url } = req.body;
+      const { project_id, title, date, status, comments, lot_id } = req.body;
+      const id = crypto.randomUUID();
+      let document_url = req.body.document_url || null;
+      if (req.file) {
+        const storagePath = `${tenantId}/${project_id}/visas/${id}/${sanitizeFilename(req.file.originalname)}`;
+        document_url = await uploadToStorage('documents', storagePath, req.file.buffer, req.file.mimetype);
+      }
       const { data, error } = await supabaseAdmin.from('visas').insert({
-        id: crypto.randomUUID(), tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url
+        id, tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url, lot_id: lot_id || null
       }).select().single();
       if (error) throw error;
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
-  app.put("/api/visas/:id", async (req: any, res: any) => {
+  app.put("/api/visas/:id", upload.single('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, date, status, comments, document_url } = req.body;
+      const { title, date, status, comments, lot_id } = req.body;
+      const updateFields: any = { title, date, status, comments, lot_id: lot_id || null };
+      if (req.file) {
+        const storagePath = `${tenantId}/${req.body.project_id || 'general'}/visas/${req.params.id}/${sanitizeFilename(req.file.originalname)}`;
+        updateFields.document_url = await uploadToStorage('documents', storagePath, req.file.buffer, req.file.mimetype);
+      } else if (req.body.document_url !== undefined) {
+        updateFields.document_url = req.body.document_url || null;
+      }
       const { data, error } = await supabaseAdmin.from('visas')
-        .update({ title, date, status, comments, document_url })
+        .update(updateFields)
         .eq('id', req.params.id)
         .eq('tenant_id', tenantId)
         .select().single();
@@ -2453,8 +2466,8 @@ async function startServer() {
       const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
-      const { indice, emetteur, doc_type } = req.body;
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null });
+      const { indice, emetteur, doc_type, contact_id, contact_name } = req.body;
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
@@ -2492,7 +2505,7 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type } = req.body;
+      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type, contact_id, contact_name, validation_status, validation_comments } = req.body;
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
@@ -2508,6 +2521,10 @@ async function startServer() {
         const uploaded_at = new Date().toISOString();
         const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
+        if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
+        if (validation_status !== undefined) updateFields.validation_status = validation_status;
+        if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
         await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
@@ -2515,6 +2532,10 @@ async function startServer() {
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
+        if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
+        if (validation_status !== undefined) updateFields.validation_status = validation_status;
+        if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
       }

@@ -25,6 +25,10 @@ export interface Document {
   approbateur?: string;
   date_approbation?: string;
   doc_type?: string;
+  contact_id?: string;
+  contact_name?: string;
+  validation_status?: 'pending' | 'approved' | 'rejected' | 'commented';
+  validation_comments?: string;
 }
 
 export interface DocumentVersion {
@@ -234,6 +238,7 @@ export interface Visa {
   status: 'pending' | 'approved' | 'rejected' | 'commented';
   comments?: string;
   document_url?: string;
+  lot_id?: string;
 }
 
 export interface Reception {

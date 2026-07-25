@@ -345,7 +345,9 @@ CREATE TABLE IF NOT EXISTS documents (
   project_id TEXT, name TEXT NOT NULL, category TEXT NOT NULL,
   phase TEXT,
   version INTEGER DEFAULT 1, file_url TEXT NOT NULL,
-  uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT
+  uploaded_by TEXT, uploaded_at TEXT NOT NULL, description TEXT,
+  contact_id TEXT, contact_name TEXT,
+  validation_status TEXT DEFAULT 'pending', validation_comments TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_tenant_project ON documents(tenant_id, project_id);
 
@@ -362,7 +364,8 @@ CREATE TABLE IF NOT EXISTS visas (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, title TEXT NOT NULL, date TEXT NOT NULL,
-  status TEXT DEFAULT 'pending', comments TEXT, document_url TEXT
+  status TEXT DEFAULT 'pending', comments TEXT, document_url TEXT,
+  lot_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_visas_tenant_project ON visas(tenant_id, project_id);
 
