@@ -2213,10 +2213,10 @@ async function startServer() {
   app.put("/api/reserves/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, batiment, local, status, lots, entreprises, created_at, due_date } = req.body;
-      const { error } = await supabaseAdmin.from('reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
+      const { error } = await supabaseAdmin.from('reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y }).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
-      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date });
+      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
   });
 
@@ -2270,10 +2270,10 @@ async function startServer() {
   app.put("/api/gpa-reserves/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, batiment, local, status, lots, entreprises, created_at, due_date } = req.body;
-      const { error } = await supabaseAdmin.from('gpa_reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
+      const { error } = await supabaseAdmin.from('gpa_reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y }).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
-      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date });
+      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update GPA reserve" }); }
   });
 

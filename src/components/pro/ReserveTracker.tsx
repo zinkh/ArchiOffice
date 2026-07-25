@@ -14,10 +14,12 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconX,
+  IconMapPin,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
+import { PlanAnnotator } from '../PlanAnnotator';
 import type { Reserve, GpaReserve, Plan } from '../../types';
 
 interface CategoryOption {
@@ -89,7 +91,7 @@ interface ReserveTrackerProps {
 export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList }: ReserveTrackerProps) {
   const [isAddingReserve, setIsAddingReserve] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [annotationCoords] = useState<{ x: number; y: number } | null>(null);
+  const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [editingReserveId, setEditingReserveId] = useState<string | null>(null);
   const [editReserveData, setEditReserveData] = useState<ReserveLike | null>(null);
@@ -115,6 +117,25 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
     };
   }, [reserves]);
 
+  const selectedPlan = plans.find(p => p.id === selectedPlanId) || null;
+
+  const planMarkers = useMemo(() => (
+    reserves
+      .filter(r => r.plan_id === selectedPlanId && r.x != null && r.y != null)
+      .map(r => ({ id: r.id, x: r.x as number, y: r.y as number, number: r.number, title: r.title }))
+  ), [reserves, selectedPlanId]);
+
+  const handleSelectMarker = (markerId: string) => {
+    const res = reserves.find(r => r.id === markerId);
+    if (!res) return;
+    const lots = JSON.parse(res.lots || '[]');
+    const entreprises = JSON.parse(res.entreprises || '[]');
+    const groupKey = lots.length > 0 ? `${lots.join(', ')} / ${entreprises.join(', ')}` : 'Sans Lot / Entreprise';
+    setExpandedGroups(prev => ({ ...prev, [groupKey]: true }));
+    setEditingReserveId(res.id);
+    setEditReserveData({ ...res });
+  };
+
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -134,7 +155,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 <select
                   className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none"
                   value={selectedPlanId || ''}
-                  onChange={e => setSelectedPlanId(e.target.value || null)}
+                  onChange={e => { setSelectedPlanId(e.target.value || null); setAnnotationCoords(null); }}
                 >
                   <option value="">Sélectionner un plan</option>
                   {plans.map(p => (
@@ -143,7 +164,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 </select>
               )}
               <button
-                onClick={() => setIsAddingReserve(!isAddingReserve)}
+                onClick={() => { setIsAddingReserve(!isAddingReserve); setAnnotationCoords(null); }}
                 className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
               >
                 <IconPlus size={14} />
@@ -152,6 +173,29 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
             </div>
           }
         />
+
+        {selectedPlan && (
+          <div className="p-4 border-b border-[var(--tblr-border)] space-y-2">
+            {isAddingReserve && (
+              <div className="flex items-center gap-2 text-xs font-medium text-[var(--tblr-muted)]">
+                <IconMapPin size={14} className={annotationCoords ? 'text-green-600' : 'text-blue-600'} />
+                {annotationCoords
+                  ? 'Position sélectionnée sur le plan — cliquez à nouveau pour la déplacer.'
+                  : 'Cliquez sur le plan ci-dessous pour positionner la réserve (optionnel).'}
+              </div>
+            )}
+            <div className="h-[500px]">
+              <PlanAnnotator
+                fileUrl={selectedPlan.file_url}
+                markers={planMarkers}
+                pendingMarker={isAddingReserve ? annotationCoords : null}
+                onAddMarker={(x, y) => setAnnotationCoords({ x, y })}
+                onSelectMarker={handleSelectMarker}
+                isAddingMode={isAddingReserve}
+              />
+            </div>
+          </div>
+        )}
 
         {isAddingReserve && (
           <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
@@ -253,7 +297,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
 
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setIsAddingReserve(false)}
+                onClick={() => { setIsAddingReserve(false); setAnnotationCoords(null); }}
                 className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
               >
                 Annuler
@@ -285,6 +329,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                       const data = await res.json();
                       setReserves(prev => [...prev, data]);
                       setIsAddingReserve(false);
+                      setAnnotationCoords(null);
                       setNewReserve({
                         title: '',
                         batiment: '',
