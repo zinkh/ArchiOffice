@@ -2753,7 +2753,7 @@ async function startServer() {
       const { id } = req.params;
       const {
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
+        is_complete_mission, is_chantier, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -2767,7 +2767,7 @@ async function startServer() {
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       const { error: ue } = await supabaseAdmin.from('projects').update({
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
