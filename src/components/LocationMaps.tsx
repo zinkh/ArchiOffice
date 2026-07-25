@@ -346,7 +346,6 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
                 // The unified geocoder returns GeoJSON features.
                 if (geoData.features && geoData.features.length > 0 && geoData.features[0].properties.id) {
                   currentBanId = geoData.features[0].properties.id;
-                  console.log(`BDNB Geocoder found cle_interop_adr: ${currentBanId}`);
                 }
               }
             }

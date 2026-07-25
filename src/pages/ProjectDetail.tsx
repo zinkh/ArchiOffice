@@ -123,6 +123,14 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
 
 const MISSION_PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR'];
 
+// Maps ContratMOEMission ids (Contrats.tsx uses 'pro', Proposals.tsx's
+// fee_distribution uses 'projet' for the same phase — both are accepted here)
+// to the DocumentPhase codes used by the "Phase actuelle" buttons below.
+const MISSION_ID_TO_PHASE: Record<string, DocumentPhase> = {
+  esquisse: 'ESQ', aps: 'APS', apd: 'APD', pro: 'PRO', projet: 'PRO',
+  act: 'ACT', visa: 'VISA', det: 'DET', aor: 'AOR',
+};
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -353,8 +361,16 @@ export default function ProjectDetail() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phase }),
       });
-      if (res.ok) fetchPhaseHistory();
-    } catch (err) { console.error('Failed to update project phase:', err); }
+      if (res.ok) {
+        fetchPhaseHistory();
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(`Erreur lors du changement de phase : ${err?.error || res.statusText}`);
+      }
+    } catch (err) {
+      console.error('Failed to update project phase:', err);
+      alert('Erreur lors du changement de phase.');
+    }
   };
 
   const fetchFullProject = async () => {
@@ -501,7 +517,6 @@ export default function ProjectDetail() {
         const text = await res.text();
         try {
           const data = JSON.parse(text);
-          console.log('ProjectDetail fetched contacts:', data);
           setContacts(data);
         } catch (e) {
           console.error("Failed to parse contacts JSON:", text);
@@ -1506,11 +1521,12 @@ export default function ProjectDetail() {
                       const honRevises = (Number(project.remuneration) || 0) +
                         ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
                       if (honRevises <= 0) return null;
+                      const phases = linkedContratsMoe[0]?.missions_list?.filter((m: any) => m.incluse) ?? DEFAULT_PHASES;
                       return (
                         <div className="pt-2 border-t border-[var(--tblr-border)]">
                           <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Répartition indicative par phase (base mission complète)</p>
                           <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
-                            {DEFAULT_PHASES.map(phase => (
+                            {phases.map((phase: any) => (
                               <div key={phase.id} className="text-center p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
                                 <p className="text-[10px] font-black uppercase text-[var(--tblr-muted)]">{phase.name}</p>
                                 <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-1">{phase.pct} %</p>
@@ -1758,6 +1774,7 @@ export default function ProjectDetail() {
                   const contrat = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
                   const cotraitants: any[] = contrat?.cotraitants || [];
                   const sousTraitants: any[] = contrat?.sous_traitants || [];
+                  const phases = contrat?.missions_list?.filter((m: any) => m.incluse).map((m: any) => ({ id: m.id, name: m.name })) ?? DEFAULT_PHASES;
 
                   const initNoteForm = () => ({
                     numero: `NH-${String(notesHonoraires.length + 1).padStart(2, '0')}`,
@@ -1765,7 +1782,7 @@ export default function ProjectDetail() {
                     objet: '',
                     status: 'Brouillon',
                     tva_rate: 20,
-                    phases: DEFAULT_PHASES.map(p => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                    phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
                     cotraitants_facturation: cotraitants.map((ct: any) => ({ contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0 })),
                     sous_traitants_facturation: sousTraitants.map((st: any) => ({ contact_id: st.contact_id, nom: st.contact_name || st.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa })),
                     notes: '',
@@ -1882,7 +1899,7 @@ export default function ProjectDetail() {
                             <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Avancement par phase — Agence</p>
                             <div className="space-y-2">
                               {(noteForm.phases || []).map((phase: any, idx: number) => {
-                                const basePhase = DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
+                                const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
                                 const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
                                 const montantPhaseBase = honRevises * phasePct / 100;
                                 const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
@@ -2581,22 +2598,30 @@ export default function ProjectDetail() {
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
                       <div className="flex flex-wrap gap-2">
-                        {MISSION_PHASES.map(phase => {
-                          const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
-                          return (
-                            <button
-                              key={phase}
-                              type="button"
-                              onClick={() => handleSetPhase(phase)}
-                              className="px-3 py-1.5 rounded-full text-xs font-bold transition-colors"
-                              style={isCurrent
-                                ? { background: 'var(--tblr-primary)', color: 'white' }
-                                : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
-                            >
-                              {phase}
-                            </button>
-                          );
-                        })}
+                        {(() => {
+                          const primaryContrat = linkedContratsMoe[0];
+                          const includedPhases = primaryContrat
+                            ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
+                            : null;
+                          return MISSION_PHASES.filter(phase =>
+                            !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
+                          ).map(phase => {
+                            const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
+                            return (
+                              <button
+                                key={phase}
+                                type="button"
+                                onClick={() => handleSetPhase(phase)}
+                                className="px-3 py-1.5 rounded-full text-xs font-bold transition-colors"
+                                style={isCurrent
+                                  ? { background: 'var(--tblr-primary)', color: 'white' }
+                                  : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                              >
+                                {phase}
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                       {phaseHistory.length > 0 && (
                         <div className="pt-3 border-t border-[var(--tblr-border)] space-y-1.5">

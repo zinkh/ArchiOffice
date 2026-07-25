@@ -3853,6 +3853,41 @@ async function startServer() {
           const cots = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), project_id: projectId, tenant_id: tenantId, specialty: spec.specialty_name, contact_id: spec.contact_id || null }));
           await supabaseAdmin.from('project_cotraitants').insert(cots);
         }
+
+        // Copy the fee-distribution mission breakdown into a new draft ContratMOE,
+        // so the project's HONOS tab has real mission %/cotraitant data instead of
+        // starting empty (fee_distribution otherwise stays orphaned on the proposal).
+        try {
+          const feeData = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          const missions: any[] = feeData?.missions || [];
+          if (missions.length > 0) {
+            const totalBaseAmount = missions
+              .filter((m: any) => m.category === 'Mission base')
+              .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+            const missions_list = missions.map((m: any) => ({
+              id: m.id, name: m.name, incluse: true,
+              pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
+            }));
+            const totalHonoraires = p.amount || totalBaseAmount || 1;
+            const cotraitants = (specialties_list || []).map((spec: any) => {
+              const montant_honoraires = missions.reduce((acc: number, m: any) =>
+                acc + (m.amount || 0) * ((m.percentages?.[spec.contact_id] || 0) / 100), 0);
+              return {
+                id: crypto.randomUUID(), contact_id: spec.contact_id || null, contact_name: spec.contact_name || null,
+                specialty: spec.specialty_name, montant_honoraires, fee_pct: montant_honoraires / totalHonoraires * 100,
+              };
+            });
+            await supabaseAdmin.from('contrats_moe').insert({
+              id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
+              client_id: p.client_id || null, intitule_projet: p.title,
+              type_contrat: 'construction_neuve', type_moa: 'prive', status: 'Brouillon',
+              mode_honoraires: 'forfait', montant_honoraires: p.amount || null,
+              missions_list, cotraitants,
+            });
+          }
+        } catch (err) {
+          console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
+        }
       }
 
       const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).single();
