@@ -44,7 +44,6 @@ import {
   IconTools,
   IconReportMoney,
   IconClipboardCheck,
-  IconCalendarStats,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
@@ -1359,9 +1358,8 @@ export default function ProjectDetail() {
               { id: 'DET', label: 'DET', icon: IconTools },
               { id: 'RDT', label: 'RDT', icon: IconReportMoney },
               { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
-              { id: 'SIT', label: 'SIT', icon: IconCalendarStats },
             ] as PillTabItem[]).filter(tab =>
-              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR', 'SIT'].includes(tab.id) && !project.is_chantier)
+              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
             )}
           />
           <div className="tab-content mt-8">
@@ -2785,100 +2783,6 @@ export default function ProjectDetail() {
                     )}
                   </div>
                 </div>
-
-                {/* RFI Section */}
-                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                  <CardHeader
-                    icon={IconMessageDots}
-                    title={
-                      <span className="flex items-center gap-2">
-                        RFI — Demandes d'information
-                        <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{rfis.length}</span>
-                      </span>
-                    }
-                    action={
-                      <button
-                        onClick={() => setIsAddingRfi(!isAddingRfi)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
-                      >
-                        <IconPlus size={14} />
-                        {isAddingRfi ? 'Annuler' : 'Ajouter'}
-                      </button>
-                    }
-                  />
-                  {isAddingRfi && (
-                    <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
-                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
-                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
-                      </div>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={async () => {
-                            if (!id || !newRfi.question) return;
-                            try {
-                              const res = await fetch('/api/rfis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newRfi, project_id: id }) });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setRfis(prev => [...prev, data]);
-                                setIsAddingRfi(false);
-                                setNewRfi({ question: '', asked_by: '', due_date: '' });
-                              }
-                            } catch (err) { console.error(err); }
-                          }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
-                        >
-                          Ajouter
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="p-4">
-                    {rfis.length === 0 ? (
-                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucune RFI pour ce projet.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {rfis.map(r => (
-                          <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
-                            <div className="min-w-0">
-                              <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{r.question}</p>
-                              <p className="text-[10px] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <select
-                                className={cn(
-                                  "text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
-                                  r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                )}
-                                value={r.status}
-                                onChange={async (e) => {
-                                  const status = e.target.value;
-                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status, answered_date: status === 'repondu' ? new Date().toISOString().split('T')[0] : null }) });
-                                  if (res.ok) setRfis(prev => prev.map(x => x.id === r.id ? { ...x, status: status as any } : x));
-                                }}
-                              >
-                                <option value="en_attente">En attente</option>
-                                <option value="repondu">Répondu</option>
-                              </select>
-                              <button
-                                onClick={async () => {
-                                  if (!confirm('Supprimer cette RFI ?')) return;
-                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
-                                  if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
-                                }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
-                                title="Supprimer"
-                              >
-                                <IconTrash size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             )}
 
@@ -3095,6 +2999,100 @@ export default function ProjectDetail() {
 
                 {/* Comptes Rendus de Chantier */}
                 <SiteReports project={project} lots_list={project.lots_list || []} />
+
+                {/* RFI Section */}
+                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                  <CardHeader
+                    icon={IconMessageDots}
+                    title={
+                      <span className="flex items-center gap-2">
+                        RFI — Demandes d'information
+                        <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{rfis.length}</span>
+                      </span>
+                    }
+                    action={
+                      <button
+                        onClick={() => setIsAddingRfi(!isAddingRfi)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                      >
+                        <IconPlus size={14} />
+                        {isAddingRfi ? 'Annuler' : 'Ajouter'}
+                      </button>
+                    }
+                  />
+                  {isAddingRfi && (
+                    <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
+                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
+                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={async () => {
+                            if (!id || !newRfi.question) return;
+                            try {
+                              const res = await fetch('/api/rfis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newRfi, project_id: id }) });
+                              if (res.ok) {
+                                const data = await res.json();
+                                setRfis(prev => [...prev, data]);
+                                setIsAddingRfi(false);
+                                setNewRfi({ question: '', asked_by: '', due_date: '' });
+                              }
+                            } catch (err) { console.error(err); }
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                        >
+                          Ajouter
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-4">
+                    {rfis.length === 0 ? (
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucune RFI pour ce projet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {rfis.map(r => (
+                          <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{r.question}</p>
+                              <p className="text-[10px] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <select
+                                className={cn(
+                                  "text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
+                                  r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                )}
+                                value={r.status}
+                                onChange={async (e) => {
+                                  const status = e.target.value;
+                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status, answered_date: status === 'repondu' ? new Date().toISOString().split('T')[0] : null }) });
+                                  if (res.ok) setRfis(prev => prev.map(x => x.id === r.id ? { ...x, status: status as any } : x));
+                                }}
+                              >
+                                <option value="en_attente">En attente</option>
+                                <option value="repondu">Répondu</option>
+                              </select>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Supprimer cette RFI ?')) return;
+                                  const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
+                                  if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
+                                }}
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                title="Supprimer"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
             {activeTab === 'RDT' && (
@@ -3296,6 +3294,12 @@ export default function ProjectDetail() {
                     </table>
                   </div>
                 </div>
+
+                {project.is_chantier && (
+                  <div className="mt-2">
+                    <Situations projectId={id!} />
+                  </div>
+                )}
               </div>
             )}
             {activeTab === 'ACT' && (
@@ -4418,11 +4422,6 @@ export default function ProjectDetail() {
                 })()}
               </div>
               </div>
-              </div>
-            )}
-            {activeTab === 'SIT' && project.is_chantier && (
-              <div className="mt-2">
-                <Situations projectId={id!} />
               </div>
             )}
           </div>
