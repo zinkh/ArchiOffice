@@ -3455,9 +3455,9 @@ async function startServer() {
   app.post("/api/milestones", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, tender_id, proposal_id, title, due_date, completed } = req.body;
+      const { project_id, tender_id, proposal_id, title, due_date, completed, duration_days, dependencies } = req.body;
       const id = crypto.randomUUID();
-      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed }).select().single();
+      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).select().single();
       if (error) throw error;
       res.status(201).json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create milestone: " + e.message }); }
@@ -3467,8 +3467,8 @@ async function startServer() {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { title, due_date, completed } = req.body;
-      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed }).eq('id', id).eq('tenant_id', tenantId);
+      const { title, due_date, completed, duration_days, dependencies } = req.body;
+      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update milestone: " + e.message }); }

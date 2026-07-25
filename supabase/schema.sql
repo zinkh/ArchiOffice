@@ -242,7 +242,8 @@ CREATE TABLE IF NOT EXISTS milestones (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, proposal_id TEXT, tender_id TEXT,
-  title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0
+  title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0,
+  duration_days INTEGER, dependencies TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
 

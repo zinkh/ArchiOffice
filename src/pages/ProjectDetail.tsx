@@ -272,11 +272,53 @@ export default function ProjectDetail() {
   }, [project?.is_chantier, activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'HONOS' && id) {
+    // Unconditional (not tab-gated): the "Phase actuelle" buttons (INFOS tab)
+    // and the mission→milestone sync below both need this regardless of
+    // whether the user has opened the HONOS tab yet.
+    if (id) {
       fetch('/api/contrats_moe')
         .then(r => r.json())
         .then((all: any[]) => setLinkedContratsMoe((all || []).filter((c: any) => c.project_id === id)))
         .catch(() => {});
+    }
+  }, [id]);
+
+  // Keep project milestones in sync with the missions included in the linked
+  // ContratMOE (one milestone per included mission, matched by title — same
+  // principle used for proposal milestones in Proposals.tsx's FeeDistributionGrid).
+  useEffect(() => {
+    if (!id) return;
+    const primaryContrat = linkedContratsMoe[0];
+    if (!primaryContrat) return;
+    const includedMissions: any[] = (primaryContrat.missions_list || []).filter((m: any) => m.incluse);
+    if (includedMissions.length === 0) return;
+
+    const projectMilestones = milestones.filter(m => m.project_id === id);
+
+    includedMissions.forEach(mission => {
+      if (!projectMilestones.some(m => m.title === mission.name)) {
+        fetch('/api/milestones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: id, title: mission.name, due_date: new Date().toISOString(), completed: false, duration_days: 30 }),
+        })
+          .then(res => res.ok ? res.json() : null)
+          .then(created => { if (created) setMilestones(prev => [...prev, { ...created, completed: !!created.completed }]); })
+          .catch(console.error);
+      }
+    });
+
+    projectMilestones.forEach(m => {
+      if (!includedMissions.some(mission => mission.name === m.title)) {
+        fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
+          .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)))
+          .catch(console.error);
+      }
+    });
+  }, [linkedContratsMoe, id]);
+
+  useEffect(() => {
+    if (activeTab === 'HONOS' && id) {
       fetch(`/api/notes_honoraires?project_id=${id}`)
         .then(r => r.json())
         .then((data: any[]) => setNotesHonoraires(data || []))
@@ -2295,10 +2337,24 @@ export default function ProjectDetail() {
 
                         {project && milestones.length > 0 && (
                           <div className="mb-6">
-                            <MilestoneGantt 
-                              milestones={milestones} 
-                              startDate={new Date(project.start_date)} 
-                              endDate={new Date(project.end_date)} 
+                            <MilestoneGantt
+                              milestones={milestones}
+                              startDate={new Date(project.start_date)}
+                              endDate={new Date(project.end_date)}
+                              onUpdate={(updated) => {
+                                setMilestones(updated);
+                                const changed = updated.find(m => {
+                                  const orig = milestones.find(o => o.id === m.id);
+                                  return orig && (orig.duration_days !== m.duration_days || JSON.stringify(orig.dependencies) !== JSON.stringify(m.dependencies));
+                                });
+                                if (changed) {
+                                  fetch(`/api/milestones/${changed.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(changed),
+                                  }).catch(console.error);
+                                }
+                              }}
                             />
                           </div>
                         )}
