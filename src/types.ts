@@ -75,12 +75,13 @@ export interface DocumentTemplateVariable {
 export interface DocumentTemplate {
   id: string;
   name: string;
-  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'Autre';
+  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'OS' | 'Autre';
   description?: string;
   content: string;
   variables: DocumentTemplateVariable[];
   is_seeded: boolean;
   editable: boolean;
+  is_default: boolean;
   source_template_id?: string | null;
   created_at: string;
 }

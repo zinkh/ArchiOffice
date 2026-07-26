@@ -447,7 +447,7 @@ CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL UNIQUE,
   agency_name TEXT, address TEXT, phone TEXT, email TEXT,
-  siret TEXT, vat_number TEXT, currency TEXT, language TEXT,
+  siret TEXT, ape TEXT, vat_number TEXT, currency TEXT, language TEXT,
   sender_option TEXT, default_email_template TEXT, logo_url TEXT,
   seller_iban TEXT, seller_bic TEXT,
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
@@ -456,7 +456,8 @@ CREATE TABLE IF NOT EXISTS settings (
   zoho_books_org_id TEXT,
   num_prefix_devis TEXT DEFAULT 'DEVIS',
   num_prefix_facture TEXT DEFAULT 'FAC',
-  num_prefix_honoraires TEXT DEFAULT 'NH'
+  num_prefix_honoraires TEXT DEFAULT 'NH',
+  num_prefix_affaire TEXT
 );
 
 -- Project Templates
@@ -760,12 +761,15 @@ CREATE TABLE IF NOT EXISTS document_templates (
   variables JSONB NOT NULL DEFAULT '[]',
   is_seeded BOOLEAN NOT NULL DEFAULT false,
   editable BOOLEAN NOT NULL DEFAULT true,
+  is_default BOOLEAN NOT NULL DEFAULT false,
   source_template_id TEXT REFERENCES document_templates(id) ON DELETE SET NULL,
   created_by TEXT,
   created_at TEXT,
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_document_templates_tenant_category ON document_templates(tenant_id, category);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_templates_one_default_per_category
+  ON document_templates(tenant_id, category) WHERE is_default = true;
 ALTER TABLE document_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON document_templates USING (tenant_id = my_tenant_id());
 

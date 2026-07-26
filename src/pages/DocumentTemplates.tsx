@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconPlus, IconTrash, IconEdit, IconCopy, IconFileText, IconDownload,
+  IconPlus, IconTrash, IconEdit, IconCopy, IconFileText, IconDownload, IconStar, IconStarFilled,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
@@ -9,7 +9,7 @@ import { useSettings } from '../hooks/useSettings';
 import type { DocumentTemplate, DocumentTemplateVariable, Project } from '../types';
 import { fillTemplate, missingRequiredVariables, exportTemplatePdf, exportTemplateDocx, downloadPdfBlob, downloadDocxBlob } from '../lib/templateExport';
 
-const CATEGORIES: DocumentTemplate['category'][] = ['Contrat MOE', 'CCTP', 'DPGF', 'Candidature', 'Courrier', 'Autre'];
+const CATEGORIES: DocumentTemplate['category'][] = ['Contrat MOE', 'CCTP', 'DPGF', 'Candidature', 'Courrier', 'OS', 'Autre'];
 
 const emptyForm = (): Partial<DocumentTemplate> => ({
   name: '', category: 'Autre', description: '', content: '', variables: [],
@@ -88,6 +88,15 @@ export default function DocumentTemplates() {
       fetchTemplates();
     } catch (e: any) {
       alert(e.message || t('document_templates_duplicate_error'));
+    }
+  };
+
+  const setDefaultTemplate = async (tpl: DocumentTemplate) => {
+    try {
+      await apiFetch(`/api/document_templates/${tpl.id}/set-default`, { method: 'POST' });
+      fetchTemplates();
+    } catch (e: any) {
+      alert(e.message || t('document_templates_set_default_error'));
     }
   };
 
@@ -195,7 +204,14 @@ export default function DocumentTemplates() {
                   {tpl.name}
                 </h3>
               </div>
-              <span className="inline-block w-fit text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 mb-2">{tpl.category}</span>
+              <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                <span className="inline-block w-fit text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">{tpl.category}</span>
+                {tpl.is_default && (
+                  <span className="inline-flex items-center gap-1 w-fit text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
+                    <IconStarFilled size={11} /> {t('document_templates_default_badge')}
+                  </span>
+                )}
+              </div>
               {tpl.is_seeded && (
                 <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded px-2 py-1 mb-2">
                   {t('document_templates_seeded_badge')}
@@ -209,6 +225,11 @@ export default function DocumentTemplates() {
                 <button onClick={() => duplicateTemplate(tpl)} title={t('document_templates_duplicate_btn')} className="p-1.5 rounded text-zinc-500 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-700">
                   <IconCopy size={16} />
                 </button>
+                {!tpl.is_default && (
+                  <button onClick={() => setDefaultTemplate(tpl)} title={t('document_templates_set_default_btn')} className="p-1.5 rounded text-zinc-500 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-700">
+                    <IconStar size={16} />
+                  </button>
+                )}
                 {tpl.editable && (
                   <>
                     <button onClick={() => openEdit(tpl)} title={t('btn_edit')} className="p-1.5 rounded text-zinc-500 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-700">

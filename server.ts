@@ -2618,11 +2618,18 @@ async function startServer() {
       const { count } = await supabaseAdmin.from('document_templates').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
       if (!count) {
         const now = new Date().toISOString();
-        const seedRows = SEED_DOCUMENT_TEMPLATES.map(t => ({
-          id: crypto.randomUUID(), tenant_id: tenantId, name: t.name, category: t.category,
-          description: t.description, content: t.content, variables: t.variables,
-          is_seeded: true, editable: false, created_at: now, updated_at: now,
-        }));
+        const seenCategory = new Set<string>();
+        const seedRows = SEED_DOCUMENT_TEMPLATES.map(t => {
+          // First seeded template of each category becomes that category's default,
+          // so a brand-new tenant already has a sensible CCTP/OS default with zero clicks.
+          const isFirstOfCategory = !seenCategory.has(t.category);
+          seenCategory.add(t.category);
+          return {
+            id: crypto.randomUUID(), tenant_id: tenantId, name: t.name, category: t.category,
+            description: t.description, content: t.content, variables: t.variables,
+            is_seeded: true, editable: false, is_default: isFirstOfCategory, created_at: now, updated_at: now,
+          };
+        });
         const { error: seedErr } = await supabaseAdmin.from('document_templates').insert(seedRows);
         if (seedErr) throw seedErr;
       }
@@ -2702,6 +2709,24 @@ async function startServer() {
       if (error) throw error;
       res.status(201).json({ id: newId });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to duplicate document template" }); }
+  });
+
+  // Marks a template as the tenant's default for its category (used by the Onboarding
+  // wizard's "Modèles par défaut" step, and by the "Définir par défaut" action on the
+  // Document Templates page). Allowed even on non-editable seeded templates — picking
+  // a default doesn't modify the template itself, unlike edit/delete.
+  app.post("/api/document_templates/:id/set-default", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: target } = await supabaseAdmin.from('document_templates').select('id, category').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!target) return res.status(404).json({ error: 'Modèle introuvable' });
+      const { error: clearErr } = await supabaseAdmin.from('document_templates').update({ is_default: false }).eq('tenant_id', tenantId).eq('category', target.category).eq('is_default', true);
+      if (clearErr) throw clearErr;
+      const { error: setErr } = await supabaseAdmin.from('document_templates').update({ is_default: true }).eq('id', id).eq('tenant_id', tenantId);
+      if (setErr) throw setErr;
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to set default template" }); }
   });
 
   app.post("/api/document_templates/:id/generate", async (req: any, res: any) => {
@@ -2815,10 +2840,20 @@ async function startServer() {
         maf_intercalaire, taux_mission, part_interet
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
-      // Generate project code: YYNNN
+      // Generate project code — prefixed PREFIX-YEAR-NNN when the tenant configured
+      // a num_prefix_affaire (Onboarding wizard / Settings), else the legacy bare YYNNN.
+      const { data: affaireSettings } = await supabaseAdmin.from('settings').select('num_prefix_affaire').eq('tenant_id', tenantId).maybeSingle();
+      const affairePrefix = (affaireSettings as any)?.num_prefix_affaire?.trim();
       const year = new Date().getFullYear().toString().slice(-2);
-      const { count: countVal } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).like('project_code', `${year}%`).then(r => ({ count: r.count || 0 }));
-      const project_code = `${year}${((countVal as number) + 1).toString().padStart(3, '0')}`;
+      let project_code: string;
+      if (affairePrefix) {
+        const likePattern = `${affairePrefix}-${year}-%`;
+        const { count: countVal } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).like('project_code', likePattern).then(r => ({ count: r.count || 0 }));
+        project_code = `${affairePrefix}-${year}-${((countVal as number) + 1).toString().padStart(3, '0')}`;
+      } else {
+        const { count: countVal } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).like('project_code', `${year}%`).then(r => ({ count: r.count || 0 }));
+        project_code = `${year}${((countVal as number) + 1).toString().padStart(3, '0')}`;
+      }
       const id = bodyId || crypto.randomUUID();
       const { error: pe } = await supabaseAdmin.from('projects').insert({
         id, tenant_id: tenantId, name, client, status: status || 'Planning', budget: budget || 0,
@@ -3227,10 +3262,13 @@ async function startServer() {
       let emailSent = false;
       let emailError: string | null = null;
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      const smtpHost = (settings as any)?.smtpHost || process.env.SMTP_HOST;
-      const smtpPort = (settings as any)?.smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = (settings as any)?.smtpUser || process.env.SMTP_USER;
-      const smtpPass = (settings as any)?.smtpPass || process.env.SMTP_PASS;
+      // Tenant's own SMTP first (raw snake_case columns — this is NOT the camelCase
+      // shape /api/settings returns), falling back to the platform's SMTP env vars
+      // so invites still go out for a brand-new tenant that hasn't configured SMTP yet.
+      const smtpHost = (settings as any)?.smtp_host || process.env.SMTP_HOST;
+      const smtpPort = (settings as any)?.smtp_port || process.env.SMTP_PORT || '587';
+      const smtpUser = (settings as any)?.smtp_user || process.env.SMTP_USER;
+      const smtpPass = (settings as any)?.smtp_pass || process.env.SMTP_PASS;
 
       console.log(`[Team Creation] Attempting to send email to ${email} using host ${smtpHost}:${smtpPort}`);
 
@@ -6391,6 +6429,7 @@ async function startServer() {
     numPrefixDevis: 'num_prefix_devis',
     numPrefixFacture: 'num_prefix_facture',
     numPrefixHonoraires: 'num_prefix_honoraires',
+    numPrefixAffaire: 'num_prefix_affaire',
     defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
     defaultLeaveDaysRtt: 'default_leave_days_rtt',
   };
@@ -6424,13 +6463,13 @@ async function startServer() {
       }
       // Only keep valid table columns (exclude id — managed separately)
       const validCols = new Set([
-        'agency_name', 'address', 'phone', 'email', 'siret', 'vat_number',
+        'agency_name', 'address', 'phone', 'email', 'siret', 'ape', 'vat_number',
         'currency', 'language', 'sender_option', 'default_email_template', 'logo_url',
         'seller_iban', 'seller_bic',
         'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass',
         'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token',
         'zoho_books_org_id',
-        'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires',
+        'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',

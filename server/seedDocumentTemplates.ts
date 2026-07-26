@@ -13,7 +13,7 @@ export interface SeedTemplateVariable {
 
 export interface SeedDocumentTemplate {
   name: string;
-  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'Autre';
+  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'OS' | 'Autre';
   description: string;
   content: string;
   variables: SeedTemplateVariable[];
@@ -191,6 +191,51 @@ Nous restons à votre disposition pour tout complément d'information et vous pr
       { key: 'references', label: 'Références', type: 'textarea' },
       { key: 'moyens', label: 'Moyens humains et matériels', type: 'textarea' },
       { key: 'signataire', label: 'Signataire', type: 'text' },
+      { key: 'lieu_signature', label: 'Lieu', type: 'text' },
+      { key: 'date_signature', label: 'Date', type: 'date' },
+    ],
+  },
+  {
+    name: 'Ordre de service — type',
+    category: 'OS',
+    description: "Modèle standard d'ordre de service (démarrage, arrêt, prolongation de délai...).",
+    content: DISCLAIMER + `# ORDRE DE SERVICE N° {{numero_os}}
+
+**Marché n° :** {{numero_marche}}
+**Opération :** {{nom_operation}}
+**Entreprise destinataire :** {{entreprise}}
+**Lot :** {{lot}}
+
+## Objet
+
+{{objet}}
+
+## Description
+
+{{description}}
+
+## Incidences sur les délais
+
+{{incidences_delais}}
+
+## Incidences sur le prix du marché
+
+{{incidences_couts}}
+
+Fait à {{lieu_signature}}, le {{date_signature}}
+
+Le Maître d'Œuvre
+`,
+    variables: [
+      { key: 'numero_os', label: "N° de l'ordre de service", type: 'text', required: true },
+      { key: 'numero_marche', label: 'N° du marché', type: 'text' },
+      { key: 'nom_operation', label: "Nom de l'opération", type: 'text', required: true },
+      { key: 'entreprise', label: 'Entreprise destinataire', type: 'text', required: true },
+      { key: 'lot', label: 'Lot', type: 'text' },
+      { key: 'objet', label: "Objet de l'ordre de service", type: 'text', required: true },
+      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: 'incidences_delais', label: 'Incidences sur les délais', type: 'textarea', default_value: 'Sans incidence sur les délais contractuels.' },
+      { key: 'incidences_couts', label: 'Incidences sur le prix du marché', type: 'textarea', default_value: 'Sans incidence sur le prix du marché.' },
       { key: 'lieu_signature', label: 'Lieu', type: 'text' },
       { key: 'date_signature', label: 'Date', type: 'date' },
     ],
