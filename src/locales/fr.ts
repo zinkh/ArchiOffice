@@ -877,6 +877,11 @@ export default {
       "calendar_milestone": "Jalon",
       "calendar_task": "Tâche",
       "calendar_select_day_hint": "Cliquez sur un jour pour voir le détail.",
+      "calendar_view_month": "Vue mensuelle",
+      "calendar_view_team": "Vue équipe",
+      "team_schedule_empty": "Aucun salarié à afficher — réservé aux managers et administrateurs.",
+      "team_schedule_total": "Total",
+      "team_schedule_all_day": "Toute la journée",
 
       // Generic
       "loading": "Chargement...",
@@ -898,6 +903,9 @@ export default {
       "document_templates_generate_error": "Erreur lors de la génération du document",
       "document_templates_generated_from": "Généré à partir du modèle \"{{name}}\"",
       "document_templates_seeded_badge": "Modèle de base — à faire valider par un juriste",
+      "document_templates_default_badge": "Par défaut",
+      "document_templates_set_default_btn": "Définir par défaut",
+      "document_templates_set_default_error": "Erreur lors de la définition du modèle par défaut.",
       "document_templates_generate_btn": "Générer",
       "document_templates_duplicate_btn": "Dupliquer",
       "document_templates_edit_title": "Modifier le modèle",

@@ -7,7 +7,7 @@ import { useSettings } from '../hooks/useSettings';
 import { exportLeaveBalancesTablePdf, exportLeaveBalanceFichePdf } from '../lib/hrExport';
 import type { LeaveRequest, LeaveBalance, LeaveBalanceAllEntry, LeaveType, TeamMember } from '../types';
 
-const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
   conges_payes: 'Congés payés',
   rtt: 'RTT',
   maladie: 'Maladie',

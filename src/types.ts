@@ -75,12 +75,13 @@ export interface DocumentTemplateVariable {
 export interface DocumentTemplate {
   id: string;
   name: string;
-  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'Autre';
+  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'OS' | 'Autre';
   description?: string;
   content: string;
   variables: DocumentTemplateVariable[];
   is_seeded: boolean;
   editable: boolean;
+  is_default: boolean;
   source_template_id?: string | null;
   created_at: string;
 }
@@ -112,6 +113,20 @@ export interface TimeAdminMatrix {
   employees: { id: string; name: string }[];
   projects: { id: string; name: string }[];
   cells: { user_id: string; project_id: string | null; hours: number }[];
+}
+
+export interface TeamScheduleEmployee {
+  id: string;
+  name: string;
+  job_title?: string;
+  department?: string;
+}
+
+export interface TeamSchedule {
+  employees: TeamScheduleEmployee[];
+  entries: TimeEntry[];
+  leaves: LeaveRequest[];
+  projects: { id: string; name: string }[];
 }
 
 export interface TimeMonthlySummaryEntry {

@@ -829,6 +829,11 @@ export default {
       "calendar_milestone": "Milestone",
       "calendar_task": "Task",
       "calendar_select_day_hint": "Click a day to see the details.",
+      "calendar_view_month": "Month view",
+      "calendar_view_team": "Team view",
+      "team_schedule_empty": "No employees to show — reserved for managers and admins.",
+      "team_schedule_total": "Total",
+      "team_schedule_all_day": "All day",
 
       // Generic
       "loading": "Loading...",
@@ -850,6 +855,9 @@ export default {
       "document_templates_generate_error": "Failed to generate the document",
       "document_templates_generated_from": "Generated from template \"{{name}}\"",
       "document_templates_seeded_badge": "Starter template — have a lawyer review before use",
+      "document_templates_default_badge": "Default",
+      "document_templates_set_default_btn": "Set as default",
+      "document_templates_set_default_error": "Failed to set the default template.",
       "document_templates_generate_btn": "Generate",
       "document_templates_duplicate_btn": "Duplicate",
       "document_templates_edit_title": "Edit Template",

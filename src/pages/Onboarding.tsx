@@ -1,18 +1,26 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { IconBuilding, IconPhoto, IconUser, IconUsers, IconCheck, IconArrowRight, IconArrowLeft, IconUpload, IconX, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from 'react-i18next';
+import {
+  IconBuilding, IconPhoto, IconUser, IconUsers, IconCheck, IconArrowRight, IconArrowLeft,
+  IconUpload, IconX, IconPlus, IconListNumbers, IconFileText,
+} from '@tabler/icons-react';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { getAccessToken } from '../lib/authToken';
 import { apiFetch } from '../lib/api';
+import type { DocumentTemplate } from '../types';
 
 const STEPS = [
   { id: 'agency', label: 'Votre cabinet', icon: IconBuilding },
+  { id: 'numbering', label: 'Numérotation', icon: IconListNumbers },
+  { id: 'templates', label: 'Modèles', icon: IconFileText },
   { id: 'logo', label: 'Logo', icon: IconPhoto },
   { id: 'avatar', label: 'Avatar', icon: IconUser },
   { id: 'invite', label: 'Équipe', icon: IconUsers },
 ];
 
-interface InviteRow { name: string; email: string; role: string }
+type SystemRole = 'user' | 'pm' | 'manager' | 'admin';
+interface InviteRow { name: string; email: string; role: SystemRole }
 
 async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const token = await getAccessToken();
@@ -23,29 +31,74 @@ async function authFetch(url: string, init: RequestInit = {}): Promise<Response>
 
 export default function Onboarding() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Step 0 — agency
+  // Step 0 — agency / company profile
   const [agencyName, setAgencyName] = useState('');
   const [agencyAddress, setAgencyAddress] = useState('');
   const [agencyPhone, setAgencyPhone] = useState('');
   const [agencyEmail, setAgencyEmail] = useState('');
+  const [agencySiret, setAgencySiret] = useState('');
+  const [agencyApe, setAgencyApe] = useState('');
 
-  // Step 1 — logo
+  // Step 1 — numbering
+  const [numPrefixDevis, setNumPrefixDevis] = useState('DEVIS');
+  const [numPrefixFacture, setNumPrefixFacture] = useState('FAC');
+  const [numPrefixAffaire, setNumPrefixAffaire] = useState('');
+
+  // Step 2 — default templates
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [defaultCctpId, setDefaultCctpId] = useState('');
+  const [defaultOsId, setDefaultOsId] = useState('');
+
+  // Step 3 — logo
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
 
-  // Step 2 — avatar
+  // Step 4 — avatar
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
 
-  // Step 3 — invite
-  const [invites, setInvites] = useState<InviteRow[]>([{ name: '', email: '', role: 'Member' }]);
+  // Step 5 — invite
+  const [invites, setInvites] = useState<InviteRow[]>([{ name: '', email: '', role: 'user' }]);
   const [inviteResults, setInviteResults] = useState<Record<number, 'ok' | 'err'>>({});
+
+  // Prefill from any settings already saved, so revisiting the wizard edits
+  // existing values instead of blanking them out.
+  useEffect(() => {
+    apiFetch<any>('/api/settings').then(s => {
+      if (!s || s.error) return;
+      if (s.agencyName) setAgencyName(s.agencyName);
+      if (s.address) setAgencyAddress(s.address);
+      if (s.phone) setAgencyPhone(s.phone);
+      if (s.email) setAgencyEmail(s.email);
+      if (s.siret) setAgencySiret(s.siret);
+      if (s.ape) setAgencyApe(s.ape);
+      if (s.numPrefixDevis) setNumPrefixDevis(s.numPrefixDevis);
+      if (s.numPrefixFacture) setNumPrefixFacture(s.numPrefixFacture);
+      if (s.numPrefixAffaire) setNumPrefixAffaire(s.numPrefixAffaire);
+    }).catch(() => {});
+  }, []);
+
+  const loadTemplates = () => {
+    setTemplatesLoading(true);
+    apiFetch<DocumentTemplate[]>('/api/document_templates')
+      .then(list => {
+        setTemplates(list);
+        const cctp = list.find(tpl => tpl.category === 'CCTP' && tpl.is_default) || list.find(tpl => tpl.category === 'CCTP');
+        const os = list.find(tpl => tpl.category === 'OS' && tpl.is_default) || list.find(tpl => tpl.category === 'OS');
+        if (cctp) setDefaultCctpId(cctp.id);
+        if (os) setDefaultOsId(os.id);
+      })
+      .catch(() => {})
+      .finally(() => setTemplatesLoading(false));
+  };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -71,11 +124,46 @@ export default function Onboarding() {
     try {
       await apiFetch('/api/settings', {
         method: 'PUT',
-        body: JSON.stringify({ agencyName, address: agencyAddress, phone: agencyPhone, email: agencyEmail }),
+        body: JSON.stringify({
+          agencyName, address: agencyAddress, phone: agencyPhone, email: agencyEmail,
+          siret: agencySiret, ape: agencyApe,
+        }),
       });
       return true;
     } catch {
       setError('Erreur lors de la sauvegarde.');
+      return false;
+    }
+  };
+
+  const saveNumbering = async (): Promise<boolean> => {
+    setError(null);
+    try {
+      await apiFetch('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          numPrefixDevis: numPrefixDevis.trim() || 'DEVIS',
+          numPrefixFacture: numPrefixFacture.trim() || 'FAC',
+          numPrefixAffaire: numPrefixAffaire.trim(),
+        }),
+      });
+      return true;
+    } catch {
+      setError('Erreur lors de la sauvegarde.');
+      return false;
+    }
+  };
+
+  const saveDefaultTemplates = async (): Promise<boolean> => {
+    setError(null);
+    try {
+      await Promise.all([
+        defaultCctpId ? apiFetch(`/api/document_templates/${defaultCctpId}/set-default`, { method: 'POST' }) : Promise.resolve(),
+        defaultOsId ? apiFetch(`/api/document_templates/${defaultOsId}/set-default`, { method: 'POST' }) : Promise.resolve(),
+      ]);
+      return true;
+    } catch {
+      setError('Erreur lors de la sauvegarde des modèles par défaut.');
       return false;
     }
   };
@@ -102,7 +190,7 @@ export default function Onboarding() {
       try {
         await apiFetch('/api/team', {
           method: 'POST',
-          body: JSON.stringify({ name: inv.name || inv.email.split('@')[0], email: inv.email, role: inv.role }),
+          body: JSON.stringify({ name: inv.name || inv.email.split('@')[0], email: inv.email, system_role: inv.role }),
         });
         results[i] = 'ok';
       } catch {
@@ -120,11 +208,19 @@ export default function Onboarding() {
         const ok = await saveAgency();
         if (!ok) { setSaving(false); return; }
       } else if (step === 1) {
-        await uploadLogo();
+        const ok = await saveNumbering();
+        if (!ok) { setSaving(false); return; }
       } else if (step === 2) {
+        const ok = await saveDefaultTemplates();
+        if (!ok) { setSaving(false); return; }
+      } else if (step === 3) {
+        await uploadLogo();
+      } else if (step === 4) {
         await uploadAvatar();
       }
-      setStep(s => s + 1);
+      const nextStep = step + 1;
+      setStep(nextStep);
+      if (STEPS[nextStep]?.id === 'templates') loadTemplates();
     } catch (e: any) {
       setError(e?.message || 'Une erreur est survenue.');
     } finally {
@@ -132,11 +228,21 @@ export default function Onboarding() {
     }
   };
 
+  // Best-effort — a failed save here shouldn't trap the admin in the wizard;
+  // the localStorage flag still lets this browser skip the redirect meanwhile.
+  const markOnboardingDone = () => {
+    localStorage.setItem('archioffice_onboarding_done', '1');
+    apiFetch('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ onboardingCompletedAt: new Date().toISOString() }),
+    }).catch(() => {});
+  };
+
   const finish = async () => {
     setSaving(true);
     try {
       await sendInvites();
-      localStorage.setItem('archioffice_onboarding_done', '1');
+      markOnboardingDone();
       navigate('/');
     } finally {
       setSaving(false);
@@ -145,12 +251,18 @@ export default function Onboarding() {
 
   const skip = () => {
     if (step < STEPS.length - 1) {
-      setStep(s => s + 1);
+      const nextStep = step + 1;
+      setStep(nextStep);
+      if (STEPS[nextStep]?.id === 'templates') loadTemplates();
     } else {
-      localStorage.setItem('archioffice_onboarding_done', '1');
+      markOnboardingDone();
       navigate('/');
     }
   };
+
+  const cctpTemplates = templates.filter(tpl => tpl.category === 'CCTP');
+  const osTemplates = templates.filter(tpl => tpl.category === 'OS');
+  const year = new Date().getFullYear();
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-[#050505] flex flex-col items-center justify-center py-12 px-4">
@@ -171,15 +283,15 @@ export default function Onboarding() {
               const active = i === step;
               return (
                 <React.Fragment key={s.id}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 flex-shrink-0 transition-colors ${
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center border-2 flex-shrink-0 transition-colors ${
                     done ? 'bg-blue-600 border-blue-600 text-white' :
                     active ? 'border-blue-600 text-blue-600 bg-white dark:bg-zinc-900' :
                     'border-zinc-300 dark:border-zinc-700 text-zinc-400 bg-white dark:bg-zinc-900'
                   } ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
-                    {done ? <IconCheck size={18} /> : <Icon size={18} />}
+                    {done ? <IconCheck size={16} /> : <Icon size={16} />}
                   </div>
                   {i < STEPS.length - 1 && (
-                    <div className={`flex-1 h-0.5 max-w-[60px] transition-colors ${i < step ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'}`} />
+                    <div className={`flex-1 h-0.5 max-w-[36px] transition-colors ${i < step ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'}`} />
                   )}
                 </React.Fragment>
               );
@@ -191,10 +303,10 @@ export default function Onboarding() {
               const active = i === step;
               return (
                 <React.Fragment key={s.id}>
-                  <div className={`w-10 flex-shrink-0 flex justify-center transition-opacity ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
-                    <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400 text-center leading-tight">{s.label}</span>
+                  <div className={`w-9 flex-shrink-0 flex justify-center transition-opacity ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
+                    <span className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400 text-center leading-tight">{s.label}</span>
                   </div>
-                  {i < STEPS.length - 1 && <div className="flex-1 max-w-[60px]" />}
+                  {i < STEPS.length - 1 && <div className="flex-1 max-w-[36px]" />}
                 </React.Fragment>
               );
             })}
@@ -204,7 +316,7 @@ export default function Onboarding() {
         {/* Card */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-lg p-8 min-h-[320px]">
 
-          {/* Step 0 — Agency info */}
+          {/* Step 0 — Agency / company profile */}
           {step === 0 && (
             <div className="space-y-5">
               <div>
@@ -254,12 +366,111 @@ export default function Onboarding() {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SIRET</label>
+                  <input
+                    type="text"
+                    value={agencySiret}
+                    onChange={e => setAgencySiret(e.target.value)}
+                    placeholder="123 456 789 00012"
+                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                    maxLength={20}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Code APE</label>
+                  <input
+                    type="text"
+                    value={agencyApe}
+                    onChange={e => setAgencyApe(e.target.value)}
+                    placeholder="7111Z"
+                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                    maxLength={10}
+                  />
+                </div>
+              </div>
               {error && <p className="text-sm text-red-500">{error}</p>}
             </div>
           )}
 
-          {/* Step 1 — Logo */}
+          {/* Step 1 — Numbering */}
           {step === 1 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Numérotation des documents</h2>
+                <p className="text-sm text-zinc-500 mt-1">Choisissez un préfixe pour vos devis, factures et affaires. Le numéro généré aura la forme <span className="font-mono">PRÉFIXE-ANNÉE-NNN</span>.</p>
+              </div>
+              {([
+                { label: 'Devis / Propositions', value: numPrefixDevis, setValue: setNumPrefixDevis, placeholder: 'DEVIS' },
+                { label: 'Factures', value: numPrefixFacture, setValue: setNumPrefixFacture, placeholder: 'FAC' },
+                { label: 'Affaires (projets)', value: numPrefixAffaire, setValue: setNumPrefixAffaire, placeholder: 'Laisser vide pour garder la numérotation automatique' },
+              ] as const).map(({ label, value, setValue, placeholder }) => {
+                const preview = value.trim() ? `${value.trim()}-${year}-001` : `${year.toString().slice(-2)}001`;
+                return (
+                  <div key={label} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{label}</label>
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={e => setValue(e.target.value)}
+                        placeholder={placeholder}
+                        className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                        maxLength={20}
+                      />
+                    </div>
+                    <div className="px-3 py-2 rounded-lg text-sm font-mono font-bold bg-zinc-50 dark:bg-zinc-800 text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                      {preview}
+                    </div>
+                  </div>
+                );
+              })}
+              {error && <p className="text-sm text-red-500">{error}</p>}
+            </div>
+          )}
+
+          {/* Step 2 — Default templates */}
+          {step === 2 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Modèles par défaut</h2>
+                <p className="text-sm text-zinc-500 mt-1">Choisissez le modèle utilisé par défaut pour vos CCTP et vos ordres de service. Vous pourrez en créer d'autres et changer d'avis à tout moment depuis Modèles de documents.</p>
+              </div>
+              {templatesLoading ? (
+                <p className="text-sm text-zinc-400">Chargement des modèles...</p>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">CCTP par défaut</label>
+                    <select
+                      value={defaultCctpId}
+                      onChange={e => setDefaultCctpId(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="">Aucun</option>
+                      {cctpTemplates.map(tpl => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Ordre de service (OS) par défaut</label>
+                    <select
+                      value={defaultOsId}
+                      onChange={e => setDefaultOsId(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="">Aucun</option>
+                      {osTemplates.map(tpl => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+              {error && <p className="text-sm text-red-500">{error}</p>}
+            </div>
+          )}
+
+          {/* Step 3 — Logo */}
+          {step === 3 && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Logo de votre cabinet</h2>
@@ -303,8 +514,8 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* Step 2 — Avatar */}
-          {step === 2 && (
+          {/* Step 4 — Avatar */}
+          {step === 4 && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Votre photo de profil</h2>
@@ -338,8 +549,8 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* Step 3 — Invite team */}
-          {step === 3 && (
+          {/* Step 5 — Invite team */}
+          {step === 5 && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Inviter votre équipe</h2>
@@ -365,12 +576,13 @@ export default function Onboarding() {
                     <div className="flex gap-2 items-center">
                       <select
                         value={inv.role}
-                        onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, role: e.target.value } : row))}
+                        onChange={e => setInvites(prev => prev.map((row, j) => j === i ? { ...row, role: e.target.value as SystemRole } : row))}
                         className="flex-1 sm:flex-none px-2 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                       >
-                        <option value="Member">Membre</option>
-                        <option value="Manager">Manager</option>
-                        <option value="admin">Admin</option>
+                        <option value="user">{t('team_role_user')}</option>
+                        <option value="pm">{t('team_role_pm')}</option>
+                        <option value="manager">{t('team_role_manager')}</option>
+                        <option value="admin">{t('team_role_admin')}</option>
                       </select>
                       <div className="w-5 flex-shrink-0">
                         {inviteResults[i] === 'ok' && <IconCheck size={18} className="text-green-500" />}
@@ -381,7 +593,7 @@ export default function Onboarding() {
                 ))}
               </div>
               <button
-                onClick={() => setInvites(prev => [...prev, { name: '', email: '', role: 'Member' }])}
+                onClick={() => setInvites(prev => [...prev, { name: '', email: '', role: 'user' }])}
                 className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
               >
                 <IconPlus size={16} /> Ajouter une ligne
