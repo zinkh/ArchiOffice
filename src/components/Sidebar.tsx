@@ -29,6 +29,9 @@ import {
   IconShieldCheck,
   IconCloudUpload,
   IconBuildingBank,
+  IconFileDescription,
+  IconClockHour4,
+  IconPlaneDeparture,
 } from '@tabler/icons-react';
 import { BrandLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -58,6 +61,9 @@ export const NAV_ITEMS = [
   { name: 'billing',        path: '/billing',        icon: IconCreditCard },
   { name: 'contrats',       path: '/contrats',       icon: IconContract },
   { name: 'maf_declaration', path: '/maf-declaration', icon: IconShieldCheck },
+  { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
+  { name: 'time_tracking',  path: '/temps',          icon: IconClockHour4 },
+  { name: 'leave',          path: '/conges',         icon: IconPlaneDeparture },
 ];
 
 const NAV_SECTIONS = [
@@ -92,6 +98,15 @@ const NAV_SECTIONS = [
       { name: 'reunions',       path: '/reunions',        icon: IconMessages },
       { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
       { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
+      { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
+    ],
+  },
+  {
+    key: 'rh',
+    label: 'RH',
+    items: [
+      { name: 'time_tracking', path: '/temps',  icon: IconClockHour4 },
+      { name: 'leave',         path: '/conges', icon: IconPlaneDeparture },
     ],
   },
   {
