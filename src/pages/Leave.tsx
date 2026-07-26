@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconCheck, IconX, IconTrash } from '@tabler/icons-react';
+import { IconCheck, IconX, IconTrash, IconFileTypePdf, IconFileDownload } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
-import type { LeaveRequest, LeaveBalance, LeaveType, TeamMember } from '../types';
+import { useSettings } from '../hooks/useSettings';
+import { exportLeaveBalancesTablePdf, exportLeaveBalanceFichePdf } from '../lib/hrExport';
+import type { LeaveRequest, LeaveBalance, LeaveBalanceAllEntry, LeaveType, TeamMember } from '../types';
 
 const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
   conges_payes: 'Congés payés',
@@ -58,8 +60,10 @@ function businessDaysBetween(startStr: string, endStr: string): number {
 export default function Leave() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
+  const { settings } = useSettings();
   const isAdmin = currentUser?.system_role === 'admin';
   const currentYear = new Date().getFullYear();
+  const agencySettings = { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email };
 
   const [tab, setTab] = useState<'mine' | 'validations' | 'balances'>('mine');
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
@@ -75,6 +79,7 @@ export default function Leave() {
 
   // Admin balances panel state: userId -> { conges_payes, rtt }
   const [balanceEdits, setBalanceEdits] = useState<Record<string, { conges_payes?: number; rtt?: number }>>({});
+  const [allBalances, setAllBalances] = useState<LeaveBalanceAllEntry[]>([]);
 
   const refreshMine = () => {
     apiFetch<LeaveBalance[]>(`/api/leave_balances?year=${currentYear}`).then(setBalances).catch(() => {});
@@ -88,6 +93,9 @@ export default function Leave() {
   useEffect(() => {
     if (isAdmin) apiFetch<TeamMember[]>('/api/team').then(setTeamMembers).catch(() => {});
   }, [isAdmin]);
+  useEffect(() => {
+    if (isAdmin) apiFetch<LeaveBalanceAllEntry[]>(`/api/leave_balances/all?year=${currentYear}`).then(setAllBalances).catch(() => {});
+  }, [isAdmin, currentYear]);
 
   const nameById = useMemo(() => Object.fromEntries(teamMembers.map(m => [m.id, m.name])), [teamMembers]);
 
@@ -257,6 +265,16 @@ export default function Leave() {
             <p className="font-semibold mb-1">{t('leave_rtt_reference_title')}</p>
             <p>{RTT_REFERENCE.map(r => `${r.hours}h → ${r.days}j`).join('  ·  ')}</p>
           </div>
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <h3 className="font-bold">{t('leave_balances_table_title', { year: currentYear })}</h3>
+            <button
+              disabled={allBalances.length === 0}
+              onClick={() => exportLeaveBalancesTablePdf(String(currentYear), allBalances, agencySettings)}
+              className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              <IconFileTypePdf size={15} /> {t('leave_export_table_pdf')}
+            </button>
+          </div>
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
@@ -264,6 +282,7 @@ export default function Leave() {
                   <th className="text-left p-3">{t('leave_col_employee')}</th>
                   <th className="text-left p-3">{t('leave_type_conges_payes')}</th>
                   <th className="text-left p-3">{t('leave_type_rtt')}</th>
+                  <th className="text-left p-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -283,6 +302,17 @@ export default function Leave() {
                         placeholder="—"
                         onChange={e => setBalanceEdits({ ...balanceEdits, [m.id]: { ...balanceEdits[m.id], rtt: parseFloat(e.target.value) } })}
                         onBlur={e => e.target.value && saveBalance(m.id, 'rtt', parseFloat(e.target.value))} />
+                    </td>
+                    <td className="p-3">
+                      {allBalances.find(b => b.user_id === m.id) && (
+                        <button
+                          onClick={() => exportLeaveBalanceFichePdf(allBalances.find(b => b.user_id === m.id)!, agencySettings)}
+                          title={t('leave_export_fiche_pdf')}
+                          className="text-zinc-400 hover:text-blue-600"
+                        >
+                          <IconFileDownload size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
