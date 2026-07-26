@@ -3539,6 +3539,60 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute team summary" }); }
   });
 
+  // Admin-only: hours per employee × per project for an arbitrary date range
+  // (used by the "Par projet" tab and its Excel export — distinct from
+  // team-summary, which is scoped to the caller's direct reports).
+  app.get("/api/time_entries/admin-matrix", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { start_date, end_date } = req.query;
+      if (!start_date || !end_date) return res.status(400).json({ error: 'start_date et end_date requis' });
+      const { data: entries, error } = await supabaseAdmin.from('time_entries').select('user_id, project_id, start_time, end_time')
+        .eq('tenant_id', tenantId).gte('entry_date', start_date as string).lte('entry_date', end_date as string);
+      if (error) throw error;
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId);
+      const { data: projects } = await supabaseAdmin.from('projects').select('id, name').eq('tenant_id', tenantId);
+      const cellMap: Record<string, number> = {};
+      for (const e of entries || []) {
+        if (!e.end_time) continue;
+        const hours = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3_600_000;
+        const key = `${e.user_id}::${e.project_id || '__none__'}`;
+        cellMap[key] = (cellMap[key] || 0) + hours;
+      }
+      const cells = Object.entries(cellMap).map(([key, hours]) => {
+        const [user_id, project_id] = key.split('::');
+        return { user_id, project_id: project_id === '__none__' ? null : project_id, hours };
+      });
+      res.json({ employees: profiles || [], projects: projects || [], cells });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute admin matrix" }); }
+  });
+
+  // Admin-only: total hours per employee for a calendar month, across the whole
+  // tenant — feeds the Excel export sent to the accountant.
+  app.get("/api/time_entries/monthly-summary", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { month } = req.query; // 'YYYY-MM'
+      if (!month || !/^\d{4}-\d{2}$/.test(month as string)) return res.status(400).json({ error: 'month requis (format YYYY-MM)' });
+      const [y, m] = (month as string).split('-').map(Number);
+      const monthStart = `${month}-01`;
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
+      const { data: entries, error } = await supabaseAdmin.from('time_entries').select('user_id, start_time, end_time')
+        .eq('tenant_id', tenantId).gte('entry_date', monthStart).lte('entry_date', monthEnd);
+      if (error) throw error;
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId);
+      const totalsByUser: Record<string, number> = {};
+      for (const e of entries || []) {
+        if (!e.end_time) continue;
+        const hours = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3_600_000;
+        totalsByUser[e.user_id] = (totalsByUser[e.user_id] || 0) + hours;
+      }
+      const result = (profiles || []).map((p: any) => ({ user_id: p.id, name: p.name, total_hours: totalsByUser[p.id] || 0 }));
+      res.json(result);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute monthly summary" }); }
+  });
+
   app.get("/api/team/join-requests", async (req: any, res: any) => {
     try {
       const tenantId = await requireTenantAdmin(req.user.id);
@@ -3700,6 +3754,35 @@ async function startServer() {
         return { user_id: targetUserId, year: targetYear, leave_type: leaveType, allocated_days: allocated, used_days: used, remaining_days: allocated - used };
       });
       res.json(balances);
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch leave balances" }); }
+  });
+
+  // Admin-only: congés payés / RTT balances for every employee at once, for
+  // a given year — feeds the "Soldes" export (global table + per-employee fiche).
+  app.get("/api/leave_balances/all", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const targetYear = parseInt((req.query.year as string) || String(new Date().getFullYear()), 10);
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name').eq('tenant_id', tenantId);
+      const { data: settings } = await supabaseAdmin.from('settings').select('default_leave_days_conges_payes, default_leave_days_rtt').eq('tenant_id', tenantId).maybeSingle();
+      const { data: overrides } = await supabaseAdmin.from('leave_balances').select('*').eq('tenant_id', tenantId).eq('year', targetYear);
+      const { data: approvedRequests } = await supabaseAdmin.from('leave_requests').select('user_id, leave_type, business_days, start_date').eq('tenant_id', tenantId).eq('status', 'approved');
+      const defaults: Record<string, number> = {
+        conges_payes: settings?.default_leave_days_conges_payes ?? 25,
+        rtt: settings?.default_leave_days_rtt ?? 0,
+      };
+      const overrideByUserType: Record<string, number> = Object.fromEntries((overrides || []).map((o: any) => [`${o.user_id}::${o.leave_type}`, o.allocated_days]));
+      const result = (profiles || []).map((p: any) => {
+        const balances = ['conges_payes', 'rtt'].map(leaveType => {
+          const allocated = overrideByUserType[`${p.id}::${leaveType}`] ?? defaults[leaveType];
+          const used = (approvedRequests || [])
+            .filter((r: any) => r.user_id === p.id && r.leave_type === leaveType && new Date(r.start_date).getFullYear() === targetYear)
+            .reduce((sum: number, r: any) => sum + Number(r.business_days), 0);
+          return { leave_type: leaveType, allocated_days: allocated, used_days: used, remaining_days: allocated - used };
+        });
+        return { user_id: p.id, name: p.name, year: targetYear, balances };
+      });
+      res.json(result);
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to fetch leave balances" }); }
   });
 

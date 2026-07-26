@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlayerPlay, IconPlayerStop, IconPlus, IconTrash, IconEdit } from '@tabler/icons-react';
+import { IconPlayerPlay, IconPlayerStop, IconPlus, IconTrash, IconEdit, IconDownload, IconFileSpreadsheet } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import type { TimeEntry, TimeWeeklySummary, TimeTeamSummaryEntry, Project } from '../types';
+import { useUser } from '../UserContext';
+import { useSettings } from '../hooks/useSettings';
+import { exportWeeklyTimesheetPdf, exportAdminMatrixExcel, exportMonthlySummaryExcel } from '../lib/hrExport';
+import type { TimeEntry, TimeWeeklySummary, TimeTeamSummaryEntry, TimeAdminMatrix, TimeMonthlySummaryEntry, Project } from '../types';
 
 function toISODate(d: Date): string {
   return d.toISOString().split('T')[0];
@@ -33,12 +36,15 @@ const DAY_LABELS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi',
 
 export default function TimeTracking() {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
+  const { settings } = useSettings();
+  const isAdmin = currentUser?.system_role === 'admin';
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [current, setCurrent] = useState<TimeEntry | null>(null);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [summary, setSummary] = useState<TimeWeeklySummary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [tab, setTab] = useState<'me' | 'team'>('me');
+  const [tab, setTab] = useState<'me' | 'team' | 'admin'>('me');
   const [teamData, setTeamData] = useState<TimeTeamSummaryEntry[] | null>(null);
   const [now, setNow] = useState(Date.now());
   const [clockProjectId, setClockProjectId] = useState('');
@@ -46,6 +52,10 @@ export default function TimeTracking() {
   const [manualForm, setManualForm] = useState<{ id?: string; entry_date: string; start: string; end: string; project_id: string; description: string }>(
     { entry_date: toISODate(new Date()), start: '09:00', end: '17:00', project_id: '', description: '' },
   );
+  const [matrix, setMatrix] = useState<TimeAdminMatrix | null>(null);
+  const [monthValue, setMonthValue] = useState(() => toISODate(new Date()).slice(0, 7));
+  const [monthlyRows, setMonthlyRows] = useState<TimeMonthlySummaryEntry[] | null>(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
 
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const weekStartStr = toISODate(weekStart);
@@ -70,6 +80,19 @@ export default function TimeTracking() {
       .then(setTeamData)
       .catch(() => setTeamData(null));
   }, [weekStartStr]);
+  useEffect(() => {
+    if (!isAdmin || tab !== 'admin') return;
+    apiFetch<TimeAdminMatrix>(`/api/time_entries/admin-matrix?start_date=${weekStartStr}&end_date=${weekEndStr}`)
+      .then(setMatrix).catch(() => setMatrix(null));
+  }, [isAdmin, tab, weekStartStr, weekEndStr]);
+
+  const fetchMonthly = () => {
+    setMonthlyLoading(true);
+    apiFetch<TimeMonthlySummaryEntry[]>(`/api/time_entries/monthly-summary?month=${monthValue}`)
+      .then(setMonthlyRows).catch(() => setMonthlyRows(null))
+      .finally(() => setMonthlyLoading(false));
+  };
+  useEffect(() => { if (isAdmin && tab === 'admin') fetchMonthly(); }, [isAdmin, tab, monthValue]);
 
   const elapsedLabel = useMemo(() => {
     if (!current) return null;
@@ -152,10 +175,15 @@ export default function TimeTracking() {
         </div>
       </div>
 
-      {teamData && teamData.length > 0 && (
+      {(teamData && teamData.length > 0 || isAdmin) && (
         <div className="flex gap-2">
           <button onClick={() => setTab('me')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'me' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_me')}</button>
-          <button onClick={() => setTab('team')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_team')}</button>
+          {teamData && teamData.length > 0 && (
+            <button onClick={() => setTab('team')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_team')}</button>
+          )}
+          {isAdmin && (
+            <button onClick={() => setTab('admin')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'admin' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_admin')}</button>
+          )}
         </div>
       )}
 
@@ -166,7 +194,20 @@ export default function TimeTracking() {
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 text-sm">→</button>
         </div>
         {tab === 'me' && summary && (
-          <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('time_tracking_week_total')}: {formatHours(summary.total_hours)}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('time_tracking_week_total')}: {formatHours(summary.total_hours)}</span>
+            <button
+              onClick={() => exportWeeklyTimesheetPdf({
+                userName: currentUser?.name || 'Utilisateur',
+                weekStartStr, weekEndStr, entries, projectName,
+                totalHours: summary.total_hours,
+                agencySettings: { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email },
+              })}
+              className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            >
+              <IconDownload size={15} /> {t('time_tracking_export_week_pdf')}
+            </button>
+          </div>
         )}
       </div>
 
@@ -207,7 +248,7 @@ export default function TimeTracking() {
             })}
           </div>
         </div>
-      ) : (
+      ) : tab === 'team' ? (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
@@ -222,6 +263,64 @@ export default function TimeTracking() {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-2">
+              <h3 className="font-bold">{t('time_tracking_matrix_title')}</h3>
+              {matrix && (
+                <button onClick={() => exportAdminMatrixExcel(matrix, `${weekStartStr}_${weekEndStr}`)} className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
+                  <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}
+                </button>
+              )}
+            </div>
+            {matrix ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-50 dark:bg-zinc-900">
+                    <tr>
+                      <th className="text-left p-2">{t('time_tracking_team_name')}</th>
+                      {matrix.projects.map(p => <th key={p.id} className="text-right p-2">{p.name}</th>)}
+                      <th className="text-right p-2">{t('time_tracking_no_project')}</th>
+                      <th className="text-right p-2 font-bold">{t('time_tracking_week_total')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matrix.employees.map(emp => {
+                      const cellFor = (projectId: string | null) => matrix.cells.find(c => c.user_id === emp.id && c.project_id === projectId)?.hours || 0;
+                      const projectHours = matrix.projects.map(p => cellFor(p.id));
+                      const noneHours = cellFor(null);
+                      const total = projectHours.reduce((s, v) => s + v, 0) + noneHours;
+                      return (
+                        <tr key={emp.id} className="border-t border-zinc-100 dark:border-zinc-700">
+                          <td className="p-2">{emp.name}</td>
+                          {projectHours.map((h, i) => <td key={i} className="text-right p-2">{h > 0 ? formatHours(h) : '—'}</td>)}
+                          <td className="text-right p-2">{noneHours > 0 ? formatHours(noneHours) : '—'}</td>
+                          <td className="text-right p-2 font-bold">{formatHours(total)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : <p className="text-sm text-zinc-400">{t('loading')}</p>}
+          </div>
+
+          <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
+            <h3 className="font-bold">{t('time_tracking_monthly_export_title')}</h3>
+            <p className="text-xs text-zinc-500">{t('time_tracking_monthly_export_hint')}</p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <input type="month" className="p-2 border rounded text-sm dark:bg-zinc-900 dark:border-zinc-700" value={monthValue} onChange={e => setMonthValue(e.target.value)} />
+              <button
+                disabled={!monthlyRows || monthlyLoading}
+                onClick={() => monthlyRows && exportMonthlySummaryExcel(monthValue, monthlyRows)}
+                className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

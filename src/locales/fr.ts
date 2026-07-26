@@ -936,6 +936,12 @@ export default {
       "time_tracking_save_error": "Erreur lors de l'enregistrement",
       "time_tracking_delete_confirm": "Supprimer cette entrée ?",
       "time_tracking_delete_error": "Erreur lors de la suppression",
+      "time_tracking_tab_admin": "Administration",
+      "time_tracking_export_week_pdf": "Exporter la fiche (PDF)",
+      "time_tracking_matrix_title": "Heures par salarié et par affaire",
+      "time_tracking_export_excel": "Exporter (Excel)",
+      "time_tracking_monthly_export_title": "Export mensuel pour le comptable",
+      "time_tracking_monthly_export_hint": "Total d'heures travaillées par salarié sur le mois sélectionné, pour transmission à la comptabilité.",
 
       // Leave page
       "leave_title": "Congés",
@@ -966,6 +972,9 @@ export default {
       "leave_rtt_reference_title": "Référence RTT (convention collective — horaire hebdomadaire → jours/an)",
       "leave_balance_save_error": "Erreur lors de l'enregistrement du solde",
       "leave_balances_hint": "Les congés payés et RTT non personnalisés utilisent les valeurs par défaut définies dans Paramètres.",
+      "leave_balances_table_title": "Soldes de congés — {{year}}",
+      "leave_export_table_pdf": "Exporter le tableau (PDF)",
+      "leave_export_fiche_pdf": "Fiche individuelle (PDF)",
       "leave_type_conges_payes": "Congés payés",
       "leave_type_rtt": "RTT"
 };

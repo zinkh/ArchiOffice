@@ -888,6 +888,12 @@ export default {
       "time_tracking_save_error": "Failed to save",
       "time_tracking_delete_confirm": "Delete this entry?",
       "time_tracking_delete_error": "Failed to delete",
+      "time_tracking_tab_admin": "Administration",
+      "time_tracking_export_week_pdf": "Export timesheet (PDF)",
+      "time_tracking_matrix_title": "Hours per employee and per project",
+      "time_tracking_export_excel": "Export (Excel)",
+      "time_tracking_monthly_export_title": "Monthly export for accounting",
+      "time_tracking_monthly_export_hint": "Total hours worked per employee for the selected month, for the accounting department.",
 
       // Leave page
       "leave_title": "Leave",
@@ -918,6 +924,9 @@ export default {
       "leave_rtt_reference_title": "RTT reference (collective agreement — weekly hours → days/year)",
       "leave_balance_save_error": "Failed to save the balance",
       "leave_balances_hint": "Employees without a custom balance use the defaults set in Settings.",
+      "leave_balances_table_title": "Leave balances — {{year}}",
+      "leave_export_table_pdf": "Export table (PDF)",
+      "leave_export_fiche_pdf": "Individual sheet (PDF)",
       "leave_type_conges_payes": "Paid leave",
       "leave_type_rtt": "RTT"
 };

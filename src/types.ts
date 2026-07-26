@@ -108,6 +108,18 @@ export interface TimeTeamSummaryEntry {
   total_hours: number;
 }
 
+export interface TimeAdminMatrix {
+  employees: { id: string; name: string }[];
+  projects: { id: string; name: string }[];
+  cells: { user_id: string; project_id: string | null; hours: number }[];
+}
+
+export interface TimeMonthlySummaryEntry {
+  user_id: string;
+  name: string;
+  total_hours: number;
+}
+
 export type LeaveType = 'conges_payes' | 'rtt' | 'maladie' | 'sans_solde' | 'exceptionnel';
 export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 export type LeaveExceptionnelMotif =
@@ -137,6 +149,13 @@ export interface LeaveBalance {
   allocated_days: number;
   used_days: number;
   remaining_days: number;
+}
+
+export interface LeaveBalanceAllEntry {
+  user_id: string;
+  name: string;
+  year: number;
+  balances: { leave_type: 'conges_payes' | 'rtt'; allocated_days: number; used_days: number; remaining_days: number }[];
 }
 
 export interface Task {
