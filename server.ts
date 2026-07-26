@@ -3539,6 +3539,38 @@ async function startServer() {
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute team summary" }); }
   });
 
+  // Manager/admin: raw time entries + approved leave for the team over a week,
+  // used to render the visual "agence" weekly occupancy grid (one row per
+  // employee, one column per day) on the Calendar page's "Vue équipe" tab.
+  app.get("/api/time_entries/team-schedule", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { week_start } = req.query;
+      if (!week_start) return res.status(400).json({ error: 'week_start requis' });
+      const reportIds = await resolveReportIds(tenantId, req.user.id, true);
+      if (reportIds.length === 0) {
+        const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
+        if (acting?.system_role !== 'admin') return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+        return res.json({ employees: [], entries: [], leaves: [], projects: [] });
+      }
+      const start = new Date(week_start as string + 'T00:00:00Z');
+      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+      const startStr = start.toISOString().split('T')[0];
+      const endStr = end.toISOString().split('T')[0];
+
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name, job_title, department').eq('tenant_id', tenantId).in('id', reportIds);
+      const { data: entries, error: entriesErr } = await supabaseAdmin.from('time_entries').select('id, user_id, entry_date, start_time, end_time, project_id')
+        .eq('tenant_id', tenantId).in('user_id', reportIds).gte('entry_date', startStr).lte('entry_date', endStr);
+      if (entriesErr) throw entriesErr;
+      const { data: leaves, error: leavesErr } = await supabaseAdmin.from('leave_requests').select('id, user_id, leave_type, start_date, end_date')
+        .eq('tenant_id', tenantId).in('user_id', reportIds).eq('status', 'approved').lte('start_date', endStr).gte('end_date', startStr);
+      if (leavesErr) throw leavesErr;
+      const { data: projects } = await supabaseAdmin.from('projects').select('id, name').eq('tenant_id', tenantId);
+
+      res.json({ employees: profiles || [], entries: entries || [], leaves: leaves || [], projects: projects || [] });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute team schedule" }); }
+  });
+
   // Admin-only: hours per employee × per project for an arbitrary date range
   // (used by the "Par projet" tab and its Excel export — distinct from
   // team-summary, which is scoped to the caller's direct reports).

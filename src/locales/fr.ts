@@ -877,6 +877,11 @@ export default {
       "calendar_milestone": "Jalon",
       "calendar_task": "Tâche",
       "calendar_select_day_hint": "Cliquez sur un jour pour voir le détail.",
+      "calendar_view_month": "Vue mensuelle",
+      "calendar_view_team": "Vue équipe",
+      "team_schedule_empty": "Aucun salarié à afficher — réservé aux managers et administrateurs.",
+      "team_schedule_total": "Total",
+      "team_schedule_all_day": "Toute la journée",
 
       // Generic
       "loading": "Chargement...",

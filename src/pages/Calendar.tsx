@@ -21,6 +21,7 @@ import { fetchJson } from '../lib/api';
 import type { Project, Milestone, Task } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
+import TeamWeekSchedule from '../components/TeamWeekSchedule';
 
 interface CalEvent {
   id: string;
@@ -34,7 +35,7 @@ interface CalEvent {
 
 const PROJECT_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#d63939', '#0ca678', '#f59f00', '#4263eb'];
 
-function colorForProject(projectId?: string): string {
+export function colorForProject(projectId?: string): string {
   if (!projectId) return '#6c7a91';
   let hash = 0;
   for (let i = 0; i < projectId.length; i++) hash = (hash * 31 + projectId.charCodeAt(i)) >>> 0;
@@ -53,6 +54,7 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'month' | 'team'>('month');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -172,38 +174,60 @@ export default function CalendarPage() {
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
           <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewDate(subMonths(viewDate, 1))}
-            className="p-1.5 rounded-lg transition-colors"
-            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          >
-            <IconChevronLeft size={16} />
-          </button>
-          <button
-            onClick={() => { setViewDate(new Date()); setSelectedDay(new Date()); }}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-          >
-            {t('calendar_today_btn')}
-          </button>
-          <button
-            onClick={() => setViewDate(addMonths(viewDate, 1))}
-            className="p-1.5 rounded-lg transition-colors"
-            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          >
-            <IconChevronRight size={16} />
-          </button>
-          <span className="text-sm font-semibold capitalize ml-1" style={{ color: 'var(--tblr-text)' }}>
-            {format(viewDate, 'MMMM yyyy', { locale })}
-          </span>
-        </div>
+        {view === 'month' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewDate(subMonths(viewDate, 1))}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
+            >
+              <IconChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => { setViewDate(new Date()); setSelectedDay(new Date()); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              {t('calendar_today_btn')}
+            </button>
+            <button
+              onClick={() => setViewDate(addMonths(viewDate, 1))}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
+            >
+              <IconChevronRight size={16} />
+            </button>
+            <span className="text-sm font-semibold capitalize ml-1" style={{ color: 'var(--tblr-text)' }}>
+              {format(viewDate, 'MMMM yyyy', { locale })}
+            </span>
+          </div>
+        )}
       </div>
 
-      {error && (
+      <div className="flex items-center gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--tblr-surface-2)' }}>
+        <button
+          onClick={() => setView('month')}
+          className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+          style={view === 'month' ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' } : { color: 'var(--tblr-muted)' }}
+        >
+          {t('calendar_view_month')}
+        </button>
+        <button
+          onClick={() => setView('team')}
+          className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+          style={view === 'team' ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' } : { color: 'var(--tblr-muted)' }}
+        >
+          {t('calendar_view_team')}
+        </button>
+      </div>
+
+      {error && view === 'month' && (
         <ErrorState compact message={error} onRetry={load} />
       )}
 
+      {view === 'team' && <TeamWeekSchedule />}
+
+      {view === 'month' && (
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
         {/* ── Month grid ── */}
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -329,6 +353,7 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

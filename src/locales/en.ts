@@ -829,6 +829,11 @@ export default {
       "calendar_milestone": "Milestone",
       "calendar_task": "Task",
       "calendar_select_day_hint": "Click a day to see the details.",
+      "calendar_view_month": "Month view",
+      "calendar_view_team": "Team view",
+      "team_schedule_empty": "No employees to show — reserved for managers and admins.",
+      "team_schedule_total": "Total",
+      "team_schedule_all_day": "All day",
 
       // Generic
       "loading": "Loading...",

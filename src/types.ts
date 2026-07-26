@@ -114,6 +114,20 @@ export interface TimeAdminMatrix {
   cells: { user_id: string; project_id: string | null; hours: number }[];
 }
 
+export interface TeamScheduleEmployee {
+  id: string;
+  name: string;
+  job_title?: string;
+  department?: string;
+}
+
+export interface TeamSchedule {
+  employees: TeamScheduleEmployee[];
+  entries: TimeEntry[];
+  leaves: LeaveRequest[];
+  projects: { id: string; name: string }[];
+}
+
 export interface TimeMonthlySummaryEntry {
   user_id: string;
   name: string;
