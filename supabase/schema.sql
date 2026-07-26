@@ -457,7 +457,8 @@ CREATE TABLE IF NOT EXISTS settings (
   num_prefix_devis TEXT DEFAULT 'DEVIS',
   num_prefix_facture TEXT DEFAULT 'FAC',
   num_prefix_honoraires TEXT DEFAULT 'NH',
-  num_prefix_affaire TEXT
+  num_prefix_affaire TEXT,
+  onboarding_completed_at TIMESTAMPTZ
 );
 
 -- Project Templates

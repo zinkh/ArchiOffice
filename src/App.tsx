@@ -649,6 +649,7 @@ function PageLoadingFallback() {
 
 function ProtectedLayout() {
   const { currentUser, isLoading } = useUser();
+  const { settings } = useSettings();
   const { t } = useTranslation();
   const location = useLocation();
 
@@ -681,6 +682,16 @@ function ProtectedLayout() {
   // fires once we're sure there's really no agency.
   if (!isOfflineBuild() && currentUser.tenantId === null) {
     return <Navigate to="/agency-setup" replace />;
+  }
+
+  // First login for a freshly-created cabinet: send its admin through the
+  // Onboarding wizard (company profile, numbering, default templates, team
+  // invites) until they finish or skip it — `settings` is null while still
+  // loading, so this only fires once we know onboarding really isn't done.
+  // Only the admin who set up the cabinet is nudged; invited teammates land
+  // straight in the app since the tenant is already configured.
+  if (!isOfflineBuild() && currentUser.system_role === 'admin' && settings && !settings.onboardingCompletedAt) {
+    return <Navigate to="/onboarding" replace />;
   }
 
   return (

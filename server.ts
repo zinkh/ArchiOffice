@@ -6430,6 +6430,7 @@ async function startServer() {
     numPrefixFacture: 'num_prefix_facture',
     numPrefixHonoraires: 'num_prefix_honoraires',
     numPrefixAffaire: 'num_prefix_affaire',
+    onboardingCompletedAt: 'onboarding_completed_at',
     defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
     defaultLeaveDaysRtt: 'default_leave_days_rtt',
   };
@@ -6470,6 +6471,7 @@ async function startServer() {
         'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token',
         'zoho_books_org_id',
         'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
+        'onboarding_completed_at',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
         'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',

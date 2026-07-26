@@ -228,11 +228,21 @@ export default function Onboarding() {
     }
   };
 
+  // Best-effort — a failed save here shouldn't trap the admin in the wizard;
+  // the localStorage flag still lets this browser skip the redirect meanwhile.
+  const markOnboardingDone = () => {
+    localStorage.setItem('archioffice_onboarding_done', '1');
+    apiFetch('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ onboardingCompletedAt: new Date().toISOString() }),
+    }).catch(() => {});
+  };
+
   const finish = async () => {
     setSaving(true);
     try {
       await sendInvites();
-      localStorage.setItem('archioffice_onboarding_done', '1');
+      markOnboardingDone();
       navigate('/');
     } finally {
       setSaving(false);
@@ -245,7 +255,7 @@ export default function Onboarding() {
       setStep(nextStep);
       if (STEPS[nextStep]?.id === 'templates') loadTemplates();
     } else {
-      localStorage.setItem('archioffice_onboarding_done', '1');
+      markOnboardingDone();
       navigate('/');
     }
   };
