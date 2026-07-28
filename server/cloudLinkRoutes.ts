@@ -60,7 +60,14 @@ export function createCloudLinkRouter(supabaseAdmin: SupabaseClient): Router {
       .select('id, tenant_id, name, email, role, system_role')
       .eq('id', cloudUserId)
       .single();
-    if (profileErr || !profile || !profile.tenant_id) {
+    if (profileErr) {
+      // A real query failure (DB/network/RLS error) is not the same thing as
+      // "no tenant" — collapsing both into the same message hides the actual
+      // cause. Log it server-side and say so distinctly.
+      console.error('[cloud-link] profile lookup failed:', profileErr.message);
+      return res.status(502).json({ error: `Échec de la vérification du compte cloud : ${profileErr.message}` });
+    }
+    if (!profile || !profile.tenant_id) {
       return res.status(400).json({
         error: "Ce compte n'est rattaché à aucune agence. Connectez-vous sur l'application web pour créer votre agence ou demander à rejoindre une agence existante, puis réessayez ici.",
       });
