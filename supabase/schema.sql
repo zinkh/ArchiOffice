@@ -595,8 +595,15 @@ ALTER TABLE det_data              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE join_requests        ENABLE ROW LEVEL SECURITY;
 
 -- Helper function : tenant_id du user connecté
+-- SECURITY DEFINER est nécessaire : cette fonction est utilisée dans la
+-- policy RLS "own_profile" sur `profiles` elle-même (id = auth.uid() OR
+-- tenant_id = my_tenant_id()). Sans SECURITY DEFINER, sa requête interne
+-- sur `profiles` redéclenche cette même policy, qui rappelle la fonction,
+-- etc. — récursion infinie ("54001 stack depth limit exceeded"). Voir
+-- migrate_fix_my_tenant_id_recursion.sql. auth.uid() reflète toujours le
+-- JWT de l'appelant, donc aucune isolation multi-tenant n'est affaiblie.
 CREATE OR REPLACE FUNCTION my_tenant_id()
-RETURNS UUID LANGUAGE sql STABLE AS $$
+RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT tenant_id FROM profiles WHERE id = auth.uid()
 $$;
 
