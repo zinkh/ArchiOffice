@@ -6433,6 +6433,7 @@ async function startServer() {
     onboardingCompletedAt: 'onboarding_completed_at',
     defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
     defaultLeaveDaysRtt: 'default_leave_days_rtt',
+    architectName: 'architect_name', oaNumber: 'oa_number',
   };
   const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -6480,6 +6481,7 @@ async function startServer() {
         'chorus_pro_piste_client_id', 'chorus_pro_piste_client_secret',
         'chorus_pro_technical_login', 'chorus_pro_technical_password', 'chorus_pro_sandbox',
         'default_leave_days_conges_payes', 'default_leave_days_rtt',
+        'architect_name', 'oa_number',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt']);
       const filteredData: any = Object.fromEntries(

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import type { AgencySettings } from '../lib/proposalExport';
 
 export function useSettings() {
-  const [settings, setSettings] = useState<any>(null);
+  const [settings, setSettings] = useState<AgencySettings | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

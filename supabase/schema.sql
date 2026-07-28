@@ -458,7 +458,8 @@ CREATE TABLE IF NOT EXISTS settings (
   num_prefix_facture TEXT DEFAULT 'FAC',
   num_prefix_honoraires TEXT DEFAULT 'NH',
   num_prefix_affaire TEXT,
-  onboarding_completed_at TIMESTAMPTZ
+  onboarding_completed_at TIMESTAMPTZ,
+  architect_name TEXT, oa_number TEXT
 );
 
 -- Project Templates

@@ -48,7 +48,6 @@ const Documents = lazy(() => import('./pages/Documents'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Billing = lazy(() => import('./pages/Billing'));
 const TenderDetail = lazy(() => import('./pages/TenderDetail'));
-const ProposalModule = lazy(() => import('./components/ProposalModule'));
 const Login = lazy(() => import('./pages/Login'));
 const CloudImportProgress = lazy(() => import('./pages/CloudImportProgress'));
 const Register = lazy(() => import('./pages/Register'));
@@ -762,7 +761,6 @@ export default function App() {
               <Route path="/kanban" element={<Kanban />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/templates" element={<ProjectTemplates />} />
-              <Route path="/proposal-generator" element={<ProposalModule />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
