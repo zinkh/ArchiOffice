@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  IconX, IconDownload, IconSettings, IconLayout, IconPalette, IconLetterCase,
+  IconX, IconDownload, IconSettings, IconLayout, IconPalette, IconLetterCase, IconLayoutSidebar,
 } from '@tabler/icons-react';
 import type { Proposal, MafCostResult } from '../types';
 import { useSettings } from '../hooks/useSettings';
@@ -10,10 +10,114 @@ import {
   ProposalPdfData, ProposalTemplate, ProposalSectionId,
   PROPOSAL_SECTION_DEFS, mapProposalToPdfData, getPdfStyles,
   loadStoredTemplate, saveStoredTemplate, applyPreset,
-  exportProposalPdf, formatCurrency, formatPercent,
+  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent,
 } from '../lib/proposalExport';
 
-// ─── Gantt chart (ported as-is from the former ProposalModule.tsx — already JSX/SVG) ───
+// ─── PDF primitives ─────────────────────────────────────────────────────────
+// Every box-model property here (padding/margin/border) MUST be inline, not a
+// CSS class — Tailwind's Preflight is compiled with an artificially-boosted
+// specificity (`*:not(#\#):not(#\#):not(#\#):not(#\#) { margin:0; padding:0;
+// border:0 solid }`) that overrides any plain class/element CSS rule for
+// those properties. Inline styles are the only reliable way to survive it.
+// See getPdfStyles()'s doc comment in src/lib/proposalExport.ts for the full
+// diagnosis. These primitives are rendered both in the live on-screen preview
+// and captured by jsPDF for export (same DOM), so there's exactly one source
+// of truth for spacing in both.
+
+function PdfPage({ template, fixedHeight, children }: { template: ProposalTemplate; fixedHeight?: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      data-pdf-page="true"
+      style={{
+        position: 'relative',
+        width: '210mm',
+        minHeight: fixedHeight ? undefined : '297mm',
+        height: fixedHeight ? '297mm' : undefined,
+        padding: '20mm 25mm',
+        background: '#fff',
+        fontFamily: `"${template.visual.fontFamily}", sans-serif`,
+        color: '#000',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function H2({ template, children }: { template: ProposalTemplate; children: React.ReactNode }) {
+  return (
+    <h2 style={{
+      fontSize: '16pt', fontWeight: 'bold', color: template.visual.primaryColor,
+      marginTop: '8mm', marginBottom: '5mm',
+      borderBottom: `1.5px solid ${template.visual.primaryColor}`, paddingBottom: '2mm',
+      clear: 'both', textTransform: 'uppercase',
+    }}>
+      {children}
+    </h2>
+  );
+}
+
+function H3({ style, children }: { style?: React.CSSProperties; children: React.ReactNode }) {
+  return (
+    <h3 style={{
+      fontSize: '11pt', fontWeight: 'bold', marginTop: '7mm', marginBottom: '3mm',
+      textTransform: 'uppercase', letterSpacing: '0.5px', color: '#1e293b',
+      ...style,
+    }}>
+      {children}
+    </h3>
+  );
+}
+
+function P({ template, style, children }: { template: ProposalTemplate; style?: React.CSSProperties; children: React.ReactNode }) {
+  return (
+    <p style={{
+      marginTop: 0, marginBottom: '3mm', lineHeight: template.visual.lineHeight ?? 1.5,
+      fontSize: '9.5pt', color: '#334155', ...style,
+    }}>
+      {children}
+    </p>
+  );
+}
+
+function Table({ style, children, ...rest }: React.TableHTMLAttributes<HTMLTableElement>) {
+  return (
+    <table
+      {...rest}
+      style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '6mm', fontSize: '9.5pt', tableLayout: 'fixed', ...style }}
+    >
+      {children}
+    </table>
+  );
+}
+
+function Th({ template, style, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement> & { template: ProposalTemplate }) {
+  return (
+    <th
+      {...rest}
+      style={{
+        border: '0.5px solid #e2e8f0', padding: '2.5mm 3.5mm', textAlign: 'left', wordWrap: 'break-word',
+        background: '#f8fafc', fontWeight: 'bold', color: template.visual.primaryColor,
+        textTransform: 'uppercase', fontSize: '8pt',
+        ...style,
+      }}
+    />
+  );
+}
+
+function Td({ style, ...rest }: React.TdHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <td
+      {...rest}
+      style={{ border: '0.5px solid #e2e8f0', padding: '2.5mm 3.5mm', textAlign: 'left', wordWrap: 'break-word', ...style }}
+    />
+  );
+}
+
+// ─── Gantt chart (already JSX/SVG, no box-model CSS involved) ──────────────
 
 function GanttChart({ data }: { data: ProposalPdfData }) {
   const missions = data.calendrier;
@@ -61,7 +165,11 @@ function GanttChart({ data }: { data: ProposalPdfData }) {
 
 function PageHeader({ d }: { d: ProposalPdfData }) {
   return (
-    <div className="pdf-header">
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      borderBottom: '0.5px solid #cbd5e1', paddingBottom: '3mm',
+      fontSize: '8.5pt', color: '#475569', marginBottom: '12mm', width: '100%',
+    }}>
       <div>{d.agenceNom}</div>
       <div>Réf: {d.reference} | Ind: {d.indice}</div>
     </div>
@@ -70,109 +178,123 @@ function PageHeader({ d }: { d: ProposalPdfData }) {
 
 function PageFooter({ d, page }: { d: ProposalPdfData; page: number }) {
   return (
-    <div className="pdf-footer">
+    <div style={{
+      position: 'absolute', bottom: '10mm', left: '25mm', right: '25mm',
+      display: 'flex', justifyContent: 'space-between', fontSize: '7pt',
+      color: '#94a3b8', borderTop: '0.5px solid #e2e8f0', paddingTop: '2mm',
+    }}>
       <div>{d.agenceNom} - {d.dateEmission}</div>
       <div>Page {page}</div>
     </div>
   );
 }
 
+const BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
+  draft: { bg: '#f1f5f9', fg: '#475569' },
+  sent: { bg: '#eff6ff', fg: '#2563eb' },
+  accepted: { bg: '#f0fdf4', fg: '#16a34a' },
+  rejected: { bg: '#fef2f2', fg: '#dc2626' },
+};
+
 // ─── Section renderers ──────────────────────────────────────────────────────
-// One .pdf-page per enabled section — see exportProposalPdf's doc comment for
+// One PDF page per enabled section — see exportProposalPdf's doc comment for
 // why (pdf.html() doesn't auto-flow content across pages).
 
 interface SectionCtx { mafCost: MafCostResult | null }
 type SectionRenderer = (d: ProposalPdfData, t: ProposalTemplate, ctx: SectionCtx, page: number) => React.ReactNode;
 
-const renderGarde: SectionRenderer = (d, t, _ctx, page) => (
-  <div className="pdf-page fixed-height" key="garde">
-    <div style={{ width: '100%', display: 'flex', justifyContent: t.visual.logoPosition === 'center' ? 'center' : 'flex-start' }}>
-      {d.agenceLogo ? (
-        <img src={d.agenceLogo} style={{ height: t.visual.logoSize === 'small' ? '15mm' : t.visual.logoSize === 'medium' ? '25mm' : '35mm' }} />
-      ) : (
-        <div style={{ fontSize: '24pt', fontWeight: 'bold', color: t.visual.primaryColor }}>{(d.agenceNom || '??').substring(0, 2).toUpperCase()}</div>
-      )}
-    </div>
-    <div style={{ textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <h1 style={{ marginBottom: '5mm' }}>LETTRE DE MISSION</h1>
-      <div style={{ fontSize: '12pt', color: '#666' }}>Réf: {d.reference} | Indice: {d.indice}</div>
-    </div>
-    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10mm', marginBottom: '20mm' }}>
-      <div style={{ background: '#f8fafc', padding: '6mm', borderRadius: '2mm', border: '1px solid #e2e8f0' }}>
-        <div style={{ fontSize: '8pt', fontWeight: 'bold', color: t.visual.primaryColor, textTransform: 'uppercase', marginBottom: '3mm', letterSpacing: '1px' }}>Le Projet</div>
-        <div style={{ fontSize: '12pt', fontWeight: 'bold', marginBottom: '2mm' }}>{d.titre}</div>
-        <div style={{ fontSize: '10pt', lineHeight: 1.4, color: '#475569' }}>{d.adresseTerrain}<br />{d.cpTerrain} {d.villeTerrain}</div>
-        <div style={{ marginTop: '4mm', fontSize: '10pt', fontWeight: 'bold', color: '#1e293b' }}>Surface Plancher: {d.surfPlancher} m²</div>
+const renderGarde: SectionRenderer = (d, t, _ctx, page) => {
+  const badgeColor = BADGE_COLORS[d.status.toLowerCase()] ?? BADGE_COLORS.draft;
+  return (
+    <PdfPage template={t} fixedHeight key="garde">
+      <div style={{ width: '100%', display: 'flex', justifyContent: t.visual.logoPosition === 'center' ? 'center' : 'flex-start' }}>
+        {d.agenceLogo ? (
+          <img src={d.agenceLogo} style={{ height: t.visual.logoSize === 'small' ? '15mm' : t.visual.logoSize === 'medium' ? '25mm' : '35mm' }} />
+        ) : (
+          <div style={{ fontSize: '24pt', fontWeight: 'bold', color: t.visual.primaryColor }}>{(d.agenceNom || '??').substring(0, 2).toUpperCase()}</div>
+        )}
       </div>
-      <div style={{ background: '#f8fafc', padding: '6mm', borderRadius: '2mm', border: '1px solid #e2e8f0' }}>
-        <div style={{ fontSize: '8pt', fontWeight: 'bold', color: t.visual.primaryColor, textTransform: 'uppercase', marginBottom: '3mm', letterSpacing: '1px' }}>Le Client</div>
-        <div style={{ fontSize: '12pt', fontWeight: 'bold', marginBottom: '2mm' }}>{d.entreprise ? d.nomSociete : d.clientNom}</div>
-        <div style={{ fontSize: '10pt', lineHeight: 1.4, color: '#475569' }}>{d.adresse}<br />{d.codePostal} {d.ville}</div>
+      <div style={{ textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <h1 style={{ margin: 0, marginBottom: '5mm', fontSize: '28pt', fontWeight: 'bold', textAlign: 'center', color: '#000', textTransform: 'uppercase' }}>LETTRE DE MISSION</h1>
+        <div style={{ fontSize: '12pt', color: '#666' }}>Réf: {d.reference} | Indice: {d.indice}</div>
       </div>
-    </div>
-    <div style={{ width: '100%', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '10mm' }}>
-      <div style={{ fontSize: '11pt', fontWeight: 'bold', marginBottom: '1mm' }}>{d.agenceNom}</div>
-      <div style={{ fontSize: '9pt', color: '#666' }}>{d.agenceAdresse}</div>
-      <div style={{ marginTop: '3mm', fontSize: '10pt', fontWeight: 500 }}>Architecte: {d.architecteNom}{d.oaNumber ? ` — Ordre des Architectes n° ${d.oaNumber}` : ''}</div>
-    </div>
-    <div style={{ width: '100%', textAlign: 'center', marginTop: '10mm' }}>
-      <div className={`pdf-badge pdf-badge-${d.status.toLowerCase()}`}>{d.status.toUpperCase()}</div>
-      <div style={{ marginTop: '3mm', fontSize: '9pt', color: '#94a3b8' }}>Émis le {d.dateEmission}</div>
-    </div>
-    <PageFooter d={d} page={page} />
-  </div>
-);
+      <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10mm', marginBottom: '20mm' }}>
+        <div style={{ background: '#f8fafc', padding: '6mm', borderRadius: '2mm', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '8pt', fontWeight: 'bold', color: t.visual.primaryColor, textTransform: 'uppercase', marginBottom: '3mm', letterSpacing: '1px' }}>Le Projet</div>
+          <div style={{ fontSize: '12pt', fontWeight: 'bold', marginBottom: '2mm' }}>{d.titre}</div>
+          <div style={{ fontSize: '10pt', lineHeight: 1.4, color: '#475569' }}>{d.adresseTerrain}<br />{d.cpTerrain} {d.villeTerrain}</div>
+          <div style={{ marginTop: '4mm', fontSize: '10pt', fontWeight: 'bold', color: '#1e293b' }}>Surface Plancher: {d.surfPlancher} m²</div>
+        </div>
+        <div style={{ background: '#f8fafc', padding: '6mm', borderRadius: '2mm', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '8pt', fontWeight: 'bold', color: t.visual.primaryColor, textTransform: 'uppercase', marginBottom: '3mm', letterSpacing: '1px' }}>Le Client</div>
+          <div style={{ fontSize: '12pt', fontWeight: 'bold', marginBottom: '2mm' }}>{d.entreprise ? d.nomSociete : d.clientNom}</div>
+          <div style={{ fontSize: '10pt', lineHeight: 1.4, color: '#475569' }}>{d.adresse}<br />{d.codePostal} {d.ville}</div>
+        </div>
+      </div>
+      <div style={{ width: '100%', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '10mm' }}>
+        <div style={{ fontSize: '11pt', fontWeight: 'bold', marginBottom: '1mm' }}>{d.agenceNom}</div>
+        <div style={{ fontSize: '9pt', color: '#666' }}>{d.agenceAdresse}</div>
+        <div style={{ marginTop: '3mm', fontSize: '10pt', fontWeight: 500 }}>Architecte: {d.architecteNom}{d.oaNumber ? ` — Ordre des Architectes n° ${d.oaNumber}` : ''}</div>
+      </div>
+      <div style={{ width: '100%', textAlign: 'center', marginTop: '10mm' }}>
+        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{d.status.toUpperCase()}</div>
+        <div style={{ marginTop: '3mm', fontSize: '9pt', color: '#94a3b8' }}>Émis le {d.dateEmission}</div>
+      </div>
+      <PageFooter d={d} page={page} />
+    </PdfPage>
+  );
+};
 
 const renderObjet: SectionRenderer = (d, t, _ctx, page) => {
   const missionsList = t.clauses.missionsText.split('\n').filter(Boolean);
   return (
-    <div className="pdf-page" key="objet">
+    <PdfPage template={t} key="objet">
       <PageHeader d={d} />
       <section style={{ marginBottom: '10mm' }}>
-        <h2>01. Objet de la Mission</h2>
-        <h3>Désignation du Maître d'Ouvrage</h3>
-        <table>
+        <H2 template={t}>01. Objet de la Mission</H2>
+        <H3>Désignation du Maître d'Ouvrage</H3>
+        <Table>
           <tbody>
-            <tr><td width="30%">Nom / Société</td><td>{d.entreprise ? d.nomSociete : d.clientNom}</td></tr>
-            {d.entreprise && <tr><td>RCS / SIRET</td><td>{d.rcs}</td></tr>}
-            {t.detailLevel === 'detaille' && <tr><td>Représentant</td><td>{d.representant} ({d.qualite})</td></tr>}
-            <tr><td>Adresse</td><td>{d.adresse}, {d.codePostal} {d.ville}</td></tr>
-            <tr><td>Contact</td><td>{d.email} | {d.telephone}</td></tr>
+            <tr><Td width="30%">Nom / Société</Td><Td>{d.entreprise ? d.nomSociete : d.clientNom}</Td></tr>
+            {d.entreprise && <tr><Td>RCS / SIRET</Td><Td>{d.rcs}</Td></tr>}
+            {t.detailLevel === 'detaille' && <tr><Td>Représentant</Td><Td>{d.representant} ({d.qualite})</Td></tr>}
+            <tr><Td>Adresse</Td><Td>{d.adresse}, {d.codePostal} {d.ville}</Td></tr>
+            <tr><Td>Contact</Td><Td>{d.email} | {d.telephone}</Td></tr>
           </tbody>
-        </table>
+        </Table>
 
-        <h3>Désignation de l'Opération</h3>
+        <H3>Désignation de l'Opération</H3>
         <div style={{ background: '#f9f9f9', padding: '4mm', borderLeft: `3px solid ${t.visual.primaryColor}` }}>
           <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>{d.titre}</div>
-          <p>{d.detailProjet}</p>
+          <P template={t}>{d.detailProjet}</P>
         </div>
-        <p style={{ marginTop: '4mm' }}>{d.descriptionGenerale}</p>
+        <P template={t} style={{ marginTop: '4mm' }}>{d.descriptionGenerale}</P>
 
-        <h3>Situation du Terrain</h3>
-        <table>
+        <H3>Situation du Terrain</H3>
+        <Table>
           <tbody>
-            <tr><td width="30%">Adresse</td><td>{d.adresseTerrain}, {d.cpTerrain} {d.villeTerrain}</td></tr>
-            <tr><td>Réf. Cadastrale</td><td>{d.refCadastrale}</td></tr>
-            <tr><td>Surface Parcelle</td><td>{d.surfaceParcelle} m²</td></tr>
-            {t.detailLevel === 'detaille' && <tr><td>Zone PLU</td><td>{d.zonePLU}</td></tr>}
+            <tr><Td width="30%">Adresse</Td><Td>{d.adresseTerrain}, {d.cpTerrain} {d.villeTerrain}</Td></tr>
+            <tr><Td>Réf. Cadastrale</Td><Td>{d.refCadastrale}</Td></tr>
+            <tr><Td>Surface Parcelle</Td><Td>{d.surfaceParcelle} m²</Td></tr>
+            {t.detailLevel === 'detaille' && <tr><Td>Zone PLU</Td><Td>{d.zonePLU}</Td></tr>}
           </tbody>
-        </table>
+        </Table>
 
         {t.detailLevel === 'detaille' && (
           <>
-            <h3>Caractéristiques de l'Ouvrage</h3>
-            <table>
-              <thead><tr><th>État</th><th>Description</th></tr></thead>
+            <H3>Caractéristiques de l'Ouvrage</H3>
+            <Table>
+              <thead><tr><Th template={t}>État</Th><Th template={t}>Description</Th></tr></thead>
               <tbody>
-                <tr><td>Avant Travaux</td><td>{d.avantTravaux}</td></tr>
-                <tr><td>Après Travaux</td><td>{d.apresTravaux}</td></tr>
-                <tr><td>Type / Catégorie</td><td>{d.typeEtCat} ({d.type} - {d.categorie})</td></tr>
+                <tr><Td>Avant Travaux</Td><Td>{d.avantTravaux}</Td></tr>
+                <tr><Td>Après Travaux</Td><Td>{d.apresTravaux}</Td></tr>
+                <tr><Td>Type / Catégorie</Td><Td>{d.typeEtCat} ({d.type} - {d.categorie})</Td></tr>
               </tbody>
-            </table>
+            </Table>
 
             {missionsList.length > 0 && (
               <>
-                <h3>Missions Proposées</h3>
+                <H3>Missions Proposées</H3>
                 <ul style={{ fontSize: '9pt', paddingLeft: '5mm' }}>
                   {missionsList.map((m, i) => <li key={i}>{m}</li>)}
                 </ul>
@@ -183,33 +305,33 @@ const renderObjet: SectionRenderer = (d, t, _ctx, page) => {
       </section>
       <div style={{ flex: 1 }} />
       <PageFooter d={d} page={page} />
-    </div>
+    </PdfPage>
   );
 };
 
 const renderSurfaces: SectionRenderer = (d, t, _ctx, page) => (
-  <div className="pdf-page" key="surfaces">
+  <PdfPage template={t} key="surfaces">
     <PageHeader d={d} />
     <section style={{ marginBottom: '10mm' }}>
-      <h2>02. Surfaces & Programme</h2>
-      <h3>Tableau des Surfaces</h3>
-      <table>
-        <thead><tr><th>Désignation</th><th>Surface (m²)</th></tr></thead>
+      <H2 template={t}>02. Surfaces & Programme</H2>
+      <H3>Tableau des Surfaces</H3>
+      <Table>
+        <thead><tr><Th template={t}>Désignation</Th><Th template={t}>Surface (m²)</Th></tr></thead>
         <tbody>
-          <tr><td>Surface de Plancher</td><td>{d.surfPlancher} m²</td></tr>
-          <tr><td>Surface d'Extension</td><td>{d.surfExtension} m²</td></tr>
-          <tr><td>Surface ERP</td><td>{d.surfERP} m²</td></tr>
-          <tr><td>Surface ERT</td><td>{d.surfERT} m²</td></tr>
+          <tr><Td>Surface de Plancher</Td><Td>{d.surfPlancher} m²</Td></tr>
+          <tr><Td>Surface d'Extension</Td><Td>{d.surfExtension} m²</Td></tr>
+          <tr><Td>Surface ERP</Td><Td>{d.surfERP} m²</Td></tr>
+          <tr><Td>Surface ERT</Td><Td>{d.surfERT} m²</Td></tr>
         </tbody>
-      </table>
-      <h3>Effectifs</h3>
-      <table>
+      </Table>
+      <H3>Effectifs</H3>
+      <Table>
         <tbody>
-          <tr><td width="50%">Public admissible</td><td>{d.effectifPublic} personnes</td></tr>
-          <tr><td>Personnel</td><td>{d.effectifPersonnel} personnes</td></tr>
+          <tr><Td width="50%">Public admissible</Td><Td>{d.effectifPublic} personnes</Td></tr>
+          <tr><Td>Personnel</Td><Td>{d.effectifPersonnel} personnes</Td></tr>
         </tbody>
-      </table>
-      <h3>Budget & Programme</h3>
+      </Table>
+      <H3>Budget & Programme</H3>
       <div style={{ marginTop: '6mm', padding: '5mm', border: '1px solid #eee', borderRadius: '2mm' }}>
         <div style={{ fontSize: '10pt', fontWeight: 'bold', color: t.visual.primaryColor, marginBottom: '2mm' }}>Montant estimatif des travaux</div>
         <div style={{ fontSize: '18pt', fontWeight: 'bold' }}>{formatCurrency(d.montantTravaux)} HT</div>
@@ -221,19 +343,19 @@ const renderSurfaces: SectionRenderer = (d, t, _ctx, page) => (
     </section>
     <div style={{ flex: 1 }} />
     <PageFooter d={d} page={page} />
-  </div>
+  </PdfPage>
 );
 
 const renderHonoraires: SectionRenderer = (d, t, ctx, page) => (
-  <div className="pdf-page" key="honoraires">
+  <PdfPage template={t} key="honoraires">
     <PageHeader d={d} />
     <section style={{ marginBottom: '10mm' }}>
-      <h2>03. Étendue de la Mission & Honoraires</h2>
+      <H2 template={t}>03. Étendue de la Mission & Honoraires</H2>
 
       {t.detailLevel === 'detaille' && (
         <>
           <div style={{ marginBottom: '6mm' }}>
-            <p>Le Maître d'Ouvrage confie à l'Architecte une mission portant sur les phases suivantes :</p>
+            <P template={t}>Le Maître d'Ouvrage confie à l'Architecte une mission portant sur les phases suivantes :</P>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2mm', marginTop: '2mm' }}>
               {d.missions.map(m => (
                 <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '2mm', fontSize: '8pt', ...(m.montantHT === 0 ? { color: '#ccc', fontStyle: 'italic' } : {}) }}>
@@ -243,9 +365,9 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, page) => (
             </div>
           </div>
 
-          <h3>Calcul des Honoraires</h3>
-          <table>
-            <thead><tr><th>Catégorie</th><th>Mission</th><th>%</th><th>Montant HT</th></tr></thead>
+          <H3>Calcul des Honoraires</H3>
+          <Table>
+            <thead><tr><Th template={t}>Catégorie</Th><Th template={t}>Mission</Th><Th template={t}>%</Th><Th template={t}>Montant HT</Th></tr></thead>
             <tbody>
               {(['base', 'execution', 'complementaire'] as const).map(cat => {
                 const catMissions = d.missions.filter(m => m.categorie === cat);
@@ -254,24 +376,24 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, page) => (
                 const catLabel = cat === 'base' ? 'Missions de Base' : cat === 'execution' ? "Missions d'Exécution" : 'Missions Complémentaires';
                 return (
                   <React.Fragment key={cat}>
-                    <tr style={{ background: '#f1f5f9' }}><td colSpan={4} style={{ fontWeight: 'bold' }}>{catLabel}</td></tr>
+                    <tr style={{ background: '#f1f5f9' }}><Td colSpan={4} style={{ fontWeight: 'bold' }}>{catLabel}</Td></tr>
                     {catMissions.map(m => (
                       <tr key={m.id} style={m.montantHT === 0 ? { color: '#999', fontStyle: 'italic' } : undefined}>
-                        <td></td>
-                        <td>{m.designation}</td>
-                        <td>{formatPercent(m.relPct)}</td>
-                        <td>{formatCurrency(m.montantHT)}</td>
+                        <Td></Td>
+                        <Td>{m.designation}</Td>
+                        <Td>{formatPercent(m.relPct)}</Td>
+                        <Td>{formatCurrency(m.montantHT)}</Td>
                       </tr>
                     ))}
                     <tr style={{ fontWeight: 'bold' }}>
-                      <td colSpan={3} style={{ textAlign: 'right' }}>Sous-total {cat}</td>
-                      <td>{formatCurrency(subtotal)}</td>
+                      <Td colSpan={3} style={{ textAlign: 'right' }}>Sous-total {cat}</Td>
+                      <Td>{formatCurrency(subtotal)}</Td>
                     </tr>
                   </React.Fragment>
                 );
               })}
             </tbody>
-          </table>
+          </Table>
         </>
       )}
 
@@ -298,7 +420,7 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, page) => (
     </section>
     <div style={{ flex: 1 }} />
     <PageFooter d={d} page={page} />
-  </div>
+  </PdfPage>
 );
 
 const renderRepartition: SectionRenderer = (d, t, _ctx, page) => {
@@ -306,10 +428,10 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, page) => {
 
   if (t.detailLevel === 'court') {
     return (
-      <div className="pdf-page" key="repartition">
+      <PdfPage template={t} key="repartition">
         <PageHeader d={d} />
         <section style={{ marginBottom: '10mm' }}>
-          <h2>04. Répartition des Honoraires</h2>
+          <H2 template={t}>04. Répartition des Honoraires</H2>
           <div style={{ marginTop: '6mm', width: '80mm' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
               <span>Total Honoraires HT</span><span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
@@ -324,39 +446,39 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, page) => {
         </section>
         <div style={{ flex: 1 }} />
         <PageFooter d={d} page={page} />
-      </div>
+      </PdfPage>
     );
   }
 
   return (
-    <div className="pdf-page" key="repartition">
+    <PdfPage template={t} key="repartition">
       <PageHeader d={d} />
       <section style={{ marginBottom: '10mm' }}>
-        <h2>04. Répartition des Honoraires</h2>
-        <table style={{ fontSize: '7pt' }}>
+        <H2 template={t}>04. Répartition des Honoraires</H2>
+        <Table style={{ fontSize: '7pt' }}>
           <thead>
             <tr>
-              <th rowSpan={2}>Désignation</th>
-              <th rowSpan={2}>Montant HT</th>
-              <th rowSpan={2}>Rel%</th>
-              {allIntervenants.map(name => <th key={name} colSpan={2} style={{ textAlign: 'center' }}>{name}</th>)}
+              <Th template={t} rowSpan={2}>Désignation</Th>
+              <Th template={t} rowSpan={2}>Montant HT</Th>
+              <Th template={t} rowSpan={2}>Rel%</Th>
+              {allIntervenants.map(name => <Th template={t} key={name} colSpan={2} style={{ textAlign: 'center' }}>{name}</Th>)}
             </tr>
             <tr>
-              {allIntervenants.map(name => <React.Fragment key={name}><th>%</th><th>€</th></React.Fragment>)}
+              {allIntervenants.map(name => <React.Fragment key={name}><Th template={t}>%</Th><Th template={t}>€</Th></React.Fragment>)}
             </tr>
           </thead>
           <tbody>
             {d.missions.map(m => (
               <tr key={m.id}>
-                <td style={{ fontWeight: 'bold' }}>{m.designation}</td>
-                <td>{formatCurrency(m.montantHT)}</td>
-                <td>{formatPercent(m.relPct)}</td>
+                <Td style={{ fontWeight: 'bold' }}>{m.designation}</Td>
+                <Td>{formatCurrency(m.montantHT)}</Td>
+                <Td>{formatPercent(m.relPct)}</Td>
                 {allIntervenants.map(name => {
                   const i = m.intervenants.find(int => int.nom === name);
                   return (
                     <React.Fragment key={name}>
-                      <td>{formatPercent(i?.pct || 0)}</td>
-                      <td>{formatCurrency(i?.montant || 0)}</td>
+                      <Td>{formatPercent(i?.pct || 0)}</Td>
+                      <Td>{formatCurrency(i?.montant || 0)}</Td>
                     </React.Fragment>
                   );
                 })}
@@ -365,118 +487,118 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, page) => {
           </tbody>
           <tfoot>
             <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
-              <td>TOTAL GÉNÉRAL HT</td>
-              <td>{formatCurrency(d.montantHonorairesHT)}</td>
-              <td>100.00 %</td>
+              <Td>TOTAL GÉNÉRAL HT</Td>
+              <Td>{formatCurrency(d.montantHonorairesHT)}</Td>
+              <Td>100.00 %</Td>
               {allIntervenants.map(name => {
                 const total = d.missions.reduce((acc, m) => acc + (m.intervenants.find(i => i.nom === name)?.montant || 0), 0);
-                return <td key={name} colSpan={2} style={{ textAlign: 'right' }}>{formatCurrency(total)}</td>;
+                return <Td key={name} colSpan={2} style={{ textAlign: 'right' }}>{formatCurrency(total)}</Td>;
               })}
             </tr>
           </tfoot>
-        </table>
+        </Table>
       </section>
       <div style={{ flex: 1 }} />
       <PageFooter d={d} page={page} />
-    </div>
+    </PdfPage>
   );
 };
 
 const renderCotraitants: SectionRenderer = (d, t, _ctx, page) => {
   if (d.cotraitants.length === 0) return null;
   return (
-    <div className="pdf-page" key="cotraitants">
+    <PdfPage template={t} key="cotraitants">
       <PageHeader d={d} />
       <section style={{ marginBottom: '10mm' }}>
-        <h2>05. Cotraitants & Spécialités</h2>
-        <p>Pour la réalisation de cette mission, l'Architecte s'entoure des compétences suivantes :</p>
-        <table>
-          <thead><tr><th>Spécialité</th><th>Contact / Société</th><th>Rôle</th></tr></thead>
+        <H2 template={t}>05. Cotraitants & Spécialités</H2>
+        <P template={t}>Pour la réalisation de cette mission, l'Architecte s'entoure des compétences suivantes :</P>
+        <Table>
+          <thead><tr><Th template={t}>Spécialité</Th><Th template={t}>Contact / Société</Th><Th template={t}>Rôle</Th></tr></thead>
           <tbody>
             {d.cotraitants.map((c, i) => (
               <tr key={i}>
-                <td style={{ fontWeight: 'bold' }}>{c.specialite}</td>
-                <td>{c.contact}</td>
-                <td>{c.role}</td>
+                <Td style={{ fontWeight: 'bold' }}>{c.specialite}</Td>
+                <Td>{c.contact}</Td>
+                <Td>{c.role}</Td>
               </tr>
             ))}
           </tbody>
-        </table>
-        <h3>Clause de Cotraitance</h3>
+        </Table>
+        <H3>Clause de Cotraitance</H3>
         <div style={{ whiteSpace: 'pre-wrap', fontSize: '8pt', color: '#444', textAlign: 'justify' }}>{t.clauses.cotraitance}</div>
       </section>
       <div style={{ flex: 1 }} />
       <PageFooter d={d} page={page} />
-    </div>
+    </PdfPage>
   );
 };
 
-const renderCalendrier: SectionRenderer = (d, _t, _ctx, page) => {
+const renderCalendrier: SectionRenderer = (d, t, _ctx, page) => {
   if (d.calendrier.length === 0) return null;
   return (
-    <div className="pdf-page" key="calendrier">
+    <PdfPage template={t} key="calendrier">
       <PageHeader d={d} />
       <section style={{ marginBottom: '10mm' }}>
-        <h2>06. Calendrier Prévisionnel</h2>
+        <H2 template={t}>06. Calendrier Prévisionnel</H2>
         <div style={{ width: '100%', marginTop: '10mm' }}><GanttChart data={d} /></div>
-        <h3 style={{ marginTop: '10mm' }}>Récapitulatif des Durées</h3>
-        <table>
-          <thead><tr><th>Mission</th><th>Durée (jours)</th><th>Précédent</th></tr></thead>
+        <H3 style={{ marginTop: '10mm' }}>Récapitulatif des Durées</H3>
+        <Table>
+          <thead><tr><Th template={t}>Mission</Th><Th template={t}>Durée (jours)</Th><Th template={t}>Précédent</Th></tr></thead>
           <tbody>
             {d.calendrier.map(c => (
               <tr key={c.id}>
-                <td>{c.mission}</td>
-                <td>{c.dureeJours} jours</td>
-                <td>{c.apres ? d.calendrier.find(ms => ms.id === c.apres)?.mission : 'Début'}</td>
+                <Td>{c.mission}</Td>
+                <Td>{c.dureeJours} jours</Td>
+                <Td>{c.apres ? d.calendrier.find(ms => ms.id === c.apres)?.mission : 'Début'}</Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </section>
       <div style={{ flex: 1 }} />
       <PageFooter d={d} page={page} />
-    </div>
+    </PdfPage>
   );
 };
 
-const renderMafCost: SectionRenderer = (d, _t, ctx, page) => {
+const renderMafCost: SectionRenderer = (d, t, ctx, page) => {
   if (!ctx.mafCost) return null;
   return (
-    <div className="pdf-page" key="mafCost">
+    <PdfPage template={t} key="mafCost">
       <PageHeader d={d} />
       <section style={{ marginBottom: '10mm' }}>
-        <h2>Coût Assurance MAF</h2>
+        <H2 template={t}>Coût Assurance MAF</H2>
         <MafCostBadge result={ctx.mafCost} showDetails />
       </section>
       <div style={{ flex: 1 }} />
       <PageFooter d={d} page={page} />
-    </div>
+    </PdfPage>
   );
 };
 
 const renderSignatures: SectionRenderer = (d, t, _ctx, page) => (
-  <div className="pdf-page" key="signatures">
+  <PdfPage template={t} key="signatures">
     <PageHeader d={d} />
     <section style={{ marginBottom: '10mm' }}>
-      <h2>07. Conditions Générales & Signatures</h2>
+      <H2 template={t}>07. Conditions Générales & Signatures</H2>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10mm' }}>
-        <div><h3>Modalités de Règlement</h3><p style={{ fontSize: '8pt' }}>{t.clauses.reglement}</p></div>
-        <div><h3>Révision des Honoraires</h3><p style={{ fontSize: '8pt' }}>{t.clauses.revision}</p></div>
+        <div><H3>Modalités de Règlement</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.reglement}</P></div>
+        <div><H3>Révision des Honoraires</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.revision}</P></div>
       </div>
       <div style={{ marginTop: '6mm' }}>
-        <h3>Résiliation</h3>
-        <p style={{ fontSize: '8pt' }}>{t.clauses.resiliation}</p>
+        <H3>Résiliation</H3>
+        <P template={t} style={{ fontSize: '8pt' }}>{t.clauses.resiliation}</P>
       </div>
 
-      <div className="signature-grid">
-        <div className="signature-box">
-          <div className="signature-label">Le Maître d'Ouvrage</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20mm', marginTop: '20mm' }}>
+        <div style={{ border: '0.5px solid #eee', padding: '5mm', height: '40mm', position: 'relative' }}>
+          <div style={{ fontSize: '7pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999', marginBottom: '2mm' }}>Le Maître d'Ouvrage</div>
           <div style={{ fontWeight: 'bold' }}>{d.entreprise ? d.nomSociete : d.clientNom}</div>
           <div style={{ fontSize: '7pt' }}>{d.representant} - {d.qualite}</div>
           <div style={{ position: 'absolute', bottom: '2mm', left: '5mm', fontSize: '7pt', fontStyle: 'italic' }}>"Lu et approuvé"</div>
         </div>
-        <div className="signature-box">
-          <div className="signature-label">L'Architecte</div>
+        <div style={{ border: '0.5px solid #eee', padding: '5mm', height: '40mm', position: 'relative' }}>
+          <div style={{ fontSize: '7pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999', marginBottom: '2mm' }}>L'Architecte</div>
           <div style={{ fontWeight: 'bold' }}>{d.agenceNom}</div>
           <div style={{ fontSize: '7pt' }}>{d.architecteNom}{d.oaNumber ? ` — OA n° ${d.oaNumber}` : ''}</div>
           <div style={{ position: 'absolute', bottom: '2mm', left: '5mm', fontSize: '7pt', fontStyle: 'italic' }}>"Lu et approuvé"</div>
@@ -487,14 +609,14 @@ const renderSignatures: SectionRenderer = (d, t, _ctx, page) => (
 
       {t.detailLevel === 'detaille' && t.clauses.appendixNotes && (
         <div style={{ marginTop: '10mm', fontSize: '7.5pt', color: '#666' }}>
-          <p style={{ fontStyle: 'italic' }}>Rappel des frais et coûts annexes à la charge du maître d'ouvrage, non compris dans la prestation</p>
-          <p style={{ whiteSpace: 'pre-wrap' }}>{t.clauses.appendixNotes}</p>
+          <P template={t} style={{ fontStyle: 'italic' }}>Rappel des frais et coûts annexes à la charge du maître d'ouvrage, non compris dans la prestation</P>
+          <P template={t} style={{ whiteSpace: 'pre-wrap' }}>{t.clauses.appendixNotes}</P>
         </div>
       )}
     </section>
     <div style={{ flex: 1 }} />
     <PageFooter d={d} page={page} />
-  </div>
+  </PdfPage>
 );
 
 const SECTION_RENDERERS: Record<ProposalSectionId, SectionRenderer> = {
@@ -512,15 +634,28 @@ const SECTION_RENDERERS: Record<ProposalSectionId, SectionRenderer> = {
 // ─── Sidebar: section toggles + preset + visual + clauses ──────────────────
 
 function TemplateEditorPanel({
-  template, onChange, mafAvailable,
-}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean }) {
+  template, onChange, mafAvailable, open, onCloseMobile,
+}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean; open: boolean; onCloseMobile: () => void }) {
   const visibleSections = PROPOSAL_SECTION_DEFS.filter(s => s.id !== 'mafCost' || mafAvailable);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 w-80 overflow-y-auto">
-      <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-        <IconSettings size={18} className="text-zinc-400" />
-        <h2 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Éditeur de Modèle</h2>
+    <div className={`flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto
+      w-80 max-w-[85vw] fixed inset-y-0 left-0 z-20 transition-transform duration-200
+      ${open ? 'translate-x-0' : '-translate-x-full'}
+      md:static md:translate-x-0 md:z-auto`}>
+      <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <IconSettings size={18} className="text-zinc-400" />
+          <h2 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Éditeur de Modèle</h2>
+        </div>
+        <button
+          type="button"
+          onClick={onCloseMobile}
+          className="md:hidden p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-lg"
+          aria-label="Fermer l'éditeur de modèle"
+        >
+          <IconX size={18} />
+        </button>
       </div>
 
       <div className="p-4 space-y-8">
@@ -641,6 +776,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
   const [isGenerating, setIsGenerating] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -654,7 +790,28 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
     tauxContratPermil: parseFloat(String(settings?.maf_taux_contrat_permil ?? 0)),
   });
 
-  const data = useMemo(() => mapProposalToPdfData(proposal, settings || {}), [proposal, settings]);
+  const rawData = useMemo(() => mapProposalToPdfData(proposal, settings || {}), [proposal, settings]);
+
+  // Logos are often uploaded at native camera/design-tool resolution — jsPDF
+  // embeds <img> sources at their native pixel size regardless of CSS
+  // display size, so an uncompressed logo can balloon export size by 100x+.
+  // Compressing here (once) means the on-screen preview and the exported
+  // PDF both use the same downscaled image — one source of truth.
+  const [compressedLogo, setCompressedLogo] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    if (rawData.agenceLogo) {
+      compressProposalLogo(rawData.agenceLogo).then(url => { if (alive) setCompressedLogo(url ?? undefined); });
+    } else {
+      setCompressedLogo(undefined);
+    }
+    return () => { alive = false; };
+  }, [rawData.agenceLogo]);
+
+  const data = useMemo(
+    () => (compressedLogo ? { ...rawData, agenceLogo: compressedLogo } : rawData),
+    [rawData, compressedLogo],
+  );
 
   const handleExport = async () => {
     if (!previewRef.current) return;
@@ -683,9 +840,19 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
     <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm">
       <div className="bg-white dark:bg-zinc-900 w-full h-full flex flex-col">
         <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
-          <div>
-            <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Export PDF de la Proposition</h2>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice}</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(o => !o)}
+              className="md:hidden p-1.5 -ml-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 rounded-lg"
+              aria-label="Basculer l'éditeur de modèle"
+            >
+              <IconLayoutSidebar size={20} />
+            </button>
+            <div>
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Export PDF de la Proposition</h2>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice}</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -702,11 +869,20 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          <TemplateEditorPanel template={template} onChange={setTemplate} mafAvailable={!!settings?.maf_enabled} />
+        <div className="flex-1 flex overflow-hidden relative">
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-10 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />
+          )}
+          <TemplateEditorPanel
+            template={template}
+            onChange={setTemplate}
+            mafAvailable={!!settings?.maf_enabled}
+            open={sidebarOpen}
+            onCloseMobile={() => setSidebarOpen(false)}
+          />
 
           <div className="flex-1 overflow-auto p-8 bg-zinc-100 dark:bg-zinc-950">
-            <style dangerouslySetInnerHTML={{ __html: getPdfStyles(template) }} />
+            <style dangerouslySetInnerHTML={{ __html: getPdfStyles() }} />
             <div ref={previewRef} className="flex flex-col items-center gap-6">
               {pages}
             </div>
