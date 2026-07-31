@@ -11,6 +11,7 @@
 // src/components/ProposalExportModal.tsx, which is the only place that needs it.
 import type { Proposal, ProposalSpecialty } from '../types';
 import { autoSaveDocument } from './autoSaveDocument';
+import { compressImage } from './imageCompression';
 
 // ─── Agency settings (as returned by GET /api/settings) ────────────────────
 // server.ts's toCamel map only covers a subset of columns (see
@@ -389,39 +390,38 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
   };
 }
 
-// ─── PDF styles (shared CSS injected once, ported from ProposalModule) ────
+// ─── Logo compression ───────────────────────────────────────────────────────
+// jsPDF's pdf.html() embeds <img> sources at their NATIVE pixel resolution
+// regardless of CSS display size — an uploaded high-resolution logo can
+// balloon an export to tens of megabytes (confirmed: a 190KB/3000×2000 test
+// image displayed at 142×94 CSS px produced an 18MB PDF). Cap at a fixed
+// resolution covering the largest configured on-page logo size (35mm ≈
+// 132px @96dpi) with headroom for print/retina fidelity. PNG (not JPEG) to
+// preserve transparency — uploaded agency logos are very often PNGs with a
+// transparent background (see Settings.tsx's logo upload, FileReader.readAsDataURL).
+const LOGO_MAX_W = 1200;
+const LOGO_MAX_H = 560;
 
-export const getPdfStyles = (template: ProposalTemplate): string => `
+export async function compressProposalLogo(dataUrlOrUrl: string): Promise<string | null> {
+  const result = await compressImage(dataUrlOrUrl, LOGO_MAX_W, LOGO_MAX_H, 0.92, 'image/png');
+  return result?.dataUrl ?? null;
+}
+
+// ─── PDF styles ─────────────────────────────────────────────────────────────
+// Deliberately minimal: Tailwind's Preflight is compiled with an
+// artificially-boosted-specificity universal selector
+// (`*:not(#\#):not(#\#):not(#\#):not(#\#) { margin:0; padding:0; border:0 solid; box-sizing:border-box }`)
+// that beats any plain class/element CSS rule for those properties — a class
+// like `.pdf-page { padding: 20mm 25mm }` gets silently overridden back to 0
+// the moment the app's real stylesheet is loaded (confirmed empirically:
+// `getComputedStyle` on such an element measures `padding: 0px` in the real
+// app, vs. the intended value in isolation). Box-model spacing (padding,
+// margin, border) for every PDF section element is therefore set via React
+// inline `style` props instead (see the PdfPage/H2/H3/P/Table/Th/Td wrapper
+// components in ProposalExportModal.tsx) — inline styles always win over any
+// stylesheet rule short of `!important`, which Preflight doesn't use.
+export const getPdfStyles = (): string => `
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; }
-  .pdf-page {
-    position: relative;
-    width: 210mm;
-    min-height: 297mm;
-    padding: 20mm 25mm;
-    background: #fff;
-    font-family: "${template.visual.fontFamily}", sans-serif;
-    color: #000;
-    display: flex;
-    flex-direction: column;
-  }
-  .pdf-page.fixed-height { height: 297mm; }
-  h1 { font-size: 28pt; font-weight: bold; text-align: center; margin: 0; color: #000; text-transform: uppercase; }
-  h2 { font-size: 16pt; font-weight: bold; color: ${template.visual.primaryColor}; margin-top: 8mm; margin-bottom: 5mm; border-bottom: 1.5px solid ${template.visual.primaryColor}; padding-bottom: 2mm; clear: both; text-transform: uppercase; }
-  h3 { font-size: 11pt; font-weight: bold; margin-top: 7mm; margin-bottom: 3mm; text-transform: uppercase; letter-spacing: 0.5px; color: #1e293b; }
-  .pdf-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 0.5px solid #cbd5e1; padding-bottom: 3mm; font-size: 8.5pt; color: #475569; margin-bottom: 12mm; width: 100%; }
-  .pdf-footer { position: absolute; bottom: 10mm; left: 25mm; right: 25mm; display: flex; justify-content: space-between; font-size: 7pt; color: #94a3b8; border-top: 0.5px solid #e2e8f0; padding-top: 2mm; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; font-size: 9.5pt; table-layout: fixed; }
-  th, td { border: 0.5px solid #e2e8f0; padding: 2.5mm 3.5mm; text-align: left; word-wrap: break-word; }
-  th { background: #f8fafc; font-weight: bold; color: ${template.visual.primaryColor}; text-transform: uppercase; font-size: 8pt; }
-  p { margin: 0 0 3mm 0; line-height: ${template.visual.lineHeight ?? 1.5}; font-size: 9.5pt; color: #334155; }
-  .pdf-badge { display: inline-block; padding: 1mm 3mm; border-radius: 1mm; font-size: 8pt; font-weight: bold; text-transform: uppercase; }
-  .pdf-badge-draft { background: #f1f5f9; color: #475569; }
-  .pdf-badge-sent { background: #eff6ff; color: #2563eb; }
-  .pdf-badge-accepted { background: #f0fdf4; color: #16a34a; }
-  .pdf-badge-rejected { background: #fef2f2; color: #dc2626; }
-  .signature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20mm; margin-top: 20mm; }
-  .signature-box { border: 0.5px solid #eee; padding: 5mm; height: 40mm; position: relative; }
-  .signature-label { font-size: 7pt; font-weight: bold; text-transform: uppercase; color: #999; margin-bottom: 2mm; }
 `;
 
 // ─── jsPDF export pipeline ──────────────────────────────────────────────────
@@ -443,7 +443,7 @@ export async function exportProposalPdf(container: HTMLElement, data: ProposalPd
     const { default: jsPDF } = await import('jspdf');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pages = container.querySelectorAll('.pdf-page');
+    const pages = container.querySelectorAll('[data-pdf-page]');
 
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i] as HTMLElement;

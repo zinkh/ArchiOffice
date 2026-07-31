@@ -3,6 +3,7 @@
 // page that merely links to a meeting export button.
 import type { Paragraph, TextRun, ImageRun, Table, TableRow } from 'docx';
 import type { Meeting, MeetingAttendee } from '../types';
+import { compressImage, type CompressedImage } from './imageCompression';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -33,52 +34,6 @@ function attendeeName(att: MeetingAttendee): string {
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9_\-]/g, '_');
-}
-
-// ── Image compression ─────────────────────────────────────────────────────────
-
-interface CompressedImage {
-  base64: string;   // JPEG base64 without data-URL prefix
-  dataUrl: string;  // Full data-URL
-  buffer: ArrayBuffer;
-  w: number;        // actual pixel width after resize
-  h: number;        // actual pixel height after resize
-}
-
-async function compressImage(
-  url: string,
-  maxW: number,
-  maxH: number,
-  quality = 0.72,
-): Promise<CompressedImage | null> {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-
-    img.onload = () => {
-      const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-      const w = Math.round(img.naturalWidth * ratio);
-      const h = Math.round(img.naturalHeight * ratio);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-
-      const dataUrl = canvas.toDataURL('image/jpeg', quality);
-      const base64 = dataUrl.split(',')[1];
-
-      // Convert to ArrayBuffer for docx
-      const bin = atob(base64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-
-      resolve({ base64, dataUrl, buffer: bytes.buffer, w, h });
-    };
-
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
 }
 
 // ── PDF export ────────────────────────────────────────────────────────────────
