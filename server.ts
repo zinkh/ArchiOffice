@@ -8,6 +8,7 @@ import { validateBody } from "./src/lib/validateRequest";
 import { invoiceSchema } from "./src/schemas/invoice.schema";
 import { proposalSchema } from "./src/schemas/proposal.schema";
 import { createTeamMemberSchema, updateTeamMemberRoleSchema } from "./src/schemas/team.schema";
+import { captureWithContext } from "./server/sentryContext";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
@@ -3004,7 +3005,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, `Suppression du projet "${name}"`, name, id, 'project', 'Projets');
       res.json({ success: true });
     } catch (error: any) {
-      console.error("Error deleting project:", error);
+      captureWithContext(error, { route: 'DELETE /api/projects/:id', tenantId: req.tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to delete project: " + error.message });
     }
   });
@@ -3960,8 +3961,9 @@ export async function createApp() {
   });
 
   app.put("/api/tenders/:id", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list } = req.body;
       const { error: ue } = await supabaseAdmin.from('tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived }).eq('id', id).eq('tenant_id', tenantId);
@@ -3972,7 +3974,7 @@ export async function createApp() {
       if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
       const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).eq('tenant_id', tenantId).single();
       res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
+    } catch (e: any) { captureWithContext(e, { route: 'PUT /api/tenders/:id', tenantId, userId: req.user?.id }); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
   });
 
   // --- Veille RSS des appels d'offres ---
@@ -4297,8 +4299,9 @@ export async function createApp() {
   });
 
   app.put("/api/contrats_moe/:id", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { client_name: _cn, project_name: _pn, id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
       const { error } = await supabaseAdmin
@@ -4316,7 +4319,7 @@ export async function createApp() {
         : '';
       const { contacts: _c, projects: _p, ...rest } = (updated as any) || {};
       res.json({ ...rest, client_name, project_name: (updated as any)?.projects?.name || '' });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to update contrat MOE: ' + e.message }); }
+    } catch (e: any) { captureWithContext(e, { route: 'PUT /api/contrats_moe/:id', tenantId, userId: req.user?.id }); res.status(500).json({ error: 'Failed to update contrat MOE: ' + e.message }); }
   });
 
   app.delete("/api/contrats_moe/:id", async (req: any, res: any) => {
@@ -4364,15 +4367,16 @@ export async function createApp() {
   });
 
   app.put("/api/notes_honoraires/:id", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
       const { error } = await supabaseAdmin.from('notes_honoraires').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       const { data: updated } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).eq('tenant_id', tenantId).single();
       res.json(updated);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to update note honoraires: ' + e.message }); }
+    } catch (e: any) { captureWithContext(e, { route: 'PUT /api/notes_honoraires/:id', tenantId, userId: req.user?.id }); res.status(500).json({ error: 'Failed to update note honoraires: ' + e.message }); }
   });
 
   app.delete("/api/notes_honoraires/:id", async (req: any, res: any) => {
@@ -4442,8 +4446,9 @@ export async function createApp() {
   });
 
   app.put("/api/proposals/:id", validateBody(proposalSchema), async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const p = req.body;
 
@@ -4540,7 +4545,7 @@ export async function createApp() {
       const { contacts: _c, ...rest } = (proposal as any) || {};
       res.json({ ...rest, client_name, specialties_list: (proposal as any)?.proposal_specialties || [] });
     } catch (error: any) {
-      console.error("Error updating proposal:", error);
+      captureWithContext(error, { route: 'PUT /api/proposals/:id', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update proposal: " + error.message });
     }
   });
@@ -4685,8 +4690,9 @@ export async function createApp() {
   });
 
   app.put("/api/invoices/:id", validateBody(invoiceSchema), async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
         amount, description, status, due_date,
@@ -4720,7 +4726,7 @@ export async function createApp() {
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
       res.json({ ...rest, project_name, items: invoice_items || [] });
     } catch (error: any) {
-      console.error("Error updating invoice:", error);
+      captureWithContext(error, { route: 'PUT /api/invoices/:id', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update invoice: " + error.message });
     }
   });
@@ -5589,8 +5595,9 @@ export async function createApp() {
   });
 
   app.post("/api/feed/posts/:id/like", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'post').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
       if (existing) {
@@ -5607,13 +5614,15 @@ export async function createApp() {
         res.json({ liked: true, likes_count: newCount });
       }
     } catch (err: any) {
+      captureWithContext(err, { route: 'POST /api/feed/posts/:id/like', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to toggle like" });
     }
   });
 
   app.post("/api/feed/activities/:id/like", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'activity').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
       if (existing) {
@@ -5630,6 +5639,7 @@ export async function createApp() {
         res.json({ liked: true, likes_count: newCount });
       }
     } catch (err: any) {
+      captureWithContext(err, { route: 'POST /api/feed/activities/:id/like', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to toggle like" });
     }
   });
@@ -6215,8 +6225,9 @@ export async function createApp() {
   });
 
   app.put("/api/reports/:reportId", async (req: any, res: any) => {
+    let tenantId: string | undefined;
     try {
-      const tenantId = await getTenantId(req.user.id);
+      tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting } = req.body;
       const { error } = await supabaseAdmin.from('site_reports').update({
@@ -6230,7 +6241,7 @@ export async function createApp() {
       const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
       res.json({ ...(updatedReport as any), stakeholders: (updatedReport as any)?.stakeholders || [], companies: (updatedReport as any)?.companies || [] });
     } catch (error) {
-      console.error(error);
+      captureWithContext(error, { route: 'PUT /api/reports/:reportId', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update report" });
     }
   });
