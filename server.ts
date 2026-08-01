@@ -59,6 +59,10 @@ import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
+import { registerSettingsRoutes } from "./server/routes/settings";
+import { registerUploadRoutes } from "./server/routes/uploads";
+import { registerLotRoutes } from "./server/routes/lots";
+import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { getNextDocNumber as getNextDocNumberImpl } from "./server/getNextDocNumber";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
@@ -1461,240 +1465,6 @@ export async function createApp() {
 
   // ── End Activity Feed ───────────────────────────────────────────────────────
 
-  // camelCase (frontend) ↔ snake_case (Supabase settings table)
-  const toSnake: Record<string, string> = {
-    agencyName: 'agency_name', vatNumber: 'vat_number',
-    senderOption: 'sender_option', defaultEmailTemplate: 'default_email_template',
-    logoUrl: 'logo_url', smtpHost: 'smtp_host', smtpPort: 'smtp_port',
-    smtpUser: 'smtp_user', smtpPass: 'smtp_pass',
-    numPrefixDevis: 'num_prefix_devis',
-    numPrefixFacture: 'num_prefix_facture',
-    numPrefixHonoraires: 'num_prefix_honoraires',
-    numPrefixAffaire: 'num_prefix_affaire',
-    onboardingCompletedAt: 'onboarding_completed_at',
-    defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
-    defaultLeaveDaysRtt: 'default_leave_days_rtt',
-    architectName: 'architect_name', oaNumber: 'oa_number',
-  };
-  const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
-
-  app.get("/api/settings", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      if (!settings) { res.json({ tenant_id: tenantId }); return; }
-      // Return camelCase keys expected by the frontend
-      const out: any = {};
-      for (const [k, v] of Object.entries(settings)) {
-        out[toCamel[k] ?? k] = v;
-      }
-      res.json(out);
-    } catch (error) {
-      console.error("[GET /api/settings]", error);
-      res.status(500).json({ error: "Failed to fetch settings" });
-    }
-  });
-
-  app.put("/api/settings", async (req: any, res: any) => {
-    try {
-      const tenantId = await requireTenantAdmin(req.user.id);
-      const data = req.body;
-      // Convert camelCase → snake_case
-      const snakeData: any = {};
-      for (const [k, v] of Object.entries(data)) {
-        const col = toSnake[k] ?? k;
-        snakeData[col] = v;
-      }
-      // Only keep valid table columns (exclude id — managed separately)
-      const validCols = new Set([
-        'agency_name', 'address', 'phone', 'email', 'siret', 'ape', 'vat_number',
-        'currency', 'language', 'sender_option', 'default_email_template', 'logo_url',
-        'seller_iban', 'seller_bic',
-        'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass',
-        'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token',
-        'zoho_books_org_id',
-        'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
-        'onboarding_completed_at',
-        'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
-        'ragic_api_key', 'ragic_account',
-        'ragic_sheet_contacts', 'ragic_sheet_projects', 'ragic_sheet_invoices', 'ragic_sheet_proposals',
-        'odoo_url', 'odoo_db', 'odoo_username', 'odoo_api_key',
-        'superpdp_client_id', 'superpdp_client_secret', 'superpdp_sandbox',
-        'chorus_pro_piste_client_id', 'chorus_pro_piste_client_secret',
-        'chorus_pro_technical_login', 'chorus_pro_technical_password', 'chorus_pro_sandbox',
-        'default_leave_days_conges_payes', 'default_leave_days_rtt',
-        'architect_name', 'oa_number',
-      ]);
-      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt']);
-      const filteredData: any = Object.fromEntries(
-        Object.entries(snakeData)
-          .filter(([k]) => validCols.has(k))
-          .map(([k, v]) => [k, numericCols.has(k) && v === '' ? null : v])
-      );
-
-      if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
-
-      // Check if row already exists for this tenant
-      const { data: existing } = await supabaseAdmin
-        .from('settings')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .maybeSingle();
-
-      // A column can be in validCols (known to this server build) but still missing from
-      // the DB if its migration hasn't been applied there yet (has happened before — see
-      // PR #55). Rather than hard-failing the whole save, drop the offending column(s)
-      // reported by Postgres and retry, so unrelated fields still get saved.
-      const droppedCols: string[] = [];
-      let saveError: any;
-      for (let attempt = 0; attempt < 20 && Object.keys(filteredData).length > 0; attempt++) {
-        if (existing) {
-          const { error } = await supabaseAdmin
-            .from('settings')
-            .update(filteredData)
-            .eq('tenant_id', tenantId);
-          saveError = error;
-        } else {
-          const { error } = await supabaseAdmin
-            .from('settings')
-            .insert({ ...filteredData, id: crypto.randomUUID(), tenant_id: tenantId });
-          saveError = error;
-        }
-        if (!saveError) break;
-        const missingCol = saveError.code === '42703' ? /column "([^"]+)"/.exec(saveError.message)?.[1] : undefined;
-        if (!missingCol || !(missingCol in filteredData)) break;
-        delete filteredData[missingCol];
-        droppedCols.push(missingCol);
-      }
-      if (droppedCols.length) {
-        console.warn(`[Settings] Column(s) missing in DB, migration likely pending — dropped from save: ${droppedCols.join(', ')}`);
-      }
-
-      if (saveError) throw saveError;
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error updating settings:", error);
-      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update settings: " + error.message });
-    }
-  });
-
-  // Upload agency logo → save to Supabase Storage, update settings.logo_url
-  app.post("/api/upload/logo", upload.single('file'), async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const file = req.file;
-      if (!file) return res.status(400).json({ error: "No file uploaded" });
-      const ext = file.originalname.split('.').pop() || 'png';
-      const storagePath = `${tenantId}/logo/${Date.now()}.${ext}`;
-      // Ensure logos bucket exists
-      const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
-      if (!bucketData) {
-        await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
-      }
-      const url = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
-      // Persist to settings
-      const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
-      if (existing) {
-        await supabaseAdmin.from('settings').update({ logo_url: url }).eq('tenant_id', tenantId);
-      } else {
-        await supabaseAdmin.from('settings').insert({ id: tenantId, tenant_id: tenantId, logo_url: url });
-      }
-      res.json({ url });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message || "Upload failed" }); }
-  });
-
-  // Upload user avatar → save to Supabase Storage, update profile.avatar
-  app.post("/api/upload/avatar", upload.single('file'), async (req: any, res: any) => {
-    try {
-      const userId = req.user.id;
-      const file = req.file;
-      if (!file) return res.status(400).json({ error: "No file uploaded" });
-      const ext = file.originalname.split('.').pop() || 'png';
-      const storagePath = `avatars/${userId}/${Date.now()}.${ext}`;
-      const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
-      if (!bucketData) {
-        await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
-      }
-      const url = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
-      await supabaseAdmin.from('profiles').update({ avatar: url }).eq('id', userId);
-      res.json({ url });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: e.message || "Upload failed" }); }
-  });
-
-  app.post("/api/test-smtp", async (req, res) => {
-    try {
-      const { smtpHost, smtpPort, smtpUser, smtpPass } = req.body;
-      
-      if (!smtpHost || !smtpUser || !smtpPass) {
-        return res.status(400).json({ error: "Missing SMTP configuration" });
-      }
-
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: parseInt(String(smtpPort) || '587'),
-        secure: String(smtpPort) === '465',
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
-      await transporter.sendMail({
-        from: `"ArchiOffice Test" <${smtpUser}>`,
-        to: smtpUser,
-        subject: "ArchiOffice SMTP Test",
-        text: "This is a test email from ArchiOffice to verify your SMTP configuration.",
-        html: "<b>This is a test email from ArchiOffice to verify your SMTP configuration.</b>"
-      });
-
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("SMTP Test Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.get("/api/projects/:projectId/lots", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { data: lots, error } = await supabaseAdmin.from('project_lots').select('*').eq('project_id', projectId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json(lots);
-    } catch (error) {
-      console.error("[GET /api/projects/:projectId/lots]", error);
-      res.status(500).json({ error: "Failed to fetch lots" });
-    }
-  });
-
-  app.post("/api/projects/:projectId/lots", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { id: bodyId, lot_number, lot_title } = req.body;
-      const lotId = bodyId || crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('project_lots').insert({ id: lotId, tenant_id: tenantId, project_id: projectId, lot_number, lot_title });
-      if (error) throw error;
-      res.status(201).json({ id: lotId });
-    } catch (error) {
-      console.error("[POST /api/projects/:projectId/lots]", error);
-      res.status(500).json({ error: "Failed to create lot" });
-    }
-  });
-
-  app.delete("/api/lots/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { error } = await supabaseAdmin.from('project_lots').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[DELETE /api/lots/:id]", error);
-      res.status(500).json({ error: "Failed to delete lot" });
-    }
-  });
-
   // Auto-numbering (PREFIX-YEAR-SEQ) shared by notesHonoraires.ts,
   // proposals.ts and invoices.ts — bound to supabaseAdmin here since
   // server/getNextDocNumber.ts is a standalone module, not a createApp() closure.
@@ -1762,6 +1532,10 @@ export async function createApp() {
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
+  registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerLotRoutes(app, { supabaseAdmin, getTenantId });
+  registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
@@ -1774,70 +1548,6 @@ export async function createApp() {
   // Phase 7: Project Members, Project Phase History, and Global Search now
   // live in server/routes/projectMembers.ts, projectPhaseHistory.ts, and
   // globalSearch.ts.
-
-  // ─── AI: CCTP Article Suggestions ──────────────────────────────────────────
-  app.post("/api/ai/suggest-articles", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { lot_name, existing_articles = [] } = req.body;
-      if (!lot_name) return res.status(400).json({ error: "lot_name is required" });
-
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
-
-      // Refresh monthly allowance if needed, then check balance
-      const { plan } = await getTenantPlan(tenantId);
-      await maybeRefreshMonthlyCredits(tenantId, plan);
-
-      const { data: tenantData } = await supabaseAdmin.from('tenants')
-        .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
-      const billingMode = (tenantData as any)?.agent_billing_mode ?? 'prepaid';
-      const balance = (tenantData as any)?.ai_credit_balance_eur_cents ?? 0;
-      if (billingMode === 'prepaid' && balance <= 0) {
-        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
-      }
-
-      const { GoogleGenAI } = await import("@google/genai");
-      const genai = new GoogleGenAI({ apiKey });
-
-      const existingList = existing_articles.length > 0 ? `\nArticles déjà présents (à ne pas dupliquer) : ${existing_articles.join(', ')}` : '';
-      const prompt = `Tu es un expert en architecture et construction.
-Génère exactement 5 articles techniques pour le lot "${lot_name}" dans un CCTP (Cahier des Clauses Techniques Particulières) architectural français.${existingList}
-
-Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication), chaque élément ayant ces champs :
-- "numero": numéro de l'article (ex: "1.1")
-- "designation": nom court de l'article (ex: "Fourniture et pose de cloisons")
-- "description": description technique détaillée (2-3 phrases)
-- "unite": unité de mesure (m², ml, u, forfait, etc.)
-- "prescriptionsTechniques": normes et prescriptions techniques applicables (1-2 phrases)`;
-
-      const result = await genai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
-      const text = result.text ?? '';
-
-      // Track token usage and deduct cost
-      const inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
-      const outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
-      if (inputTokens + outputTokens > 0) {
-        await deductAiCredit({
-          tenantId, userId: req.user.id,
-          agentId: null, conversationId: null,
-          endpointType: 'suggest_articles',
-          inputTokens, outputTokens,
-        });
-      }
-
-      // Extract JSON from response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) return res.status(500).json({ error: "Invalid AI response format" });
-
-      const articles = JSON.parse(jsonMatch[0]);
-      res.json({ articles });
-    } catch (e: any) {
-      console.error("AI suggest-articles error:", e.message);
-      Sentry.captureException(e, { tags: { feature: 'ai-suggest-articles' } });
-      res.status(500).json({ error: "AI suggestion failed: " + e.message });
-    }
-  });
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
