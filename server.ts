@@ -36,6 +36,8 @@ import { registerLeaveRoutes } from "./server/routes/leave";
 import { registerTenderRoutes } from "./server/routes/tenders";
 import { registerTenderRssRoutes } from "./server/routes/tenderRss";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
+import { registerSpecificationRoutes } from "./server/routes/specifications";
+import { registerContactRoutes } from "./server/routes/contacts";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
 import multer from "multer";
@@ -3377,128 +3379,6 @@ export async function createApp() {
       console.error("[POST /api/team/join-requests/:id/reject]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
-  app.get("/api/specifications", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('specifications').select('*').eq('tenant_id', tenantId).order('last_updated', { ascending: false });
-      if (error) throw error;
-      res.json((data || []).map((s: any) => ({ ...s, is_template: !!s.is_template })));
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: "Failed to fetch specifications" });
-    }
-  });
-
-  app.post("/api/specifications", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, project_id, title, content, is_template } = req.body;
-      const id = bodyId || crypto.randomUUID();
-      const last_updated = new Date().toISOString();
-      const { error } = await supabaseAdmin.from('specifications').insert({ id, tenant_id: tenantId, project_id, title, content, last_updated, is_template: !!is_template });
-      if (error) throw error;
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du CCTP "${title}"`, title, id, 'specification', 'CCTP');
-      res.status(201).json({ id, last_updated });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create specification: " + e.message }); }
-  });
-
-  app.put("/api/specifications/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { title, content, is_template } = req.body;
-      const last_updated = new Date().toISOString();
-      const { error } = await supabaseAdmin.from('specifications').update({ title, content, last_updated, is_template: !!is_template }).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true, last_updated });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update specification: " + e.message }); }
-  });
-
-  app.delete("/api/specifications/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: spec } = await supabaseAdmin.from('specifications').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
-      const { error } = await supabaseAdmin.from('specifications').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const title = (spec as any)?.title || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression du CCTP "${title}"`, title, id, 'specification', 'CCTP');
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete specification: " + e.message }); }
-  });
-
-  app.get("/api/contacts", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json((data || []).map((c: any) => ({ ...c, name: `${c.first_name || ''} ${c.last_name || ''}`.trim() })));
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contacts" }); }
-  });
-
-  app.post("/api/contacts", async (req: any, res: any) => {
-    console.log("POST /api/contacts hit");
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const contact = req.body;
-      const id = contact.id || crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('contacts').insert({ ...contact, id, tenant_id: tenantId });
-      if (error) throw error;
-      const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
-      res.status(201).json({ id });
-    } catch (e: any) {
-      console.error("Error creating contact:", e.message);
-      res.status(500).json({ error: "Failed to create contact: " + e.message });
-    }
-  });
-
-  app.put("/api/contacts/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const contact = req.body;
-      // Strip computed/non-column fields before sending to Supabase
-      const { id: _id, tenant_id: _t, name: _name, ...updateData } = contact;
-      const { error } = await supabaseAdmin.from('contacts').update(updateData).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error("Error updating contact:", e.message);
-      res.status(500).json({ error: "Failed to update contact: " + e.message });
-    }
-  });
-
-  app.delete("/api/contacts/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: contact } = await supabaseAdmin.from('contacts').select('first_name, last_name, company_name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
-      const { error } = await supabaseAdmin.from('contacts').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const contactName = (contact as any)?.company_name || `${(contact as any)?.first_name || ''} ${(contact as any)?.last_name || ''}`.trim();
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression du contact "${contactName}"`, contactName, id, 'contact', 'Contacts');
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error("Error deleting contact:", e.message);
-      res.status(500).json({ error: "Failed to delete contact" });
-    }
-  });
-
-  app.get("/api/contact-categories", async (req: any, res: any) => {
-    console.log("GET /api/contact-categories called");
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('contact_categories').select('*').eq('tenant_id', tenantId).order('name');
-      if (error) throw error;
-      res.json(data);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contact categories" }); }
-  });
-
   app.get("/api/proposals", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -6411,6 +6291,8 @@ export async function createApp() {
   registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
+  registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
