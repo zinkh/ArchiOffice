@@ -1115,7 +1115,11 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
 }
 
-async function startServer() {
+// Builds and fully configures the Express app (all middleware + all ~340
+// routes) without binding a port — the production entry point (startServer(),
+// below) adds the .listen() call. Exported so Supertest can drive the app
+// in-process; see tests/testServer.ts.
+export async function createApp() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
 
@@ -3939,7 +3943,7 @@ async function startServer() {
       if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
       await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
       if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
-      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).eq('tenant_id', tenantId).single();
       res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
   });
@@ -4278,7 +4282,7 @@ async function startServer() {
       const { data: updated } = await supabaseAdmin
         .from('contrats_moe')
         .select('*, contacts(first_name, last_name, company_name), projects(name)')
-        .eq('id', id).single();
+        .eq('id', id).eq('tenant_id', tenantId).single();
       const contact = (updated as any)?.contacts;
       const client_name = contact
         ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim())
@@ -4339,7 +4343,7 @@ async function startServer() {
       const { id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
       const { error } = await supabaseAdmin.from('notes_honoraires').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
-      const { data: updated } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).single();
+      const { data: updated } = await supabaseAdmin.from('notes_honoraires').select('*').eq('id', id).eq('tenant_id', tenantId).single();
       res.json(updated);
     } catch (e: any) { console.error(e); res.status(500).json({ error: 'Failed to update note honoraires: ' + e.message }); }
   });
@@ -4436,7 +4440,7 @@ async function startServer() {
         const projectId = crypto.randomUUID();
         let clientName = 'Unknown Client';
         if (p.client_id) {
-          const { data: clientData } = await supabaseAdmin.from('contacts').select('first_name, last_name').eq('id', p.client_id).single();
+          const { data: clientData } = await supabaseAdmin.from('contacts').select('first_name, last_name').eq('id', p.client_id).eq('tenant_id', tenantId).single();
           if (clientData) clientName = `${clientData.first_name || ''} ${clientData.last_name || ''}`.trim();
         }
         const { error: projErr } = await supabaseAdmin.from('projects').insert({
@@ -4503,7 +4507,7 @@ async function startServer() {
         }
       }
 
-      const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).single();
+      const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).eq('tenant_id', tenantId).single();
       const contact = (proposal as any)?.contacts;
       const client_name = contact ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() : '';
       const { contacts: _c, ...rest } = (proposal as any) || {};
@@ -4684,7 +4688,7 @@ async function startServer() {
         }
       }
 
-      const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).single();
+      const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).eq('tenant_id', tenantId).single();
       const project_name = (invoice as any)?.projects?.name || null;
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
       res.json({ ...rest, project_name, items: invoice_items || [] });
@@ -5564,15 +5568,15 @@ async function startServer() {
       const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'post').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
       if (existing) {
         await supabaseAdmin.from('feed_likes').delete().eq('id', (existing as any).id);
-        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).single();
+        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).eq('tenant_id', tenantId).single();
         const newCount = Math.max(0, ((post as any)?.likes_count || 1) - 1);
-        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id);
+        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id).eq('tenant_id', tenantId);
         res.json({ liked: false, likes_count: newCount });
       } else {
         await supabaseAdmin.from('feed_likes').insert({ id: crypto.randomUUID(), item_id: id, item_type: 'post', user_id: req.user.id, tenant_id: tenantId });
-        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).single();
+        const { data: post } = await supabaseAdmin.from('feed_posts').select('likes_count').eq('id', id).eq('tenant_id', tenantId).single();
         const newCount = ((post as any)?.likes_count || 0) + 1;
-        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id);
+        await supabaseAdmin.from('feed_posts').update({ likes_count: newCount }).eq('id', id).eq('tenant_id', tenantId);
         res.json({ liked: true, likes_count: newCount });
       }
     } catch (err: any) {
@@ -5587,15 +5591,15 @@ async function startServer() {
       const { data: existing } = await supabaseAdmin.from('feed_likes').select('id').eq('item_id', id).eq('item_type', 'activity').eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
       if (existing) {
         await supabaseAdmin.from('feed_likes').delete().eq('id', (existing as any).id);
-        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).single();
+        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).eq('tenant_id', tenantId).single();
         const newCount = Math.max(0, ((act as any)?.likes_count || 1) - 1);
-        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id);
+        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id).eq('tenant_id', tenantId);
         res.json({ liked: false, likes_count: newCount });
       } else {
         await supabaseAdmin.from('feed_likes').insert({ id: crypto.randomUUID(), item_id: id, item_type: 'activity', user_id: req.user.id, tenant_id: tenantId });
-        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).single();
+        const { data: act } = await supabaseAdmin.from('activities').select('likes_count').eq('id', id).eq('tenant_id', tenantId).single();
         const newCount = ((act as any)?.likes_count || 0) + 1;
-        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id);
+        await supabaseAdmin.from('activities').update({ likes_count: newCount }).eq('id', id).eq('tenant_id', tenantId);
         res.json({ liked: true, likes_count: newCount });
       }
     } catch (err: any) {
@@ -6196,7 +6200,7 @@ async function startServer() {
         nextMeeting: nextMeeting || null
       }).eq('id', reportId).eq('tenant_id', tenantId);
       if (error) throw error;
-      const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).single();
+      const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
       res.json({ ...(updatedReport as any), stakeholders: (updatedReport as any)?.stakeholders || [], companies: (updatedReport as any)?.companies || [] });
     } catch (error) {
       console.error(error);
@@ -10610,6 +10614,15 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
     });
   }
 
+  return { app, supabaseAdmin, ensureStorageBuckets, PORT };
+}
+
+// Thin wrapper kept separate from createApp() so Supertest (and anything else
+// that just needs a handle on `app`) can import createApp() without binding a
+// real port — see tests/testServer.ts. Production startup is unchanged: this
+// is still the only thing invoked at module load.
+async function startServer() {
+  const { app, supabaseAdmin, ensureStorageBuckets, PORT } = await createApp();
   // Start listening after all middleware is set up
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
@@ -10623,8 +10636,14 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
   });
 }
 
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-  Sentry.captureException(err);
-  process.exit(1);
-});
+// Vitest sets process.env.VITEST — skip the real listen() when this module is
+// merely imported for its createApp() export (Supertest drives the app
+// in-process instead; see tests/testServer.ts). Production entry point is
+// unaffected: nothing outside a Vitest run ever sets this variable.
+if (!process.env.VITEST) {
+  startServer().catch((err) => {
+    console.error("Failed to start server:", err);
+    Sentry.captureException(err);
+    process.exit(1);
+  });
+}
