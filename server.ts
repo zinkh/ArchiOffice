@@ -150,6 +150,7 @@ async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000)
     clearTimeout(id);
     return response;
   } catch (error) {
+    console.error("[server.ts:152]", error);
     clearTimeout(id);
     throw error;
   }
@@ -946,6 +947,7 @@ if (false as any) {
       try {
         db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`).run();
       } catch (e) {
+        console.error("[server.ts:948]", e);
         // Column likely already exists
       }
     }
@@ -954,12 +956,14 @@ if (false as any) {
   try {
     db.prepare(`ALTER TABLE invoices ADD COLUMN advancement_pct NUMERIC DEFAULT 0`).run();
   } catch (e) {
+    console.error("[server.ts:956]", e);
     // Column likely already exists
   }
 
   try {
     db.prepare(`ALTER TABLE specifications ADD COLUMN is_template INTEGER DEFAULT 0`).run();
   } catch (e) {
+    console.error("[server.ts:962]", e);
     // Column likely already exists
   }
 
@@ -967,6 +971,7 @@ if (false as any) {
   try {
     db.prepare(`ALTER TABLE ordres_de_service ADD COLUMN type TEXT DEFAULT 'travaux'`).run();
   } catch (e) {
+    console.error("[server.ts:969]", e);
     // Column likely already exists
   }
   // Backfill type for existing rows
@@ -1268,6 +1273,7 @@ export async function createApp() {
         req.tenantId = tenantId;
         next();
       } catch (e: any) {
+        console.error("[server.ts:1270]", e);
         res.status(e.status || 500).json({ error: e.message || 'Failed to verify role' });
       }
     };
@@ -1605,7 +1611,8 @@ export async function createApp() {
         }
       }
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/public/resend-confirmation]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Envoyer un email de réinitialisation de mot de passe (ne révèle jamais si le compte existe).
@@ -1637,7 +1644,8 @@ export async function createApp() {
         }
       }
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/public/forgot-password]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Public: get tenant branding info by slug (used on subdomain login page)
@@ -1653,6 +1661,7 @@ export async function createApp() {
         logoUrl: (settings as any)?.logo_url || null,
       });
     } catch (e: any) {
+      console.error("[GET /api/public/tenant/:slug]", e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -1811,6 +1820,7 @@ export async function createApp() {
       try {
         geometry = JSON.parse(geom as string);
       } catch (e) {
+        console.error("[GET /api/urbanisme]", e);
         return res.status(400).json({ error: "Format GeoJSON invalide" });
       }
 
@@ -2108,7 +2118,8 @@ export async function createApp() {
       const nums = (data || []).map((r: any) => parseInt(r.os_number) || 0);
       const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
       res.json({ next: String(next).padStart(3, '0') });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/ordres_de_service/next-number]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Visa Routes
@@ -3113,7 +3124,8 @@ export async function createApp() {
         defaultEmailTemplate: data.default_email_template,
         jobTitle: data.job_title,
       });
-    } catch (e: any) { res.status(500).json({ error: "Failed to fetch profile" }); }
+    } catch (e: any) {
+      console.error("[GET /api/me]", e); res.status(500).json({ error: "Failed to fetch profile" }); }
   });
 
   // ─── Agency setup (compte authentifié sans tenant — création OAuth ou en attente de rattachement) ─────
@@ -3159,7 +3171,8 @@ export async function createApp() {
         hasTenant: false,
         pendingRequest: pending ? { id: pending.id, tenantName: (pending as any).tenants?.name, createdAt: pending.created_at } : null,
       });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/agency-setup/status]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.get("/api/agency-setup/search", async (req: any, res: any) => {
@@ -3174,7 +3187,8 @@ export async function createApp() {
         .limit(10);
       if (error) throw error;
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/agency-setup/search]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/agency-setup/create", async (req: any, res: any) => {
@@ -3214,7 +3228,8 @@ export async function createApp() {
       await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
 
       res.json({ success: true, tenantId: tenant.id });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/agency-setup/create]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/agency-setup/join", async (req: any, res: any) => {
@@ -3245,14 +3260,16 @@ export async function createApp() {
       );
 
       res.json({ success: true, requestId: request.id, tenantName: tenant.name });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/agency-setup/join]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/agency-setup/join", async (req: any, res: any) => {
     try {
       await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/agency-setup/join]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.put("/api/team/:id", async (req: any, res: any) => {
@@ -3273,7 +3290,8 @@ export async function createApp() {
       }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update profile: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/team/:id]", e); res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update profile: " + e.message }); }
   });
 
   app.post("/api/team", validateBody(createTeamMemberSchema), async (req: any, res: any) => {
@@ -3707,7 +3725,8 @@ export async function createApp() {
         .order('created_at', { ascending: true });
       if (error) throw error;
       res.json(data || []);
-    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/team/join-requests]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   app.post("/api/team/join-requests/:id/approve", async (req: any, res: any) => {
@@ -3728,7 +3747,8 @@ export async function createApp() {
 
       await supabaseAdmin.from('join_requests').update({ status: 'approved', decided_at: new Date().toISOString(), decided_by: req.user.id }).eq('id', request.id);
       res.json({ success: true });
-    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/team/join-requests/:id/approve]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   app.post("/api/team/join-requests/:id/reject", async (req: any, res: any) => {
@@ -3741,7 +3761,8 @@ export async function createApp() {
         .select().single();
       if (error || !data) return res.status(404).json({ error: 'Demande introuvable' });
       res.json({ success: true });
-    } catch (e: any) { res.status(e.status || 500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/team/join-requests/:id/reject]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // ─── Leave / Congés ──────────────────────────────────────────────────────
@@ -5690,6 +5711,7 @@ export async function createApp() {
 
       res.json({ count: (actCount || 0) + (postCount || 0) });
     } catch (err: any) {
+      console.error("[GET /api/notifications/unread-count]", err);
       res.json({ count: 0 });
     }
   });
@@ -5700,6 +5722,7 @@ export async function createApp() {
       await supabaseAdmin.from('profiles').update({ notifications_last_seen: now }).eq('id', req.user.id);
       res.json({ success: true, last_seen: now });
     } catch (err: any) {
+      console.error("[POST /api/notifications/mark-read]", err);
       res.status(500).json({ error: "Failed to mark notifications as read" });
     }
   });
@@ -5785,6 +5808,7 @@ export async function createApp() {
       if ((profile as any)?.cv_url) deleteFromStorage('cv', (profile as any).cv_url).catch(() => {});
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[DELETE /api/profile/cv]", e);
       res.status(500).json({ error: "Failed to remove CV" });
     }
   });
@@ -5816,6 +5840,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[PUT /api/profile/education/:id]", e);
       res.status(500).json({ error: "Failed to update education entry" });
     }
   });
@@ -5828,6 +5853,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[DELETE /api/profile/education/:id]", e);
       res.status(500).json({ error: "Failed to delete education entry" });
     }
   });
@@ -5859,6 +5885,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[PUT /api/profile/experience/:id]", e);
       res.status(500).json({ error: "Failed to update experience entry" });
     }
   });
@@ -5871,6 +5898,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[DELETE /api/profile/experience/:id]", e);
       res.status(500).json({ error: "Failed to delete experience entry" });
     }
   });
@@ -5994,6 +6022,7 @@ export async function createApp() {
       if (error) throw error;
       res.json(data || []);
     } catch (e: any) {
+      console.error("[GET /api/conversations/:id/messages]", e);
       res.status(e.status || 500).json({ error: e.message || "Failed to fetch messages" });
     }
   });
@@ -6046,6 +6075,7 @@ export async function createApp() {
         .eq('conversation_id', id).eq('user_id', req.user.id).eq('tenant_id', tenantId);
       res.json({ success: true, last_read_at: now });
     } catch (e: any) {
+      console.error("[POST /api/conversations/:id/read]", e);
       res.status(500).json({ error: "Failed to mark conversation as read" });
     }
   });
@@ -6062,6 +6092,7 @@ export async function createApp() {
       }));
       res.json({ count: counts.reduce((a, b) => a + b, 0) });
     } catch (e: any) {
+      console.error("[GET /api/messages/unread-count]", e);
       res.json({ count: 0 });
     }
   });
@@ -6081,6 +6112,7 @@ export async function createApp() {
       if (rows.length) await supabaseAdmin.from('conversation_participants').upsert(rows, { onConflict: 'conversation_id,user_id', ignoreDuplicates: true });
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[POST /api/conversations/:id/participants]", e);
       res.status(e.status || 500).json({ error: e.message || "Failed to add participants" });
     }
   });
@@ -6094,6 +6126,7 @@ export async function createApp() {
       await supabaseAdmin.from('conversation_participants').delete().eq('conversation_id', id).eq('user_id', userId).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (e: any) {
+      console.error("[DELETE /api/conversations/:id/participants/:userId]", e);
       res.status(500).json({ error: "Failed to leave conversation" });
     }
   });
@@ -6158,8 +6191,10 @@ export async function createApp() {
       if (error) throw error;
       const parsedReports = (reports || []).map((report: any) => ({
         ...report,
-        stakeholders: Array.isArray(report.stakeholders) ? report.stakeholders : (() => { try { return report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) { return []; } })(),
-        companies: Array.isArray(report.companies) ? report.companies : (() => { try { return report.companies ? JSON.parse(report.companies) : []; } catch (e) { return []; } })()
+        stakeholders: Array.isArray(report.stakeholders) ? report.stakeholders : (() => { try { return report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) {
+          console.error("[GET /api/projects/:projectId/reports]", e); return []; } })(),
+        companies: Array.isArray(report.companies) ? report.companies : (() => { try { return report.companies ? JSON.parse(report.companies) : []; } catch (e) {
+          console.error("[GET /api/projects/:projectId/reports]", e); return []; } })()
       }));
       res.json(parsedReports);
     } catch (error) {
@@ -6192,6 +6227,7 @@ export async function createApp() {
       }
       res.status(201).json({ id });
     } catch (error) {
+      console.error("[POST /api/projects/:projectId/reports]", error);
       res.status(500).json({ error: "Failed to create report" });
     }
   });
@@ -6204,6 +6240,7 @@ export async function createApp() {
       if (error) throw error;
       res.json(notes);
     } catch (error) {
+      console.error("[GET /api/reports/:reportId/notes]", error);
       res.status(500).json({ error: "Failed to fetch notes" });
     }
   });
@@ -6220,6 +6257,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, `Ajout de la note de chantier N° ${note_number}`, category || '', id, 'site_report_note', 'Notes de site');
       res.status(201).json({ id });
     } catch (error) {
+      console.error("[POST /api/reports/:reportId/notes]", error);
       res.status(500).json({ error: "Failed to create note" });
     }
   });
@@ -6255,6 +6293,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {
+      console.error("[PUT /api/notes/:noteId]", error);
       res.status(500).json({ error: "Failed to update note" });
     }
   });
@@ -6271,6 +6310,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, `Suppression de la note de chantier N° ${noteNumber}`, (note as any)?.category || '', noteId, 'site_report_note', 'Notes de site');
       res.json({ success: true });
     } catch (error) {
+      console.error("[DELETE /api/notes/:noteId]", error);
       res.status(500).json({ error: "Failed to delete note" });
     }
   });
@@ -6295,6 +6335,7 @@ export async function createApp() {
       }));
       res.json(mapped);
     } catch (error) {
+      console.error("[GET /api/projects/:projectId/observations]", error);
       res.status(500).json({ error: "Failed to fetch observations" });
     }
   });
@@ -6320,6 +6361,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, `Création de l'observation N° ${number}`, texte || '', id, 'observation', 'Réserves/Observations');
       res.json(data);
     } catch (error) {
+      console.error("[POST /api/projects/:projectId/observations]", error);
       res.status(500).json({ error: "Failed to create observation" });
     }
   });
@@ -6335,6 +6377,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {
+      console.error("[PUT /api/observations/:id]", error);
       res.status(500).json({ error: "Failed to update observation" });
     }
   });
@@ -6350,6 +6393,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, `Suppression de l'observation N° ${(obs as any)?.number}`, (obs as any)?.texte || '', id, 'observation', 'Réserves/Observations');
       res.json({ success: true });
     } catch (error) {
+      console.error("[DELETE /api/observations/:id]", error);
       res.status(500).json({ error: "Failed to delete observation" });
     }
   });
@@ -6373,6 +6417,7 @@ export async function createApp() {
       }));
       res.json(mapped);
     } catch (error) {
+      console.error("[GET /api/reports/:reportId/observations]", error);
       res.status(500).json({ error: "Failed to fetch report observations" });
     }
   });
@@ -6382,6 +6427,7 @@ export async function createApp() {
       await supabaseAdmin.from('observation_reports').insert({ observation_id: req.params.id, report_id: req.params.reportId });
       res.json({ success: true });
     } catch (error) {
+      console.error("[POST /api/observations/:id/link/:reportId]", error);
       res.status(500).json({ error: "Failed to link observation to report" });
     }
   });
@@ -6400,6 +6446,7 @@ export async function createApp() {
         res.status(404).json({ error: "CCTP not found" });
       }
     } catch (error) {
+      console.error("[GET /api/projects/:projectId/cctp]", error);
       res.status(500).json({ error: "Failed to fetch CCTP" });
     }
   });
@@ -6419,6 +6466,7 @@ export async function createApp() {
       }
       res.json(data);
     } catch (error) {
+      console.error("[POST /api/projects/:projectId/cctp]", error);
       res.status(500).json({ error: "Failed to save CCTP" });
     }
   });
@@ -6435,6 +6483,7 @@ export async function createApp() {
         res.status(404).json({ error: "DPGF not found" });
       }
     } catch (error) {
+      console.error("[GET /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to fetch DPGF" });
     }
   });
@@ -6458,6 +6507,7 @@ export async function createApp() {
       }
       res.json(data);
     } catch (error) {
+      console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
     }
   });
@@ -6491,6 +6541,7 @@ export async function createApp() {
       }
       res.json(out);
     } catch (error) {
+      console.error("[GET /api/settings]", error);
       res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
@@ -6662,6 +6713,7 @@ export async function createApp() {
       if (error) throw error;
       res.json(lots);
     } catch (error) {
+      console.error("[GET /api/projects/:projectId/lots]", error);
       res.status(500).json({ error: "Failed to fetch lots" });
     }
   });
@@ -6676,6 +6728,7 @@ export async function createApp() {
       if (error) throw error;
       res.status(201).json({ id: lotId });
     } catch (error) {
+      console.error("[POST /api/projects/:projectId/lots]", error);
       res.status(500).json({ error: "Failed to create lot" });
     }
   });
@@ -6688,6 +6741,7 @@ export async function createApp() {
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {
+      console.error("[DELETE /api/lots/:id]", error);
       res.status(500).json({ error: "Failed to delete lot" });
     }
   });
@@ -6727,7 +6781,8 @@ export async function createApp() {
       });
       const contacts: any[] = search.data.contacts || [];
       if (contacts.length > 0) return contacts[0].contact_id;
-    } catch (_) {}
+    } catch (_) {
+      console.error("[server.ts:6730]", _);}
     const create = await axios.post(`${apiBase}/contacts`, {
       contact_name: name,
       contact_type: 'customer'
@@ -6752,6 +6807,7 @@ export async function createApp() {
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && (settings as any)?.zoho_org_id),
       });
     } catch (error) {
+      console.error("[GET /api/zoho/status]", error);
       res.status(500).json({ error: 'Failed to get Zoho status' });
     }
   });
@@ -6791,6 +6847,7 @@ export async function createApp() {
       authUrl.searchParams.set('state', tenantId);
       res.redirect(authUrl.toString());
     } catch (error) {
+      console.error("[GET /api/zoho/auth]", error);
       res.status(500).send('Erreur lors de la connexion à Zoho');
     }
   });
@@ -6838,6 +6895,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error) {
+      console.error("[DELETE /api/zoho/disconnect]", error);
       res.status(500).json({ error: 'Failed to disconnect Zoho' });
     }
   });
@@ -6902,6 +6960,7 @@ export async function createApp() {
             pushed++;
           }
         } catch (err: any) {
+          console.error("[POST /api/zoho/sync]", err);
           errors.push(`Envoi échoué (${inv.invoice_number || inv.id}): ${err.response?.data?.message || err.message}`);
         }
       }
@@ -6921,6 +6980,7 @@ export async function createApp() {
           }
         }
       } catch (err: any) {
+        console.error("[POST /api/zoho/sync]", err);
         errors.push(`Récupération échouée: ${err.response?.data?.message || err.message}`);
       }
 
@@ -6974,6 +7034,7 @@ export async function createApp() {
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && ((settings as any)?.zoho_books_org_id || (settings as any)?.zoho_org_id)),
       });
     } catch (error: any) {
+      console.error("[GET /api/zoho-books/status]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -6997,6 +7058,7 @@ export async function createApp() {
       authUrl.searchParams.set('prompt', 'consent');
       res.redirect(authUrl.toString());
     } catch (error: any) {
+      console.error("[GET /api/zoho-books/auth]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7022,6 +7084,7 @@ export async function createApp() {
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_books_connected=1');
     } catch {
+      console.error("[GET /api/zoho-books/callback] Unhandled error");
       res.redirect('/settings?zoho_books_error=1');
     }
   });
@@ -7036,6 +7099,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho Books', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error: any) {
+      console.error("[DELETE /api/zoho-books/disconnect]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7089,10 +7153,12 @@ export async function createApp() {
               errors.push(`Push ${(inv as any).id}: ${respData.message}`);
             }
           } catch (err: any) {
+            console.error("[POST /api/zoho-books/sync]", err);
             errors.push(`Push ${(inv as any).id}: ${err.message}`);
           }
         }
       } catch (err: any) {
+        console.error("[POST /api/zoho-books/sync]", err);
         errors.push(`Envoi échoué: ${err.message}`);
       }
 
@@ -7113,6 +7179,7 @@ export async function createApp() {
           }
         }
       } catch (err: any) {
+        console.error("[POST /api/zoho-books/sync]", err);
         errors.push(`Récupération échouée: ${err.message}`);
       }
 
@@ -7149,6 +7216,7 @@ export async function createApp() {
       const connected = !!(settings as any)?.ragic_api_key && !!(settings as any)?.ragic_account;
       res.json({ connected });
     } catch (error: any) {
+      console.error("[GET /api/ragic/status]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7167,6 +7235,7 @@ export async function createApp() {
       }).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (error: any) {
+      console.error("[DELETE /api/ragic/disconnect]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7208,6 +7277,7 @@ export async function createApp() {
             }
             out.pushed++;
           } catch (err: any) {
+            console.error("[POST /api/ragic/sync]", err);
             out.errors.push(`Push ${row.id}: ${err.response?.data?.status ?? err.message}`);
           }
         }
@@ -7241,10 +7311,12 @@ export async function createApp() {
               }
               out.pulled++;
             } catch (err: any) {
+              console.error("[POST /api/ragic/sync]", err);
               out.errors.push(`Pull ${rec._ragicId}: ${err.message}`);
             }
           }
         } catch (err: any) {
+          console.error("[POST /api/ragic/sync]", err);
           out.errors.push(`Fetch échoué: ${err.response?.data?.status ?? err.message}`);
         }
         return out;
@@ -7529,6 +7601,7 @@ export async function createApp() {
       const connected = !!(settings as any)?.odoo_url && !!(settings as any)?.odoo_api_key;
       res.json({ connected });
     } catch (error: any) {
+      console.error("[GET /api/odoo/status]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7544,6 +7617,7 @@ export async function createApp() {
       logActivity(tenantId, req.user.id, userName, 'Déconnexion d\'Odoo', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (error: any) {
+      console.error("[DELETE /api/odoo/disconnect]", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -7592,7 +7666,8 @@ export async function createApp() {
               if (newId) await supabaseAdmin.from('contacts').update({ odoo_id: newId }).eq('id', c.id).eq('tenant_id', tenantId);
             }
             out.pushed++;
-          } catch (err: any) { out.errors.push(`Push contact ${c.id}: ${err.message}`); }
+          } catch (err: any) {
+            console.error("[POST /api/odoo/sync]", err); out.errors.push(`Push contact ${c.id}: ${err.message}`); }
         }
 
         // Pull: Odoo res.partner → ArchiOffice
@@ -7626,12 +7701,15 @@ export async function createApp() {
                 await supabaseAdmin.from('contacts').insert({ ...mapped, odoo_id: p.id, tenant_id: tenantId, created_at: new Date().toISOString() });
               }
               out.pulled++;
-            } catch (err: any) { out.errors.push(`Pull partner ${p.id}: ${err.message}`); }
+            } catch (err: any) {
+              console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull partner ${p.id}: ${err.message}`); }
           }
-        } catch (err: any) { out.errors.push(`Pull contacts échoué: ${err.message}`); }
+        } catch (err: any) {
+          console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull contacts échoué: ${err.message}`); }
 
         results.contacts = out;
-      } catch (err: any) { results.contacts = { pushed: 0, pulled: 0, errors: [err.message] }; }
+      } catch (err: any) {
+        console.error("[POST /api/odoo/sync]", err); results.contacts = { pushed: 0, pulled: 0, errors: [err.message] }; }
 
       // ── Projects ─────────────────────────────────────────────────────────────
       try {
@@ -7653,7 +7731,8 @@ export async function createApp() {
               if (newId) await supabaseAdmin.from('projects').update({ odoo_id: newId }).eq('id', p.id).eq('tenant_id', tenantId);
             }
             out.pushed++;
-          } catch (err: any) { out.errors.push(`Push project ${p.id}: ${err.message}`); }
+          } catch (err: any) {
+            console.error("[POST /api/odoo/sync]", err); out.errors.push(`Push project ${p.id}: ${err.message}`); }
         }
 
         // Pull
@@ -7680,12 +7759,15 @@ export async function createApp() {
                 await supabaseAdmin.from('projects').insert({ ...mapped, odoo_id: op.id, tenant_id: tenantId });
               }
               out.pulled++;
-            } catch (err: any) { out.errors.push(`Pull project ${op.id}: ${err.message}`); }
+            } catch (err: any) {
+              console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull project ${op.id}: ${err.message}`); }
           }
-        } catch (err: any) { out.errors.push(`Pull projects échoué: ${err.message}`); }
+        } catch (err: any) {
+          console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull projects échoué: ${err.message}`); }
 
         results.projects = out;
-      } catch (err: any) { results.projects = { pushed: 0, pulled: 0, errors: [err.message] }; }
+      } catch (err: any) {
+        console.error("[POST /api/odoo/sync]", err); results.projects = { pushed: 0, pulled: 0, errors: [err.message] }; }
 
       // ── Invoices ─────────────────────────────────────────────────────────────
       try {
@@ -7716,7 +7798,8 @@ export async function createApp() {
               if (newId) await supabaseAdmin.from('invoices').update({ odoo_id: newId }).eq('id', inv.id).eq('tenant_id', tenantId);
             }
             out.pushed++;
-          } catch (err: any) { out.errors.push(`Push invoice ${inv.id}: ${err.message}`); }
+          } catch (err: any) {
+            console.error("[POST /api/odoo/sync]", err); out.errors.push(`Push invoice ${inv.id}: ${err.message}`); }
         }
 
         // Pull
@@ -7747,12 +7830,15 @@ export async function createApp() {
                 await supabaseAdmin.from('invoices').insert({ ...mapped, odoo_id: oi.id, tenant_id: tenantId });
               }
               out.pulled++;
-            } catch (err: any) { out.errors.push(`Pull invoice ${oi.id}: ${err.message}`); }
+            } catch (err: any) {
+              console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull invoice ${oi.id}: ${err.message}`); }
           }
-        } catch (err: any) { out.errors.push(`Pull invoices échoué: ${err.message}`); }
+        } catch (err: any) {
+          console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull invoices échoué: ${err.message}`); }
 
         results.invoices = out;
-      } catch (err: any) { results.invoices = { pushed: 0, pulled: 0, errors: [err.message] }; }
+      } catch (err: any) {
+        console.error("[POST /api/odoo/sync]", err); results.invoices = { pushed: 0, pulled: 0, errors: [err.message] }; }
 
       // ── Proposals / Devis ─────────────────────────────────────────────────────
       try {
@@ -7773,7 +7859,8 @@ export async function createApp() {
               if (newId) await supabaseAdmin.from('proposals').update({ odoo_id: newId }).eq('id', prop.id).eq('tenant_id', tenantId);
             }
             out.pushed++;
-          } catch (err: any) { out.errors.push(`Push proposal ${prop.id}: ${err.message}`); }
+          } catch (err: any) {
+            console.error("[POST /api/odoo/sync]", err); out.errors.push(`Push proposal ${prop.id}: ${err.message}`); }
         }
 
         // Pull
@@ -7801,12 +7888,15 @@ export async function createApp() {
                 await supabaseAdmin.from('proposals').insert({ ...mapped, odoo_id: so.id, tenant_id: tenantId });
               }
               out.pulled++;
-            } catch (err: any) { out.errors.push(`Pull sale.order ${so.id}: ${err.message}`); }
+            } catch (err: any) {
+              console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull sale.order ${so.id}: ${err.message}`); }
           }
-        } catch (err: any) { out.errors.push(`Pull proposals échoué: ${err.message}`); }
+        } catch (err: any) {
+          console.error("[POST /api/odoo/sync]", err); out.errors.push(`Pull proposals échoué: ${err.message}`); }
 
         results.proposals = out;
-      } catch (err: any) { results.proposals = { pushed: 0, pulled: 0, errors: [err.message] }; }
+      } catch (err: any) {
+        console.error("[POST /api/odoo/sync]", err); results.proposals = { pushed: 0, pulled: 0, errors: [err.message] }; }
 
       const totalPushed = Object.values(results).reduce((sum, r) => sum + (r?.pushed || 0), 0);
       const totalPulled = Object.values(results).reduce((sum, r) => sum + (r?.pulled || 0), 0);
@@ -7833,6 +7923,7 @@ export async function createApp() {
       const company = result?.[0]?.name ?? 'Odoo';
       res.json({ connected: true, company });
     } catch (error: any) {
+      console.error("[POST /api/odoo/test]", error);
       res.status(400).json({ connected: false, error: error.message });
     }
   });
@@ -7914,7 +8005,8 @@ export async function createApp() {
       const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret,superpdp_sandbox').eq('tenant_id', tenantId).single();
       const connected = !!(s as any)?.superpdp_client_id && !!(s as any)?.superpdp_client_secret;
       res.json({ connected, sandbox: (s as any)?.superpdp_sandbox ?? true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/superpdp/status]", e); res.status(500).json({ error: e.message }); }
   });
 
   // DELETE /api/superpdp/disconnect
@@ -7923,7 +8015,8 @@ export async function createApp() {
       const tenantId = await getTenantId(req.user.id);
       await supabaseAdmin.from('settings').update({ superpdp_client_id: null, superpdp_client_secret: null }).eq('tenant_id', tenantId);
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/superpdp/test — verify credentials by fetching company info
@@ -7936,7 +8029,8 @@ export async function createApp() {
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
       const company = await superpdpFetch(token, '/v1.beta/companies/me');
       res.json({ connected: true, company: company?.formal_name || company?.name || 'SuperPDP' });
-    } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/superpdp/test]", e); res.status(400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/superpdp/send/:invoiceId — send one invoice to SuperPDP
@@ -7980,7 +8074,8 @@ export async function createApp() {
       await supabaseAdmin.from('invoices').update({ superpdp_id: superpdpId, superpdp_status: superpdpStatus }).eq('id', invoiceId);
 
       res.json({ success: true, superpdp_id: superpdpId, status: superpdpStatus });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/superpdp/send/:invoiceId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/superpdp/events/:invoiceId — get lifecycle events for an invoice
@@ -8004,7 +8099,8 @@ export async function createApp() {
       if (latest) await supabaseAdmin.from('invoices').update({ superpdp_status: latest }).eq('id', invoiceId);
 
       res.json({ events: events?.data || [], latest_status: latest });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/superpdp/events/:invoiceId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/superpdp/invoices — list all invoices from SuperPDP
@@ -8017,7 +8113,8 @@ export async function createApp() {
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
       const result = await superpdpFetch(token, '/v1.beta/invoices?direction=out&limit=100');
       res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/superpdp/invoices]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ── Situations / factures de travaux — marchés privés ──────────────────────
@@ -8099,7 +8196,8 @@ export async function createApp() {
       if (error) throw error;
 
       res.json({ success: true, situation: updated });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/superpdp/link-situation/:situationId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/superpdp/attach-etat-acompte/:situationId — generate the état
@@ -8164,7 +8262,8 @@ export async function createApp() {
       if (latest) await supabaseAdmin.from('situations').update({ superpdp_status: latest }).eq('id', situationId).eq('tenant_id', tenantId);
 
       res.json({ events: events?.data || [], latest_status: latest || (sit as any)?.superpdp_status });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/superpdp/situation-status/:situationId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/superpdp/situations — list local situations linked to an entreprise facture on Super PDP
@@ -8185,7 +8284,8 @@ export async function createApp() {
         return { ...rest, project_name, montant_ttc: net.net };
       }));
       res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/superpdp/situations]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ─── End SuperPDP Integration ────────────────────────────────────────────────
@@ -8224,7 +8324,8 @@ export async function createApp() {
     });
     const text = await r.text();
     let json: any = {};
-    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    try { json = text ? JSON.parse(text) : {}; } catch {
+      console.error("[server.ts:8227] Unhandled error"); json = { raw: text }; }
     if (!r.ok) throw new Error(`Chorus Pro API — erreur ${r.status}: ${json?.libelle || text}`);
     if (json && typeof json.codeRetour === 'number' && json.codeRetour !== 0) {
       throw new Error(`Chorus Pro API — code retour ${json.codeRetour}: ${json.libelle || 'erreur inconnue'}`);
@@ -8282,7 +8383,8 @@ export async function createApp() {
         .eq('tenant_id', tenantId).single();
       const cfg = s as any;
       res.json({ connected: chorusProCfgComplete(cfg), sandbox: cfg?.chorus_pro_sandbox ?? true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/chorus-pro/status]", e); res.status(500).json({ error: e.message }); }
   });
 
   // DELETE /api/chorus-pro/disconnect
@@ -8296,7 +8398,8 @@ export async function createApp() {
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Chorus Pro', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/chorus-pro/disconnect]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/chorus-pro/test — verify both credential layers: the PISTE OAuth2
@@ -8320,7 +8423,8 @@ export async function createApp() {
         );
       }
       res.json({ connected: true, sandbox });
-    } catch (e: any) { res.status(400).json({ connected: false, error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/chorus-pro/test]", e); res.status(400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
@@ -8413,7 +8517,8 @@ export async function createApp() {
       if (latest) await supabaseAdmin.from('invoices').update({ chorus_pro_status: latest }).eq('id', invoiceId).eq('tenant_id', tenantId);
 
       res.json({ history: historique, latest_status: latest || (inv as any)?.chorus_pro_status });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/chorus-pro/status/:invoiceId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/chorus-pro/invoices — list local invoices already submitted to Chorus Pro
@@ -8432,7 +8537,8 @@ export async function createApp() {
         return { ...rest, project_name };
       });
       res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/chorus-pro/invoices]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ── Situations / factures de travaux ────────────────────────────────────────
@@ -8522,7 +8628,8 @@ export async function createApp() {
       if (error) throw error;
 
       res.json({ success: true, situation: updated });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/chorus-pro/link-situation/:situationId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/chorus-pro/attach-etat-acompte/:situationId — generate the état
@@ -8598,7 +8705,8 @@ export async function createApp() {
       if (latest) await supabaseAdmin.from('situations').update({ chorus_pro_status: latest }).eq('id', situationId).eq('tenant_id', tenantId);
 
       res.json({ history: historique, latest_status: latest || (sit as any)?.chorus_pro_status });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/chorus-pro/situation-status/:situationId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/chorus-pro/situations — list local situations linked to an entreprise facture on Chorus Pro
@@ -8619,7 +8727,8 @@ export async function createApp() {
         return { ...rest, project_name, montant_ttc: net.net };
       }));
       res.json(result);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/chorus-pro/situations]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ─── End Chorus Pro Integration ────────────────────────────────────────────
@@ -8631,7 +8740,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('project_templates').select('*').eq('tenant_id', tenantId).order('name');
       if (error) throw error;
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: "Failed to fetch project templates" }); }
+    } catch (e: any) {
+      console.error("[GET /api/project-templates]", e); res.status(500).json({ error: "Failed to fetch project templates" }); }
   });
 
   app.post("/api/project-templates", async (req: any, res: any) => {
@@ -8642,7 +8752,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('project_templates').insert({ id, tenant_id: tenantId, name, description, default_status: default_status || 'Planning', default_budget: default_budget || 0, default_description }).select().single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create project template: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/project-templates]", e); res.status(500).json({ error: "Failed to create project template: " + e.message }); }
   });
 
   app.put("/api/project-templates/:id", async (req: any, res: any) => {
@@ -8652,7 +8763,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('project_templates').update({ name, description, default_status, default_budget, default_description }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update project template: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/project-templates/:id]", e); res.status(500).json({ error: "Failed to update project template: " + e.message }); }
   });
 
   app.delete("/api/project-templates/:id", async (req: any, res: any) => {
@@ -8661,7 +8773,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('project_templates').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete project template" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/project-templates/:id]", e); res.status(500).json({ error: "Failed to delete project template" }); }
   });
 
   // ─── ACT Data (Analyse Comparative des Offres) ────────────────────────────
@@ -8671,7 +8784,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('act_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
       if (error && error.code !== 'PGRST116') throw error;
       res.json(data || null);
-    } catch (e: any) { res.status(500).json({ error: "Failed to fetch ACT data" }); }
+    } catch (e: any) {
+      console.error("[GET /api/projects/:projectId/act]", e); res.status(500).json({ error: "Failed to fetch ACT data" }); }
   });
 
   app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
@@ -8689,7 +8803,8 @@ export async function createApp() {
         if (error) throw error;
         res.status(201).json(data);
       }
-    } catch (e: any) { res.status(500).json({ error: "Failed to save ACT data: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/projects/:projectId/act]", e); res.status(500).json({ error: "Failed to save ACT data: " + e.message }); }
   });
 
   // ─── DET Data (Comptes Rendus de Réunions) ────────────────────────────────
@@ -8699,7 +8814,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('det_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).order('created_at');
       if (error) throw error;
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: "Failed to fetch DET data" }); }
+    } catch (e: any) {
+      console.error("[GET /api/projects/:projectId/det]", e); res.status(500).json({ error: "Failed to fetch DET data" }); }
   });
 
   app.post("/api/projects/:projectId/det", async (req: any, res: any) => {
@@ -8710,7 +8826,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('det_data').insert({ id, tenant_id: tenantId, project_id: req.params.projectId, info, observations, intervenants }).select().single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create CR: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/projects/:projectId/det]", e); res.status(500).json({ error: "Failed to create CR: " + e.message }); }
   });
 
   app.put("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
@@ -8720,7 +8837,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('det_data').update({ info, observations, intervenants }).eq('id', req.params.crId).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update CR: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/projects/:projectId/det/:crId]", e); res.status(500).json({ error: "Failed to update CR: " + e.message }); }
   });
 
   app.delete("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
@@ -8729,7 +8847,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('det_data').delete().eq('id', req.params.crId).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete CR" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/projects/:projectId/det/:crId]", e); res.status(500).json({ error: "Failed to delete CR" }); }
   });
 
   // ─── DPGF Items CRUD (missing write operations) ───────────────────────────
@@ -8741,7 +8860,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('dpgf_items').insert({ id, tenant_id: tenantId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price }).select().single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF item: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/dpgf]", e); res.status(500).json({ error: "Failed to create DPGF item: " + e.message }); }
   });
 
   app.put("/api/dpgf/:id", async (req: any, res: any) => {
@@ -8751,7 +8871,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('dpgf_items').update({ lot_number, lot_title, item_number, description, unit, quantity, unit_price }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF item: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/dpgf/:id]", e); res.status(500).json({ error: "Failed to update DPGF item: " + e.message }); }
   });
 
   app.delete("/api/dpgf/:id", async (req: any, res: any) => {
@@ -8760,7 +8881,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('dpgf_items').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF item" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/dpgf/:id]", e); res.status(500).json({ error: "Failed to delete DPGF item" }); }
   });
 
   // ─── DPGFs CRUD (missing write + update/delete) ───────────────────────────
@@ -8772,7 +8894,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id, title, version }).select().single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create DPGF: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/dpgfs]", e); res.status(500).json({ error: "Failed to create DPGF: " + e.message }); }
   });
 
   app.put("/api/dpgfs/:id", async (req: any, res: any) => {
@@ -8782,7 +8905,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('dpgfs').update({ title, version }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update DPGF: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/dpgfs/:id]", e); res.status(500).json({ error: "Failed to update DPGF: " + e.message }); }
   });
 
   app.delete("/api/dpgfs/:id", async (req: any, res: any) => {
@@ -8791,7 +8915,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('dpgfs').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete DPGF" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/dpgfs/:id]", e); res.status(500).json({ error: "Failed to delete DPGF" }); }
   });
 
   // ─── Situations CRUD (missing write operations) ───────────────────────────
@@ -8805,7 +8930,8 @@ export async function createApp() {
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la situation N° ${numero}`, String(numero ?? ''), id, 'situation', 'Situations/DPGF');
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create situation: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/situations]", e); res.status(500).json({ error: "Failed to create situation: " + e.message }); }
   });
 
   app.put("/api/situations/:id", async (req: any, res: any) => {
@@ -8815,7 +8941,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('situations').update({ numero, date_situation, statut }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update situation: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/situations/:id]", e); res.status(500).json({ error: "Failed to update situation: " + e.message }); }
   });
 
   app.delete("/api/situations/:id", async (req: any, res: any) => {
@@ -8828,7 +8955,8 @@ export async function createApp() {
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Suppression de la situation N° ${numero}`, String(numero ?? ''), req.params.id, 'situation', 'Situations/DPGF');
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete situation" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/situations/:id]", e); res.status(500).json({ error: "Failed to delete situation" }); }
   });
 
   // ─── Detail Situations CRUD (missing write operations) ────────────────────
@@ -8840,7 +8968,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('detail_situations').insert({ id, tenant_id: tenantId, situation_id, dpgf_item_id, quantite_realisee, montant_situation }).select().single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to create detail situation: " + e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/detail-situations]", e); res.status(500).json({ error: "Failed to create detail situation: " + e.message }); }
   });
 
   app.put("/api/detail-situations/:id", async (req: any, res: any) => {
@@ -8850,7 +8979,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('detail_situations').update({ quantite_realisee, montant_situation }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update detail situation: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/detail-situations/:id]", e); res.status(500).json({ error: "Failed to update detail situation: " + e.message }); }
   });
 
   app.delete("/api/detail-situations/:id", async (req: any, res: any) => {
@@ -8859,7 +8989,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('detail_situations').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete detail situation" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/detail-situations/:id]", e); res.status(500).json({ error: "Failed to delete detail situation" }); }
   });
 
   // ─── Marchés Entreprises CRUD ─────────────────────────────────────────────
@@ -8875,7 +9006,8 @@ export async function createApp() {
         .order('created_at', { ascending: true });
       if (error) throw error;
       res.json(data ?? []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/marches-entreprises/:projectId]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/marches-entreprises", async (req: any, res: any) => {
@@ -8888,7 +9020,8 @@ export async function createApp() {
         .single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/marches-entreprises]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.put("/api/marches-entreprises/:id", async (req: any, res: any) => {
@@ -8903,7 +9036,8 @@ export async function createApp() {
         .single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/marches-entreprises/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/marches-entreprises/:id", async (req: any, res: any) => {
@@ -8916,7 +9050,8 @@ export async function createApp() {
         .eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/marches-entreprises/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/situations/:projectId/avec-marche — situations avec marché joint
@@ -8931,7 +9066,8 @@ export async function createApp() {
         .order('numero_situation', { ascending: true });
       if (error) throw error;
       res.json(data ?? []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/situations/:projectId/avec-marche]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/situations/:situationId/details-enhanced — details avec avancement N-1 auto-calculé
@@ -9007,7 +9143,8 @@ export async function createApp() {
       });
 
       res.json({ situation: sit, items: enriched });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/situations/:situationId/details-enhanced]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/situations/:situationId/detail-bulk — upsert tous les détails d'un coup
@@ -9038,7 +9175,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('detail_situations').insert(rows);
       if (error) throw error;
       res.json({ success: true, count: rows.length });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/situations/:situationId/detail-bulk]", e); res.status(500).json({ error: e.message }); }
   });
 
   // PUT /api/situations/:id/etat-acompte — màj des champs état d'acompte
@@ -9061,7 +9199,8 @@ export async function createApp() {
         .single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/situations/:id/etat-acompte]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Calcul de l'état d'acompte d'une situation de travaux (partagé entre le PDF
@@ -9188,7 +9327,8 @@ export async function createApp() {
       res.set('Content-Type', 'application/pdf');
       res.set('Content-Disposition', `attachment; filename="etat-acompte-${sit.numero_situation}.pdf"`);
       res.send(buf);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/situations/:situationId/etat-acompte-pdf]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ─── CCTPs CRUD (missing update/delete) ──────────────────────────────────
@@ -9200,7 +9340,8 @@ export async function createApp() {
       const { data, error } = await supabaseAdmin.from('cctps').update({ title, content, lot, is_template: !!is_template, last_updated }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: "Failed to update CCTP: " + e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/cctps/:id]", e); res.status(500).json({ error: "Failed to update CCTP: " + e.message }); }
   });
 
   app.delete("/api/cctps/:id", async (req: any, res: any) => {
@@ -9209,7 +9350,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('cctps').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: "Failed to delete CCTP" }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/cctps/:id]", e); res.status(500).json({ error: "Failed to delete CCTP" }); }
   });
 
   // ─── Stancer Billing ──────────────────────────────────────────────────────
@@ -9264,7 +9406,8 @@ export async function createApp() {
           included_monthly_cents: PLAN_AI_MONTHLY_CREDIT_CENTS[effectivePlan] ?? 0,
         },
       });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/billing/status]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/billing/checkout — create Stancer payment, return redirect URL
@@ -9405,7 +9548,8 @@ export async function createApp() {
         .order('created_at', { ascending: false })
         .limit(20);
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/billing/history]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/billing/credits/packs — available top-up packs
@@ -9488,7 +9632,8 @@ export async function createApp() {
         throw error;
       }
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/references/custom]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post('/api/references/custom', async (req: any, res: any) => {
@@ -9503,7 +9648,8 @@ export async function createApp() {
         .single();
       if (error) throw error;
       res.status(201).json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/references/custom]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.put('/api/references/custom/:id', async (req: any, res: any) => {
@@ -9519,7 +9665,8 @@ export async function createApp() {
         .single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/references/custom/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete('/api/references/custom/:id', async (req: any, res: any) => {
@@ -9532,7 +9679,8 @@ export async function createApp() {
         .eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/references/custom/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post('/api/references/custom/bulk', async (req: any, res: any) => {
@@ -9560,7 +9708,8 @@ export async function createApp() {
         throw error;
       }
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/references/custom/bulk]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ─── End Custom References ────────────────────────────────────────────────
@@ -9607,7 +9756,8 @@ export async function createApp() {
         monthlyRevenue[month] = (monthlyRevenue[month] ?? 0) + (e.amount ?? 0) / 100;
       }
       res.json({ stats, monthlyRevenue });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/admin/stats]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.get('/api/admin/tenants', requireSuperAdmin, async (_req: any, res: any) => {
@@ -9633,7 +9783,8 @@ export async function createApp() {
         };
       }));
       res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch('/api/admin/tenants/:id/plan', requireSuperAdmin, async (req: any, res: any) => {
@@ -9645,7 +9796,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('tenants').update({ plan }).eq('id', req.params.id);
       if (error) throw error;
       res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/admin/tenants/:id/plan]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch('/api/admin/tenants/:id/trial', requireSuperAdmin, async (req: any, res: any) => {
@@ -9658,7 +9810,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('tenants').update({ trial_ends_at: newDate, plan: 'trial' }).eq('id', req.params.id);
       if (error) throw error;
       res.json({ ok: true, trial_ends_at: newDate });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/admin/tenants/:id/trial]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch('/api/admin/tenants/:id/ai-credit', requireSuperAdmin, async (req: any, res: any) => {
@@ -9672,7 +9825,8 @@ export async function createApp() {
       const { data: tenant, error } = await supabaseAdmin.from('tenants').select('ai_credit_balance_eur_cents').eq('id', req.params.id).single();
       if (error) throw error;
       res.json({ ok: true, balance_eur_cents: (tenant as any).ai_credit_balance_eur_cents });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/admin/tenants/:id/ai-credit]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post('/api/admin/tenants', requireSuperAdmin, async (req: any, res: any) => {
@@ -9702,7 +9856,8 @@ export async function createApp() {
       });
 
       res.status(201).json({ tenantId, slug: cleanSlug, tempPassword });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete('/api/admin/tenants/:id', requireSuperAdmin, async (req: any, res: any) => {
@@ -9715,7 +9870,8 @@ export async function createApp() {
       const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
       if (error) throw error;
       res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/admin/tenants/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ─── End Super-Admin Dashboard ────────────────────────────────────────────
@@ -9967,7 +10123,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { data, error } = await query;
       if (error) throw error;
       res.json(data || []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.get("/api/meetings/:id", async (req: any, res: any) => {
@@ -9978,7 +10135,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       if (error) throw error;
       const { data: photos } = await supabaseAdmin.from('meeting_photos').select('*').eq('meeting_id', id).eq('tenant_id', tenantId).order('uploaded_at');
       res.json({ ...meeting, photos: photos || [] });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/meetings", async (req: any, res: any) => {
@@ -9992,7 +10150,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.put("/api/meetings/:id", async (req: any, res: any) => {
@@ -10004,7 +10163,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { error } = await supabaseAdmin.from('meetings').update({ title, date, notes: notes || null, updated_at }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/meetings/:id", async (req: any, res: any) => {
@@ -10022,7 +10182,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Suppression de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/meetings/:id/photos", upload.single('file'), async (req: any, res: any) => {
@@ -10039,7 +10200,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { error } = await supabaseAdmin.from('meeting_photos').insert({ id: photoId, meeting_id: id, tenant_id: tenantId, file_url, caption: caption || null, uploaded_at });
       if (error) throw error;
       res.status(201).json({ id: photoId, meeting_id: id, file_url, caption, uploaded_at });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/meetings/:id/photos]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/meetings/:meetingId/photos/:photoId", async (req: any, res: any) => {
@@ -10050,7 +10212,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       await supabaseAdmin.from('meeting_photos').delete().eq('id', photoId).eq('tenant_id', tenantId);
       if (photo?.file_url) deleteFromStorage('meeting-photos', photo.file_url).catch(() => {});
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/meetings/:meetingId/photos/:photoId]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch("/api/meetings/photos/:photoId/caption", async (req: any, res: any) => {
@@ -10061,7 +10224,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { error } = await supabaseAdmin.from('meeting_photos').update({ caption }).eq('id', photoId).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/meetings/photos/:photoId/caption]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ── Meeting Attendees ──────────────────────────────────────────────────────
@@ -10086,7 +10250,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const contactMap: Record<string, any> = {};
       (contacts || []).forEach((c: any) => { contactMap[c.id] = c; });
       res.json(attendees.map((a: any) => ({ ...a, contact: contactMap[a.contact_id] || null })));
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/meetings/:id/attendees]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Add existing contact as attendee
@@ -10117,7 +10282,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .eq('tenant_id', tenantId)
         .single();
       res.status(201).json({ id: attendeeId, contact_id, role, contact });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/meetings/:id/attendees]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Create new contact and add as attendee
@@ -10152,7 +10318,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       if (ae) throw ae;
       const contact = { id: contactId, first_name, last_name, company_name, job_title, phone_mobile, phone: phone_mobile || '', email, email_work: null, email_home: null, phone_work: null };
       res.status(201).json({ id: attendeeId, contact_id: contactId, role, contact });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/meetings/:id/attendees/new-contact]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch("/api/meetings/:meetingId/attendees/:attendeeId", async (req: any, res: any) => {
@@ -10163,7 +10330,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { error } = await supabaseAdmin.from('meeting_attendees').update({ role }).eq('id', attendeeId).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/meetings/:meetingId/attendees/:attendeeId]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/meetings/:meetingId/attendees/:attendeeId", async (req: any, res: any) => {
@@ -10173,7 +10341,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { error } = await supabaseAdmin.from('meeting_attendees').delete().eq('id', attendeeId).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/meetings/:meetingId/attendees/:attendeeId]", e); res.status(500).json({ error: e.message }); }
   });
 
   // ── MAF — Déclaration des activités professionnelles ───────────────────────
@@ -10218,7 +10387,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .eq('tenant_id', tenantId)
         .single();
       res.json(data ?? {});
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/config]", e); res.status(500).json({ error: e.message }); }
   });
 
   // PUT /api/maf/v1/config
@@ -10230,7 +10400,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       for (const k of allowed) { if (k in req.body) payload[k] = req.body[k]; }
       await supabaseAdmin.from('settings').upsert({ ...payload, tenant_id: tenantId }, { onConflict: 'tenant_id' });
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/maf/v1/config]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/maf/v1/entries?year=2025&intercalaire=jaune
@@ -10248,7 +10419,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       const { data, error } = await q;
       if (error) throw error;
       res.json(data ?? []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/entries]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/maf/v1/entries
@@ -10262,7 +10434,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[POST /api/maf/v1/entries]", e); res.status(500).json({ error: e.message }); }
   });
 
   // PUT /api/maf/v1/entries/:id
@@ -10279,7 +10452,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .single();
       if (error) throw error;
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PUT /api/maf/v1/entries/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   // DELETE /api/maf/v1/entries/:id
@@ -10294,7 +10468,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[DELETE /api/maf/v1/entries/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/maf/v1/summary?year=2025
@@ -10335,7 +10510,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         intercalaires,
         cotisationTotaleEstimee: cotisationTotale,
       });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/summary]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/maf/v1/export-pdf?year=2025
@@ -10446,7 +10622,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
       res.set('Content-Type', 'application/pdf');
       res.set('Content-Disposition', `attachment; filename="declaration-maf-${year}.pdf"`);
       res.send(Buffer.from(buf));
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/export-pdf]", e); res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/maf/v1/submit — Enterprise only (stub)
@@ -10516,7 +10693,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
           situationDate: lastSituation.date_situation,
         } : null,
       });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/situations-cumul]", e); res.status(500).json({ error: e.message }); }
   });
 
   // PATCH /api/maf/v1/entries/:id/statut — Changer le statut (brouillon ↔ declaree)
@@ -10534,7 +10712,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .single();
       if (error) return res.status(400).json({ error: error.message });
       res.json(data);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[PATCH /api/maf/v1/entries/:id/statut]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/maf/v1/suivi — Toutes les années pour traçabilité pluriannuelle
@@ -10549,7 +10728,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         .order('created_at', { ascending: false });
       if (error) return res.status(400).json({ error: error.message });
       res.json(data ?? []);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[GET /api/maf/v1/suivi]", e); res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/maf/v1/spec — OpenAPI spec
@@ -10599,6 +10779,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
         template = await vite.transformIndexHtml(url, template);
         res.status(200).set({ "Content-Type": "text/html" }).end(template);
       } catch (e) {
+        console.error("[server.ts:10601]", e);
         vite.ssrFixStacktrace(e as Error);
         next(e);
       }
