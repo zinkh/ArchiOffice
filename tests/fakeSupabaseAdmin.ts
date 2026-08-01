@@ -134,6 +134,21 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  gte(col: string, val: any) {
+    this.filters.push(row => row[col] >= val);
+    return this;
+  }
+
+  lt(col: string, val: any) {
+    this.filters.push(row => row[col] < val);
+    return this;
+  }
+
+  lte(col: string, val: any) {
+    this.filters.push(row => row[col] <= val);
+    return this;
+  }
+
   is(col: string, val: any) {
     this.filters.push(row => (row[col] ?? null) === val);
     return this;
