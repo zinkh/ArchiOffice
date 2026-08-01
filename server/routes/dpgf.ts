@@ -1,6 +1,9 @@
 // Phase 7 extraction — moved verbatim out of server.ts's "─── DPGF Items
 // CRUD ───" and "─── DPGFs CRUD ───" sections (dpgf_items are children of a
-// parent dpgfs row — kept together as one domain module).
+// parent dpgfs row — kept together as one domain module). GET
+// /api/dpgf/:projectId joins from the Projects section (server/routes/projects.ts)
+// this same lot — it's the read counterpart of the mutations already here,
+// just never extracted alongside them.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 
@@ -10,6 +13,15 @@ export interface RouteDeps {
 }
 
 export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+  app.get('/api/dpgf/:projectId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items').select('*').eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch dpgf items" }); }
+  });
+
   app.post('/api/dpgf', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

@@ -213,6 +213,16 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  // SQL LIKE semantics (case-sensitive) — `%` → any run of characters,
+  // `_` → any single character. Used for prefix patterns like
+  // `${prefix}-${year}-%` (project_code auto-numbering).
+  like(col: string, pattern: string) {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.');
+    const re = new RegExp(`^${escaped}$`);
+    this.filters.push(row => re.test(String(row[col] ?? '')));
+    return this;
+  }
+
   // Minimal `.not(col, 'is', null)` — the only form this codebase's routes
   // use (superpdp.ts/chorusPro.ts filtering to rows already linked to an
   // external facture).
