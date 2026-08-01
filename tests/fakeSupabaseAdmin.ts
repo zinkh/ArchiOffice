@@ -56,6 +56,18 @@ export class FakeSupabaseAdmin {
         this.adminUsers.delete(id);
         return { data: {}, error: null };
       },
+      // Used by server/routes/agencySetup.ts to pull the auth user's
+      // display name (falls back to the email's local part when absent, so
+      // an empty user_metadata here is a valid, commonly-exercised case).
+      getUserById: async (id: string) => {
+        return { data: { user: this.adminUsers.get(id) ?? { id, user_metadata: {} } }, error: null };
+      },
+      generateLink: async (attrs: { type: string; email: string; password?: string; options?: Record<string, any> }) => {
+        const id = crypto.randomUUID();
+        const user = { id, email: attrs.email };
+        this.adminUsers.set(id, user);
+        return { data: { user, properties: { action_link: `https://fake.supabase.test/verify?type=${attrs.type}&email=${encodeURIComponent(attrs.email)}` } }, error: null };
+      },
     },
   };
 
@@ -181,6 +193,12 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
 
   is(col: string, val: any) {
     this.filters.push(row => (row[col] ?? null) === val);
+    return this;
+  }
+
+  ilike(col: string, pattern: string) {
+    const needle = pattern.replace(/^%|%$/g, '').toLowerCase();
+    this.filters.push(row => String(row[col] ?? '').toLowerCase().includes(needle));
     return this;
   }
 
