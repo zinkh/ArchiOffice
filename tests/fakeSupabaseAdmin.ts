@@ -70,11 +70,12 @@ export class FakeSupabaseAdmin {
   }
 }
 
-type Op = 'select' | 'insert' | 'update' | 'delete';
+type Op = 'select' | 'insert' | 'update' | 'delete' | 'upsert';
 
 class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: number }> {
   private op: Op = 'select';
   private payload: Row | Row[] | undefined;
+  private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } | undefined;
   private filters: ((row: Row) => boolean)[] = [];
   private wantSingle = false;
   private wantMaybeSingle = false;
@@ -94,6 +95,17 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   update(payload: Row) {
     this.op = 'update';
     this.payload = payload;
+    return this;
+  }
+
+  // Minimal PostgREST-style `.upsert(rows, { onConflict, ignoreDuplicates })`
+  // — matches existing rows by the onConflict column(s); on a match, either
+  // merges the new fields in or, with ignoreDuplicates, leaves the row
+  // untouched (the only mode this codebase's routes actually use).
+  upsert(payload: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
+    this.op = 'upsert';
+    this.payload = payload;
+    this.upsertOpts = opts;
     return this;
   }
 
@@ -183,6 +195,25 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       }));
       rows.push(...inserted);
       const data = this.wantSingle || this.wantMaybeSingle ? inserted[0] ?? null : inserted;
+      return { data, error: null };
+    }
+
+    if (this.op === 'upsert') {
+      const conflictCols = (this.upsertOpts?.onConflict || 'id').split(',').map(c => c.trim());
+      const incoming = Array.isArray(this.payload) ? this.payload : [this.payload!];
+      const result: Row[] = [];
+      for (const row of incoming) {
+        const match = rows.find(r => conflictCols.every(c => r[c] === row[c]));
+        if (match) {
+          if (!this.upsertOpts?.ignoreDuplicates) Object.assign(match, row);
+          result.push(match);
+        } else {
+          const inserted = { id: row.id ?? crypto.randomUUID(), ...row };
+          rows.push(inserted);
+          result.push(inserted);
+        }
+      }
+      const data = this.wantSingle || this.wantMaybeSingle ? result[0] ?? null : result;
       return { data, error: null };
     }
 
