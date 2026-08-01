@@ -191,9 +191,17 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     const clauses = condition.split(',').map(c => c.trim());
     this.filters.push(row => clauses.some(clause => {
       const [col, op, ...rest] = clause.split('.');
-      if (op !== 'ilike') return false;
-      const pattern = rest.join('.').replace(/^%|%$/g, '').toLowerCase();
-      return String(row[col] ?? '').toLowerCase().includes(pattern);
+      const value = rest.join('.');
+      if (op === 'ilike') {
+        const pattern = value.replace(/^%|%$/g, '').toLowerCase();
+        return String(row[col] ?? '').toLowerCase().includes(pattern);
+      }
+      // `col.is.null` — PostgREST's syntax for "column is NULL"
+      if (op === 'is') return (row[col] ?? null) === (value === 'null' ? null : value);
+      // `col.eq.` (empty value) — the `zoho_invoice_id.is.null,zoho_invoice_id.eq.`
+      // pattern this codebase's Zoho sync routes use to also match empty strings.
+      if (op === 'eq') return row[col] === value;
+      return false;
     }));
     return this;
   }
