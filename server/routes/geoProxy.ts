@@ -4,10 +4,223 @@
 // Géoportail de l'Urbanisme, data.culture.gouv.fr) or Open-Meteo — none of
 // them touch supabaseAdmin or a tenant, so unlike every other extracted
 // module this one takes no deps object at all.
+//
+// Five more routes (rnb-buildings, georisques, urbanisme, bdnb-geocode,
+// bdnb) joined in a later lot — module-level proxies of the exact same
+// shape, left off this module's original extraction and every bilan since
+// by oversight, not deliberate scoping (same class of gap as the
+// "suivi de chantier" cluster). getPlu (used only by /api/urbanisme) and
+// its GPU-response interfaces moved here with it since nothing else in
+// server.ts referenced them.
 import type { Express } from 'express';
 import axios from 'axios';
 import https from 'https';
 import { fetchWithTimeout } from '../fetchWithTimeout';
+
+interface GeoJSONGeometry {
+  type: string;
+  coordinates: any;
+}
+
+interface ZoneUrbaProperties {
+  gid: number;
+  partition: string;
+  libelle: string;
+  libelong: string;
+  typezone: string;
+  destdomi: string | null;
+  nomfic: string;
+  urlfic: string | null;
+  insee: string;
+  datappro: string;
+  datvalid: string;
+  idurba: string;
+}
+
+interface DocumentProperties {
+  libelle: string;
+  typedoc: string;
+}
+
+interface ApicartoPluResponse<T> {
+  type: string;
+  features: Array<{
+    type: string;
+    geometry: GeoJSONGeometry;
+    properties: T;
+  }>;
+}
+
+interface PluResult {
+  libelle: string;
+  libelong: string;
+  typezone: string;
+  destdomi: string | null;
+  urlfic: string | null;
+  datappro: string | null;
+  insee: string;
+  partition: string;
+  document: {
+    nom: string | null;
+    typedoc: string | null;
+  } | null;
+}
+
+/**
+ * Fetch PLU data from APICARTO IGN GPU API
+ */
+async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
+  try {
+    const zoneUrbaUrl = "https://apicarto.ign.fr/api/gpu/zone-urba";
+    console.log(`[GPU] Calling zone-urba API with geometry: ${JSON.stringify(geometry)}`);
+
+    const response = await axios.get<ApicartoPluResponse<ZoneUrbaProperties>>(zoneUrbaUrl, {
+      params: { geom: JSON.stringify(geometry) },
+      timeout: 10000
+    });
+
+    if (!response.data.features || response.data.features.length === 0) {
+      const error: any = new Error("Aucune zone PLU trouvée pour cette adresse");
+      error.status = 404;
+      throw error;
+    }
+
+    const props = response.data.features[0].properties;
+
+    // Convert AAAAMMJJ to ISO string
+    let datapproIso: string | null = null;
+    if (props.datappro && props.datappro.length === 8) {
+      const year = props.datappro.substring(0, 4);
+      const month = props.datappro.substring(4, 6);
+      const day = props.datappro.substring(6, 8);
+      datapproIso = new Date(`${year}-${month}-${day}T00:00:00Z`).toISOString();
+    }
+
+    const result: PluResult = {
+      libelle: props.libelle,
+      libelong: props.libelong,
+      typezone: props.typezone,
+      destdomi: props.destdomi,
+      urlfic: props.urlfic,
+      datappro: datapproIso,
+      insee: props.insee,
+      partition: props.partition,
+      document: null
+    };
+
+    // Optional second call for document info (non-blocking)
+    try {
+      const docUrl = "https://apicarto.ign.fr/api/gpu/document";
+      const docResponse = await axios.get<ApicartoPluResponse<DocumentProperties>>(docUrl, {
+        params: { geom: JSON.stringify(geometry) },
+        timeout: 5000
+      });
+
+      if (docResponse.data.features && docResponse.data.features.length > 0) {
+        const docProps = docResponse.data.features[0].properties;
+        result.document = {
+          nom: docProps.libelle,
+          typedoc: docProps.typedoc
+        };
+      }
+    } catch (docErr: any) {
+      console.warn("[GPU] Optional document lookup failed:", docErr.message);
+    }
+
+    return result;
+  } catch (error: any) {
+    if (error.status === 404) throw error;
+    console.error("[GPU] getPlu Error:", error.message);
+    const apiError: any = new Error("Service Urbanisme (GPU) temporairement indisponible");
+    apiError.status = 503;
+    throw apiError;
+  }
+}
+
+// Georisques API Interfaces
+interface RisqueEntry {
+  present: boolean;
+  libelle: string;
+}
+
+interface GeorisquesV1Response {
+  risquesNaturels: Record<string, RisqueEntry>;
+  risquesTechnologiques: Record<string, RisqueEntry>;
+  url: string;
+}
+
+interface GeorisquesResult {
+  url: string;
+  risques_naturels: string[];
+  risques_technologiques: string[];
+}
+
+async function getGeorisques(lon: number, lat: number, codeInsee: string): Promise<GeorisquesResult> {
+  const v1Url = `https://georisques.gouv.fr/api/v1/resultats_rapport_risque?latlon=${lon},${lat}`;
+  console.log(`Attempting Georisques API v1: ${v1Url}`);
+
+  try {
+    const v1Response = await axios.get<GeorisquesV1Response>(v1Url, {
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      timeout: 15000 // Increased timeout
+    });
+
+    if (v1Response.data) {
+      const data = v1Response.data;
+      const risques_naturels = Object.values(data.risquesNaturels || {})
+        .filter(r => r.present)
+        .map(r => r.libelle);
+
+      const risques_technologiques = Object.values(data.risquesTechnologiques || {})
+        .filter(r => r.present)
+        .map(r => r.libelle);
+
+      return {
+        url: data.url || `https://www.georisques.gouv.fr/mes-risques/rapport?latlon=${lon},${lat}`,
+        risques_naturels,
+        risques_technologiques
+      };
+    }
+  } catch (v1Error: any) {
+    console.error("Georisques API v1 failed, attempting v2 fallback:", v1Error.message);
+  }
+
+  // Fallback to API v2
+  const v2Url = `https://www.georisques.gouv.fr/api/v2/indicateurs`; // Changed from /risques to /indicateurs which is more common for v2
+  const token = process.env.GEORISQUES_TOKEN;
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    console.log(`Attempting Georisques API v2: ${v2Url} for lat=${lat}, lon=${lon}`);
+    const v2Response = await axios.get<any>(v2Url, {
+      params: {
+        lat: lat,
+        lng: lon,
+      },
+      headers,
+      timeout: 8000
+    });
+
+    if (v2Response.data) {
+      // Map v2 response
+      const risks = v2Response.data.indicateurs || [];
+      const risksList = risks.map((r: any) => r.libelle || r.nom);
+
+      return {
+        url: `https://www.georisques.gouv.fr/mes-risques/rapport?latlon=${lon},${lat}`,
+        risques_naturels: risksList,
+        risques_technologiques: []
+      };
+    }
+  } catch (v2Error: any) {
+    console.error("Georisques API v2 also failed:", v2Error.message);
+  }
+
+  throw new Error("Georisques API unavailable (v1 and v2 failed)");
+}
 
 function formatWeatherData(data: any) {
   if (!data.daily || !data.daily.weather_code || data.daily.weather_code.length === 0) {
@@ -513,6 +726,241 @@ export function registerGeoProxyRoutes(app: Express) {
         error: "Internal server error during Cadastre lookup",
         message: error.message
       });
+    }
+  });
+
+  app.get("/api/rnb-buildings", async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+
+      const url = `https://rnb-api.beta.gouv.fr/api/alpha/buildings/address/?q=${encodeURIComponent(q as string)}`;
+      console.log(`Calling RNB API: ${url}`);
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`RNB API error: ${response.status} ${errorText}`);
+        return res.status(response.status).json({ error: `RNB API error: ${response.status}`, details: errorText });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (error: any) {
+      console.error("Error in /api/rnb-buildings:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/georisques", async (req, res) => {
+    try {
+      const { latitude, longitude, code_insee } = req.query;
+
+      if (!latitude || !longitude || !code_insee) {
+        return res.status(400).json({ error: "latitude, longitude, and code_insee are required" });
+      }
+
+      const lat = parseFloat(latitude as string);
+      const lon = parseFloat(longitude as string);
+      const insee = code_insee as string;
+
+      const result = await getGeorisques(lon, lat, insee);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error in /api/georisques:", error);
+      res.status(503).json({
+        error: "Service Géorisques temporairement indisponible",
+        details: error.message
+      });
+    }
+  });
+
+  app.get("/api/urbanisme", async (req, res) => {
+    try {
+      const { geom } = req.query;
+      if (!geom) {
+        return res.status(400).json({ error: "Le paramètre 'geom' est requis (GeoJSON stringifié)" });
+      }
+
+      let geometry: GeoJSONGeometry;
+      try {
+        geometry = JSON.parse(geom as string);
+      } catch (e) {
+        console.error("[GET /api/urbanisme]", e);
+        return res.status(400).json({ error: "Format GeoJSON invalide" });
+      }
+
+      const result = await getPlu(geometry);
+      res.json(result);
+    } catch (error: any) {
+      const status = error.status || 500;
+      console.error(`[GPU] Route Error (${status}):`, error.message);
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  // Étape 0 : géocoder une adresse via le géocodeur interne BDNB pour obtenir la cle_interop_adr
+  app.get("/api/bdnb-geocode", async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+
+      const url = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=5`;
+      console.log(`Calling BDNB Geocodage API: ${url}`);
+
+      const response = await fetchWithTimeout(url, {
+        headers: { 'Accept': 'application/json' }
+      }, 10000); // 10 second timeout
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No response body');
+        console.error(`BDNB Geocodage error: ${response.status} ${errorText.substring(0, 200)}`);
+        return res.status(response.status).json({ error: `BDNB Geocodage error: ${response.status}`, details: errorText.substring(0, 200) });
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        res.json(data);
+      } else {
+        const text = await response.text().catch(() => 'Could not read body');
+        console.error(`BDNB Geocodage returned non-JSON: ${text.substring(0, 200)}`);
+        res.status(502).json({ error: "Invalid response from BDNB Geocodage", details: text.substring(0, 200) });
+      }
+    } catch (error: any) {
+      console.error("Error in /api/bdnb-geocode:", error);
+      if (error.name === 'AbortError') {
+        res.status(504).json({ error: "BDNB geocodage request timed out" });
+      } else {
+        res.status(500).json({ error: "Internal server error", details: error.message });
+      }
+    }
+  });
+
+  app.get("/api/bdnb", async (req, res) => {
+    try {
+      const { q, banId, cityCode } = req.query;
+      if (!q && !banId) {
+        return res.status(400).json({ error: "Query parameter 'q' or 'banId' is required" });
+      }
+
+      let buildings: any[] = [];
+
+      // Step 1: If we have a banId, try to find the building group ID first using the relationship table
+      // This table is indexed on cle_interop_adr and is much faster for direct lookups
+      if (banId) {
+        const relUrl = `https://api.bdnb.io/v1/bdnb/donnees/rel_batiment_groupe_adresse?cle_interop_adr=eq.${banId}&select=batiment_groupe_id`;
+        console.log(`Calling BDNB Rel API: ${relUrl}`);
+
+        try {
+          const relResponse = await fetchWithTimeout(relUrl, {
+            headers: { 'Accept': 'application/json' }
+          }, 5000); // 5 second timeout
+
+          if (relResponse.ok) {
+            const relData = await relResponse.json();
+            const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
+
+            if (ids.length > 0) {
+              // Step 2: Fetch full details for these specific building IDs
+              const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;
+              console.log(`Calling BDNB Detail API: ${detailUrl}`);
+
+              const detailResponse = await fetchWithTimeout(detailUrl, {
+                headers: { 'Accept': 'application/json' }
+              }, 5000);
+
+              if (detailResponse.ok) {
+                buildings = await detailResponse.json();
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error in BDNB direct lookup:", err);
+          // Continue to fallback if direct lookup fails
+        }
+      }
+
+      // Step 3: Fallback to geocoder if no buildings found via banId or no banId provided
+      // Fuzzy search on batiment_groupe_complet is very slow.
+      // We use the geocoder to get a cle_interop_adr first.
+      if (buildings.length === 0 && q) {
+        console.log(`[BDNB] Fallback: Geocoding query "${q}" to get cle_interop_adr`);
+        const geoUrl = `https://api.bdnb.io/v1/bdnb/geocodage?q=${encodeURIComponent(q as string)}&limit=1`;
+
+        try {
+          const geoRes = await fetchWithTimeout(geoUrl, {
+            headers: { 'Accept': 'application/json' }
+          }, 5000);
+
+          if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            const firstResult = geoData[0];
+            if (firstResult && firstResult.cle_interop_adr) {
+              const banIdFromGeo = firstResult.cle_interop_adr;
+              console.log(`[BDNB] Geocoder found cle_interop_adr: ${banIdFromGeo}`);
+
+              // Now try direct lookup with this ID
+              const relUrl = `https://api.bdnb.io/v1/bdnb/donnees/rel_batiment_groupe_adresse?cle_interop_adr=eq.${banIdFromGeo}&select=batiment_groupe_id`;
+              const relResponse = await fetchWithTimeout(relUrl, {
+                headers: { 'Accept': 'application/json' }
+              }, 5000);
+
+              if (relResponse.ok) {
+                const relData = await relResponse.json();
+                const ids = (Array.isArray(relData) ? relData : []).map((item: any) => item.batiment_groupe_id).filter(Boolean);
+
+                if (ids.length > 0) {
+                  const detailUrl = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?batiment_groupe_id=in.(${ids.join(',')})&limit=5`;
+                  const detailResponse = await fetchWithTimeout(detailUrl, {
+                    headers: { 'Accept': 'application/json' }
+                  }, 5000);
+
+                  if (detailResponse.ok) {
+                    buildings = await detailResponse.json();
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error in BDNB fallback geocoding:", err);
+        }
+      }
+
+      // Step 4: Final fallback to fuzzy search ONLY if geocoder failed or returned nothing
+      // This is the last resort and might still timeout.
+      if (buildings.length === 0 && q) {
+        let url = `https://api.bdnb.io/v1/bdnb/donnees/batiment_groupe_complet?limit=5`;
+        if (cityCode) {
+          url += `&code_commune_insee=eq.${cityCode}`;
+        }
+        url += `&libelle_adr_principale_ban=ilike.*${encodeURIComponent(q as string)}*`;
+
+        console.log(`Calling BDNB Final Fallback API: ${url}`);
+
+        try {
+          const response = await fetchWithTimeout(url, {
+            headers: { 'Accept': 'application/json' }
+          }, 15000); // Increased timeout for fuzzy search
+
+          if (response.ok) {
+            buildings = await response.json();
+          }
+        } catch (err) {
+          console.error("Error in BDNB final fallback search:", err);
+        }
+      }
+
+      res.json(buildings);
+    } catch (error: any) {
+      console.error("Error in /api/bdnb:", error);
+      res.status(500).json({ error: "Internal server error", details: error.message });
     }
   });
 }
