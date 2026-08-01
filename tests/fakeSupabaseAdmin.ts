@@ -122,6 +122,25 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  is(col: string, val: any) {
+    this.filters.push(row => (row[col] ?? null) === val);
+    return this;
+  }
+
+  // Minimal PostgREST-style `.or("col.ilike.%x%,col2.ilike.%x%")` — only
+  // `ilike` with leading/trailing `%` wildcards is supported, which is the
+  // only form this codebase's search routes actually use.
+  or(condition: string) {
+    const clauses = condition.split(',').map(c => c.trim());
+    this.filters.push(row => clauses.some(clause => {
+      const [col, op, ...rest] = clause.split('.');
+      if (op !== 'ilike') return false;
+      const pattern = rest.join('.').replace(/^%|%$/g, '').toLowerCase();
+      return String(row[col] ?? '').toLowerCase().includes(pattern);
+    }));
+    return this;
+  }
+
   order() {
     return this;
   }
