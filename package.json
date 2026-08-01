@@ -78,7 +78,8 @@
     "styled-components": "^6.3.12",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.21.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",

@@ -4,6 +4,10 @@ import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper";
 import { buildEnInvoiceData } from "./src/lib/facturX";
+import { validateBody } from "./src/lib/validateRequest";
+import { invoiceSchema } from "./src/schemas/invoice.schema";
+import { proposalSchema } from "./src/schemas/proposal.schema";
+import { createTeamMemberSchema, updateTeamMemberRoleSchema } from "./src/schemas/team.schema";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
@@ -3271,12 +3275,11 @@ export async function createApp() {
     } catch (e: any) { res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update profile: " + e.message }); }
   });
 
-  app.post("/api/team", async (req: any, res: any) => {
+  app.post("/api/team", validateBody(createTeamMemberSchema), async (req: any, res: any) => {
     try {
       const tenantId = await requireTenantAdmin(req.user.id);
       await checkQuota(tenantId, 'users');
       const { name, email, role, system_role } = req.body;
-      if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
       // Check if user already exists in this tenant
       const { data: existing } = await supabaseAdmin.from('profiles').select('id').eq('email', email).eq('tenant_id', tenantId).maybeSingle();
       if (existing) return res.status(400).json({ error: "User with this email already exists" });
@@ -3355,7 +3358,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/team/:id/role", async (req: any, res: any) => {
+  app.put("/api/team/:id/role", validateBody(updateTeamMemberRoleSchema), async (req: any, res: any) => {
     try {
       const tenantId = await requireTenantAdmin(req.user.id);
       const { id } = req.params;
@@ -4408,7 +4411,7 @@ export async function createApp() {
     return `${prefix}-${year}-${seq}`;
   };
 
-  app.post("/api/proposals", async (req: any, res: any) => {
+  app.post("/api/proposals", validateBody(proposalSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const p = req.body;
@@ -4438,7 +4441,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/proposals/:id", async (req: any, res: any) => {
+  app.put("/api/proposals/:id", validateBody(proposalSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
@@ -4609,7 +4612,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/invoices", async (req: any, res: any) => {
+  app.post("/api/invoices", validateBody(invoiceSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const {
@@ -4681,7 +4684,7 @@ export async function createApp() {
     }
   });
 
-  app.put("/api/invoices/:id", async (req: any, res: any) => {
+  app.put("/api/invoices/:id", validateBody(invoiceSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
