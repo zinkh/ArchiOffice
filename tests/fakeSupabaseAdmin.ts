@@ -184,6 +184,16 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  // Minimal `.not(col, 'is', null)` — the only form this codebase's routes
+  // use (superpdp.ts/chorusPro.ts filtering to rows already linked to an
+  // external facture).
+  not(col: string, op: string, val: any) {
+    if (op === 'is') {
+      this.filters.push(row => (row[col] ?? null) !== val);
+    }
+    return this;
+  }
+
   // Minimal PostgREST-style `.or("col.ilike.%x%,col2.ilike.%x%")` — only
   // `ilike` with leading/trailing `%` wildcards is supported, which is the
   // only form this codebase's search routes actually use.
