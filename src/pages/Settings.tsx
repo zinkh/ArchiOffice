@@ -790,7 +790,19 @@ export default function Settings() {
             <button
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_org_id}
-              onClick={async () => { await handleSave(); window.location.href = '/api/zoho/auth'; }}
+              onClick={async () => {
+                await handleSave();
+                // window.location.href = '/api/zoho/auth' used to navigate straight to our
+                // own route — a bare browser navigation carries no JWT, so it 401'd before
+                // ever reaching Zoho. apiFetch attaches the JWT; the server returns the
+                // consent URL as JSON, and we navigate to Zoho ourselves.
+                try {
+                  const data = await apiFetch<{ url: string }>('/api/zoho/auth');
+                  window.location.href = data.url;
+                } catch (err: any) {
+                  setZohoNotice({ type: 'error', message: err.message || 'Erreur lors de la connexion à Zoho' });
+                }
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ background: '#f76707', color: '#fff' }}>
               <IconPlugConnected size={13} /> Connecter Zoho
@@ -854,7 +866,15 @@ export default function Settings() {
             <button
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !(settings.zoho_books_org_id || settings.zoho_org_id)}
-              onClick={async () => { await handleSave(); window.location.href = '/api/zoho-books/auth'; }}
+              onClick={async () => {
+                await handleSave();
+                try {
+                  const data = await apiFetch<{ url: string }>('/api/zoho-books/auth');
+                  window.location.href = data.url;
+                } catch (err: any) {
+                  setZohoBooksNotice({ type: 'error', message: err.message || 'Erreur lors de la connexion à Zoho Books' });
+                }
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ background: '#f76707', color: '#fff' }}>
               <IconPlugConnected size={13} /> Connecter Zoho Books

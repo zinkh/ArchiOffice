@@ -142,4 +142,49 @@ describe('Geo Proxy input validation', () => {
     const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '1,2,3' }).set(authHeader(token));
     expect(res.status).toBe(400);
   });
+
+  // The following five (rnb-buildings, georisques, urbanisme, bdnb-geocode,
+  // bdnb) joined geoProxy.ts in a later lot — same module, same sandbox
+  // network limitation, so only their validation branches are exercised here.
+  it('rejects rnb-buildings without q', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/rnb-buildings').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects georisques without latitude/longitude/code_insee', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/georisques').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects urbanisme without geom', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/urbanisme').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects urbanisme with malformed GeoJSON', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/urbanisme').query({ geom: '{not json' }).set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects bdnb-geocode without q', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/bdnb-geocode').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects bdnb without q or banId', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).get('/api/bdnb').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
 });

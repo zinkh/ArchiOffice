@@ -1,9 +1,9 @@
 // Phase 7 extraction — moved out of server.ts's inline Contacts CRUD
-// section, plus GET /api/contact-categories. POST/DELETE
-// /api/contact-categories stay inline for now — they landed in the middle
-// of the still-inline Invoices section of server.ts (an unrelated code
-// organization quirk, not a real dependency), and touching that block is
-// out of scope until Invoices itself is extracted.
+// section, plus all three /api/contact-categories routes. POST/DELETE
+// used to stay inline because they landed in the middle of the (until now)
+// still-inline Invoices section of server.ts — an unrelated code
+// organization quirk, not a real dependency — and moved here alongside
+// GET now that Invoices itself is extracted too.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 
@@ -83,5 +83,32 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       if (error) throw error;
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contact categories" }); }
+  });
+
+  app.post("/api/contact-categories", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id: bodyId, name } = req.body;
+      const id = bodyId || crypto.randomUUID();
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contact_categories').insert({ id, name });
+      if (error) throw error;
+      res.status(201).json({ id });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to create contact category" });
+    }
+  });
+
+  app.delete("/api/contact-categories/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contact_categories').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to delete contact category" });
+    }
   });
 }

@@ -24,6 +24,17 @@
 
 type Row = Record<string, any>;
 
+// Shallow-clones what execute() hands back to callers — see the "select"
+// comment below for why this matters. Rows in this fake are flat DB records
+// (no nested objects of our own besides embedded-relation stand-ins, which
+// this fake doesn't populate anyway — see the file-level comment), so a
+// shallow clone is enough to break aliasing with the stored row.
+function clone<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(v => ({ ...v })) as any;
+  if (value && typeof value === 'object') return { ...value } as any;
+  return value;
+}
+
 interface FakeUser {
   id: string;
   email: string;
@@ -33,21 +44,82 @@ export class FakeSupabaseAdmin {
   private tables = new Map<string, Row[]>();
   private tokenToUser = new Map<string, FakeUser>();
 
+  private adminUsers = new Map<string, { id: string; email: string }>();
+
   auth = {
     getUser: async (token: string) => {
       const user = this.tokenToUser.get(token);
       if (!user) return { data: { user: null }, error: { message: 'invalid token' } };
       return { data: { user }, error: null };
     },
+    // Minimal stand-in for the Supabase Auth admin API, used by
+    // server/routes/superAdmin.ts to provision/deprovision tenant owner
+    // accounts. Real supabase-js also lets any caller with a service-role
+    // key manage auth.users this way — this fake just tracks ids in memory.
+    admin: {
+      createUser: async (attrs: { email: string; password?: string; user_metadata?: Record<string, any>; email_confirm?: boolean }) => {
+        const id = crypto.randomUUID();
+        const user = { id, email: attrs.email };
+        this.adminUsers.set(id, user);
+        return { data: { user }, error: null };
+      },
+      deleteUser: async (id: string) => {
+        this.adminUsers.delete(id);
+        return { data: {}, error: null };
+      },
+      // Used by server/routes/agencySetup.ts to pull the auth user's
+      // display name (falls back to the email's local part when absent, so
+      // an empty user_metadata here is a valid, commonly-exercised case).
+      getUserById: async (id: string) => {
+        return { data: { user: this.adminUsers.get(id) ?? { id, user_metadata: {} } }, error: null };
+      },
+      generateLink: async (attrs: { type: string; email: string; password?: string; options?: Record<string, any> }) => {
+        const id = crypto.randomUUID();
+        const user = { id, email: attrs.email };
+        this.adminUsers.set(id, user);
+        return { data: { user, properties: { action_link: `https://fake.supabase.test/verify?type=${attrs.type}&email=${encodeURIComponent(attrs.email)}` } }, error: null };
+      },
+    },
   };
+
+  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — only
+  // 'increment_ai_credits' is called anywhere in this codebase.
+  async rpc(fnName: string, params: Record<string, any>) {
+    if (fnName === 'increment_ai_credits') {
+      const tenants = this.tables.get('tenants') || [];
+      const tenant = tenants.find(t => t.id === params.p_tenant_id);
+      if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
+      return { data: null, error: null };
+    }
+    return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
+  }
 
   // createApp() eagerly calls ensureStorageBuckets() at startup (unrelated to
   // the tenant-isolation routes under test) — a no-op stub is enough for it
   // to complete without touching real Supabase Storage.
   private buckets = new Set<string>();
+  // In-memory object store backing `.storage.from(bucket)`, used by
+  // server.ts's uploadToStorage/deleteFromStorage (documents.ts, plans.ts,
+  // visas.ts, meetings.ts, ...). Objects aren't retained for assertions —
+  // routes only ever pass the returned public URL back around — so a Set of
+  // "uploaded" paths per bucket is enough to make delete/remove meaningful.
+  private storageObjects = new Map<string, Set<string>>();
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
     createBucket: async (name: string, _opts?: any) => { this.buckets.add(name); return { data: { name }, error: null }; },
+    from: (bucket: string) => ({
+      upload: async (path: string, _buffer: Buffer, _opts?: any) => {
+        if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
+        this.storageObjects.get(bucket)!.add(path);
+        return { data: { path }, error: null };
+      },
+      getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
+      remove: async (paths: string[]) => {
+        const set = this.storageObjects.get(bucket);
+        if (set) paths.forEach(p => set.delete(p));
+        return { data: null, error: null };
+      },
+    }),
   };
 
   /** Test setup: makes `Authorization: Bearer <token>` resolve to this user in the auth middleware. */
@@ -154,6 +226,32 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  ilike(col: string, pattern: string) {
+    const needle = pattern.replace(/^%|%$/g, '').toLowerCase();
+    this.filters.push(row => String(row[col] ?? '').toLowerCase().includes(needle));
+    return this;
+  }
+
+  // SQL LIKE semantics (case-sensitive) — `%` → any run of characters,
+  // `_` → any single character. Used for prefix patterns like
+  // `${prefix}-${year}-%` (project_code auto-numbering).
+  like(col: string, pattern: string) {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.');
+    const re = new RegExp(`^${escaped}$`);
+    this.filters.push(row => re.test(String(row[col] ?? '')));
+    return this;
+  }
+
+  // Minimal `.not(col, 'is', null)` — the only form this codebase's routes
+  // use (superpdp.ts/chorusPro.ts filtering to rows already linked to an
+  // external facture).
+  not(col: string, op: string, val: any) {
+    if (op === 'is') {
+      this.filters.push(row => (row[col] ?? null) !== val);
+    }
+    return this;
+  }
+
   // Minimal PostgREST-style `.or("col.ilike.%x%,col2.ilike.%x%")` — only
   // `ilike` with leading/trailing `%` wildcards is supported, which is the
   // only form this codebase's search routes actually use.
@@ -161,13 +259,25 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     const clauses = condition.split(',').map(c => c.trim());
     this.filters.push(row => clauses.some(clause => {
       const [col, op, ...rest] = clause.split('.');
-      if (op !== 'ilike') return false;
-      const pattern = rest.join('.').replace(/^%|%$/g, '').toLowerCase();
-      return String(row[col] ?? '').toLowerCase().includes(pattern);
+      const value = rest.join('.');
+      if (op === 'ilike') {
+        const pattern = value.replace(/^%|%$/g, '').toLowerCase();
+        return String(row[col] ?? '').toLowerCase().includes(pattern);
+      }
+      // `col.is.null` — PostgREST's syntax for "column is NULL"
+      if (op === 'is') return (row[col] ?? null) === (value === 'null' ? null : value);
+      // `col.eq.` (empty value) — the `zoho_invoice_id.is.null,zoho_invoice_id.eq.`
+      // pattern this codebase's Zoho sync routes use to also match empty strings.
+      if (op === 'eq') return row[col] === value;
+      return false;
     }));
     return this;
   }
 
+  // No-op: none of this codebase's ~50 `.order(...)` call sites are tested
+  // for actual sort order, only for which rows come back (tenant scoping,
+  // filters) — implementing real sorting here would be pure scope creep for
+  // a fake that's already just enough to drive these routes' own logic.
   order() {
     return this;
   }
@@ -210,7 +320,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       }));
       rows.push(...inserted);
       const data = this.wantSingle || this.wantMaybeSingle ? inserted[0] ?? null : inserted;
-      return { data, error: null };
+      return { data: clone(data), error: null };
     }
 
     if (this.op === 'upsert') {
@@ -229,14 +339,14 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
         }
       }
       const data = this.wantSingle || this.wantMaybeSingle ? result[0] ?? null : result;
-      return { data, error: null };
+      return { data: clone(data), error: null };
     }
 
     const matched = rows.filter(row => this.filters.every(f => f(row)));
 
     if (this.op === 'update') {
       matched.forEach(row => Object.assign(row, this.payload));
-      return { data: this.wantSingle || this.wantMaybeSingle ? matched[0] ?? null : matched, error: null };
+      return { data: clone(this.wantSingle || this.wantMaybeSingle ? matched[0] ?? null : matched), error: null };
     }
 
     if (this.op === 'delete') {
@@ -245,14 +355,18 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       return { data: null, error: null };
     }
 
-    // select
+    // select — always return a copy, never the live row reference: a real
+    // Supabase/PostgREST response is a freshly deserialized JSON object, so
+    // a caller holding onto `data` (e.g. an "old value" read before a later
+    // .update() on the same row, a pattern several routes use) must not see
+    // that later mutation reflected back into what it already read.
     if (this.wantSingle) {
       if (matched.length !== 1) return { data: null, error: { message: 'no rows (or too many) returned', code: 'PGRST116' } };
-      return { data: matched[0], error: null };
+      return { data: clone(matched[0]), error: null };
     }
     if (this.wantMaybeSingle) {
-      return { data: matched[0] ?? null, error: null };
+      return { data: clone(matched[0] ?? null), error: null };
     }
-    return { data: matched, error: null, count: matched.length };
+    return { data: clone(matched), error: null, count: matched.length };
   }
 }

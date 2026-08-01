@@ -1,7 +1,10 @@
 // Phase 7 extraction — moved verbatim out of server.ts's "─── Situations
 // CRUD ───" and "─── Detail Situations CRUD ───" sections (detail_situations
 // rows are line items of a parent situation — kept together as one domain
-// module, same convention as dpgf.ts).
+// module, same convention as dpgf.ts). GET /api/situations/:projectId and
+// GET /api/situations/:situationId/details join from the Projects section
+// (server/routes/projects.ts) this same lot — read counterparts of the
+// mutations already here, just never extracted alongside them.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 
@@ -13,6 +16,24 @@ export interface RouteDeps {
 }
 
 export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+  app.get('/api/situations/:projectId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations').select('*').eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch situations" }); }
+  });
+
+  app.get('/api/situations/:situationId/details', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'detail_situations').select('*').eq('situation_id', req.params.situationId);
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch situation details" }); }
+  });
+
   app.post('/api/situations', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
