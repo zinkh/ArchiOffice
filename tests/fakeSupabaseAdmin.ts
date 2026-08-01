@@ -24,6 +24,17 @@
 
 type Row = Record<string, any>;
 
+// Shallow-clones what execute() hands back to callers — see the "select"
+// comment below for why this matters. Rows in this fake are flat DB records
+// (no nested objects of our own besides embedded-relation stand-ins, which
+// this fake doesn't populate anyway — see the file-level comment), so a
+// shallow clone is enough to break aliasing with the stored row.
+function clone<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(v => ({ ...v })) as any;
+  if (value && typeof value === 'object') return { ...value } as any;
+  return value;
+}
+
 interface FakeUser {
   id: string;
   email: string;
@@ -276,7 +287,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       }));
       rows.push(...inserted);
       const data = this.wantSingle || this.wantMaybeSingle ? inserted[0] ?? null : inserted;
-      return { data, error: null };
+      return { data: clone(data), error: null };
     }
 
     if (this.op === 'upsert') {
@@ -295,14 +306,14 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
         }
       }
       const data = this.wantSingle || this.wantMaybeSingle ? result[0] ?? null : result;
-      return { data, error: null };
+      return { data: clone(data), error: null };
     }
 
     const matched = rows.filter(row => this.filters.every(f => f(row)));
 
     if (this.op === 'update') {
       matched.forEach(row => Object.assign(row, this.payload));
-      return { data: this.wantSingle || this.wantMaybeSingle ? matched[0] ?? null : matched, error: null };
+      return { data: clone(this.wantSingle || this.wantMaybeSingle ? matched[0] ?? null : matched), error: null };
     }
 
     if (this.op === 'delete') {
@@ -311,14 +322,18 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       return { data: null, error: null };
     }
 
-    // select
+    // select — always return a copy, never the live row reference: a real
+    // Supabase/PostgREST response is a freshly deserialized JSON object, so
+    // a caller holding onto `data` (e.g. an "old value" read before a later
+    // .update() on the same row, a pattern several routes use) must not see
+    // that later mutation reflected back into what it already read.
     if (this.wantSingle) {
       if (matched.length !== 1) return { data: null, error: { message: 'no rows (or too many) returned', code: 'PGRST116' } };
-      return { data: matched[0], error: null };
+      return { data: clone(matched[0]), error: null };
     }
     if (this.wantMaybeSingle) {
-      return { data: matched[0] ?? null, error: null };
+      return { data: clone(matched[0] ?? null), error: null };
     }
-    return { data: matched, error: null, count: matched.length };
+    return { data: clone(matched), error: null, count: matched.length };
   }
 }
