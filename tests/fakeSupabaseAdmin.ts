@@ -98,9 +98,28 @@ export class FakeSupabaseAdmin {
   // the tenant-isolation routes under test) — a no-op stub is enough for it
   // to complete without touching real Supabase Storage.
   private buckets = new Set<string>();
+  // In-memory object store backing `.storage.from(bucket)`, used by
+  // server.ts's uploadToStorage/deleteFromStorage (documents.ts, plans.ts,
+  // visas.ts, meetings.ts, ...). Objects aren't retained for assertions —
+  // routes only ever pass the returned public URL back around — so a Set of
+  // "uploaded" paths per bucket is enough to make delete/remove meaningful.
+  private storageObjects = new Map<string, Set<string>>();
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
     createBucket: async (name: string, _opts?: any) => { this.buckets.add(name); return { data: { name }, error: null }; },
+    from: (bucket: string) => ({
+      upload: async (path: string, _buffer: Buffer, _opts?: any) => {
+        if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
+        this.storageObjects.get(bucket)!.add(path);
+        return { data: { path }, error: null };
+      },
+      getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
+      remove: async (paths: string[]) => {
+        const set = this.storageObjects.get(bucket);
+        if (set) paths.forEach(p => set.delete(p));
+        return { data: null, error: null };
+      },
+    }),
   };
 
   /** Test setup: makes `Authorization: Bearer <token>` resolve to this user in the auth middleware. */
@@ -255,6 +274,10 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
+  // No-op: none of this codebase's ~50 `.order(...)` call sites are tested
+  // for actual sort order, only for which rows come back (tenant scoping,
+  // filters) — implementing real sorting here would be pure scope creep for
+  // a fake that's already just enough to drive these routes' own logic.
   order() {
     return this;
   }
