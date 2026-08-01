@@ -7,8 +7,22 @@
 // zoho_invoice_id (not id) or update `settings`, which tenantScopedFrom's
 // simple .eq('id', ...) chaining wasn't designed around — kept as the
 // original explicit `.eq('tenant_id', tenantId)` chains instead.
+//
+// OAuth flow fix (found while writing this batch's tests): /api/zoho/auth
+// used to res.redirect() straight to Zoho, and the frontend triggered it
+// via `window.location.href = '/api/zoho/auth'` — a bare browser
+// navigation, which never carries our app's JWT, so the auth middleware
+// 401'd before the handler ever ran. It now returns { url } as JSON for an
+// authenticated fetch to call, and the frontend navigates to that URL
+// itself (see src/pages/Settings.tsx). The callback route is exempted from
+// auth in server.ts (AUTH_EXEMPT) since Zoho's redirect back can't carry a
+// JWT either; it recovers the tenant from the one-time `state` nonce
+// instead (server/oauthState.ts) — using the bare tenantId as state, like
+// before, would let anyone who learns a tenant's UUID hijack the OAuth
+// grant for that tenant.
 import type { Express } from 'express';
 import axios from 'axios';
+import { createOAuthState, consumeOAuthState } from '../oauthState';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -95,13 +109,16 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     res.json({ url: getZohoRedirectUri(req) });
   });
 
-  // GET /api/zoho/auth  — redirects browser to Zoho OAuth consent screen
+  // GET /api/zoho/auth  — returns the Zoho OAuth consent-screen URL for the
+  // authenticated caller's tenant. Called via an authenticated fetch (not a
+  // bare navigation, which can't carry the JWT); the frontend then navigates
+  // to the returned URL itself.
   app.get('/api/zoho/auth', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_client_id || !(settings as any)?.zoho_client_secret || !(settings as any)?.zoho_org_id) {
-        return res.status(400).send('Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.');
+        return res.status(400).json({ error: 'Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.' });
       }
       const dc = (settings as any).zoho_data_center || 'com';
       const redirectUri = getZohoRedirectUri(req);
@@ -113,18 +130,21 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       authUrl.searchParams.set('scope', scope);
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
-      // Store tenantId in state param for callback
-      authUrl.searchParams.set('state', tenantId);
-      res.redirect(authUrl.toString());
+      // One-time nonce mapping back to this tenant — see server/oauthState.ts.
+      authUrl.searchParams.set('state', createOAuthState(tenantId));
+      res.json({ url: authUrl.toString() });
     } catch (error) {
       console.error("[GET /api/zoho/auth]", error);
-      res.status(500).send('Erreur lors de la connexion à Zoho');
+      res.status(500).json({ error: 'Erreur lors de la connexion à Zoho' });
     }
   });
 
-  // GET /api/zoho/callback  — Zoho redirects here after user grants access
+  // GET /api/zoho/callback  — Zoho redirects here after user grants access.
+  // No JWT on this request (see the module header comment) — the tenant
+  // comes from the one-time state nonce issued by /api/zoho/auth above.
   app.get('/api/zoho/callback', async (req: any, res: any) => {
-    const { code, error: oauthError, state: tenantId } = req.query as any;
+    const { code, error: oauthError, state } = req.query as any;
+    const tenantId = consumeOAuthState(state);
     if (oauthError || !code || !tenantId) {
       return res.redirect('/settings?zoho_error=1');
     }

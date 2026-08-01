@@ -38,32 +38,59 @@ describe('Zoho Invoice', () => {
     expect(res.status).toBe(400);
   });
 
-  it('redirects to the Zoho consent screen when credentials are present', async () => {
+  it('returns the Zoho consent URL as JSON, with a one-time state nonce (not the bare tenantId)', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
 
+    // Called via an authenticated fetch (not a bare `window.location.href` navigation,
+    // which can't carry the JWT) — the frontend then navigates to the returned URL.
     const res = await request(app).get('/api/zoho/auth').set(authHeader(token));
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('accounts.zoho.com/oauth/v2/auth');
-    expect(res.headers.location).toContain(`state=${tenantId}`);
+    expect(res.status).toBe(200);
+    const url = new URL(res.body.url);
+    expect(url.origin + url.pathname).toBe('https://accounts.zoho.com/oauth/v2/auth');
+    const state = url.searchParams.get('state');
+    expect(state).toBeTruthy();
+    expect(state).not.toBe(tenantId); // a bare tenantId as state would let anyone replay another tenant's id
   });
 
-  it('exchanges the OAuth code for a refresh token on callback', async () => {
+  it('completes the callback (no auth header, matching Zoho\'s bare redirect) using a state minted by /api/zoho/auth', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec' }]);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'new-refresh-token' } } as any);
 
-    // The redirect from Zoho's consent screen doesn't carry our app's JWT — this
-    // route identifies the tenant purely via the OAuth `state` param, so an
-    // Authorization header is still required to pass the global auth middleware
-    // (this route is not in AUTH_EXEMPT), a pre-existing quirk unchanged by
-    // this extraction, not something introduced by it.
-    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state: tenantId }).set(authHeader(token));
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+
+    // No Authorization header here — this route is in AUTH_EXEMPT because Zoho's
+    // redirect back is a bare browser navigation that can't carry one.
+    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/settings?zoho_connected=1');
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBe('new-refresh-token');
+  });
+
+  it('rejects a callback with an unknown or reused state (CSRF/replay protection)', async () => {
+    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state: 'not-a-real-nonce' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/settings?zoho_error=1');
+
+    // Same nonce used twice — the second attempt must fail even with a valid code.
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'rt' } } as any);
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+
+    const first = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+    expect(first.status).toBe(302);
+    expect(first.headers.location).toBe('/settings?zoho_connected=1');
+
+    const replay = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+    expect(replay.status).toBe(302);
+    expect(replay.headers.location).toBe('/settings?zoho_error=1');
   });
 
   it('disconnects, clearing the refresh token', async () => {
@@ -136,6 +163,31 @@ describe('Zoho Books', () => {
 
     const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
     expect(res.status).toBe(400);
+  });
+
+  it('returns the consent URL with a one-time state nonce, then completes the callback with no auth header', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_data_center: 'com' }]);
+
+    const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
+    expect(authRes.status).toBe(200);
+    const state = new URL(authRes.body.url).searchParams.get('state');
+    expect(state).toBeTruthy();
+    expect(state).not.toBe(tenantId);
+
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ refresh_token: 'books-refresh-token' }) })) as any;
+
+    const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/settings?zoho_books_connected=1');
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBe('books-refresh-token');
+  });
+
+  it('rejects a Zoho Books callback with an unknown state', async () => {
+    const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: 'not-a-real-nonce' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/settings?zoho_books_error=1');
   });
 
   it('disconnects, clearing the refresh token', async () => {

@@ -1450,10 +1450,21 @@ export async function createApp() {
     "/api/health", "/api/public", "/api/billing/webhook",
     "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
     "/api/auth/cloud-link-status", "/api/auth/cloud-link", "/api/auth/cloud-link-import",
+    // Zoho's OAuth redirect back to us is a bare browser navigation — it
+    // can't carry our app's JWT. These recover the tenant from a one-time
+    // state nonce instead (server/oauthState.ts), not from req.user.
+    "/api/zoho/callback", "/api/zoho-books/callback",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
-    if (AUTH_EXEMPT.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + "/"))) {
+    // Strip the query string before matching: req.originalUrl includes it
+    // (req.path, the alternative, is relative to this middleware's "/api"
+    // mount point and would silently break every other entry in the list
+    // instead). The Zoho OAuth callbacks below always arrive as e.g.
+    // /api/zoho/callback?code=...&state=..., so matching the raw
+    // originalUrl could never succeed for them.
+    const pathOnly = req.originalUrl.split("?")[0];
+    if (AUTH_EXEMPT.some(p => pathOnly === p || pathOnly.startsWith(p + "/"))) {
       return next();
     }
     const token = req.headers.authorization?.split(" ")[1];

@@ -4,7 +4,17 @@
 // create/edit/delete, so lower-risk than the still-deferred Invoices CRUD
 // domain despite touching the same table. Explicit `.eq('tenant_id', ...)`
 // chains kept as-is rather than tenantScopedFrom, matching zohoInvoice.ts.
+//
+// OAuth flow fix (found while writing this batch's tests): the callback
+// route used to call getTenantId(req.user.id) and never set/read a `state`
+// param at all — but Zoho's redirect back is a bare browser navigation that
+// carries neither our app's JWT nor req.user. It's fixed the same way as
+// zohoInvoice.ts: /api/zoho-books/auth now returns { url } as JSON (called
+// via authenticated fetch) with a one-time state nonce (server/
+// oauthState.ts), and the callback (exempted from auth in server.ts)
+// recovers the tenant from that nonce instead.
 import type { Express } from 'express';
+import { createOAuthState, consumeOAuthState } from '../oauthState';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -56,7 +66,9 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
-  // GET /api/zoho-books/auth  — redirects browser to Zoho OAuth consent screen (Books scope)
+  // GET /api/zoho-books/auth  — returns the Zoho OAuth consent-screen URL
+  // (Books scope) for the authenticated caller's tenant. Called via an
+  // authenticated fetch; the frontend navigates to the returned URL itself.
   app.get('/api/zoho-books/auth', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -73,19 +85,23 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       authUrl.searchParams.set('scope', 'ZohoBooks.fullaccess.all');
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
-      res.redirect(authUrl.toString());
+      // One-time nonce mapping back to this tenant — see server/oauthState.ts.
+      authUrl.searchParams.set('state', createOAuthState(tenantId));
+      res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error("[GET /api/zoho-books/auth]", error);
       res.status(500).json({ error: error.message });
     }
   });
 
-  // GET /api/zoho-books/callback  — Zoho redirects here after user grants access
+  // GET /api/zoho-books/callback  — Zoho redirects here after user grants
+  // access. No JWT on this request — the tenant comes from the one-time
+  // state nonce issued by /api/zoho-books/auth above.
   app.get('/api/zoho-books/callback', async (req: any, res: any) => {
-    const { code, error: oauthError } = req.query as any;
-    if (oauthError || !code) return res.redirect('/settings?zoho_books_error=1');
+    const { code, error: oauthError, state } = req.query as any;
+    const tenantId = consumeOAuthState(state);
+    if (oauthError || !code || !tenantId) return res.redirect('/settings?zoho_books_error=1');
     try {
-      const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_data_center').eq('tenant_id', tenantId).single();
       const dc = (settings as any)?.zoho_data_center || 'com';
       const redirectUri = getZohoBooksCallbackUrl(req);
