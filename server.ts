@@ -9,6 +9,9 @@ import { invoiceSchema } from "./src/schemas/invoice.schema";
 import { proposalSchema } from "./src/schemas/proposal.schema";
 import { createTeamMemberSchema, updateTeamMemberRoleSchema } from "./src/schemas/team.schema";
 import { captureWithContext } from "./server/sentryContext";
+import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
+import { registerActDataRoutes } from "./server/routes/actData";
+import { registerDetDataRoutes } from "./server/routes/detData";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
@@ -8733,123 +8736,14 @@ export async function createApp() {
 
   // ─── End Chorus Pro Integration ────────────────────────────────────────────
 
-  // ─── Project Templates ─────────────────────────────────────────────────────
-  app.get("/api/project-templates", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('project_templates').select('*').eq('tenant_id', tenantId).order('name');
-      if (error) throw error;
-      res.json(data || []);
-    } catch (e: any) {
-      console.error("[GET /api/project-templates]", e); res.status(500).json({ error: "Failed to fetch project templates" }); }
-  });
-
-  app.post("/api/project-templates", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, name, description, default_status, default_budget, default_description } = req.body;
-      const id = bodyId || crypto.randomUUID();
-      const { data, error } = await supabaseAdmin.from('project_templates').insert({ id, tenant_id: tenantId, name, description, default_status: default_status || 'Planning', default_budget: default_budget || 0, default_description }).select().single();
-      if (error) throw error;
-      res.status(201).json(data);
-    } catch (e: any) {
-      console.error("[POST /api/project-templates]", e); res.status(500).json({ error: "Failed to create project template: " + e.message }); }
-  });
-
-  app.put("/api/project-templates/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { name, description, default_status, default_budget, default_description } = req.body;
-      const { data, error } = await supabaseAdmin.from('project_templates').update({ name, description, default_status, default_budget, default_description }).eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
-      if (error) throw error;
-      res.json(data);
-    } catch (e: any) {
-      console.error("[PUT /api/project-templates/:id]", e); res.status(500).json({ error: "Failed to update project template: " + e.message }); }
-  });
-
-  app.delete("/api/project-templates/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { error } = await supabaseAdmin.from('project_templates').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error("[DELETE /api/project-templates/:id]", e); res.status(500).json({ error: "Failed to delete project template" }); }
-  });
-
-  // ─── ACT Data (Analyse Comparative des Offres) ────────────────────────────
-  app.get("/api/projects/:projectId/act", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('act_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
-      if (error && error.code !== 'PGRST116') throw error;
-      res.json(data || null);
-    } catch (e: any) {
-      console.error("[GET /api/projects/:projectId/act]", e); res.status(500).json({ error: "Failed to fetch ACT data" }); }
-  });
-
-  app.put("/api/projects/:projectId/act", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { companies, lots, scoring_criteria, weights, consultation, act_phase } = req.body;
-      const { data: existing } = await supabaseAdmin.from('act_data').select('id').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).single();
-      const payload = { companies, lots, scoring_criteria, weights, consultation, act_phase, updated_at: new Date().toISOString() };
-      if (existing) {
-        const { data, error } = await supabaseAdmin.from('act_data').update(payload).eq('id', existing.id).eq('tenant_id', tenantId).select().single();
-        if (error) throw error;
-        res.json(data);
-      } else {
-        const { data, error } = await supabaseAdmin.from('act_data').insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: req.params.projectId, ...payload }).select().single();
-        if (error) throw error;
-        res.status(201).json(data);
-      }
-    } catch (e: any) {
-      console.error("[PUT /api/projects/:projectId/act]", e); res.status(500).json({ error: "Failed to save ACT data: " + e.message }); }
-  });
-
-  // ─── DET Data (Comptes Rendus de Réunions) ────────────────────────────────
-  app.get("/api/projects/:projectId/det", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('det_data').select('*').eq('tenant_id', tenantId).eq('project_id', req.params.projectId).order('created_at');
-      if (error) throw error;
-      res.json(data || []);
-    } catch (e: any) {
-      console.error("[GET /api/projects/:projectId/det]", e); res.status(500).json({ error: "Failed to fetch DET data" }); }
-  });
-
-  app.post("/api/projects/:projectId/det", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, info, observations, intervenants } = req.body;
-      const id = bodyId || crypto.randomUUID();
-      const { data, error } = await supabaseAdmin.from('det_data').insert({ id, tenant_id: tenantId, project_id: req.params.projectId, info, observations, intervenants }).select().single();
-      if (error) throw error;
-      res.status(201).json(data);
-    } catch (e: any) {
-      console.error("[POST /api/projects/:projectId/det]", e); res.status(500).json({ error: "Failed to create CR: " + e.message }); }
-  });
-
-  app.put("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { info, observations, intervenants } = req.body;
-      const { data, error } = await supabaseAdmin.from('det_data').update({ info, observations, intervenants }).eq('id', req.params.crId).eq('tenant_id', tenantId).select().single();
-      if (error) throw error;
-      res.json(data);
-    } catch (e: any) {
-      console.error("[PUT /api/projects/:projectId/det/:crId]", e); res.status(500).json({ error: "Failed to update CR: " + e.message }); }
-  });
-
-  app.delete("/api/projects/:projectId/det/:crId", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { error } = await supabaseAdmin.from('det_data').delete().eq('id', req.params.crId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error("[DELETE /api/projects/:projectId/det/:crId]", e); res.status(500).json({ error: "Failed to delete CR" }); }
-  });
+  // Phase 7 pilot: Project Templates / ACT Data / DET Data now live in
+  // server/routes/*.ts — see those files for why they were picked first
+  // (small, self-contained, low traffic) and server/tenantScopedFrom.ts for
+  // the shared data-access helper they use instead of a hand-written
+  // `.eq('tenant_id', tenantId)` on each query.
+  registerProjectTemplateRoutes(app, { supabaseAdmin, getTenantId });
+  registerActDataRoutes(app, { supabaseAdmin, getTenantId });
+  registerDetDataRoutes(app, { supabaseAdmin, getTenantId });
 
   // ─── DPGF Items CRUD (missing write operations) ───────────────────────────
   app.post("/api/dpgf", async (req: any, res: any) => {
