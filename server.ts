@@ -3,6 +3,7 @@ import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { proposalToXml, xmlToProposal } from "./src/lib/xmlHelper";
+import { buildEnInvoiceData } from "./src/lib/facturX";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
@@ -7828,74 +7829,45 @@ export async function createApp() {
     return r.text();
   }
 
+  // Maps this route's local (loosely-typed, snake_case DB row) shapes onto the
+  // shared FacturXInvoiceData contract — see src/lib/facturX.ts for why this
+  // and the client-side XML export (InvoiceGenerator.tsx) now share one
+  // implementation instead of two that could silently drift apart.
   function buildEnInvoice(invoice: any, items: any[], settings: any): any {
     const vatRate = invoice.vat_rate ?? 20;
     const amountHT = parseFloat(invoice.amount ?? 0);
     const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
     const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
 
-    const sellerName = invoice.seller_name || settings.agency_name || 'Architecte';
-    const sellerAddress = invoice.seller_address || settings.address || '';
-    const sellerSiret = invoice.seller_siret || settings.siret || '';
-    const sellerVat = invoice.seller_vat_number || settings.vat_number || '';
-    const sellerEmail = settings.email || '';
-
-    const lines = items.length > 0 ? items.map((item: any, idx: number) => {
-      const qty = parseFloat(item.quantity ?? 1);
-      const unitPrice = parseFloat(item.unit_price ?? 0);
-      const netAmount = qty * unitPrice;
-      return {
-        identifier: String(idx + 1),
-        invoiced_quantity: String(qty),
-        invoiced_quantity_code: 'C62',
-        net_amount: netAmount.toFixed(2),
-        item_information: { name: item.description || 'Prestation' },
-        price_details: { item_net_price: unitPrice.toFixed(2) },
-        vat_information: { vat_category_code: 'S', vat_category_rate: String(vatRate) },
-      };
-    }) : [{
-      identifier: '1',
-      invoiced_quantity: '1',
-      invoiced_quantity_code: 'C62',
-      net_amount: amountHT.toFixed(2),
-      item_information: { name: invoice.description || 'Honoraires d\'architecture' },
-      price_details: { item_net_price: amountHT.toFixed(2) },
-      vat_information: { vat_category_code: 'S', vat_category_rate: String(vatRate) },
-    }];
-
-    return {
-      number: invoice.invoice_number || invoice.id,
-      issue_date: invoice.issue_date || new Date().toISOString().slice(0, 10),
-      type_code: '380',
-      currency_code: 'EUR',
-      process_control: { specification_identifier: 'urn:cen.eu:en16931:2017' },
-      payment_due_date: invoice.due_date || undefined,
+    return buildEnInvoiceData({
+      invoiceNumber: invoice.invoice_number || invoice.id,
+      invoiceType: invoice.invoice_type,
+      issueDate: invoice.issue_date || new Date().toISOString().slice(0, 10),
+      dueDate: invoice.due_date || undefined,
+      currency: 'EUR',
+      vatRate,
+      description: invoice.description,
+      // Totals stay authoritative from the invoice row (an acompte invoice
+      // bills a percentage of a mission, not necessarily the sum of these
+      // display line items) — computeFacturXTotals(items) is not used here.
+      totals: { net: amountHT, vat: taxAmount, gross: totalTTC },
+      items: items.map((item: any) => ({
+        description: item.description || 'Prestation',
+        quantity: parseFloat(item.quantity ?? 1),
+        unitPrice: parseFloat(item.unit_price ?? 0),
+        vatRate,
+      })),
       seller: {
-        name: sellerName,
-        electronic_address: { value: sellerEmail || 'contact@cabinet.fr', scheme: 'EM' },
-        postal_address: { address_line1: sellerAddress, country_code: 'FR' },
-        ...(sellerVat ? { vat_identifier: sellerVat } : {}),
-        ...(sellerSiret ? { legal_registration_identifier: { value: sellerSiret, scheme: '0002' } } : {}),
+        name: invoice.seller_name || settings.agency_name || 'Architecte',
+        address: invoice.seller_address || settings.address || '',
+        siret: invoice.seller_siret || settings.siret || '',
+        vatNumber: invoice.seller_vat_number || settings.vat_number || '',
+        email: settings.email || '',
       },
       buyer: {
         name: invoice.client_name || invoice.mission_name || 'Client',
-        postal_address: { country_code: 'FR' },
       },
-      totals: {
-        sum_invoice_lines_amount: amountHT.toFixed(2),
-        total_without_vat: amountHT.toFixed(2),
-        total_vat_amount: { value: taxAmount.toFixed(2) },
-        total_with_vat: totalTTC.toFixed(2),
-        amount_due_for_payment: totalTTC.toFixed(2),
-      },
-      vat_break_down: [{
-        vat_category_code: 'S',
-        vat_category_rate: String(vatRate),
-        vat_category_taxable_amount: amountHT.toFixed(2),
-        vat_category_tax_amount: taxAmount.toFixed(2),
-      }],
-      lines,
-    };
+    });
   }
 
   // GET /api/superpdp/status
