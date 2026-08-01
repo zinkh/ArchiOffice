@@ -33,13 +33,43 @@ export class FakeSupabaseAdmin {
   private tables = new Map<string, Row[]>();
   private tokenToUser = new Map<string, FakeUser>();
 
+  private adminUsers = new Map<string, { id: string; email: string }>();
+
   auth = {
     getUser: async (token: string) => {
       const user = this.tokenToUser.get(token);
       if (!user) return { data: { user: null }, error: { message: 'invalid token' } };
       return { data: { user }, error: null };
     },
+    // Minimal stand-in for the Supabase Auth admin API, used by
+    // server/routes/superAdmin.ts to provision/deprovision tenant owner
+    // accounts. Real supabase-js also lets any caller with a service-role
+    // key manage auth.users this way — this fake just tracks ids in memory.
+    admin: {
+      createUser: async (attrs: { email: string; password?: string; user_metadata?: Record<string, any>; email_confirm?: boolean }) => {
+        const id = crypto.randomUUID();
+        const user = { id, email: attrs.email };
+        this.adminUsers.set(id, user);
+        return { data: { user }, error: null };
+      },
+      deleteUser: async (id: string) => {
+        this.adminUsers.delete(id);
+        return { data: {}, error: null };
+      },
+    },
   };
+
+  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — only
+  // 'increment_ai_credits' is called anywhere in this codebase.
+  async rpc(fnName: string, params: Record<string, any>) {
+    if (fnName === 'increment_ai_credits') {
+      const tenants = this.tables.get('tenants') || [];
+      const tenant = tenants.find(t => t.id === params.p_tenant_id);
+      if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
+      return { data: null, error: null };
+    }
+    return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
+  }
 
   // createApp() eagerly calls ensureStorageBuckets() at startup (unrelated to
   // the tenant-isolation routes under test) — a no-op stub is enough for it
