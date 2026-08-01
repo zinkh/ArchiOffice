@@ -725,6 +725,16 @@ function ProtectedLayout() {
   );
 }
 
+// Role-gated route guard, nested inside ProtectedLayout (which only checks
+// session presence) — pilot use: /admin. currentUser.system_role is always
+// server-authoritative by the time ProtectedLayout renders its children (see
+// UserContext.tsx's loadFullProfile, which overrides it from GET /api/me).
+function RequireRole({ role, children }: { role: string; children: React.ReactNode }) {
+  const { currentUser } = useUser();
+  if (currentUser?.system_role !== role) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
@@ -775,7 +785,7 @@ export default function App() {
               <Route path="/conges" element={<Leave />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
-              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin" element={<RequireRole role="admin"><AdminDashboard /></RequireRole>} />
               <Route path="/maf-declaration" element={<MafDeclaration />} />
               <Route path="/superpdp" element={<SuperPDPPortal />} />
               <Route path="/chorus-pro" element={<ChorusProPortal />} />

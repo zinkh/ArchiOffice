@@ -44,11 +44,11 @@ export function makeTenant(overrides: Record<string, any> = {}) {
 }
 
 /** Seeds a profile row + auth token for a user belonging to `tenantId`, and returns { userId, token }. */
-export function makeUser(tenantId: string) {
+export function makeUser(tenantId: string, systemRole: 'admin' | 'manager' | 'pm' | 'user' = 'user') {
   const userId = uniqueId('user');
   const email = `${userId}@example.test`;
   const token = uniqueId('token');
-  fakeSupabaseAdmin.seed('profiles', [{ id: userId, tenant_id: tenantId, email, system_role: 'user' }]);
+  fakeSupabaseAdmin.seed('profiles', [{ id: userId, tenant_id: tenantId, email, system_role: systemRole }]);
   fakeSupabaseAdmin.registerUser(token, { id: userId, email });
   return { userId, token };
 }

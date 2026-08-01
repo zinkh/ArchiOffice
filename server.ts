@@ -1242,6 +1242,32 @@ export async function createApp() {
     throw err;
   }
 
+  async function getSystemRole(tenantId: string, userId: string): Promise<string | null> {
+    const { data } = await supabaseAdmin.from('profiles').select('system_role').eq('id', userId).eq('tenant_id', tenantId).single();
+    return (data as any)?.system_role ?? null;
+  }
+
+  // Centralized route guard for admin-only endpoints — checks the caller's
+  // system_role in `profiles` (never a client-supplied value: a route that
+  // trusted e.g. a request header for this was the exact bug this middleware
+  // was introduced to close, see DELETE /api/projects/:id). Mount it as
+  // middleware: app.delete("/path", requireRole('admin'), handler).
+  function requireRole(...roles: string[]) {
+    return async (req: any, res: any, next: any) => {
+      try {
+        const tenantId = await getTenantId(req.user.id);
+        const role = await getSystemRole(tenantId, req.user.id);
+        if (!role || !roles.includes(role)) {
+          return res.status(403).json({ error: `Réservé aux rôles : ${roles.join(', ')}` });
+        }
+        req.tenantId = tenantId;
+        next();
+      } catch (e: any) {
+        res.status(e.status || 500).json({ error: e.message || 'Failed to verify role' });
+      }
+    };
+  }
+
   // ─── Billing / Plan quota ──────────────────────────────────────────────────
 
   const PLAN_LIMITS: Record<string, { projects: number; users: number; documents: number }> = {
@@ -2956,13 +2982,10 @@ export async function createApp() {
     }
   });
 
-  app.delete("/api/projects/:id", async (req: any, res: any) => {
+  app.delete("/api/projects/:id", requireRole('admin'), async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = req.tenantId as string;
       const { id } = req.params;
-      const userRole = req.headers['x-user-role'];
-      console.log(`Attempting to delete project ${id} with role ${userRole}`);
-      if (userRole !== 'admin') return res.status(403).json({ error: "Only administrators can delete projects" });
       const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
@@ -3362,13 +3385,16 @@ export async function createApp() {
 
   async function requireTenantAdmin(userId: string): Promise<string> {
     const tenantId = await getTenantId(userId);
-    const { data: profile } = await supabaseAdmin.from('profiles').select('system_role').eq('id', userId).single();
-    if (profile?.system_role !== 'admin') {
+    if ((await getSystemRole(tenantId, userId)) !== 'admin') {
       const err: any = new Error("Réservé aux administrateurs de l'agence");
       err.status = 403;
       throw err;
     }
     return tenantId;
+  }
+
+  async function isAdmin(tenantId: string, userId: string): Promise<boolean> {
+    return (await getSystemRole(tenantId, userId)) === 'admin';
   }
 
   // Allows: the person themselves, a tenant admin, or the target's direct manager (profiles.manager_id).
@@ -3560,8 +3586,7 @@ export async function createApp() {
       if (!week_start) return res.status(400).json({ error: 'week_start requis' });
       const reportIds = await resolveReportIds(tenantId, req.user.id, scope === 'all');
       if (reportIds.length === 0) {
-        const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
-        if (acting?.system_role !== 'admin') {
+        if (!(await isAdmin(tenantId, req.user.id))) {
           const { data: anyReport } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', req.user.id).limit(1);
           if (!anyReport || anyReport.length === 0) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
         }
@@ -3592,8 +3617,7 @@ export async function createApp() {
       if (!week_start) return res.status(400).json({ error: 'week_start requis' });
       const reportIds = await resolveReportIds(tenantId, req.user.id, true);
       if (reportIds.length === 0) {
-        const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
-        if (acting?.system_role !== 'admin') return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+        if (!(await isAdmin(tenantId, req.user.id))) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
         return res.json({ employees: [], entries: [], leaves: [], projects: [] });
       }
       const start = new Date(week_start as string + 'T00:00:00Z');
@@ -3724,8 +3748,7 @@ export async function createApp() {
       if (scope === 'team') {
         const reportIds = await resolveReportIds(tenantId, req.user.id, true);
         if (reportIds.length === 0) {
-          const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', req.user.id).eq('tenant_id', tenantId).single();
-          if (acting?.system_role !== 'admin') return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+          if (!(await isAdmin(tenantId, req.user.id))) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
           return res.json([]);
         }
         const { data, error } = await supabaseAdmin.from('leave_requests').select('*').eq('tenant_id', tenantId).in('user_id', reportIds).order('created_at', { ascending: false });
