@@ -33,6 +33,9 @@ import { registerGeoProxyRoutes } from "./server/routes/geoProxy";
 import { registerMafRoutes } from "./server/routes/maf";
 import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
+import { registerTenderRoutes } from "./server/routes/tenders";
+import { registerTenderRssRoutes } from "./server/routes/tenderRss";
+import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
 import multer from "multer";
@@ -41,7 +44,7 @@ import axios from "axios";
 import https from "https";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
-import { startTenderRssPolling, pollAllTenderRssSources } from "./server/tenderRssPoller";
+import { startTenderRssPolling } from "./server/tenderRssPoller";
 
 interface GeoJSONGeometry {
   type: string;
@@ -3374,228 +3377,6 @@ export async function createApp() {
       console.error("[POST /api/team/join-requests/:id/reject]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
-  app.get("/api/tenders", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json((data || []).map((t: any) => ({ ...t, specialties_list: t.tender_specialties || [] })));
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tenders" }); }
-  });
-
-  app.get("/api/tenders/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data, error } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).eq('tenant_id', tenantId).single();
-      if (error || !data) return res.status(404).json({ error: "Tender not found" });
-      res.json({ ...data, specialties_list: (data as any).tender_specialties || [] });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender" }); }
-  });
-
-  app.post("/api/tenders", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list } = req.body;
-      const id = crypto.randomUUID();
-      const { error: te } = await supabaseAdmin.from('tenders').insert({ id, tenant_id: tenantId, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived });
-      if (te) throw te;
-      if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
-      if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
-      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).single();
-      // Log activity
-      const userNameTndr = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
-      res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
-  });
-
-  app.delete("/api/tenders/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: tender } = await supabaseAdmin.from('tenders').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
-      await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
-      await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
-      const { error } = await supabaseAdmin.from('tenders').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const title = (tender as any)?.title || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression de l'appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender" }); }
-  });
-
-  app.put("/api/tenders/:id", async (req: any, res: any) => {
-    let tenantId: string | undefined;
-    try {
-      tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list } = req.body;
-      const { error: ue } = await supabaseAdmin.from('tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived }).eq('id', id).eq('tenant_id', tenantId);
-      if (ue) throw ue;
-      await supabaseAdmin.from('tender_specialties').delete().eq('tender_id', id).eq('tenant_id', tenantId);
-      if (specialties_list?.length) await supabaseAdmin.from('tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
-      await supabaseAdmin.from('milestones').delete().eq('tender_id', id).eq('tenant_id', tenantId);
-      if (milestones_list?.length) await supabaseAdmin.from('milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
-      const { data } = await supabaseAdmin.from('tenders').select('*, tender_specialties(*)').eq('id', id).eq('tenant_id', tenantId).single();
-      res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
-    } catch (e: any) { captureWithContext(e, { route: 'PUT /api/tenders/:id', tenantId, userId: req.user?.id }); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
-  });
-
-  // --- Veille RSS des appels d'offres ---
-
-  app.get("/api/tender-rss-sources", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('tender_rss_sources').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
-      if (error) throw error;
-      res.json(data || []);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender RSS sources" }); }
-  });
-
-  app.post("/api/tender-rss-sources", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
-      const id = crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('tender_rss_sources').insert({
-        id, tenant_id: tenantId, name, url, enabled: enabled !== false,
-        include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
-      });
-      if (error) throw error;
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Ajout de la source de veille RSS "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
-      res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender RSS source: " + e.message }); }
-  });
-
-  app.put("/api/tender-rss-sources/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
-      const { error } = await supabaseAdmin.from('tender_rss_sources').update({
-        name, url, enabled: !!enabled, include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
-      }).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS source: " + e.message }); }
-  });
-
-  app.delete("/api/tender-rss-sources/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: source } = await supabaseAdmin.from('tender_rss_sources').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
-      const { error } = await supabaseAdmin.from('tender_rss_sources').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const name = (source as any)?.name || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression de la source de veille RSS "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete tender RSS source" }); }
-  });
-
-  app.post("/api/tender-rss-sources/poll-now", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      await pollAllTenderRssSources(supabaseAdmin, tenantId);
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to poll tender RSS sources: " + e.message }); }
-  });
-
-  app.get("/api/tender-rss-matches", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      let query = supabaseAdmin.from('tender_rss_matches').select('*, tender_rss_sources(name)').eq('tenant_id', tenantId).order('pub_date', { ascending: false, nullsFirst: false });
-      if (req.query.status) query = query.eq('status', req.query.status as string);
-      const { data, error } = await query;
-      if (error) throw error;
-      res.json((data || []).map((m: any) => ({ ...m, source_name: m.tender_rss_sources?.name || null, tender_rss_sources: undefined })));
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender RSS matches" }); }
-  });
-
-  app.put("/api/tender-rss-matches/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { status } = req.body;
-      const { error } = await supabaseAdmin.from('tender_rss_matches').update({ status }).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS match" }); }
-  });
-
-  app.post("/api/tender-rss-matches/:id/convert", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: match, error: me } = await supabaseAdmin.from('tender_rss_matches').select('*').eq('id', id).eq('tenant_id', tenantId).single();
-      if (me || !match) return res.status(404).json({ error: "Tender RSS match not found" });
-
-      const tenderId = crypto.randomUUID();
-      const notes = [match.link, match.description].filter(Boolean).join('\n\n');
-      const { error: te } = await supabaseAdmin.from('tenders').insert({
-        id: tenderId, tenant_id: tenantId, title: match.title, client: '',
-        submission_deadline: '', status: 'Draft', value: 0, notes, archived: false
-      });
-      if (te) throw te;
-
-      await supabaseAdmin.from('tender_rss_matches').update({ status: 'converted', tender_id: tenderId }).eq('id', id).eq('tenant_id', tenantId);
-
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Appel d'offres créé depuis la veille RSS "${match.title}"`, match.title, tenderId, 'tender', 'Appels d\'offres');
-      res.status(201).json({ id: tenderId });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to convert tender RSS match: " + e.message }); }
-  });
-
-  app.get("/api/milestones", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { project_id, tender_id, proposal_id } = req.query;
-      const query = supabaseAdmin.from('milestones').select('*').eq('tenant_id', tenantId).order('due_date', { ascending: true });
-      if (project_id) query.eq('project_id', project_id as string);
-      else if (tender_id) query.eq('tender_id', tender_id as string);
-      else if (proposal_id) query.eq('proposal_id', proposal_id as string);
-      const { data, error } = await query;
-      if (error) throw error;
-      res.json(data);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch milestones" }); }
-  });
-
-  app.post("/api/milestones", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { project_id, tender_id, proposal_id, title, due_date, completed, duration_days, dependencies } = req.body;
-      const id = crypto.randomUUID();
-      const { data, error } = await supabaseAdmin.from('milestones').insert({ id, tenant_id: tenantId, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).select().single();
-      if (error) throw error;
-      res.status(201).json(data);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create milestone: " + e.message }); }
-  });
-
-  app.put("/api/milestones/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { title, due_date, completed, duration_days, dependencies } = req.body;
-      const { error } = await supabaseAdmin.from('milestones').update({ title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update milestone: " + e.message }); }
-  });
-
-  app.delete("/api/milestones/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { error } = await supabaseAdmin.from('milestones').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete milestone: " + e.message }); }
-  });
-
   app.get("/api/specifications", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -6627,6 +6408,9 @@ export async function createApp() {
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
   registerTimeTrackingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin });
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });
+  registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
+  registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
