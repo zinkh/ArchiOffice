@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildEnInvoiceData > standard invoice — matches the golden fixture 1`] = `
+{
+  "buyer": {
+    "name": "Client Dupont",
+    "postal_address": {
+      "country_code": "FR",
+    },
+  },
+  "currency_code": "EUR",
+  "issue_date": "2026-02-01",
+  "lines": [
+    {
+      "identifier": "1",
+      "invoiced_quantity": "1",
+      "invoiced_quantity_code": "C62",
+      "item_information": {
+        "name": "Honoraires de maîtrise d'œuvre — phase APS",
+      },
+      "net_amount": "5000.00",
+      "price_details": {
+        "item_net_price": "5000.00",
+      },
+      "vat_information": {
+        "vat_category_code": "S",
+        "vat_category_rate": "20",
+      },
+    },
+  ],
+  "number": "FAC-2026-001",
+  "payment_due_date": "2026-03-03",
+  "process_control": {
+    "specification_identifier": "urn:cen.eu:en16931:2017",
+  },
+  "seller": {
+    "electronic_address": {
+      "scheme": "EM",
+      "value": "contact@atelier-test.fr",
+    },
+    "legal_registration_identifier": {
+      "scheme": "0002",
+      "value": "123 456 789 00012",
+    },
+    "name": "Atelier Test Architecture",
+    "postal_address": {
+      "address_line1": "12 rue de la Paix, 75002 Paris",
+      "country_code": "FR",
+    },
+    "vat_identifier": "FR12345678900",
+  },
+  "totals": {
+    "amount_due_for_payment": "6000.00",
+    "sum_invoice_lines_amount": "5000.00",
+    "total_vat_amount": {
+      "value": "1000.00",
+    },
+    "total_with_vat": "6000.00",
+    "total_without_vat": "5000.00",
+  },
+  "type_code": "380",
+  "vat_break_down": [
+    {
+      "vat_category_code": "S",
+      "vat_category_rate": "20",
+      "vat_category_tax_amount": "1000.00",
+      "vat_category_taxable_amount": "5000.00",
+    },
+  ],
+}
+`;

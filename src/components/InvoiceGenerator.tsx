@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import type { Invoice, Project, InvoiceItem } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
+import { buildFacturXCiiXml } from '../lib/facturX';
 
 interface InvoiceGeneratorProps {
   onClose: () => void;
@@ -69,102 +70,31 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
   const { net, vat, gross } = calculateTotals();
 
-  const generateFacturXXML = () => {
-    // Basic Factur-X XML (EN 16931 - Basic Profile)
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<rsm:CrossIndustryInvoice xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100" xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <rsm:ExchangedDocumentContext>
-    <ram:GuidelineSpecifiedDocumentContextParameter>
-      <ram:ID>urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic</ram:ID>
-    </ram:GuidelineSpecifiedDocumentContextParameter>
-  </rsm:ExchangedDocumentContext>
-  <rsm:ExchangedDocument>
-    <ram:ID>${data.invoice_number}</ram:ID>
-    <ram:TypeCode>${data.invoice_type === 'acompte' ? '386' : '380'}</ram:TypeCode>
-    <ram:IssueDateTime>
-      <udt:DateTimeString format="102">${data.issue_date?.replace(/-/g, '')}</udt:DateTimeString>
-    </ram:IssueDateTime>
-  </rsm:ExchangedDocument>
-  <rsm:SupplyChainTransaction>
-    ${data.items?.map((item, idx) => `
-    <ram:IncludedSupplyChainTradeLineItem>
-      <ram:AssociatedDocumentLineDocument>
-        <ram:LineID>${idx + 1}</ram:LineID>
-      </ram:AssociatedDocumentLineDocument>
-      <ram:SpecifiedTradeProduct>
-        <ram:Name>${item.description}</ram:Name>
-      </ram:SpecifiedTradeProduct>
-      <ram:SpecifiedLineTradeAgreement>
-        <ram:NetPriceProductTradePrice>
-          <ram:ChargeAmount>${item.unit_price.toFixed(2)}</ram:ChargeAmount>
-        </ram:NetPriceProductTradePrice>
-      </ram:SpecifiedLineTradeAgreement>
-      <ram:SpecifiedLineTradeDelivery>
-        <ram:BilledQuantity unitCode="HUR">${item.quantity}</ram:BilledQuantity>
-      </ram:SpecifiedLineTradeDelivery>
-      <ram:SpecifiedLineTradeSettlement>
-        <ram:ApplicableTradeTax>
-          <ram:TypeCode>VAT</ram:TypeCode>
-          <ram:CategoryCode>S</ram:CategoryCode>
-          <ram:RateApplicablePercent>${item.vat_rate}</ram:RateApplicablePercent>
-        </ram:ApplicableTradeTax>
-        <ram:SpecifiedTradeSettlementLineMonetarySummation>
-          <ram:LineTotalAmount>${(item.quantity * item.unit_price).toFixed(2)}</ram:LineTotalAmount>
-        </ram:SpecifiedTradeSettlementLineMonetarySummation>
-      </ram:SpecifiedLineTradeSettlement>
-    </ram:IncludedSupplyChainTradeLineItem>`).join('')}
-    <ram:ApplicableHeaderTradeAgreement>
-      <ram:SellerTradeParty>
-        <ram:Name>${data.seller_name || 'KHALDOUN SEKTAOUI ARCHITECTE'}</ram:Name>
-        <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">${data.seller_siret?.replace(/\s/g, '')}</ram:ID>
-        </ram:SpecifiedLegalOrganization>
-        <ram:PostalTradeAddress>
-          <ram:LineOne>${data.seller_address || ''}</ram:LineOne>
-          <ram:CountryID>FR</ram:CountryID>
-        </ram:PostalTradeAddress>
-        <ram:SpecifiedTaxRegistration>
-          <ram:ID schemeID="VA">${data.seller_vat_number?.replace(/\s/g, '')}</ram:ID>
-        </ram:SpecifiedTaxRegistration>
-      </ram:SellerTradeParty>
-      <ram:BuyerTradeParty>
-        <ram:Name>${project?.client || 'Client'}</ram:Name>
-        <ram:PostalTradeAddress>
-          <ram:LineOne>${project?.address || ''}</ram:LineOne>
-          <ram:CountryID>FR</ram:CountryID>
-        </ram:PostalTradeAddress>
-      </ram:BuyerTradeParty>
-    </ram:ApplicableHeaderTradeAgreement>
-    <ram:ApplicableHeaderTradeSettlement>
-      <ram:InvoiceCurrencyCode>${data.currency || 'EUR'}</ram:InvoiceCurrencyCode>
-      <ram:SpecifiedTradeSettlementPaymentMeans>
-        <ram:TypeCode>30</ram:TypeCode>
-        <ram:PayeePartyCredential>
-          <ram:IBANID>${data.seller_iban?.replace(/\s/g, '')}</ram:IBANID>
-        </ram:PayeePartyCredential>
-      </ram:SpecifiedTradeSettlementPaymentMeans>
-      <ram:ApplicableTradeTax>
-        <ram:BasisAmount>${net.toFixed(2)}</ram:BasisAmount>
-        <ram:TypeCode>VAT</ram:TypeCode>
-        <ram:CategoryCode>S</ram:CategoryCode>
-        <ram:RateApplicablePercent>${data.vat_rate}</ram:RateApplicablePercent>
-      </ram:ApplicableTradeTax>
-      <ram:SpecifiedTradePaymentTerms>
-        <ram:DueDateDateTime>
-          <udt:DateTimeString format="102">${data.due_date?.replace(/-/g, '')}</udt:DateTimeString>
-        </ram:DueDateDateTime>
-      </ram:SpecifiedTradePaymentTerms>
-      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-        <ram:LineTotalAmount>${net.toFixed(2)}</ram:LineTotalAmount>
-        <ram:TaxBasisTotalAmount>${net.toFixed(2)}</ram:TaxBasisTotalAmount>
-        <ram:TaxTotalAmount currencyID="${data.currency || 'EUR'}">${vat.toFixed(2)}</ram:TaxTotalAmount>
-        <ram:GrandTotalAmount>${gross.toFixed(2)}</ram:GrandTotalAmount>
-        <ram:DuePayableAmount>${gross.toFixed(2)}</ram:DuePayableAmount>
-      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-    </ram:ApplicableHeaderTradeSettlement>
-  </rsm:SupplyChainTransaction>
-</rsm:CrossIndustryInvoice>`;
-  };
+  const generateFacturXXML = () => buildFacturXCiiXml({
+    invoiceNumber: data.invoice_number || '',
+    invoiceType: data.invoice_type,
+    issueDate: data.issue_date || '',
+    dueDate: data.due_date,
+    currency: data.currency,
+    vatRate: data.vat_rate ?? 20,
+    items: (data.items || []).map(item => ({
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: item.unit_price,
+      vatRate: item.vat_rate,
+    })),
+    seller: {
+      name: data.seller_name || '',
+      address: data.seller_address,
+      siret: data.seller_siret,
+      vatNumber: data.seller_vat_number,
+      iban: data.seller_iban,
+    },
+    buyer: {
+      name: project?.client || '',
+      address: project?.address,
+    },
+  });
 
   const handleSave = async () => {
     if (!data.id) return;
