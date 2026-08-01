@@ -56,6 +56,9 @@ import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
 import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
+import { registerTaskRoutes } from "./server/routes/tasks";
+import { registerSendEmailRoutes } from "./server/routes/sendEmail";
+import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { getNextDocNumber as getNextDocNumberImpl } from "./server/getNextDocNumber";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
@@ -1375,53 +1378,6 @@ export async function createApp() {
     res.json({ status: "ok", environment: process.env.NODE_ENV });
   });
 
-  app.get("/api/tasks", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin.from('tasks').select('*').eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json(data || []);
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tasks" }); }
-  });
-
-  app.post("/api/tasks", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, project_id, title, start_date, end_date, progress, dependencies } = req.body;
-      const id = bodyId || crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('tasks').insert({ id, tenant_id: tenantId, project_id, title, start_date, end_date, progress: progress || 0, dependencies: dependencies || [] });
-      if (error) throw error;
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création de la tâche "${title}"`, title, id, 'task', 'Tâches');
-      res.status(201).json({ id });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create task" }); }
-  });
-
-  app.put("/api/tasks/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { title, start_date, end_date, progress, dependencies } = req.body;
-      const { error } = await supabaseAdmin.from('tasks').update({ title, start_date, end_date, progress, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update task" }); }
-  });
-
-  app.delete("/api/tasks/:id", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { data: task } = await supabaseAdmin.from('tasks').select('title').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
-      const { error } = await supabaseAdmin.from('tasks').delete().eq('id', id).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const title = (task as any)?.title || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression de la tâche "${title}"`, title, id, 'task', 'Tâches');
-      res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete task" }); }
-  });
-
   async function requireTenantAdmin(userId: string): Promise<string> {
     const tenantId = await getTenantId(userId);
     if ((await getSystemRole(tenantId, userId)) !== 'admin') {
@@ -1504,266 +1460,6 @@ export async function createApp() {
   };
 
   // ── End Activity Feed ───────────────────────────────────────────────────────
-
-  app.post("/api/send-email", async (req: any, res: any) => {
-    try {
-      const { to, subject, text, html, attachments, userEmail } = req.body;
-
-      // Get settings from Supabase
-      const tenantId = await getTenantId(req.user.id);
-      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      if (!settings) {
-        return res.status(500).json({ error: "Settings not found" });
-      }
-
-      const smtpHost = (settings as any).smtpHost || process.env.SMTP_HOST;
-      const smtpPort = (settings as any).smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = (settings as any).smtpUser || process.env.SMTP_USER;
-      const smtpPass = (settings as any).smtpPass || process.env.SMTP_PASS;
-
-      if (!smtpHost || !smtpUser || !smtpPass) {
-        return res.status(500).json({ error: "Configuration SMTP manquante" });
-      }
-
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: parseInt(String(smtpPort)),
-        secure: String(smtpPort) === '465',
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
-      const from = (settings as any).senderOption === 'personal' ? userEmail : (settings as any).email;
-      const cc = (settings as any).senderOption === 'personal' ? (settings as any).email : undefined;
-
-      await transporter.sendMail({
-        from,
-        to,
-        cc,
-        subject,
-        text,
-        html,
-        attachments
-      });
-
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ error: "Failed to send email: " + error.message });
-    }
-  });
-
-  app.get("/api/projects/:projectId/reports", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { data: reports, error } = await supabaseAdmin.from('site_reports').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).order('date', { ascending: false });
-      if (error) throw error;
-      const parsedReports = (reports || []).map((report: any) => ({
-        ...report,
-        stakeholders: Array.isArray(report.stakeholders) ? report.stakeholders : (() => { try { return report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) {
-          console.error("[GET /api/projects/:projectId/reports]", e); return []; } })(),
-        companies: Array.isArray(report.companies) ? report.companies : (() => { try { return report.companies ? JSON.parse(report.companies) : []; } catch (e) {
-          console.error("[GET /api/projects/:projectId/reports]", e); return []; } })()
-      }));
-      res.json(parsedReports);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch reports" });
-    }
-  });
-
-  app.post("/api/projects/:projectId/reports", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { date, report_number } = req.body;
-      const id = crypto.randomUUID();
-      const { error: insErr } = await supabaseAdmin.from('site_reports').insert({ id, tenant_id: tenantId, project_id: projectId, date, report_number });
-      if (insErr) throw insErr;
-      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
-      const projectName = (project as any)?.name || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${report_number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
-      // Copy open notes from previous report
-      const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
-      if (previousReports && previousReports.length > 0) {
-        const prevId = previousReports[0].id;
-        const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
-        if (openNotes && openNotes.length > 0) {
-          const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
-          await supabaseAdmin.from('site_report_notes').insert(newNotes);
-        }
-      }
-      res.status(201).json({ id });
-    } catch (error) {
-      console.error("[POST /api/projects/:projectId/reports]", error);
-      res.status(500).json({ error: "Failed to create report" });
-    }
-  });
-
-  app.get("/api/reports/:reportId/notes", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { reportId } = req.params;
-      const { data: notes, error } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', reportId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json(notes);
-    } catch (error) {
-      console.error("[GET /api/reports/:reportId/notes]", error);
-      res.status(500).json({ error: "Failed to fetch notes" });
-    }
-  });
-
-  app.post("/api/reports/:reportId/notes", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { reportId } = req.params;
-      const { category, note_number, responsible_company, issue_date, due_date } = req.body;
-      const id = crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('site_report_notes').insert({ id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date });
-      if (error) throw error;
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Ajout de la note de chantier N° ${note_number}`, category || '', id, 'site_report_note', 'Notes de site');
-      res.status(201).json({ id });
-    } catch (error) {
-      console.error("[POST /api/reports/:reportId/notes]", error);
-      res.status(500).json({ error: "Failed to create note" });
-    }
-  });
-
-  app.put("/api/reports/:reportId", async (req: any, res: any) => {
-    let tenantId: string | undefined;
-    try {
-      tenantId = await getTenantId(req.user.id);
-      const { reportId } = req.params;
-      const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting } = req.body;
-      const { error } = await supabaseAdmin.from('site_reports').update({
-        pageFormat: pageFormat || null,
-        stakeholders: stakeholders || [],
-        companies: companies || [],
-        meetingNotes: meetingNotes || null,
-        nextMeeting: nextMeeting || null
-      }).eq('id', reportId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
-      res.json({ ...(updatedReport as any), stakeholders: (updatedReport as any)?.stakeholders || [], companies: (updatedReport as any)?.companies || [] });
-    } catch (error) {
-      captureWithContext(error, { route: 'PUT /api/reports/:reportId', tenantId, userId: req.user?.id });
-      res.status(500).json({ error: "Failed to update report" });
-    }
-  });
-
-  app.put("/api/notes/:noteId", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { noteId } = req.params;
-      const { category, responsible_company, text, status, due_date, realization_date } = req.body;
-      const { error } = await supabaseAdmin.from('site_report_notes').update({ category, responsible_company, text, status, due_date, realization_date }).eq('id', noteId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[PUT /api/notes/:noteId]", error);
-      res.status(500).json({ error: "Failed to update note" });
-    }
-  });
-
-  app.delete("/api/notes/:noteId", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { noteId } = req.params;
-      const { data: note } = await supabaseAdmin.from('site_report_notes').select('note_number, category').eq('id', noteId).eq('tenant_id', tenantId).maybeSingle();
-      const { error } = await supabaseAdmin.from('site_report_notes').delete().eq('id', noteId).eq('tenant_id', tenantId);
-      if (error) throw error;
-      const noteNumber = (note as any)?.note_number;
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Suppression de la note de chantier N° ${noteNumber}`, (note as any)?.category || '', noteId, 'site_report_note', 'Notes de site');
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[DELETE /api/notes/:noteId]", error);
-      res.status(500).json({ error: "Failed to delete note" });
-    }
-  });
-
-  app.get("/api/projects/:projectId/cctp", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { data: cctp, error } = await supabaseAdmin.from('cctps').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
-      if (error && error.code !== 'PGRST116') throw error;
-      if (cctp) {
-        res.json(typeof (cctp as any).data === 'string' ? JSON.parse((cctp as any).data) : (cctp as any).data);
-      } else {
-        res.status(404).json({ error: "CCTP not found" });
-      }
-    } catch (error) {
-      console.error("[GET /api/projects/:projectId/cctp]", error);
-      res.status(500).json({ error: "Failed to fetch CCTP" });
-    }
-  });
-
-  app.post("/api/projects/:projectId/cctp", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const data = req.body;
-      const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
-      data.id = id;
-      const { data: existing } = await supabaseAdmin.from('cctps').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
-      if (existing) {
-        await supabaseAdmin.from('cctps').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
-      } else {
-        await supabaseAdmin.from('cctps').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
-      }
-      res.json(data);
-    } catch (error) {
-      console.error("[POST /api/projects/:projectId/cctp]", error);
-      res.status(500).json({ error: "Failed to save CCTP" });
-    }
-  });
-
-  app.get("/api/projects/:projectId/dpgf", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const { data: dpgf, error } = await supabaseAdmin.from('dpgfs').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
-      if (error && error.code !== 'PGRST116') throw error;
-      if (dpgf) {
-        res.json(typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data);
-      } else {
-        res.status(404).json({ error: "DPGF not found" });
-      }
-    } catch (error) {
-      console.error("[GET /api/projects/:projectId/dpgf]", error);
-      res.status(500).json({ error: "Failed to fetch DPGF" });
-    }
-  });
-
-  app.post("/api/projects/:projectId/dpgf", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { projectId } = req.params;
-      const data = req.body;
-      const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
-      data.id = id;
-      const { data: existing } = await supabaseAdmin.from('dpgfs').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
-      if (existing) {
-        await supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
-      } else {
-        await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
-        const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
-        const projectName = (project as any)?.name || '';
-        const userName = await getUserName(tenantId, req.user.id, req.user.email);
-        logActivity(tenantId, req.user.id, userName, `Création du DPGF du projet "${projectName}"`, projectName, id, 'dpgf', 'Situations/DPGF');
-      }
-      res.json(data);
-    } catch (error) {
-      console.error("[POST /api/projects/:projectId/dpgf]", error);
-      res.status(500).json({ error: "Failed to save DPGF" });
-    }
-  });
 
   // camelCase (frontend) ↔ snake_case (Supabase settings table)
   const toSnake: Record<string, string> = {
@@ -2013,7 +1709,7 @@ export async function createApp() {
   registerProjectTemplateRoutes(app, { supabaseAdmin, getTenantId });
   registerActDataRoutes(app, { supabaseAdmin, getTenantId });
   registerDetDataRoutes(app, { supabaseAdmin, getTenantId });
-  registerDpgfRoutes(app, { supabaseAdmin, getTenantId });
+  registerDpgfRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCctpRoutes(app, { supabaseAdmin, getTenantId });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
@@ -2063,6 +1759,9 @@ export async function createApp() {
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload });
+  registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
+  registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
