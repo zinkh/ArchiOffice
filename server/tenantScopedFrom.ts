@@ -9,7 +9,7 @@
 // of server.ts. Existing inline routes in server.ts are untouched; this is
 // additive, not a retrofit of the whole file.
 export interface TenantScopedTable {
-  select: (columns?: string) => any;
+  select: (columns?: string, opts?: { count?: 'exact' | 'planned' | 'estimated'; head?: boolean }) => any;
   update: (payload: Record<string, unknown>) => any;
   delete: () => any;
   insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => any;
@@ -17,7 +17,8 @@ export interface TenantScopedTable {
 
 export function tenantScopedFrom(supabaseAdmin: any, tenantId: string, table: string): TenantScopedTable {
   return {
-    select: (columns?: string) => supabaseAdmin.from(table).select(columns).eq('tenant_id', tenantId),
+    select: (columns?: string, opts?: { count?: 'exact' | 'planned' | 'estimated'; head?: boolean }) =>
+      supabaseAdmin.from(table).select(columns, opts).eq('tenant_id', tenantId),
     update: (payload: Record<string, unknown>) => supabaseAdmin.from(table).update(payload).eq('tenant_id', tenantId),
     delete: () => supabaseAdmin.from(table).delete().eq('tenant_id', tenantId),
     insert: (payload: Record<string, unknown> | Record<string, unknown>[]) =>
