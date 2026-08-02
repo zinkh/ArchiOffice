@@ -696,20 +696,23 @@ function ProtectedLayout() {
   // ProjectDetail (/projects/:id, not the /projects list) renders its own
   // dense, full-bleed Doctolib-style layout that manages scrolling per
   // column rather than at the page level — it opts out of the shared
-  // padded/max-width main + footer that every other route keeps.
+  // padded/max-width main + footer that every other route keeps. That
+  // per-column-scroll treatment only makes sense once there's room for the
+  // columns to sit side by side (lg+); below that the page falls back to
+  // normal, page-level scrolling like every other route.
   const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname);
 
   return (
     <AgentChatProvider>
     <div
-      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'h-screen overflow-hidden' : 'min-h-screen')}
+      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-screen lg:h-screen lg:overflow-hidden' : 'min-h-screen')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
     >
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
 
-        <main className={isFullBleedRoute ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto'}>
+        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto'}>
           <Outlet />
         </main>
 

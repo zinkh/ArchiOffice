@@ -14,6 +14,7 @@ import {
   IconFileInvoice,
   IconDots,
   IconEdit,
+  IconBuilding,
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
@@ -87,19 +88,29 @@ export interface ProjectOverviewProps {
   isAddingMilestone: boolean;
   setIsAddingMilestone: (v: boolean) => void;
   onGoToInvoices: () => void;
+  /** Phase whose notes should be shown in Column C — distinct from the
+   *  project's actual current phase, set by the topbar phase pills without
+   *  mutating the real mission phase. Falls back to the actual current
+   *  phase when unset. */
+  notePhase?: DocumentPhase;
 }
 
 export function ProjectOverview({
   project, setProject, phaseHistory, projectActivity, projectMembers, permits, milestones,
   onOpenFullEditor, onAddMilestone, onToggleMilestone,
   newMilestoneTitle, setNewMilestoneTitle, newMilestoneDate, setNewMilestoneDate,
-  isAddingMilestone, setIsAddingMilestone, onGoToInvoices,
+  isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase,
 }: ProjectOverviewProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
+  // The project's actual current phase (Column A badge) — never changed by
+  // the topbar pills, only by the real phase picker in the full editor.
   const currentPhase: DocumentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase) || 'ESQ';
-  const isChantierPhase = CHANTIER_PHASES.has(currentPhase);
+  // The phase whose notes Column C displays/edits — may differ from the
+  // above while the user is just browsing phase notes via the topbar pills.
+  const viewedPhase: DocumentPhase = notePhase || currentPhase;
+  const isChantierPhase = CHANTIER_PHASES.has(viewedPhase);
   const pendingPermit = useMemo(() => permits.find(p => p.status === 'en_instruction'), [permits]);
   const nextMilestone = useMemo(() => {
     const upcoming = milestones.filter(m => !m.completed).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
@@ -123,13 +134,36 @@ export function ProjectOverview({
   const observationsField: 'etudes_notes' | 'chantier_notes' = isChantierPhase ? 'chantier_notes' : 'etudes_notes';
 
   return (
-    <div className="h-full flex overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
+    <div className="flex flex-col lg:h-full lg:flex-row overflow-visible lg:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
 
       {/* ── Column A — identity / admin ───────────────────────────── */}
-      <div className="w-[280px] shrink-0 border-r overflow-y-auto p-4" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
-        <div className="font-bold text-lg leading-tight mb-0.5" style={{ color: 'var(--tblr-text)' }}>{project.name}</div>
-        <div className="text-[13px] mb-0.5" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
-        {project.address && <div className="font-mono text-[11px] mb-3" style={{ color: 'var(--tblr-muted)' }}>{project.address}</div>}
+      <div
+        className="w-full lg:w-[280px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      >
+        <div className="flex items-start gap-3 mb-3">
+          {project.image_url ? (
+            <img
+              src={project.image_url}
+              alt={project.name}
+              referrerPolicy="no-referrer"
+              className="w-12 h-12 rounded-lg object-cover shrink-0"
+              style={{ border: '1px solid var(--tblr-border)' }}
+            />
+          ) : (
+            <div
+              className="w-12 h-12 rounded-lg shrink-0 flex items-center justify-center"
+              style={{ background: 'var(--tblr-surface-2)' }}
+            >
+              <IconBuilding size={20} style={{ color: 'var(--tblr-muted)' }} />
+            </div>
+          )}
+          <div className="min-w-0 pt-0.5">
+            <div className="font-bold text-[15px] leading-tight mb-0.5 truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</div>
+            <div className="text-[13px] mb-0.5 truncate" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
+            {project.address && <div className="font-mono text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>{project.address}</div>}
+          </div>
+        </div>
 
         <div className="flex gap-1.5 flex-wrap mb-3.5">
           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
@@ -191,7 +225,10 @@ export function ProjectOverview({
       </div>
 
       {/* ── Column B — historique ──────────────────────────────────── */}
-      <div className="w-[320px] shrink-0 border-r overflow-y-auto p-4" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+      <div
+        className="w-full lg:w-[320px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      >
         <div className="font-bold text-[15px] mb-3" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_history_title')}</div>
         {activityGroups.length === 0 && (
           <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_history_empty')}</p>
@@ -221,9 +258,12 @@ export function ProjectOverview({
       </div>
 
       {/* ── Column C — note de phase ───────────────────────────────── */}
-      <div className="flex-1 min-w-[380px] border-r overflow-y-auto p-6" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+      <div
+        className="w-full lg:flex-1 lg:min-w-[380px] border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4 lg:p-6"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      >
         <div className="font-bold text-base mb-4" style={{ color: 'var(--tblr-text)' }}>
-          Note de phase — {PHASE_LABELS[currentPhase] || currentPhase}
+          Note de phase — {PHASE_LABELS[viewedPhase] || viewedPhase}
         </div>
 
         <div className="mb-4">
@@ -295,7 +335,7 @@ export function ProjectOverview({
       </div>
 
       {/* ── Column D — plan d'actions ──────────────────────────────── */}
-      <div className="w-[260px] shrink-0 overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
+      <div className="w-full lg:w-[260px] lg:shrink-0 overflow-visible lg:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
         <div className="font-bold text-[15px] mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
           <button

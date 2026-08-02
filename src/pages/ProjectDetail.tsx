@@ -48,7 +48,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
-import { formatCurrency, cn } from '../lib/utils';
+import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
@@ -234,6 +234,11 @@ export default function ProjectDetail() {
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [activeTab, setActiveTab] = useState('INFOS');
   const [showFullEditor, setShowFullEditor] = useState(false);
+  // Which phase's notes are shown in the overview's "Note de phase" column.
+  // Distinct from the project's actual current phase (phaseHistory) — the
+  // topbar pills only change this, they never transition the real mission
+  // phase. `null` means "follow the actual current phase".
+  const [viewedPhase, setViewedPhase] = useState<DocumentPhase | null>(null);
   const [projectActivity, setProjectActivity] = useState<any[]>([]);
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const [planUploading, setPlanUploading] = useState(false);
@@ -418,6 +423,7 @@ export default function ProjectDetail() {
       if (res.ok) {
         fetchPhaseHistory();
         fetchProjectActivity();
+        setViewedPhase(null); // resync the overview's note column to the new actual phase
       } else {
         const err = await res.json().catch(() => null);
         alert(`Erreur lors du changement de phase : ${err?.error || res.statusText}`);
@@ -433,7 +439,11 @@ export default function ProjectDetail() {
       const res = await fetch(`/api/projects/${id}/full`);
       if (res.ok) {
         const data = await res.json();
-        setProject({ ...data.project, is_complete_mission: !!data.project.is_complete_mission });
+        setProject({
+          ...data.project,
+          is_complete_mission: isFlagTrue(data.project.is_complete_mission),
+          is_chantier: isFlagTrue(data.project.is_chantier),
+        });
         setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
         setInvoices(data.invoices);
         setSpecifications(data.specifications);
@@ -1375,10 +1385,10 @@ export default function ProjectDetail() {
   if (!project) return <div className="p-8 text-center">Loading project...</div>;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex flex-col lg:h-full">
       {/* Compact topbar */}
       <div
-        className="h-14 shrink-0 flex items-center gap-4 px-4 border-b"
+        className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <button
@@ -1402,24 +1412,30 @@ export default function ProjectDetail() {
           </span>
         </div>
 
-        <div className="flex-1 flex justify-center overflow-x-auto">
+        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center overflow-x-auto">
           <div className="flex gap-0.5 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
             {(() => {
               const primaryContrat = linkedContratsMoe[0];
               const includedPhases = primaryContrat
                 ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
                 : null;
+              const actualCurrentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+              const displayedPhase = viewedPhase || actualCurrentPhase;
               return MISSION_PHASES.filter(phase =>
                 !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
               ).map(phase => {
-                const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
+                const isDisplayed = phase === displayedPhase;
                 return (
                   <button
                     key={phase}
                     type="button"
-                    onClick={() => handleSetPhase(phase)}
+                    // Pills only choose which phase's notes to view in the
+                    // INFOS overview — they never change the project's real
+                    // mission phase (that stays in "Modifier la fiche
+                    // complète" ▸ Phase de mission actuelle).
+                    onClick={() => { setViewedPhase(phase); setActiveTab('INFOS'); setShowFullEditor(false); }}
                     className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap"
-                    style={isCurrent
+                    style={isDisplayed
                       ? { background: 'var(--tblr-primary)', color: '#fff' }
                       : { color: 'var(--tblr-muted)' }}
                   >
@@ -1431,7 +1447,7 @@ export default function ProjectDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
           {currentUser?.system_role === 'admin' && (
             <button
               onClick={handleDelete}
@@ -1484,11 +1500,12 @@ export default function ProjectDetail() {
         />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 lg:min-h-0 lg:overflow-hidden">
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
             project={project}
             setProject={setProject}
+            notePhase={viewedPhase || (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined)}
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
             projectMembers={projectMembers}
@@ -1506,7 +1523,7 @@ export default function ProjectDetail() {
             onGoToInvoices={() => { setActiveTab('RDT'); setIsAddingInvoice(true); }}
           />
         ) : (
-          <div className="h-full overflow-y-auto p-6">
+          <div className="lg:h-full overflow-visible lg:overflow-y-auto p-4 sm:p-6">
             <div className="max-w-6xl mx-auto space-y-8 pb-20">
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="flex items-center justify-between -mt-2 mb-2">
