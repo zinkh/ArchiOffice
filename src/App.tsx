@@ -693,32 +693,40 @@ function ProtectedLayout() {
     return <Navigate to="/onboarding" replace />;
   }
 
+  // ProjectDetail (/projects/:id, not the /projects list) renders its own
+  // dense, full-bleed Doctolib-style layout that manages scrolling per
+  // column rather than at the page level — it opts out of the shared
+  // padded/max-width main + footer that every other route keeps.
+  const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname);
+
   return (
     <AgentChatProvider>
     <div
-      className="flex min-h-screen font-sans overflow-x-hidden"
+      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'h-screen overflow-hidden' : 'min-h-screen')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
     >
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <Header />
 
-        <main className="flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto">
+        <main className={isFullBleedRoute ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto'}>
           <Outlet />
         </main>
 
-        <footer
-          className="border-t mt-auto py-4 px-6"
-          style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
-        >
-          <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
-            <div>{t('footer_rights')}</div>
-            <div className="flex gap-4">
-              <Link to="/privacy" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_privacy')}</Link>
-              <Link to="/terms" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_terms')}</Link>
+        {!isFullBleedRoute && (
+          <footer
+            className="border-t mt-auto py-4 px-6"
+            style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+          >
+            <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
+              <div>{t('footer_rights')}</div>
+              <div className="flex gap-4">
+                <Link to="/privacy" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_privacy')}</Link>
+                <Link to="/terms" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_terms')}</Link>
+              </div>
             </div>
-          </div>
-        </footer>
+          </footer>
+        )}
       </div>
     </div>
     </AgentChatProvider>

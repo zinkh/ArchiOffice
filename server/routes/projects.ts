@@ -6,6 +6,7 @@
 // those modules already own the POST/PUT/DELETE side of the same tables;
 // only the read lookups had never been extracted).
 import type { Express } from 'express';
+import { tenantScopedFrom } from '../tenantScopedFrom';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -63,6 +64,26 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
+  // Project-scoped activity log — powers the "Historique du projet" timeline
+  // in the redesigned ProjectDetail overview. Reads the same `activities`
+  // rows logActivity(...) already writes for project creation/deletion
+  // (below) and phase transitions (projectPhaseHistory.ts).
+  app.get("/api/projects/:id/activity", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'activities')
+        .select('*')
+        .eq('target_id', req.params.id)
+        .eq('target_type', 'project')
+        .order('created_at', { ascending: false });
+      if (error) { res.json([]); return; }
+      res.json(data || []);
+    } catch (e: any) {
+      console.error('[GET /api/projects/:id/activity]', e);
+      res.json([]);
+    }
+  });
+
   app.post("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -78,7 +99,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       // Generate project code — prefixed PREFIX-YEAR-NNN when the tenant configured
@@ -110,7 +131,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       });
       if (pe) throw pe;
       if (cotraitants_list?.length) {
@@ -151,7 +172,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       const { error: ue } = await supabaseAdmin.from('projects').update({
@@ -165,7 +186,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
       // Update related lists (delete + reinsert)

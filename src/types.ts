@@ -303,6 +303,10 @@ export interface Project {
   maf_intercalaire?: MafIntercalaire;
   taux_mission?: number;
   part_interet?: number;
+
+  // Context fields used by the ProjectDetail overview
+  secteur_abf?: string;
+  programme?: string;
 }
 
 export interface OrdreDeService {

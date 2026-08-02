@@ -74,6 +74,7 @@ import { MafCostBadge } from '../components/MafCostBadge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
+import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 
 import { useTranslation } from 'react-i18next';
 
@@ -232,6 +233,8 @@ export default function ProjectDetail() {
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [activeTab, setActiveTab] = useState('INFOS');
+  const [showFullEditor, setShowFullEditor] = useState(false);
+  const [projectActivity, setProjectActivity] = useState<any[]>([]);
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const [planUploading, setPlanUploading] = useState(false);
   const planInputRef = useRef<HTMLInputElement>(null);
@@ -335,6 +338,7 @@ export default function ProjectDetail() {
       fetchProjectTenders();
       fetchProjectMembers();
       fetchPhaseHistory();
+      fetchProjectActivity();
       fetchGpaReserves();
       fetchPermits();
       fetchRfis();
@@ -395,6 +399,14 @@ export default function ProjectDetail() {
     } catch (err) { console.error('Failed to fetch project phase history:', err); }
   };
 
+  const fetchProjectActivity = async () => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/projects/${id}/activity`);
+      if (res.ok) { const data = await res.json(); setProjectActivity(Array.isArray(data) ? data : []); }
+    } catch (err) { console.error('Failed to fetch project activity:', err); }
+  };
+
   const handleSetPhase = async (phase: DocumentPhase) => {
     if (!id) return;
     try {
@@ -405,6 +417,7 @@ export default function ProjectDetail() {
       });
       if (res.ok) {
         fetchPhaseHistory();
+        fetchProjectActivity();
       } else {
         const err = await res.json().catch(() => null);
         alert(`Erreur lors du changement de phase : ${err?.error || res.statusText}`);
@@ -1362,64 +1375,150 @@ export default function ProjectDetail() {
   if (!project) return <div className="p-8 text-center">Loading project...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-20">
-      {/* Navigation Header */}
-      <div className="flex items-center justify-between">
-        <button 
+    <div className="h-full flex flex-col">
+      {/* Compact topbar */}
+      <div
+        className="h-14 shrink-0 flex items-center gap-4 px-4 border-b"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      >
+        <button
           onClick={() => navigate('/projects')}
-          className="flex items-center gap-2 text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)] shrink-0"
+          style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          title={`${t('view_all')} ${t('projects')}`}
         >
-          <IconArrowLeft size={20} />
-          {t('view_all')} {t('projects')}
+          <IconArrowLeft size={18} />
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex items-baseline gap-2.5 min-w-0">
+          <span className="font-bold text-[15px] truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</span>
+          {(project.project_code || project.reference) && (
+            <span className="font-mono text-[11px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
+          )}
+          <span
+            className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold shrink-0 whitespace-nowrap"
+            style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+          >
+            {project.is_chantier ? 'Mission chantier active' : project.status}
+          </span>
+        </div>
+
+        <div className="flex-1 flex justify-center overflow-x-auto">
+          <div className="flex gap-0.5 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+            {(() => {
+              const primaryContrat = linkedContratsMoe[0];
+              const includedPhases = primaryContrat
+                ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
+                : null;
+              return MISSION_PHASES.filter(phase =>
+                !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
+              ).map(phase => {
+                const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
+                return (
+                  <button
+                    key={phase}
+                    type="button"
+                    onClick={() => handleSetPhase(phase)}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap"
+                    style={isCurrent
+                      ? { background: 'var(--tblr-primary)', color: '#fff' }
+                      : { color: 'var(--tblr-muted)' }}
+                  >
+                    {phase}
+                  </button>
+                );
+              });
+            })()}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           {currentUser?.system_role === 'admin' && (
-            <button 
+            <button
               onClick={handleDelete}
-              className="p-2.5 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
               title={t('delete')}
             >
-              <IconTrash size={20} />
+              <IconTrash size={18} />
             </button>
           )}
           <button
+            onClick={() => navigate('/projects')}
+            className="h-8 px-3 rounded-lg text-[13px] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+          >
+            Annuler
+          </button>
+          <button
             onClick={handleSave}
             disabled={isSaving}
-            className="flex items-center gap-2 px-3 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50"
+            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[13px] font-semibold text-white transition-all disabled:opacity-50"
+            style={{ background: 'var(--tblr-primary)' }}
           >
             {isSaving ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              <IconDeviceFloppy size={20} />
+              <IconDeviceFloppy size={16} />
             )}
             <span className="hidden sm:inline">{t('commit_changes')}</span>
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8">
-        {/* Main Column */}
-        <div className="space-y-8">
-          
-          {/* Tab Navigation */}
-          <PillTabs
-            className="mb-6"
-            activeId={activeTab}
-            onChange={setActiveTab}
-            tabs={([
-              { id: 'INFOS', label: 'INFOS', icon: IconInfoCircle },
-              { id: 'HONOS', label: 'HONOS', icon: IconReceipt2 },
-              { id: 'PRO', label: 'PRO', icon: IconFileDescription },
-              { id: 'ACT', label: 'ACT', icon: IconUsersGroup },
-              { id: 'VISA', label: 'VISA', icon: IconRubberStamp },
-              { id: 'DET', label: 'DET', icon: IconTools },
-              { id: 'RDT', label: 'RDT', icon: IconReportMoney },
-              { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
-            ] as PillTabItem[]).filter(tab =>
-              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
-            )}
+      {/* Tab bar */}
+      <div className="shrink-0 px-4 pt-3">
+        <PillTabs
+          activeId={activeTab}
+          onChange={setActiveTab}
+          tabs={([
+            { id: 'INFOS', label: 'INFOS', icon: IconInfoCircle },
+            { id: 'HONOS', label: 'HONOS', icon: IconReceipt2 },
+            { id: 'PRO', label: 'PRO', icon: IconFileDescription },
+            { id: 'ACT', label: 'ACT', icon: IconUsersGroup },
+            { id: 'VISA', label: 'VISA', icon: IconRubberStamp },
+            { id: 'DET', label: 'DET', icon: IconTools },
+            { id: 'RDT', label: 'RDT', icon: IconReportMoney },
+            { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
+          ] as PillTabItem[]).filter(tab =>
+            !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
+          )}
+        />
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === 'INFOS' && !showFullEditor ? (
+          <ProjectOverview
+            project={project}
+            setProject={setProject}
+            phaseHistory={phaseHistory}
+            projectActivity={projectActivity}
+            projectMembers={projectMembers}
+            permits={permits}
+            milestones={milestones}
+            onOpenFullEditor={() => setShowFullEditor(true)}
+            onAddMilestone={handleAddMilestone}
+            onToggleMilestone={handleToggleMilestone}
+            newMilestoneTitle={newMilestoneTitle}
+            setNewMilestoneTitle={setNewMilestoneTitle}
+            newMilestoneDate={newMilestoneDate}
+            setNewMilestoneDate={setNewMilestoneDate}
+            isAddingMilestone={isAddingMilestone}
+            setIsAddingMilestone={setIsAddingMilestone}
+            onGoToInvoices={() => { setActiveTab('RDT'); setIsAddingInvoice(true); }}
           />
-          <div className="tab-content mt-8">
+        ) : (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-6xl mx-auto space-y-8 pb-20">
+            {activeTab === 'INFOS' && showFullEditor && (
+              <div className="flex items-center justify-between -mt-2 mb-2">
+                <button
+                  onClick={() => setShowFullEditor(false)}
+                  className="flex items-center gap-2 text-sm font-semibold"
+                  style={{ color: 'var(--tblr-primary)' }}
+                >
+                  <IconArrowLeft size={16} /> {t('project_overview_back_to_summary')}
+                </button>
+              </div>
+            )}
             {activeTab === 'HONOS' && (
               <div className="space-y-8">
 
@@ -2104,7 +2203,7 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} /></div>}
-            {activeTab === 'INFOS' && (
+            {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
@@ -4505,8 +4604,9 @@ export default function ProjectDetail() {
               </div>
               </div>
             )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {/* AR Modal */}
       <AnimatePresence>
