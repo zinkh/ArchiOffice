@@ -67,7 +67,7 @@ We may also share data with **legal authorities** when required by law, court or
 
 • **Your personal profile data** (name, contact details, CV, avatar, education, experience) can be deleted immediately and permanently at any time, by yourself, from Profile > Confidentiality — no request or waiting period needed.
 • **Your cabinet's professional data** (projects, invoices, documents, contacts...) is deleted through a cabinet-wide closure requested by an administrator (Settings > Danger Zone). This starts a 30-day grace period, cancellable at any time, after which the deletion runs automatically and permanently.
-• **Legally mandated records** (in particular accounting documents, which French law requires to be kept for 10 years) are not affected by these deletions and remain your cabinet's responsibility to archive beforehand.
+• **Legally mandated records** (in particular accounting documents, which French law requires to be kept for 10 years) are not affected by these deletions and remain your cabinet's responsibility to archive beforehand — use **Settings > Archiving** to download a complete, exploitable export of your cabinet's activity (a CSV file per data table plus every uploaded file) at any time, independently of any deletion request.
 • Backup copies may persist for up to 60 additional days after a deletion.
 • Anonymized usage statistics may be retained indefinitely.`,
       },
@@ -93,7 +93,7 @@ We may also share data with **legal authorities** when required by law, court or
 • **Right to object**: object to processing based on legitimate interests.
 • **Right to withdraw consent**: at any time, for consent-based processing.
 
-You can exercise the rights of access, portability and erasure yourself, immediately, from Profile > Confidentiality (export or delete your personal profile data) and, for a cabinet administrator, from Settings > Danger Zone (request full cabinet closure). For any other request, contact us at privacy@archioffice.fr — we will respond within 30 days.`,
+You can exercise the rights of access, portability and erasure yourself, immediately, from Profile > Confidentiality (export or delete your personal profile data) and, for a cabinet administrator, from Settings > Archiving (export the cabinet's full activity) and Settings > Danger Zone (request full cabinet closure). For any other request, contact us at privacy@archioffice.fr — we will respond within 30 days.`,
       },
       {
         heading: '10. Cookies',
@@ -183,7 +183,7 @@ Nous pouvons également partager des données avec des **autorités légales** l
 
 • **Vos données personnelles de profil** (nom, coordonnées, CV, avatar, formations, expériences) peuvent être supprimées immédiatement et définitivement à tout moment, par vous-même, depuis Profil > Confidentialité — sans demande ni délai d'attente.
 • **Les données professionnelles de votre cabinet** (projets, factures, documents, contacts...) sont supprimées via une fermeture de cabinet demandée par un administrateur (Réglages > Zone dangereuse). Cela déclenche un délai de grâce de 30 jours, annulable à tout moment, à l'issue duquel la suppression s'exécute automatiquement et définitivement.
-• **Les documents à conservation légale obligatoire** (notamment les documents comptables, que la loi française impose de conserver 10 ans) ne sont pas concernés par ces suppressions et restent sous la responsabilité de votre cabinet, à archiver au préalable.
+• **Les documents à conservation légale obligatoire** (notamment les documents comptables, que la loi française impose de conserver 10 ans) ne sont pas concernés par ces suppressions et restent sous la responsabilité de votre cabinet, à archiver au préalable — utilisez **Réglages > Archivage** pour télécharger à tout moment un export complet et exploitable de l'activité du cabinet (un fichier CSV par table de données, ainsi que tous les fichiers déposés), indépendamment de toute demande de suppression.
 • Les copies de sauvegarde peuvent subsister pendant 60 jours supplémentaires après une suppression.
 • Les statistiques d'utilisation anonymisées peuvent être conservées indéfiniment.`,
       },
@@ -209,7 +209,7 @@ Nous pouvons également partager des données avec des **autorités légales** l
 • **Droit d'opposition** : vous opposer au traitement fondé sur des intérêts légitimes.
 • **Droit de retrait du consentement** : à tout moment, pour les traitements fondés sur le consentement.
 
-Vous pouvez exercer vous-même, immédiatement, les droits d'accès, de portabilité et d'effacement depuis Profil > Confidentialité (exporter ou supprimer vos données personnelles de profil) et, pour un administrateur de cabinet, depuis Réglages > Zone dangereuse (demander la fermeture complète du cabinet). Pour toute autre demande, contactez-nous à privacy@archioffice.fr — nous répondrons dans les 30 jours.`,
+Vous pouvez exercer vous-même, immédiatement, les droits d'accès, de portabilité et d'effacement depuis Profil > Confidentialité (exporter ou supprimer vos données personnelles de profil) et, pour un administrateur de cabinet, depuis Réglages > Archivage (exporter toute l'activité du cabinet) et Réglages > Zone dangereuse (demander la fermeture complète du cabinet). Pour toute autre demande, contactez-nous à privacy@archioffice.fr — nous répondrons dans les 30 jours.`,
       },
       {
         heading: '10. Cookies',

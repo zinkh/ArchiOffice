@@ -6,11 +6,12 @@ import { useUser } from '../UserContext';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
-  IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle
+  IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
 import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 
@@ -292,6 +293,7 @@ export default function Settings() {
   const [tenantDeletion, setTenantDeletion] = useState<{ deletion_requested_at: string | null; grace_period_days: number } | null>(null);
   const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
   const [isCancelingDeletion, setIsCancelingDeletion] = useState(false);
+  const [isExportingTenant, setIsExportingTenant] = useState(false);
 
   // Chorus Pro
   const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
@@ -595,12 +597,39 @@ export default function Settings() {
     }
   };
 
+  const handleExportTenantData = async () => {
+    setIsExportingTenant(true);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch('/api/settings/tenant-export', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Échec de l'export (${res.status}).`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = match?.[1] || `archioffice-export-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err?.message || "Échec de l'export des données du cabinet.");
+    } finally {
+      setIsExportingTenant(false);
+    }
+  };
+
   const handleRequestTenantDeletion = async () => {
     if (!window.confirm(
       "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront " +
       "définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. " +
-      "Pensez à archiver vos documents comptables au préalable : la loi française impose leur conservation pendant 10 ans, " +
-      "indépendamment de cette suppression."
+      "Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ? La loi française impose la " +
+      "conservation des documents comptables pendant 10 ans, indépendamment de cette suppression."
     )) return;
     setIsRequestingDeletion(true);
     try {
@@ -1705,6 +1734,27 @@ export default function Settings() {
             )}
           </div>
 
+          {/* ── Archivage — RGPD : export complet de l'activité du cabinet ── */}
+          <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Archivage</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Téléchargez une archive ZIP contenant toute l'activité du cabinet dans un format exploitable : un fichier CSV
+              par table de données (projets, factures, contacts, documents, réunions...) et l'ensemble des fichiers déposés
+              (documents, plans, CV, photos, pièces jointes). Utile pour vos archives légales — notamment comptables,
+              conservation obligatoire de 10 ans en droit français — indépendamment de toute suppression de compte.
+            </p>
+            <button
+              type="button"
+              onClick={handleExportTenantData}
+              disabled={isExportingTenant}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            >
+              {isExportingTenant ? <IconLoader2 size={13} className="animate-spin" /> : <IconDownload size={13} />}
+              {isExportingTenant ? 'Génération de l\'archive...' : 'Exporter toutes les données du cabinet'}
+            </button>
+          </div>
+
           {/* ── Zone dangereuse — RGPD : fermeture du cabinet ── */}
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-danger, #e03131)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-danger, #e03131)' }}>
@@ -1732,8 +1782,9 @@ export default function Settings() {
               <div className="space-y-2">
                 <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
                   Supprime définitivement le cabinet et toutes ses données (projets, factures, documents, contacts, comptes utilisateurs...)
-                  après un délai de grâce de 30 jours, annulable à tout moment d'ici là. Pensez à archiver vos documents comptables au
-                  préalable : la loi française impose leur conservation pendant 10 ans, indépendamment de cette suppression.
+                  après un délai de grâce de 30 jours, annulable à tout moment d'ici là. Utilisez le bouton « Exporter toutes les données
+                  du cabinet » ci-dessus au préalable : la loi française impose la conservation des documents comptables pendant 10 ans,
+                  indépendamment de cette suppression.
                 </p>
                 <button
                   type="button"

@@ -3,6 +3,7 @@
 // part of Settings even though it never touches the settings table itself).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { streamTenantExport } from '../tenantExport';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -125,6 +126,23 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
     } catch (error: any) {
       console.error("Error updating settings:", error);
       res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update settings: " + error.message });
+    }
+  });
+
+  // Archivage — export complet et exploitable de toute l'activité du cabinet
+  // (données + fichiers) en une archive ZIP téléchargeable. À utiliser avant
+  // une demande de fermeture de cabinet (ci-dessous) pour conserver ce que
+  // la loi impose (comptabilité : 10 ans) ou ce que le cabinet souhaite garder.
+  app.get("/api/settings/tenant-export", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single();
+      await streamTenantExport(supabaseAdmin, tenantId, (tenant as any)?.name || 'cabinet', res);
+    } catch (error: any) {
+      console.error("[GET /api/settings/tenant-export]", error);
+      if (!res.headersSent) {
+        res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to export tenant data" });
+      }
     }
   });
 
