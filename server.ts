@@ -71,6 +71,7 @@ import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
+import { startTenantPurge } from "./server/tenantPurge";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
 const upload = multer({
@@ -1674,6 +1675,9 @@ async function startServer() {
     // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
     // shim REST de ce même serveur, qui n'accepte les requêtes qu'une fois à l'écoute.
     startTenderRssPolling(supabaseAdmin);
+    // RGPD — purge automatisée des cabinets dont le délai de grâce de
+    // fermeture (30 jours, server/routes/settings.ts) est écoulé.
+    startTenantPurge(supabaseAdmin);
   });
 }
 

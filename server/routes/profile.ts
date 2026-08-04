@@ -141,6 +141,84 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
+  // RGPD — droit à la portabilité : export de toutes les données personnelles
+  // du compte courant (profil, CV/avatar, formations, expériences). Volontairement
+  // limité aux données propres à l'individu, pas aux données professionnelles
+  // du cabinet (projets, factures...) qui restent des données du tenant.
+  app.get("/api/profile/me/export", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const userId = req.user.id;
+      const [{ data: profile }, { data: education }, { data: experience }, authUserRes] = await Promise.all([
+        tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*').eq('id', userId).maybeSingle(),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'profile_education').select('*').eq('user_id', userId),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'profile_experience').select('*').eq('user_id', userId),
+        supabaseAdmin.auth.admin.getUserById(userId),
+      ]);
+      if (!profile) return res.status(404).json({ error: "Profil introuvable" });
+      const p = profile as any;
+      const cvDownloadUrl = await resolveFileUrl('cv', p.cv_url);
+
+      res.json({
+        exported_at: new Date().toISOString(),
+        account: {
+          email: authUserRes?.data?.user?.email || p.email,
+          account_created_at: authUserRes?.data?.user?.created_at || null,
+          terms_accepted_at: p.terms_accepted_at || null,
+        },
+        profile: {
+          name: p.name, job_title: p.job_title, department: p.department,
+          phone: p.phone, address: p.address, bio: p.bio,
+          avatar_url: p.avatar || null,
+          cv_filename: p.cv_filename || null,
+          cv_download_url: cvDownloadUrl,
+          cv_download_url_note: cvDownloadUrl ? "Lien temporaire, valable quelques jours seulement." : undefined,
+        },
+        education: education || [],
+        experience: experience || [],
+      });
+    } catch (e: any) {
+      console.error("[GET /api/profile/me/export]", e);
+      res.status(500).json({ error: "Failed to export profile data" });
+    }
+  });
+
+  // RGPD — droit à l'effacement : supprime le compte et les données
+  // personnelles de l'utilisateur courant (profil, CV, avatar, formations,
+  // expériences) et son compte d'authentification. Les données professionnelles
+  // du cabinet qu'il a produites (documents, factures...) restent, comme
+  // enregistrements de l'activité du cabinet, pas de l'individu.
+  app.delete("/api/profile/me", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const userId = req.user.id;
+
+      const { count } = await supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+      if ((count || 0) <= 1) {
+        return res.status(409).json({ error: "Vous êtes le seul compte de ce cabinet. Utilisez la fermeture de cabinet dans Réglages > Zone dangereuse pour supprimer l'ensemble des données du cabinet." });
+      }
+
+      const { data: profile } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('cv_url, avatar').eq('id', userId).maybeSingle();
+      const p = profile as any;
+      if (p?.cv_url) await deleteFromStorage('cv', p.cv_url).catch(() => {});
+      if (p?.avatar) await deleteFromStorage('logos', p.avatar).catch(() => {});
+      await tenantScopedFrom(supabaseAdmin, tenantId, 'profile_education').delete().eq('user_id', userId);
+      await tenantScopedFrom(supabaseAdmin, tenantId, 'profile_experience').delete().eq('user_id', userId);
+      // Deleted explicitly rather than relying solely on the
+      // `profiles.id REFERENCES auth.users(id) ON DELETE CASCADE` FK, so the
+      // row is gone even if the auth user delete below partially fails.
+      await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').delete().eq('id', userId);
+
+      const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("[DELETE /api/profile/me]", e);
+      res.status(500).json({ error: e.message || "Failed to delete account" });
+    }
+  });
+
   app.post("/api/profile/experience", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

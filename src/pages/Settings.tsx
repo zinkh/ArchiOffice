@@ -6,7 +6,7 @@ import { useUser } from '../UserContext';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
-  IconRefresh, IconSearch, IconTrash, IconTag
+  IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
@@ -288,6 +288,11 @@ export default function Settings() {
   const [isDisconnectingSuperpdp, setIsDisconnectingSuperpdp] = useState(false);
   const [superpdpNotice, setSuperpdpNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // RGPD — fermeture de cabinet (Zone dangereuse)
+  const [tenantDeletion, setTenantDeletion] = useState<{ deletion_requested_at: string | null; grace_period_days: number } | null>(null);
+  const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
+  const [isCancelingDeletion, setIsCancelingDeletion] = useState(false);
+
   // Chorus Pro
   const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
   const [isTestingChorusPro, setIsTestingChorusPro] = useState(false);
@@ -368,6 +373,9 @@ export default function Settings() {
         .catch(() => {});
       apiFetch('/api/chorus-pro/status')
         .then(s => setChorusProStatus(s))
+        .catch(() => {});
+      apiFetch('/api/settings/tenant-deletion')
+        .then((s: any) => setTenantDeletion(s))
         .catch(() => {});
       fetchProjectCategories();
     }
@@ -584,6 +592,36 @@ export default function Settings() {
       setChorusProNotice({ type: 'error', message: 'Erreur lors de la déconnexion.' });
     } finally {
       setIsDisconnectingChorusPro(false);
+    }
+  };
+
+  const handleRequestTenantDeletion = async () => {
+    if (!window.confirm(
+      "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront " +
+      "définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. " +
+      "Pensez à archiver vos documents comptables au préalable : la loi française impose leur conservation pendant 10 ans, " +
+      "indépendamment de cette suppression."
+    )) return;
+    setIsRequestingDeletion(true);
+    try {
+      const res = await apiFetch<{ deletion_requested_at: string }>('/api/settings/tenant-deletion', { method: 'POST' });
+      setTenantDeletion(prev => ({ deletion_requested_at: res.deletion_requested_at, grace_period_days: prev?.grace_period_days || 30 }));
+    } catch (err: any) {
+      alert(err?.message || "Échec de la demande de fermeture.");
+    } finally {
+      setIsRequestingDeletion(false);
+    }
+  };
+
+  const handleCancelTenantDeletion = async () => {
+    setIsCancelingDeletion(true);
+    try {
+      await apiFetch('/api/settings/tenant-deletion', { method: 'DELETE' });
+      setTenantDeletion(prev => ({ deletion_requested_at: null, grace_period_days: prev?.grace_period_days || 30 }));
+    } catch (err: any) {
+      alert(err?.message || "Échec de l'annulation.");
+    } finally {
+      setIsCancelingDeletion(false);
     }
   };
 
@@ -1663,6 +1701,49 @@ export default function Settings() {
               <div className="text-center py-12" style={{ color: 'var(--tblr-muted)' }}>
                 <IconPuzzle size={32} className="mx-auto mb-2 opacity-40" />
                 <p className="text-sm">Aucun plugin trouvé.</p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Zone dangereuse — RGPD : fermeture du cabinet ── */}
+          <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-danger, #e03131)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-danger, #e03131)' }}>
+              <IconAlertTriangle size={15} /> Zone dangereuse
+            </h2>
+            {tenantDeletion?.deletion_requested_at ? (
+              <div className="space-y-2">
+                <p className="text-sm" style={{ color: 'var(--tblr-text)' }}>
+                  Fermeture du cabinet demandée le {new Date(tenantDeletion.deletion_requested_at).toLocaleDateString('fr-FR')}.
+                  Toutes les données seront définitivement supprimées le{' '}
+                  {new Date(new Date(tenantDeletion.deletion_requested_at).getTime() + tenantDeletion.grace_period_days * 86400000).toLocaleDateString('fr-FR')}
+                  {' '}sauf annulation avant cette date.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCancelTenantDeletion}
+                  disabled={isCancelingDeletion}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                >
+                  {isCancelingDeletion ? <IconLoader2 size={13} className="animate-spin" /> : null} Annuler la fermeture
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Supprime définitivement le cabinet et toutes ses données (projets, factures, documents, contacts, comptes utilisateurs...)
+                  après un délai de grâce de 30 jours, annulable à tout moment d'ici là. Pensez à archiver vos documents comptables au
+                  préalable : la loi française impose leur conservation pendant 10 ans, indépendamment de cette suppression.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRequestTenantDeletion}
+                  disabled={isRequestingDeletion}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                  style={{ background: 'var(--tblr-danger, #e03131)' }}
+                >
+                  {isRequestingDeletion ? <IconLoader2 size={13} className="animate-spin" /> : <IconTrash size={13} />} Demander la fermeture du cabinet
+                </button>
               </div>
             )}
           </div>

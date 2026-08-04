@@ -5,7 +5,7 @@ import { IconArrowLeft, IconCommand } from '@tabler/icons-react';
 const content = {
   en: {
     title: 'Privacy Policy',
-    lastUpdated: 'Last updated: May 20, 2026',
+    lastUpdated: 'Last updated: August 4, 2026',
     sections: [
       {
         heading: '1. Introduction',
@@ -49,21 +49,26 @@ By using the Service, you agree to the collection and use of information in acco
       },
       {
         heading: '6. Data Sharing',
-        body: `We do not sell your personal data. We may share it with:
+        body: `We do not sell your personal data. We share it with the following sub-processors, each bound by a data processing agreement:
 
-• **Service providers**: Supabase (database and authentication), DigitalOcean (hosting), Stripe (payments), and email providers — all bound by data processing agreements.
-• **Legal authorities**: when required by law, court order, or to protect rights and safety.
-• **Business transfers**: in the event of a merger, acquisition, or asset sale, users will be notified.
+• **Supabase**: database, file storage and authentication for the whole Service.
+• **Our hosting provider**: infrastructure hosting.
+• **Stancer**: payment processing for your ArchiOffice subscription (Stripe is integrated but not yet in active use).
+• **Google (Gemini API)**: AI-assisted drafting features (proposals, CCTP...) send the relevant project text to Google's Gemini API for processing.
+• **Email providers**: transactional email delivery (SMTP), using either our platform mailer or your own SMTP configuration.
 
-All sub-processors are contractually required to maintain the same level of data protection.`,
+In addition, if your cabinet chooses to enable one of the following optional integrations (Settings > Plugins), the data you explicitly sync through it is also shared with that provider, under your cabinet's own relationship with them: **Zoho** (Invoice/Books), **Odoo**, **Ragic**, or **Chorus Pro** (AIFE — Ministère de l'Économie, mandatory for public-sector e-invoicing). These integrations are off by default and only exchange data once your cabinet configures and enables them.
+
+We may also share data with **legal authorities** when required by law, court order, or to protect rights and safety, and in a **business transfer** (merger, acquisition, asset sale), in which case users will be notified.`,
       },
       {
         heading: '7. Data Retention',
-        body: `We retain your data for as long as your account is active. Upon account deletion:
+        body: `We retain your data for as long as your account or your cabinet's account is active.
 
-• Account and profile data is deleted within 30 days.
-• Professional data (projects, invoices) is deleted within 90 days unless legally required to be retained longer.
-• Backup copies may persist for up to 60 additional days.
+• **Your personal profile data** (name, contact details, CV, avatar, education, experience) can be deleted immediately and permanently at any time, by yourself, from Profile > Confidentiality — no request or waiting period needed.
+• **Your cabinet's professional data** (projects, invoices, documents, contacts...) is deleted through a cabinet-wide closure requested by an administrator (Settings > Danger Zone). This starts a 30-day grace period, cancellable at any time, after which the deletion runs automatically and permanently.
+• **Legally mandated records** (in particular accounting documents, which French law requires to be kept for 10 years) are not affected by these deletions and remain your cabinet's responsibility to archive beforehand.
+• Backup copies may persist for up to 60 additional days after a deletion.
 • Anonymized usage statistics may be retained indefinitely.`,
       },
       {
@@ -88,7 +93,7 @@ All sub-processors are contractually required to maintain the same level of data
 • **Right to object**: object to processing based on legitimate interests.
 • **Right to withdraw consent**: at any time, for consent-based processing.
 
-To exercise these rights, contact us at privacy@archioffice.fr. We will respond within 30 days.`,
+You can exercise the rights of access, portability and erasure yourself, immediately, from Profile > Confidentiality (export or delete your personal profile data) and, for a cabinet administrator, from Settings > Danger Zone (request full cabinet closure). For any other request, contact us at privacy@archioffice.fr — we will respond within 30 days.`,
       },
       {
         heading: '10. Cookies',
@@ -116,7 +121,7 @@ If you believe we have not addressed your concern adequately, you have the right
   },
   fr: {
     title: 'Politique de Confidentialité',
-    lastUpdated: 'Dernière mise à jour : 20 mai 2026',
+    lastUpdated: 'Dernière mise à jour : 4 août 2026',
     sections: [
       {
         heading: '1. Introduction',
@@ -160,21 +165,26 @@ En utilisant le Service, vous acceptez la collecte et l'utilisation des informat
       },
       {
         heading: '6. Partage des Données',
-        body: `Nous ne vendons pas vos données personnelles. Nous pouvons les partager avec :
+        body: `Nous ne vendons pas vos données personnelles. Nous les partageons avec les sous-traitants suivants, chacun lié par un accord de traitement des données :
 
-• **Prestataires de services** : Supabase (base de données et authentification), DigitalOcean (hébergement), Stripe (paiements) et fournisseurs de messagerie — tous liés par des accords de traitement des données.
-• **Autorités légales** : lorsque la loi, une décision de justice ou la protection des droits et de la sécurité l'exige.
-• **Transferts d'entreprise** : en cas de fusion, acquisition ou vente d'actifs, les utilisateurs seront informés.
+• **Supabase** : base de données, stockage de fichiers et authentification pour l'ensemble du Service.
+• **Notre hébergeur** : hébergement de l'infrastructure.
+• **Stancer** : traitement des paiements de votre abonnement ArchiOffice (Stripe est intégré mais pas encore utilisé en production).
+• **Google (API Gemini)** : les fonctionnalités de rédaction assistée par IA (propositions, CCTP...) transmettent le texte concerné à l'API Gemini de Google pour traitement.
+• **Fournisseurs de messagerie** : envoi des e-mails transactionnels (SMTP), via notre messagerie de plateforme ou votre propre configuration SMTP.
 
-Tous les sous-traitants sont contractuellement tenus de maintenir le même niveau de protection des données.`,
+Par ailleurs, si votre cabinet active l'une des intégrations optionnelles suivantes (Réglages > Plugins), les données que vous synchronisez explicitement via cette intégration sont également partagées avec ce prestataire, dans le cadre de la relation propre de votre cabinet avec lui : **Zoho** (Invoice/Books), **Odoo**, **Ragic**, ou **Chorus Pro** (AIFE — Ministère de l'Économie, obligatoire pour la facturation électronique du secteur public). Ces intégrations sont désactivées par défaut et n'échangent des données qu'une fois configurées et activées par votre cabinet.
+
+Nous pouvons également partager des données avec des **autorités légales** lorsque la loi, une décision de justice ou la protection des droits et de la sécurité l'exige, et lors d'un **transfert d'entreprise** (fusion, acquisition, vente d'actifs), auquel cas les utilisateurs seront informés.`,
       },
       {
         heading: '7. Conservation des Données',
-        body: `Nous conservons vos données aussi longtemps que votre compte est actif. Lors de la suppression du compte :
+        body: `Nous conservons vos données aussi longtemps que votre compte ou celui de votre cabinet est actif.
 
-• Les données de compte et de profil sont supprimées dans les 30 jours.
-• Les données professionnelles (projets, factures) sont supprimées dans les 90 jours, sauf obligation légale de conservation plus longue.
-• Les copies de sauvegarde peuvent subsister pendant 60 jours supplémentaires.
+• **Vos données personnelles de profil** (nom, coordonnées, CV, avatar, formations, expériences) peuvent être supprimées immédiatement et définitivement à tout moment, par vous-même, depuis Profil > Confidentialité — sans demande ni délai d'attente.
+• **Les données professionnelles de votre cabinet** (projets, factures, documents, contacts...) sont supprimées via une fermeture de cabinet demandée par un administrateur (Réglages > Zone dangereuse). Cela déclenche un délai de grâce de 30 jours, annulable à tout moment, à l'issue duquel la suppression s'exécute automatiquement et définitivement.
+• **Les documents à conservation légale obligatoire** (notamment les documents comptables, que la loi française impose de conserver 10 ans) ne sont pas concernés par ces suppressions et restent sous la responsabilité de votre cabinet, à archiver au préalable.
+• Les copies de sauvegarde peuvent subsister pendant 60 jours supplémentaires après une suppression.
 • Les statistiques d'utilisation anonymisées peuvent être conservées indéfiniment.`,
       },
       {
@@ -199,7 +209,7 @@ Tous les sous-traitants sont contractuellement tenus de maintenir le même nivea
 • **Droit d'opposition** : vous opposer au traitement fondé sur des intérêts légitimes.
 • **Droit de retrait du consentement** : à tout moment, pour les traitements fondés sur le consentement.
 
-Pour exercer ces droits, contactez-nous à privacy@archioffice.fr. Nous répondrons dans les 30 jours.`,
+Vous pouvez exercer vous-même, immédiatement, les droits d'accès, de portabilité et d'effacement depuis Profil > Confidentialité (exporter ou supprimer vos données personnelles de profil) et, pour un administrateur de cabinet, depuis Réglages > Zone dangereuse (demander la fermeture complète du cabinet). Pour toute autre demande, contactez-nous à privacy@archioffice.fr — nous répondrons dans les 30 jours.`,
       },
       {
         heading: '10. Cookies',

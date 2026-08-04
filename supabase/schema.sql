@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS tenants (
   stripe_subscription_id TEXT,
   stancer_customer_id TEXT,
   stancer_subscription_id TEXT,
+  -- Fermeture de cabinet demandée par un admin (RGPD, droit à l'effacement) :
+  -- délai de grâce de 30 jours avant purge automatisée — server/tenantPurge.ts.
+  deletion_requested_at TIMESTAMPTZ,
+  deletion_requested_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -50,6 +54,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   address     TEXT,
   job_title   TEXT,
   department  TEXT,
+  -- Horodatage du consentement à la politique de confidentialité / CGU,
+  -- capturé à l'inscription (case à cocher obligatoire, voir Register.tsx).
+  terms_accepted_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

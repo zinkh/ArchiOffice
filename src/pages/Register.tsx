@@ -11,6 +11,7 @@ export default function Register() {
     password: '',
     confirm_password: '',
   });
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState<{ email: string; emailSent: boolean } | null>(null);
@@ -39,6 +40,10 @@ export default function Register() {
       setError('Le mot de passe doit contenir au moins 8 caractères.');
       return;
     }
+    if (!consent) {
+      setError('Vous devez accepter la politique de confidentialité et les CGU pour créer un compte.');
+      return;
+    }
 
     setLoading(true);
 
@@ -51,6 +56,7 @@ export default function Register() {
         admin_name: form.admin_name,
         email: form.email,
         password: form.password,
+        consent: true,
       }),
     });
 
@@ -237,13 +243,29 @@ export default function Register() {
             </div>
           </div>
 
+          <label className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={e => setConsent(e.target.checked)}
+              required
+              className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-blue-600 focus:ring-blue-500"
+            />
+            <span>
+              J'accepte la{' '}
+              <Link to="/privacy" target="_blank" className="text-blue-600 hover:underline">politique de confidentialité</Link>
+              {' '}et les{' '}
+              <Link to="/terms" target="_blank" className="text-blue-600 hover:underline">conditions générales d'utilisation</Link>.
+            </span>
+          </label>
+
           {error && (
             <p className="text-sm text-red-500 text-center">{error}</p>
           )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !consent}
             className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors mt-2"
           >
             {loading ? 'Création en cours...' : 'Créer mon cabinet'}
