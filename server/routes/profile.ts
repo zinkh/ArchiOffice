@@ -10,10 +10,11 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   upload: any;
 }
 
-export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
   app.get("/api/profile/:userId", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -38,6 +39,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
 
       res.json({
         ...profile,
+        cv_url: await resolveFileUrl('cv', (profile as any).cv_url),
         jobTitle: profile.job_title,
         education: education || [],
         experience: experience || [],
@@ -73,7 +75,8 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       const storagePath = `${tenantId}/${req.user.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
       const url = await uploadToStorage('cv', storagePath, file.buffer, file.mimetype);
       await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').update({ cv_url: url, cv_filename: file.originalname }).eq('id', req.user.id);
-      res.json({ url, filename: file.originalname });
+      const signedUrl = await resolveFileUrl('cv', url);
+      res.json({ url: signedUrl, filename: file.originalname });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to upload CV" });

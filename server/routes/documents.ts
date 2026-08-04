@@ -15,10 +15,11 @@ export interface RouteDeps {
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   upload: any;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -27,7 +28,8 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       if (project_id) query.eq('project_id', project_id as string);
       const { data, error } = await query;
       if (error) throw error;
-      res.json(data);
+      const withUrls = await Promise.all((data || []).map(async (d: any) => ({ ...d, file_url: await resolveFileUrl('documents', d.file_url) })));
+      res.json(withUrls);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch documents" }); }
   });
 
@@ -68,9 +70,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       // Delete storage files (best-effort, don't fail if storage cleanup fails)
       if (versions?.length) {
         for (const v of versions) {
-          if (v.file_url?.includes('/object/public/documents/')) {
-            deleteFromStorage('documents', v.file_url).catch(() => {});
-          }
+          if (v.file_url) deleteFromStorage('documents', v.file_url).catch(() => {});
         }
       }
       const docName = (doc as any)?.name || '';
@@ -128,7 +128,8 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const { id } = req.params;
       const { data, error } = await supabaseAdmin.from('document_versions').select('*').eq('tenant_id', tenantId).eq('document_id', id).order('version', { ascending: false });
       if (error) throw error;
-      res.json(data);
+      const withUrls = await Promise.all((data || []).map(async (v: any) => ({ ...v, file_url: await resolveFileUrl('documents', v.file_url) })));
+      res.json(withUrls);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch document versions" }); }
   });
 

@@ -9,17 +9,19 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   upload: any;
 }
 
-export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
   app.get("/api/plans", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
       const { data, error } = await supabaseAdmin.from('plans').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
       if (error) throw error;
-      res.json(data);
+      const withUrls = await Promise.all((data || []).map(async (p: any) => ({ ...p, file_url: await resolveFileUrl('plans', p.file_url) })));
+      res.json(withUrls);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch plans" }); }
   });
 
@@ -39,7 +41,8 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
         index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null
       });
       if (error) throw error;
-      res.json({ id, project_id, name, file_url, uploaded_at, index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null });
+      const signedUrl = await resolveFileUrl('plans', file_url);
+      res.json({ id, project_id, name, file_url: signedUrl, uploaded_at, index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create plan" }); }
   });
 
@@ -49,7 +52,7 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
       const { data: plan } = await supabaseAdmin.from('plans').select('file_url').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('plans').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
-      if ((plan as any)?.file_url?.includes('/object/public/plans/')) {
+      if ((plan as any)?.file_url) {
         deleteFromStorage('plans', (plan as any).file_url).catch(() => {});
       }
       res.json({ success: true });

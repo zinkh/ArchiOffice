@@ -9,17 +9,19 @@ export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
+  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   upload: any;
 }
 
-export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, upload }: RouteDeps) {
+export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload }: RouteDeps) {
   app.get("/api/visas", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id } = req.query;
       const { data, error } = await supabaseAdmin.from('visas').select('*').eq('tenant_id', tenantId).eq('project_id', project_id as string);
       if (error) throw error;
-      res.json(data);
+      const withUrls = await Promise.all((data || []).map(async (v: any) => ({ ...v, document_url: await resolveFileUrl('documents', v.document_url) })));
+      res.json(withUrls);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch visas" }); }
   });
 
@@ -28,6 +30,10 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
       const tenantId = await getTenantId(req.user.id);
       const { project_id, title, date, status, comments, lot_id } = req.body;
       const id = crypto.randomUUID();
+      // A client resubmitting an unchanged visa (no new file) sends back
+      // whatever URL it last displayed — possibly an already-signed one from
+      // a prior GET. resolveFileUrl's path extraction understands that
+      // shape too, so it always re-derives the true storage path.
       let document_url = req.body.document_url || null;
       if (req.file) {
         const storagePath = `${tenantId}/${project_id}/visas/${id}/${sanitizeFilename(req.file.originalname)}`;
@@ -37,7 +43,7 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
         id, tenant_id: tenantId, project_id, title, date, status: status || 'pending', comments, document_url, lot_id: lot_id || null
       }).select().single();
       if (error) throw error;
-      res.json(data);
+      res.json({ ...data, document_url: await resolveFileUrl('documents', data.document_url) });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
@@ -58,7 +64,7 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
         .eq('tenant_id', tenantId)
         .select().single();
       if (error) throw error;
-      res.json(data);
+      res.json({ ...data, document_url: await resolveFileUrl('documents', data.document_url) });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update visa" }); }
   });
 

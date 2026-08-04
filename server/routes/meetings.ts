@@ -15,10 +15,11 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   upload: any;
 }
 
-export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
   app.get("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -42,7 +43,8 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: meeting, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', id).single();
       if (error) throw error;
       const { data: photos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('meeting_id', id).order('uploaded_at');
-      res.json({ ...meeting, photos: photos || [] });
+      const photosWithUrls = await Promise.all((photos || []).map(async (p: any) => ({ ...p, file_url: await resolveFileUrl('meeting-photos', p.file_url) })));
+      res.json({ ...meeting, photos: photosWithUrls });
     } catch (e: any) {
       console.error("[GET /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
@@ -107,7 +109,8 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const uploaded_at = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').insert({ id: photoId, meeting_id: id, file_url, caption: caption || null, uploaded_at });
       if (error) throw error;
-      res.status(201).json({ id: photoId, meeting_id: id, file_url, caption, uploaded_at });
+      const signedUrl = await resolveFileUrl('meeting-photos', file_url);
+      res.status(201).json({ id: photoId, meeting_id: id, file_url: signedUrl, caption, uploaded_at });
     } catch (e: any) {
       console.error("[POST /api/meetings/:id/photos]", e); res.status(500).json({ error: e.message }); }
   });

@@ -1311,11 +1311,17 @@ export async function createApp() {
 
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
+  // These buckets hold personal/professional data (CVs, site documents, plans,
+  // meeting photos, message & feed attachments...), so they're private —
+  // access only ever goes through a short-lived signed URL, never a
+  // permanent public one. (The "logos" bucket is deliberately excluded: it
+  // holds only agency branding assets, not personal data, and is embedded
+  // directly in exported PDFs/DOCX where a non-expiring URL is simpler.)
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
-        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
+        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
         if (error && !error.message.includes('already exists')) {
           console.error(`[storage] Failed to create bucket "${bucket}":`, error.message);
         } else {
@@ -1330,13 +1336,47 @@ export async function createApp() {
       .from(bucket)
       .upload(storagePath, buffer, { contentType: mimetype, upsert: false });
     if (error) throw new Error(`Storage upload failed: ${error.message}`);
-    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
-    return data.publicUrl;
+    // Callers persist this value as the file's DB reference (file_url,
+    // cv_url, document_url...); resolveFileUrl() turns it back into a usable
+    // link on read.
+    return storagePath;
+  }
+
+  // Accepts a bare storage path, a pre-migration public URL, or a
+  // previously-issued signed URL (a client may echo one back unchanged in a
+  // later PUT, e.g. visas.ts) and returns the bare path in all three cases —
+  // so every stored shape keeps resolving/deleting correctly.
+  function storagePathFromValue(bucket: string, value: string): string {
+    if (!value.startsWith('http')) return value;
+    const withoutQuery = value.split('?')[0];
+    const publicMarker = `/object/public/${bucket}/`;
+    const signMarker = `/object/sign/${bucket}/`;
+    if (withoutQuery.includes(publicMarker)) return withoutQuery.split(publicMarker)[1];
+    if (withoutQuery.includes(signMarker)) return withoutQuery.split(signMarker)[1];
+    return value;
+  }
+
+  async function getSignedUrl(bucket: string, storagePath: string, expiresIn = 60 * 60 * 24 * 7): Promise<string | null> {
+    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(storagePath, expiresIn);
+    if (error) {
+      console.error(`[storage] Failed to sign URL for ${bucket}/${storagePath}:`, error.message);
+      return null;
+    }
+    return data.signedUrl;
+  }
+
+  // Resolves a stored file reference (path, legacy public URL, or an old
+  // signed URL) into a fresh signed URL. Default expiry is 7 days — long
+  // enough to survive a browsing session, and re-derived on every read since
+  // callers re-run this each time a record is fetched, so staleness never
+  // accumulates in the DB.
+  async function resolveFileUrl(bucket: string, value: string | null | undefined, expiresIn?: number): Promise<string | null> {
+    if (!value) return null;
+    return getSignedUrl(bucket, storagePathFromValue(bucket, value), expiresIn);
   }
 
   async function deleteFromStorage(bucket: string, fileUrl: string) {
-    const marker = `/object/public/${bucket}/`;
-    const path = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
+    const path = storagePathFromValue(bucket, fileUrl);
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
@@ -1487,14 +1527,14 @@ export async function createApp() {
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, upload });
+  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
-  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
-  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext, upload });
-  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
+  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, resolveFileUrl, captureWithContext, upload });
+  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
@@ -1520,15 +1560,15 @@ export async function createApp() {
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });

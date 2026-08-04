@@ -99,10 +99,11 @@ export class FakeSupabaseAdmin {
   // to complete without touching real Supabase Storage.
   private buckets = new Set<string>();
   // In-memory object store backing `.storage.from(bucket)`, used by
-  // server.ts's uploadToStorage/deleteFromStorage (documents.ts, plans.ts,
-  // visas.ts, meetings.ts, ...). Objects aren't retained for assertions —
-  // routes only ever pass the returned public URL back around — so a Set of
-  // "uploaded" paths per bucket is enough to make delete/remove meaningful.
+  // server.ts's uploadToStorage/deleteFromStorage/resolveFileUrl
+  // (documents.ts, plans.ts, visas.ts, meetings.ts, ...). Objects aren't
+  // retained for assertions — routes only ever pass the stored path/signed
+  // URL back around — so a Set of "uploaded" paths per bucket is enough to
+  // make delete/remove meaningful.
   private storageObjects = new Map<string, Set<string>>();
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
@@ -114,6 +115,10 @@ export class FakeSupabaseAdmin {
         return { data: { path }, error: null };
       },
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
+      createSignedUrl: async (path: string, expiresIn: number) => ({
+        data: { signedUrl: `https://fake.supabase.test/storage/v1/object/sign/${bucket}/${path}?token=fake&expiresIn=${expiresIn}` },
+        error: null,
+      }),
       remove: async (paths: string[]) => {
         const set = this.storageObjects.get(bucket);
         if (set) paths.forEach(p => set.delete(p));
