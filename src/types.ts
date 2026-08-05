@@ -799,6 +799,12 @@ export interface Invoice {
   mission_id?: string;
   mission_name?: string;
   advancement_pct?: number;
+  // Double numérotation : affaire_invoice_number est une référence métier
+  // complémentaire par affaire ("26014-ACO-02"), affichée à côté du numéro
+  // séquentiel légal (invoice_number) — jamais à sa place. phases porte la
+  // ventilation par phase de mission d'un acompte (plusieurs phases par facture).
+  affaire_invoice_number?: string;
+  phases?: InvoicePhase[];
   due_date: string;
   issue_date: string;
   description: string;
@@ -829,6 +835,13 @@ export interface InvoiceItem {
   quantity: number;
   unit_price: number;
   vat_rate: number;
+}
+
+export interface InvoicePhase {
+  phase_id: string;
+  phase_name: string;
+  avancement_pct: number;
+  montant_phase: number;
 }
 
 export interface SiteReport {

@@ -256,7 +256,13 @@ CREATE TABLE IF NOT EXISTS invoices (
   seller_name TEXT, seller_address TEXT, seller_siret TEXT,
   seller_vat_number TEXT, seller_iban TEXT, seller_bic TEXT,
   vat_rate NUMERIC, zoho_invoice_id TEXT, invoice_type TEXT DEFAULT 'standard',
-  mission_id TEXT, mission_name TEXT, advancement_pct NUMERIC DEFAULT 0
+  mission_id TEXT, mission_name TEXT, advancement_pct NUMERIC DEFAULT 0,
+  -- Double numérotation : affaire_invoice_number est une référence métier
+  -- complémentaire par affaire (ex: "26014-ACO-02"), jamais un remplacement
+  -- de invoice_number (le numéro légal séquentiel ci-dessus). phases porte
+  -- la ventilation par phase de mission d'un acompte, même forme que
+  -- notes_honoraires.phases : [{phase_id, phase_name, avancement_pct, montant_phase}]
+  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
 

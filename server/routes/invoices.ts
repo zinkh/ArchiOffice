@@ -16,9 +16,10 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   captureWithContext: (error: any, context: Record<string, any>) => void;
   getNextDocNumber: (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) => Promise<string>;
+  getNextAffaireInvoiceNumber: (tenantId: string, projectId: string) => Promise<string>;
 }
 
-export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber }: RouteDeps) {
+export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber }: RouteDeps) {
   app.get("/api/invoices", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -43,7 +44,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
-        invoice_type, mission_id, mission_name, advancement_pct,
+        invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
         items
       } = req.body;
 
@@ -70,8 +71,15 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         }
       }
 
-      // Auto-generate invoice_number if not provided
+      // Auto-generate invoice_number if not provided — the tenant-wide legal
+      // sequential reference, unaffected by the per-affaire number below.
       const finalInvoiceNumber = invoice_number || await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC');
+
+      // Auto-generate the per-affaire business reference for acompte invoices
+      // only (e.g. "26014-ACO-02") — a complement to, never a replacement of,
+      // finalInvoiceNumber above.
+      const finalAffaireInvoiceNumber = affaire_invoice_number
+        || (invoice_type === 'acompte' && project_id ? await getNextAffaireInvoiceNumber(tenantId, project_id) : null);
 
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
         id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id,
@@ -82,7 +90,8 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
         seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20,
         invoice_type: invoice_type || 'standard',
-        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0,
+        affaire_invoice_number: finalAffaireInvoiceNumber, phases: phases || []
       });
       if (insErr) throw insErr;
 
@@ -117,9 +126,16 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
-        invoice_type, mission_id, mission_name, advancement_pct,
+        invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
         items
       } = req.body;
+
+      // affaire_invoice_number/phases are only ever set at creation time (or
+      // by a client that explicitly resends them) — an edit form that omits
+      // them (e.g. a standard-invoice form with no phases UI) must not wipe
+      // out the acompte data already stored, unlike the other fields above
+      // which intentionally reset to their default when absent.
+      const { data: existingInvoice } = await supabaseAdmin.from('invoices').select('affaire_invoice_number, phases').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
 
       const { error: updErr } = await supabaseAdmin.from('invoices').update({
         amount: amount || 0, description: description || '', status: status || 'Draft', due_date: due_date || null,
@@ -127,7 +143,9 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
         seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20,
         invoice_type: invoice_type || 'standard',
-        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0
+        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0,
+        affaire_invoice_number: affaire_invoice_number ?? (existingInvoice as any)?.affaire_invoice_number ?? null,
+        phases: phases ?? (existingInvoice as any)?.phases ?? []
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

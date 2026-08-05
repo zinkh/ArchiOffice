@@ -64,6 +64,7 @@ import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { getNextDocNumber as getNextDocNumberImpl } from "./server/getNextDocNumber";
+import { getNextAffaireInvoiceNumber as getNextAffaireInvoiceNumberImpl } from "./server/getNextAffaireInvoiceNumber";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
 import multer from "multer";
@@ -1471,6 +1472,12 @@ export async function createApp() {
   const getNextDocNumber = (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) =>
     getNextDocNumberImpl(supabaseAdmin, tenantId, settingCol, countTable, defaultPrefix);
 
+  // Per-affaire business-reference numbering for acompte invoices — see
+  // server/getNextAffaireInvoiceNumber.ts. Bound to supabaseAdmin the same
+  // way as getNextDocNumber above.
+  const getNextAffaireInvoiceNumber = (tenantId: string, projectId: string) =>
+    getNextAffaireInvoiceNumberImpl(supabaseAdmin, tenantId, projectId);
+
   // Phase 7 pilot: Project Templates / ACT Data / DET Data now live in
   // server/routes/*.ts — see those files for why they were picked first
   // (small, self-contained, low traffic) and server/tenantScopedFrom.ts for
@@ -1518,7 +1525,7 @@ export async function createApp() {
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
-  registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber });
+  registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });

@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
-import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconPercentage, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
+import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
-import type { Invoice, Project } from '../types';
+import type { Invoice, InvoicePhase, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
@@ -47,6 +47,129 @@ function chorusProStatusLabel(status: string): { label: string; style: React.CSS
   if (status === 'REJETEE' || status === 'SUSPENDUE') return { label: 'Chorus Pro : rejetée', style: { background: '#ffe3e3', color: '#c92a2a', border: '1px solid #ffc9c9' } };
   if (status === 'PAIEMENT_EFFECTUE' || status === 'SOLDEE') return { label: 'Chorus Pro : payée', style: { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } };
   return { label: `Chorus Pro : ${status}`, style: { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' } };
+}
+
+// Invoices created before the multi-phase model only have a single
+// mission_id/mission_name/advancement_pct — synthesize a one-entry phases
+// list from them so read-only displays don't need two code paths.
+function getEffectivePhases(invoice: Invoice): InvoicePhase[] {
+  if (invoice.phases && invoice.phases.length > 0) return invoice.phases;
+  if (invoice.mission_id) {
+    return [{ phase_id: invoice.mission_id, phase_name: invoice.mission_name || '', avancement_pct: invoice.advancement_pct || 0, montant_phase: invoice.amount }];
+  }
+  return [];
+}
+
+// Editeur d'avancement multi-phases pour les factures d'acompte — permet de
+// couvrir plusieurs phases de mission (ex: APD 100% + PRO 30%) en une seule
+// facture. Même principe que l'éditeur "Avancement par phase" des Notes
+// d'honoraires (src/pages/ProjectDetail.tsx), adapté aux MISSIONS de cette page.
+function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
+  phases: InvoicePhase[];
+  onChange: (phases: InvoicePhase[]) => void;
+  project: Project | undefined;
+  currency: string;
+  t: (key: string) => string;
+}) {
+  const remuneration = project?.remuneration || 0;
+  const availableMissions = MISSIONS.filter(m => !phases.some(p => p.phase_id === m.id));
+  const total = phases.reduce((s, p) => s + (Number(p.montant_phase) || 0), 0);
+
+  const addPhase = () => {
+    const next = availableMissions[0];
+    if (!next) return;
+    onChange([...phases, { phase_id: next.id, phase_name: next.name, avancement_pct: 0, montant_phase: 0 }]);
+  };
+  const updatePhase = (idx: number, patch: Partial<InvoicePhase>) => {
+    const next = [...phases];
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  };
+  const removePhase = (idx: number) => onChange(phases.filter((_, i) => i !== idx));
+
+  return (
+    <div className="space-y-3 p-4 rounded-lg" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
+      <div className="flex items-center justify-between">
+        <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{t('invoices_phases_label')}</label>
+        <button
+          type="button"
+          onClick={addPhase}
+          disabled={availableMissions.length === 0}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-50"
+          style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+        >
+          <IconPlus size={12} /> {t('invoices_add_phase')}
+        </button>
+      </div>
+      {phases.length === 0 && (
+        <p className="text-xs" style={{ color: '#7d4e00' }}>{t('invoices_no_phases')}</p>
+      )}
+      <div className="space-y-2">
+        {phases.map((phase, idx) => {
+          const mission = MISSIONS.find(m => m.id === phase.phase_id);
+          const montantPhaseBase = remuneration * (mission?.default_pct || 0) / 100;
+          const montantAvancement = parseFloat((montantPhaseBase * (phase.avancement_pct || 0) / 100).toFixed(2));
+          return (
+            <div key={phase.phase_id} className="flex items-center gap-2 p-2 rounded-lg flex-wrap" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+              <select
+                className="text-xs font-semibold px-2 py-1.5 rounded outline-none"
+                style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={phase.phase_id}
+                onChange={e => {
+                  const m = MISSIONS.find(m => m.id === e.target.value);
+                  updatePhase(idx, { phase_id: e.target.value, phase_name: m?.name || '' });
+                }}
+              >
+                <option value={phase.phase_id}>{phase.phase_name}</option>
+                {availableMissions.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number" min={0} max={100} step={5}
+                  className="w-16 text-sm text-center rounded p-1 outline-none"
+                  style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={phase.avancement_pct}
+                  onChange={e => {
+                    const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                    updatePhase(idx, { avancement_pct: pct, montant_phase: parseFloat((montantPhaseBase * pct / 100).toFixed(2)) });
+                  }}
+                />
+                <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>%</span>
+              </div>
+              <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                <span>→</span>
+                <input
+                  type="number" min={0}
+                  className="w-24 text-sm text-right rounded p-1 outline-none"
+                  style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={phase.montant_phase}
+                  onChange={e => updatePhase(idx, { montant_phase: Number(e.target.value) || 0 })}
+                />
+                <span>€</span>
+              </div>
+              {montantAvancement > 0 && phase.montant_phase !== montantAvancement && (
+                <button type="button" className="text-[10px] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
+                  Auto
+                </button>
+              )}
+              <button type="button" onClick={() => removePhase(idx)} className="ml-auto p-1" style={{ color: 'var(--tblr-muted)' }} title={t('invoices_remove_phase')}>
+                <IconTrash size={14} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {phases.length > 0 && (
+        <div className="flex items-center justify-between text-sm font-bold px-1 pt-1" style={{ color: 'var(--tblr-text)', borderTop: '1px solid #ffe066' }}>
+          <span>{t('invoices_calculated_amount')}</span>
+          <span>{formatCurrency(total, currency)}</span>
+        </div>
+      )}
+      {!remuneration && (
+        <p className="text-xs flex items-center gap-1.5" style={{ color: '#e67700' }}><IconInfoCircle size={14} className="shrink-0" />{t('invoices_no_remuneration')}</p>
+      )}
+    </div>
+  );
 }
 
 export default function Invoices() {
@@ -219,9 +342,16 @@ export default function Invoices() {
     if (!editingInvoice) return;
     setIsSavingEdit(true);
     try {
+      const payload = { ...editForm };
+      if (acompteCalculated !== null) payload.amount = acompteCalculated;
+      if (payload.invoice_type === 'acompte' && payload.phases?.length) {
+        payload.mission_id = payload.phases[0].phase_id;
+        payload.mission_name = payload.phases[0].phase_name;
+        payload.advancement_pct = payload.phases[0].avancement_pct;
+      }
       const updated = await fetchJson<Invoice>(`/api/invoices/${editingInvoice.id}`, {
         method: 'PUT',
-        body: JSON.stringify(editForm)
+        body: JSON.stringify(payload)
       });
       const enriched = { ...updated, project_name: projects.find(p => p.id === updated.project_id)?.name || updated.project_name };
       setInvoices(invoices.map(i => i.id === enriched.id ? enriched : i));
@@ -236,12 +366,14 @@ export default function Invoices() {
   const openSendModal = (invoice: Invoice) => {
     const project = projects.find(p => p.id === invoice.project_id);
     const clientEmail = project?.client_email || project?.email_client || '';
-    const subject = `${invoice.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'} N° ${invoice.invoice_number} – ${invoice.project_name || project?.name || ''}`;
+    const affaireRef = invoice.affaire_invoice_number ? ` (réf. affaire ${invoice.affaire_invoice_number})` : '';
+    const subject = `${invoice.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'} N° ${invoice.invoice_number}${affaireRef} – ${invoice.project_name || project?.name || ''}`;
     const isAcompte = invoice.invoice_type === 'acompte';
-    const missionLine = isAcompte && invoice.mission_name
-      ? `Mission : ${invoice.mission_name} (${invoice.advancement_pct ?? 0}% d'avancement)\n`
+    const phases = isAcompte ? getEffectivePhases(invoice) : [];
+    const missionLine = phases.length > 0
+      ? `${phases.map(p => `Phase : ${p.phase_name} (${p.avancement_pct}% d'avancement)`).join('\n')}\n`
       : '';
-    const message = `Bonjour,\n\nVeuillez trouver ci-joint ${isAcompte ? "la facture d'acompte" : 'la facture'} N° ${invoice.invoice_number}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
+    const message = `Bonjour,\n\nVeuillez trouver ci-joint ${isAcompte ? "la facture d'acompte" : 'la facture'} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
     setSendingInvoice(invoice);
     setSendForm({ to: clientEmail, subject, message });
     setSendResult(null);
@@ -274,37 +406,32 @@ export default function Invoices() {
     }
   };
 
-  // Computed: auto-calculate acompte amount from mission + advancement
+  // Computed: sum of the multi-phase avancement montants (edit modal)
   const acompteCalculated = useMemo(() => {
-    if (editForm.invoice_type !== 'acompte' || !editForm.mission_id || !editForm.project_id) return null;
-    const project = projects.find(p => p.id === editForm.project_id);
-    const remuneration = project?.remuneration || 0;
-    if (!remuneration) return null;
-    const mission = MISSIONS.find(m => m.id === editForm.mission_id);
-    if (!mission || !mission.default_pct) return null;
-    const advancement = editForm.advancement_pct ?? 0;
-    return (remuneration * mission.default_pct / 100) * (advancement / 100);
-  }, [editForm.invoice_type, editForm.mission_id, editForm.project_id, editForm.advancement_pct, projects]);
+    if (editForm.invoice_type !== 'acompte' || !editForm.phases?.length) return null;
+    return editForm.phases.reduce((s, p) => s + (Number(p.montant_phase) || 0), 0);
+  }, [editForm.invoice_type, editForm.phases]);
 
   // Same for create modal
   const newAcompteCalculated = useMemo(() => {
-    if (newInvoice.invoice_type !== 'acompte' || !newInvoice.mission_id || !newInvoice.project_id) return null;
-    const project = projects.find(p => p.id === newInvoice.project_id);
-    const remuneration = project?.remuneration || 0;
-    if (!remuneration) return null;
-    const mission = MISSIONS.find(m => m.id === newInvoice.mission_id);
-    if (!mission || !mission.default_pct) return null;
-    const advancement = newInvoice.advancement_pct ?? 0;
-    return (remuneration * mission.default_pct / 100) * (advancement / 100);
-  }, [newInvoice.invoice_type, newInvoice.mission_id, newInvoice.project_id, newInvoice.advancement_pct, projects]);
+    if (newInvoice.invoice_type !== 'acompte' || !newInvoice.phases?.length) return null;
+    return newInvoice.phases.reduce((s, p) => s + (Number(p.montant_phase) || 0), 0);
+  }, [newInvoice.invoice_type, newInvoice.phases]);
 
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const payload = { ...newInvoice };
       if (newAcompteCalculated !== null) payload.amount = newAcompteCalculated;
-      if (payload.invoice_type === 'acompte' && payload.mission_name && !payload.description) {
-        payload.description = `Acompte – ${payload.mission_name} – ${payload.advancement_pct ?? 0}% d'avancement`;
+      if (payload.invoice_type === 'acompte' && payload.phases?.length && !payload.description) {
+        payload.description = `Acompte – ${payload.phases.map(p => `${p.phase_name} ${p.avancement_pct}%`).join(', ')}`;
+      }
+      if (payload.invoice_type === 'acompte' && payload.phases?.length) {
+        // Compat descendante : la 1ère phase alimente aussi les anciens champs
+        // mission_id/mission_name/advancement_pct pour les lectures pré-existantes.
+        payload.mission_id = payload.phases[0].phase_id;
+        payload.mission_name = payload.phases[0].phase_name;
+        payload.advancement_pct = payload.phases[0].avancement_pct;
       }
       const saved = await fetchJson<Invoice>('/api/invoices', {
         method: 'POST',
@@ -507,6 +634,7 @@ export default function Invoices() {
               { label: t('invoices_col_invoice_project'), primary: true, render: inv => (
                 <div>
                   <p className="font-semibold text-sm">{inv.invoice_number}</p>
+                  {inv.affaire_invoice_number && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
                   <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
@@ -615,6 +743,9 @@ export default function Invoices() {
                                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                                 )}
                               </div>
+                              {invoice.affaire_invoice_number && (
+                                <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                              )}
                               <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
                           </div>
@@ -740,6 +871,9 @@ export default function Invoices() {
                             <span className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
                             <p className="text-xs font-medium" style={{ color: 'var(--tblr-primary)' }}>{invoice.project_name || 'General'}</p>
                           </div>
+                          {invoice.affaire_invoice_number && (
+                            <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                          )}
                           <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                         </div>
                       </div>
@@ -926,47 +1060,13 @@ export default function Invoices() {
                   </div>
                 </div>
                 {newInvoice.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 rounded-lg" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
-                    <div>
-                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
-                      <select
-                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newInvoice.mission_id || ''}
-                        onChange={e => {
-                          const m = MISSIONS.find(m => m.id === e.target.value);
-                          setNewInvoice({ ...newInvoice, mission_id: e.target.value, mission_name: m?.name || '' });
-                        }}
-                      >
-                        <option value="">{t('invoices_mission_placeholder')}</option>
-                        {MISSIONS.map(m => (
-                          <option key={m.id} value={m.id}>{m.name} {m.default_pct ? `(${m.default_pct}%)` : ''}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_advancement_label')}</label>
-                      <input
-                        type="number" min={0} max={100} step={5}
-                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newInvoice.advancement_pct ?? ''}
-                        onChange={e => setNewInvoice({ ...newInvoice, advancement_pct: Number(e.target.value) })}
-                        placeholder="Ex : 30"
-                      />
-                    </div>
-                    {newAcompteCalculated !== null && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <IconInfoCircle size={16} style={{ color: '#e67700' }} className="shrink-0" />
-                        <span style={{ color: '#7d4e00' }}>
-                          {t('invoices_calculated_amount')} : <strong>{formatCurrency(newAcompteCalculated, currency)}</strong>
-                        </span>
-                      </div>
-                    )}
-                    {newInvoice.project_id && !projects.find(p => p.id === newInvoice.project_id)?.remuneration && (
-                      <p className="text-xs" style={{ color: '#e67700' }}>{t('invoices_no_remuneration')}</p>
-                    )}
-                  </div>
+                  <AcomptePhasesEditor
+                    phases={newInvoice.phases || []}
+                    onChange={phases => setNewInvoice({ ...newInvoice, phases })}
+                    project={projects.find(p => p.id === newInvoice.project_id)}
+                    currency={currency}
+                    t={t}
+                  />
                 )}
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
@@ -1062,50 +1162,20 @@ export default function Invoices() {
 
                 {/* Acompte mission fields */}
                 {editForm.invoice_type === 'acompte' && (
-                  <div className="space-y-3 p-4 rounded-lg" style={{ background: '#fff3bf', border: '1px solid #ffe066' }}>
-                    <div>
-                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_mission_label')}</label>
-                      <select
-                        className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={editForm.mission_id || ''}
-                        onChange={e => {
-                          const m = MISSIONS.find(m => m.id === e.target.value);
-                          setEditForm({ ...editForm, mission_id: e.target.value, mission_name: m?.name || '' });
-                        }}
-                      >
-                        <option value="">{t('invoices_mission_placeholder')}</option>
-                        {MISSIONS.map(m => (
-                          <option key={m.id} value={m.id}>{m.name} {m.default_pct ? `(${m.default_pct}%)` : ''}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_advancement_label')}</label>
-                      <div className="relative">
-                        <input
-                          type="number" min={0} max={100} step={5}
-                          className="w-full px-4 py-2 pr-10 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={editForm.advancement_pct ?? ''}
-                          onChange={e => setEditForm({ ...editForm, advancement_pct: Number(e.target.value) })}
-                          placeholder="Ex : 30"
-                        />
-                        <IconPercentage size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--tblr-muted)' }} />
-                      </div>
-                    </div>
-                    {acompteCalculated !== null && (
-                      <div className="flex items-center gap-2 text-sm p-2 rounded-lg" style={{ background: 'rgba(255,243,191,0.7)' }}>
-                        <IconInfoCircle size={16} style={{ color: '#e67700' }} className="shrink-0" />
-                        <span style={{ color: '#7d4e00' }}>
-                          {t('invoices_calculated_amount')} : <strong>{formatCurrency(acompteCalculated, currency)}</strong>
-                        </span>
-                      </div>
+                  <>
+                    {editForm.affaire_invoice_number && (
+                      <p className="text-xs font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                        {t('invoices_affaire_number_label')} : <strong>{editForm.affaire_invoice_number}</strong>
+                      </p>
                     )}
-                    {editForm.project_id && !projects.find(p => p.id === editForm.project_id)?.remuneration && (
-                      <p className="text-xs" style={{ color: '#e67700' }}>{t('invoices_no_remuneration')}</p>
-                    )}
-                  </div>
+                    <AcomptePhasesEditor
+                      phases={editForm.phases || []}
+                      onChange={phases => setEditForm({ ...editForm, phases })}
+                      project={projects.find(p => p.id === editForm.project_id)}
+                      currency={currency}
+                      t={t}
+                    />
+                  </>
                 )}
 
                 {/* Amount */}

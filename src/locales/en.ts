@@ -451,6 +451,11 @@ export default {
       "invoices_calculated_amount": "Calculated Amount (excl. VAT)",
       "invoices_project_remuneration": "Project fees",
       "invoices_no_remuneration": "No fee defined for this project",
+      "invoices_phases_label": "Advancement by phase",
+      "invoices_add_phase": "Add a phase",
+      "invoices_remove_phase": "Remove this phase",
+      "invoices_no_phases": "No phase added for this deposit invoice.",
+      "invoices_affaire_number_label": "Project ref.",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",

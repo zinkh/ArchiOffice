@@ -230,6 +230,7 @@ export default function Settings() {
     numPrefixDevis: 'DEVIS',
     numPrefixFacture: 'FAC',
     numPrefixHonoraires: 'NH',
+    numPrefixAffaire: '',
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -1374,10 +1375,17 @@ export default function Settings() {
               { label: 'Devis / Propositions', key: 'numPrefixDevis' as const, presets: ['DEVIS', 'DEV', 'PROP'] },
               { label: 'Factures', key: 'numPrefixFacture' as const, presets: ['FAC', 'Facture', 'F'] },
               { label: 'Notes d\'honoraires', key: 'numPrefixHonoraires' as const, presets: ['NH', 'NOTE-H', 'HONOS'] },
+              { label: 'Numéro d\'affaire (projets)', key: 'numPrefixAffaire' as const, presets: ['AFF', 'PROJ', ''] },
             ] as const).map(({ label, key, presets }) => {
               const year = new Date().getFullYear();
               const prefix = settings[key] || presets[0];
-              const preview = `${prefix}-${year}-001`;
+              // Le numéro d'affaire (project_code) suit son propre format
+              // PRÉFIXE-AA-NNN (année sur 2 chiffres, voir server/routes/projects.ts) —
+              // il sert aussi de base à la référence par affaire des factures
+              // d'acompte (ex: 26014-ACO-02, voir Invoices.tsx).
+              const preview = key === 'numPrefixAffaire'
+                ? (prefix ? `${prefix}-${String(year).slice(-2)}-001` : `${String(year).slice(-2)}001`)
+                : `${prefix}-${year}-001`;
               return (
                 <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div>
