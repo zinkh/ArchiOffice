@@ -39,5 +39,12 @@ export const invoiceSchema = z.object({
   mission_id: z.string().optional().nullable(),
   mission_name: z.string().optional().nullable(),
   advancement_pct: z.number().optional(),
+  affaire_invoice_number: z.string().optional().nullable(),
+  phases: z.array(z.object({
+    phase_id: z.string(),
+    phase_name: z.string(),
+    avancement_pct: z.number().min(0).max(100),
+    montant_phase: z.number(),
+  })).optional(),
   items: z.array(invoiceItemSchema).optional(),
 });

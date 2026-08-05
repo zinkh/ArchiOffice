@@ -451,6 +451,11 @@ export default {
       "invoices_calculated_amount": "Montant calculé (HT)",
       "invoices_project_remuneration": "Honoraires du projet",
       "invoices_no_remuneration": "Aucun honoraire défini pour ce projet",
+      "invoices_phases_label": "Avancement par phase",
+      "invoices_add_phase": "Ajouter une phase",
+      "invoices_remove_phase": "Retirer cette phase",
+      "invoices_no_phases": "Aucune phase ajoutée pour cet acompte.",
+      "invoices_affaire_number_label": "Réf. affaire",
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",
