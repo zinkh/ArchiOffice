@@ -15,6 +15,13 @@ import {
   IconMapPin,
 } from '@tabler/icons-react';
 import { BrandLogo } from '../components/ArchiOfficeLogo';
+import { HeroIllustration } from '../components/illustrations/HeroIllustration';
+import {
+  WorkspaceIllustration,
+  ProjectsIllustration,
+  DocsIllustration,
+  SiteProgressIllustration,
+} from '../components/illustrations/StepIllustrations';
 import i18n, { changeLanguageLazy } from '../i18n';
 
 const FEATURES = [
@@ -26,7 +33,12 @@ const FEATURES = [
   { icon: IconMapPin, titleKey: 'landing_feature_cadastre_title', descKey: 'landing_feature_cadastre_desc' },
 ] as const;
 
-const HOW_IT_WORKS_STEPS = [1, 2, 3, 4] as const;
+const HOW_IT_WORKS_STEPS = [
+  { step: 1, Illustration: WorkspaceIllustration },
+  { step: 2, Illustration: ProjectsIllustration },
+  { step: 3, Illustration: DocsIllustration },
+  { step: 4, Illustration: SiteProgressIllustration },
+] as const;
 
 const PRICING_TIERS = [
   { key: 'tier1', featureCount: 4, popular: false },
@@ -114,35 +126,46 @@ function Hero() {
         className="pointer-events-none absolute inset-x-0 top-0 h-[560px] -z-10"
         style={{ background: 'radial-gradient(600px circle at 50% 0%, var(--tblr-primary-lt), transparent 70%)' }}
       />
-      <motion.h1
-        {...fadeInUp}
-        className="max-w-3xl mx-auto text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight leading-[1.1]"
-        style={{ color: 'var(--tblr-text)' }}
-      >
-        {t('landing_hero_title')}
-      </motion.h1>
-      <motion.p
-        {...fadeInUp}
-        transition={{ ...fadeInUp.transition, delay: 0.1 }}
-        className="max-w-2xl mx-auto mt-6 text-base md:text-lg"
-        style={{ color: 'var(--tblr-muted)' }}
-      >
-        {t('landing_hero_subtitle')}
-      </motion.p>
-      <motion.div
-        {...fadeInUp}
-        transition={{ ...fadeInUp.transition, delay: 0.2 }}
-        className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3"
-      >
-        <Link to="/register" className="btn btn-primary text-base px-6 py-3">
-          {t('landing_hero_cta_primary')}
-          <IconArrowRight size={18} />
-        </Link>
-        <a href="#fonctionnalites" className="btn btn-secondary text-base px-6 py-3">
-          {t('landing_hero_cta_secondary')}
-        </a>
-      </motion.div>
-      <p className="mt-5 text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('landing_hero_trust_note')}</p>
+      <div className="max-w-[1200px] mx-auto grid md:grid-cols-2 gap-12 items-center">
+        <div className="text-center md:text-left">
+          <motion.h1
+            {...fadeInUp}
+            className="max-w-3xl mx-auto md:mx-0 text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight leading-[1.1]"
+            style={{ color: 'var(--tblr-text)' }}
+          >
+            {t('landing_hero_title')}
+          </motion.h1>
+          <motion.p
+            {...fadeInUp}
+            transition={{ ...fadeInUp.transition, delay: 0.1 }}
+            className="max-w-2xl mx-auto md:mx-0 mt-6 text-base md:text-lg"
+            style={{ color: 'var(--tblr-muted)' }}
+          >
+            {t('landing_hero_subtitle')}
+          </motion.p>
+          <motion.div
+            {...fadeInUp}
+            transition={{ ...fadeInUp.transition, delay: 0.2 }}
+            className="mt-9 flex flex-col sm:flex-row items-center md:items-start justify-center md:justify-start gap-3"
+          >
+            <Link to="/register" className="btn btn-primary text-base px-6 py-3">
+              {t('landing_hero_cta_primary')}
+              <IconArrowRight size={18} />
+            </Link>
+            <a href="#fonctionnalites" className="btn btn-secondary text-base px-6 py-3">
+              {t('landing_hero_cta_secondary')}
+            </a>
+          </motion.div>
+          <p className="mt-5 text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('landing_hero_trust_note')}</p>
+        </div>
+        <motion.div
+          {...fadeInUp}
+          transition={{ ...fadeInUp.transition, delay: 0.15 }}
+          className="hidden md:block"
+        >
+          <HeroIllustration className="w-full max-w-[380px] lg:max-w-[440px] mx-auto" />
+        </motion.div>
+      </div>
     </section>
   );
 }
@@ -195,8 +218,9 @@ function HowItWorks() {
         </motion.div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {HOW_IT_WORKS_STEPS.map((step, i) => (
+          {HOW_IT_WORKS_STEPS.map(({ step, Illustration: StepIllustration }, i) => (
             <motion.div key={step} {...fadeInUp} transition={{ ...fadeInUp.transition, delay: i * 0.08 }}>
+              <StepIllustration width={64} className="mb-4" />
               <div
                 className="w-9 h-9 flex items-center justify-center rounded-full font-semibold text-sm mb-4"
                 style={{ background: 'var(--tblr-primary)', color: '#fff' }}
