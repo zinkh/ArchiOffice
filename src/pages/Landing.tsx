@@ -220,7 +220,7 @@ function HowItWorks() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {HOW_IT_WORKS_STEPS.map(({ step, Illustration: StepIllustration }, i) => (
             <motion.div key={step} {...fadeInUp} transition={{ ...fadeInUp.transition, delay: i * 0.08 }}>
-              <StepIllustration width={64} className="mb-4" />
+              <StepIllustration className="mb-4 h-24 w-auto" />
               <div
                 className="w-9 h-9 flex items-center justify-center rounded-full font-semibold text-sm mb-4"
                 style={{ background: 'var(--tblr-primary)', color: '#fff' }}
