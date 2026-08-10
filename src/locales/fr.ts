@@ -880,6 +880,7 @@ export default {
       "ai_draft_project_behind": "Rédige un message interne pour l'équipe rappelant que le projet {{project}} (client {{client}}) est avancé à {{progress}}% alors qu'il reste {{days}} jour(s) avant l'échéance. Propose des actions pour rattraper le retard.",
       "ai_suggestion_invoice_overdue": "La facture {{number}} ({{client}}) est en retard de paiement.",
       "ai_draft_invoice_overdue": "Rédige un e-mail de relance de paiement poli pour la facture {{number}} d'un montant de {{amount}} auprès de {{client}}.",
+      "agent_chat_suggestions_badge": "{{count}} suggestion(s)",
 
       // Calendar page
       "calendar_page_subtitle": "Jalons et tâches, par semaine et par mois",

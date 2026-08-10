@@ -63,6 +63,7 @@ import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
+import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
 import { getNextDocNumber as getNextDocNumberImpl } from "./server/getNextDocNumber";
 import { getNextAffaireInvoiceNumber as getNextAffaireInvoiceNumberImpl } from "./server/getNextAffaireInvoiceNumber";
 import { sanitizeFilename } from "./server/sanitizeFilename";
@@ -1543,6 +1544,7 @@ export async function createApp() {
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
+  registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered

@@ -18,6 +18,7 @@ import {
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
+import { computeCopilotSuggestions, formatCopilotSuggestion } from '../lib/copilotSuggestions';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
@@ -154,63 +155,12 @@ function AdminDashboardView() {
   // ── Proactive AI suggestions — simple rule-based read of the data already
   // on this page (no extra network round-trip). Each suggestion opens the
   // agent chat with a prefilled draft the user reviews before sending, so
-  // the AI never acts without the user's go-ahead. ──
-  type Suggestion = { id: string; tone: 'danger' | 'warning'; text: string; draft: string };
-  const suggestions = React.useMemo<Suggestion[]>(() => {
-    const list: Suggestion[] = [];
-    const now = new Date();
-
-    const overdueMilestonesByProject = new Map<string, Milestone[]>();
-    milestones
-      .filter(m => !m.completed && m.project_id && new Date(m.due_date) < now)
-      .forEach(m => {
-        const arr = overdueMilestonesByProject.get(m.project_id!) || [];
-        arr.push(m);
-        overdueMilestonesByProject.set(m.project_id!, arr);
-      });
-    for (const [projectId, ms] of overdueMilestonesByProject) {
-      const project = projects.find(p => p.id === projectId);
-      if (!project) continue;
-      list.push({
-        id: `overdue-milestone-${projectId}`,
-        tone: 'danger',
-        text: t('ai_suggestion_overdue_milestone', { count: ms.length, project: project.name }),
-        draft: t('ai_draft_overdue_milestone', {
-          project: project.name,
-          client: project.client,
-          titles: ms.map(m => m.title).join(', '),
-        }),
-      });
-    }
-
-    projects
-      .filter(p => p.status === 'In Progress' && p.end_date)
-      .forEach(p => {
-        const daysLeft = Math.ceil((new Date(p.end_date).getTime() - now.getTime()) / 86400000);
-        if (daysLeft >= 0 && daysLeft <= 14 && (p.progression || 0) < 80) {
-          list.push({
-            id: `behind-schedule-${p.id}`,
-            tone: 'warning',
-            text: t('ai_suggestion_project_behind', { project: p.name, progress: p.progression || 0, days: daysLeft }),
-            draft: t('ai_draft_project_behind', { project: p.name, client: p.client, progress: p.progression || 0, days: daysLeft }),
-          });
-        }
-      });
-
-    invoices
-      .filter(inv => inv.status === 'overdue' || inv.status === 'Overdue')
-      .slice(0, 3)
-      .forEach(inv => {
-        list.push({
-          id: `overdue-invoice-${inv.id}`,
-          tone: 'danger',
-          text: t('ai_suggestion_invoice_overdue', { number: inv.invoice_number, client: inv.project_name || inv.client || '' }),
-          draft: t('ai_draft_invoice_overdue', { number: inv.invoice_number, client: inv.project_name || inv.client || '', amount: formatEur(inv.total_amount || inv.amount || 0) }),
-        });
-      });
-
-    return list.slice(0, 5);
-  }, [milestones, projects, invoices, t]);
+  // the AI never acts without the user's go-ahead. Rules live in
+  // src/lib/copilotSuggestions.ts, shared with the global chat badge. ──
+  const suggestions = React.useMemo(
+    () => computeCopilotSuggestions({ projects, milestones, invoices }).map(raw => formatCopilotSuggestion(raw, t)),
+    [milestones, projects, invoices, t]
+  );
 
   const dashboardHeader = (
     <>

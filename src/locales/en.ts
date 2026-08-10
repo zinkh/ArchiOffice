@@ -832,6 +832,7 @@ export default {
       "ai_draft_project_behind": "Draft an internal message to the team noting that project {{project}} (client {{client}}) is {{progress}}% complete with {{days}} day(s) left until the deadline. Suggest actions to catch up.",
       "ai_suggestion_invoice_overdue": "Invoice {{number}} ({{client}}) is overdue.",
       "ai_draft_invoice_overdue": "Draft a polite payment follow-up email for invoice {{number}} for {{amount}} addressed to {{client}}.",
+      "agent_chat_suggestions_badge": "{{count}} suggestion(s)",
 
       // Calendar page
       "calendar_page_subtitle": "Milestones and tasks, by week and by month",

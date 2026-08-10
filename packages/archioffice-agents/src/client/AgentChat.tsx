@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose, IconUpload } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
+import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
+import type { CopilotSuggestion, CopilotSuggestionRaw } from '@/src/lib/copilotSuggestions';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -15,9 +17,11 @@ interface AgentChatContextValue {
    */
   openChat: (agentId?: string, draftMessage?: string) => void;
   closeChat: () => void;
+  /** Re-fetches the proactive "next steps" suggestions shown on the floating badge. */
+  refreshCopilotSuggestions: () => void;
 }
 
-const AgentChatContext = createContext<AgentChatContextValue>({ openChat: () => {}, closeChat: () => {} });
+const AgentChatContext = createContext<AgentChatContextValue>({ openChat: () => {}, closeChat: () => {}, refreshCopilotSuggestions: () => {} });
 
 export function useAgentChat() {
   return useContext(AgentChatContext);
@@ -210,6 +214,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
+  const [copilotSuggestions, setCopilotSuggestions] = useState<CopilotSuggestion[]>([]);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -242,6 +247,19 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {});
   }, []);
+
+  // Proactive "next steps" suggestions surfaced on the floating badge —
+  // rule-based, computed on demand (no polling), same engine as the
+  // Dashboard's "Suggestions IA" widget. Silently no-ops without a tenant.
+  const loadCopilotSuggestions = useCallback(() => {
+    apiFetch('/api/copilot/suggestions')
+      .then((data: CopilotSuggestionRaw[]) => setCopilotSuggestions((data || []).map(raw => formatCopilotSuggestion(raw, t))))
+      .catch(() => {});
+  }, [t]);
+
+  useEffect(() => {
+    loadCopilotSuggestions();
+  }, [loadCopilotSuggestions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -426,7 +444,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AgentChatContext.Provider value={{ openChat, closeChat }}>
+    <AgentChatContext.Provider value={{ openChat, closeChat, refreshCopilotSuggestions: loadCopilotSuggestions }}>
       {children}
 
       {/* Floating trigger */}
@@ -434,10 +452,18 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
         onClick={() => setIsOpen(o => !o)}
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
         style={{ background: 'var(--tblr-primary)', color: 'white' }}
-        title={t('agents')}
+        title={copilotSuggestions.length > 0 ? t('agent_chat_suggestions_badge', { count: copilotSuggestions.length }) : t('agents')}
       >
         <IconRobot size={18} />
         <span className="hidden sm:inline">{t('agents')}</span>
+        {copilotSuggestions.length > 0 && (
+          <span
+            className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[10px] font-bold"
+            style={{ background: '#e03131', color: 'white', minWidth: 18, height: 18, padding: '0 4px' }}
+          >
+            {copilotSuggestions.length}
+          </span>
+        )}
       </button>
 
       {/* Chat panel */}
@@ -535,6 +561,38 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Proactive suggestions — passive only: clicking prefills the
+                draft below, the user still has to review and send it. */}
+            {copilotSuggestions.length > 0 && (
+              <div className="border-b px-4 py-3 space-y-2 shrink-0" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>
+                  {t('dashboard_ai_suggestions')}
+                </div>
+                {copilotSuggestions.map(s => (
+                  <div
+                    key={s.id}
+                    className="flex items-start gap-2 p-2 rounded-lg"
+                    style={{
+                      background: s.tone === 'danger' ? '#fff5f5' : '#fff4e6',
+                      border: `1px solid ${s.tone === 'danger' ? '#ffc9c9' : '#ffd8a8'}`,
+                    }}
+                  >
+                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? '#c92a2a' : '#e67700' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                      <button
+                        onClick={() => { setInput(s.draft); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                        className="mt-1 text-[11px] font-semibold hover:underline"
+                        style={{ color: 'var(--tblr-primary)' }}
+                      >
+                        {t('ai_draft_reminder_btn')}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
