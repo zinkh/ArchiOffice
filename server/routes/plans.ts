@@ -3,16 +3,16 @@
 // as meetings.ts/visas.ts for the plan file attachment.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  upload: any;
 }
 
-export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage }: RouteDeps) {
   app.get("/api/plans", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -23,7 +23,7 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch plans" }); }
   });
 
-  app.post("/api/plans", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/plans", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, name, index, version, parent_id, category } = req.body;

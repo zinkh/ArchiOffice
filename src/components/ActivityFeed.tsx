@@ -5,6 +5,8 @@ import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
+import { openSignedUrl } from '../lib/signedStorageUrl';
+import { SignedImage } from './SignedImage';
 
 interface Attachment {
   attachment_url?: string | null;
@@ -52,15 +54,15 @@ function AttachmentView({ item }: { item: Attachment }) {
   if (!item.attachment_url) return null;
   if (item.attachment_type?.startsWith('image/')) {
     return (
-      <a href={item.attachment_url} target="_blank" rel="noreferrer">
-        <img src={item.attachment_url} alt={item.attachment_name || 'pièce jointe'} className="mt-1.5 rounded-lg max-w-full max-h-56" />
-      </a>
+      <button type="button" onClick={() => openSignedUrl(item.attachment_url!)} className="block">
+        <SignedImage src={item.attachment_url} alt={item.attachment_name || 'pièce jointe'} className="mt-1.5 rounded-lg max-w-full max-h-56" />
+      </button>
     );
   }
   return (
-    <a href={item.attachment_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs mt-1.5 hover:underline w-fit" style={{ color: 'var(--tblr-primary)' }}>
+    <button type="button" onClick={() => openSignedUrl(item.attachment_url!)} className="flex items-center gap-1.5 text-xs mt-1.5 hover:underline w-fit" style={{ color: 'var(--tblr-primary)' }}>
       <IconFile size={13} /> {item.attachment_name || 'Pièce jointe'} <IconDownload size={12} />
-    </a>
+    </button>
   );
 }
 

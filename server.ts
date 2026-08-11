@@ -61,6 +61,7 @@ import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
+import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
@@ -1355,15 +1356,34 @@ export async function createApp() {
 
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
+  // These hold business documents (CCTP, plans, CVs, chat/feed attachments) —
+  // private, unlike "logos" (agency branding/avatars), which is meant to be
+  // public. uploadToStorage() below still returns a getPublicUrl()-shaped
+  // string for these (that call just builds a URL string; it doesn't check
+  // the bucket's actual public/private flag), so every existing DB row keeps
+  // working as a stable object *reference* — see server/storagePaths.ts and
+  // server/routes/storageAccess.ts, which exchange that reference for a
+  // short-lived signed URL after checking the caller's tenant owns it.
   async function ensureStorageBuckets() {
     for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
-        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: 52428800 });
+        const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
         if (error && !error.message.includes('already exists')) {
           console.error(`[storage] Failed to create bucket "${bucket}":`, error.message);
         } else {
           console.log(`[storage] Created bucket "${bucket}"`);
+        }
+      } else if ((existing as any).public) {
+        // Migrates a bucket created by an older deploy (when these were
+        // still `public: true`) — existing object URLs keep resolving the
+        // same way, they just now require a signed URL instead of being
+        // fetchable directly.
+        const { error } = await supabaseAdmin.storage.updateBucket(bucket, { public: false });
+        if (error) {
+          console.error(`[storage] Failed to make bucket "${bucket}" private:`, error.message);
+        } else {
+          console.log(`[storage] Migrated bucket "${bucket}" to private`);
         }
       }
     }
@@ -1537,14 +1557,14 @@ export async function createApp() {
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, upload });
+  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
-  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
+  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext, upload });
-  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
@@ -1577,13 +1597,14 @@ export async function createApp() {
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload, requireRole });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
+  registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });

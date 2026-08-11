@@ -39,6 +39,15 @@ describe('Plans', () => {
     const res = await request(app).post('/api/plans').set(authHeader(token)).field('project_id', 'p1').field('name', 'Sans fichier');
     expect(res.status).toBe(400);
   });
+
+  it('rejects a plan whose content is actually HTML, however it was named', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/plans').set(authHeader(token))
+      .field('project_id', 'p1').field('name', 'Faux plan')
+      .attach('file', Buffer.from('<html><body><script>alert(1)</script></body></html>'), 'plan.pdf');
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('Documents', () => {
@@ -56,6 +65,24 @@ describe('Documents', () => {
     const versions = fakeSupabaseAdmin.getTable('document_versions').filter(v => v.document_id === res.body.id);
     expect(versions.length).toBe(1);
     expect(versions[0].version).toBe(1);
+  });
+
+  it('rejects a document whose real content is HTML/script, disguised with a .pdf name and a forged Content-Type', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/documents').set(authHeader(token))
+      .field('project_id', 'p1').field('name', 'CCTP piégé').field('category', 'CCTP')
+      .attach('file', Buffer.from('<!DOCTYPE html><html><body><script>alert(document.cookie)</script></body></html>'), { filename: 'cctp.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a document upload by dangerous extension even before the content is read', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/documents').set(authHeader(token))
+      .field('project_id', 'p1').field('name', 'Script').field('category', 'CCTP')
+      .attach('file', Buffer.from('irrelevant content'), 'payload.svg');
+    expect(res.status).toBe(400);
   });
 
   it('rejects a document with no file attached', async () => {

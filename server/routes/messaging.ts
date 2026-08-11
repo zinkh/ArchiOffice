@@ -5,15 +5,15 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  upload: any;
 }
 
-export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, upload }: RouteDeps) {
+export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage }: RouteDeps) {
   const getProfileDisplayName = async (tenantId: string, userId: string): Promise<string> => {
     const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('name').eq('id', userId).maybeSingle();
     return (data as any)?.name || 'Utilisateur';
@@ -134,7 +134,7 @@ export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
-  app.post("/api/conversations/:id/messages", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/conversations/:id/messages", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;

@@ -6,6 +6,7 @@ import {
   IconMail, IconPhone, IconMapPin, IconMessageCircle, IconBell
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { openSignedUrl } from '../lib/signedStorageUrl';
 import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
@@ -463,9 +464,9 @@ export default function Profile() {
       <SectionCard title="CV" icon={IconFileText}>
         {profile.cv_url ? (
           <div className="flex items-center justify-between gap-2">
-            <a href={profile.cv_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+            <button type="button" onClick={() => openSignedUrl(profile.cv_url!)} className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline">
               <IconDownload size={15} /> {profile.cv_filename || 'Télécharger le CV'}
-            </a>
+            </button>
             {isViewingSelf && (
               <button onClick={handleRemoveCv} className="text-zinc-400 hover:text-red-500 transition-colors">
                 <IconTrash size={14} />

@@ -11,6 +11,7 @@ import { Document, DocumentPhase, DocumentDiffusion, Project } from '../types';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
+import { openSignedUrl } from '../lib/signedStorageUrl';
 
 const PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR', 'Général'];
 
@@ -322,7 +323,7 @@ export default function Documents() {
     if (doc.doc_statut === 'perime') {
       if (!window.confirm('⚠️ Ce document est PÉRIMÉ. Son utilisation peut entraîner des erreurs. Voulez-vous tout de même le télécharger ?')) return;
     }
-    window.open(doc.file_url, '_blank');
+    openSignedUrl(doc.file_url);
   };
 
   return (
@@ -891,7 +892,7 @@ export default function Documents() {
                         <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(v.uploaded_at).toLocaleDateString('fr-FR')} · {v.uploaded_by || '—'}</p>
                         {v.description && <p className="text-[11px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{v.description}</p>}
                       </div>
-                      <button onClick={() => window.open(v.file_url, '_blank')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)' }} title="Télécharger">
+                      <button onClick={() => openSignedUrl(v.file_url)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)' }} title="Télécharger">
                         <IconDownload size={14} />
                       </button>
                     </div>

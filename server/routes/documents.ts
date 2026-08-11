@@ -6,6 +6,7 @@
 // as meetings.ts/visas.ts/plans.ts for file attachments and versioning.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -15,11 +16,10 @@ export interface RouteDeps {
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  upload: any;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload, requireRole }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole }: RouteDeps) {
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -32,7 +32,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch documents" }); }
   });
 
-  app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/documents", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       await checkQuota(tenantId, 'documents');
@@ -88,7 +88,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
 
-  app.put("/api/documents/:id", upload.single('file'), async (req: any, res: any) => {
+  app.put("/api/documents/:id", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
