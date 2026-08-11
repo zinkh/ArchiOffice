@@ -4,15 +4,15 @@
 // receives, for the optional visa document attachment.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  upload: any;
 }
 
-export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, upload }: RouteDeps) {
+export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage }: RouteDeps) {
   app.get("/api/visas", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -23,7 +23,7 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch visas" }); }
   });
 
-  app.post("/api/visas", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/visas", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, title, date, status, comments, lot_id } = req.body;
@@ -41,7 +41,7 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create visa" }); }
   });
 
-  app.put("/api/visas/:id", upload.single('file'), async (req: any, res: any) => {
+  app.put("/api/visas/:id", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { title, date, status, comments, lot_id } = req.body;

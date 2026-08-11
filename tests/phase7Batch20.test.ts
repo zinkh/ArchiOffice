@@ -85,6 +85,15 @@ describe('Visas', () => {
     expect(deleted.status).toBe(200);
     expect(fakeSupabaseAdmin.getTable('visas').find(v => v.id === id)).toBeUndefined();
   });
+
+  it('rejects a visa document attachment whose real content is HTML, disguised as a .pdf', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/visas').set(authHeader(token))
+      .field('project_id', 'p1').field('title', 'Visa piégé')
+      .attach('file', Buffer.from('<html><body><script>alert(1)</script></body></html>'), { filename: 'doc.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('Receptions', () => {

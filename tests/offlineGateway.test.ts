@@ -92,4 +92,52 @@ describe('offline gateway auth', () => {
     const readRes = await request(app).get('/storage/v1/object/public/documents/..%2f..%2f..%2fetc%2fpasswd');
     expect(readRes.status).toBe(404);
   });
+
+  it('mints a signed URL only with the secret, and serves the object through it without one', async () => {
+    const auth = { Authorization: `Bearer ${SECRET}` };
+    await request(app).post('/storage/v1/bucket').set(auth).send({ id: 'documents' });
+    await request(app).post('/storage/v1/object/documents/tenant1/private.txt').set(auth).send('shh');
+
+    const noAuthSign = await request(app).post('/storage/v1/object/sign/documents/tenant1/private.txt').send({ expiresIn: 60 });
+    expect(noAuthSign.status).toBe(401);
+
+    const signRes = await request(app)
+      .post('/storage/v1/object/sign/documents/tenant1/private.txt')
+      .set(auth)
+      .send({ expiresIn: 60 });
+    expect(signRes.status).toBe(200);
+    expect(signRes.body.signedURL).toContain('/object/sign/documents/tenant1/private.txt?token=');
+
+    // signedURL is a relative path (mirrors real Supabase Storage's sign
+    // response) — the real client (supabase-js's createSignedUrl) prepends
+    // its own `${SUPABASE_URL}/storage/v1` base to it; this router is
+    // likewise mounted under /storage/v1, so replicate that here.
+    const signedPath = `/storage/v1${signRes.body.signedURL}`;
+    const readRes = await request(app).get(signedPath);
+    expect(readRes.status).toBe(200);
+    expect(readRes.text).toBe('shh');
+
+    // A guessed/garbage token must not work.
+    const badTokenRes = await request(app).get('/storage/v1/object/sign/documents/tenant1/private.txt?token=guessed');
+    expect(badTokenRes.status).toBe(404);
+  });
+
+  it('rejects an expired signed URL', async () => {
+    const auth = { Authorization: `Bearer ${SECRET}` };
+    await request(app).post('/storage/v1/bucket').set(auth).send({ id: 'documents' });
+    await request(app).post('/storage/v1/object/documents/tenant1/expiring.txt').set(auth).send('bye');
+
+    // A tiny (but still >0, so not clamped to the 3600s default) expiresIn
+    // lets this test the real expiry check without sleeping for a full TTL.
+    const signRes = await request(app)
+      .post('/storage/v1/object/sign/documents/tenant1/expiring.txt')
+      .set(auth)
+      .send({ expiresIn: 0.001 });
+    expect(signRes.status).toBe(200);
+    const signedPath = `/storage/v1${signRes.body.signedURL}`;
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const readRes = await request(app).get(signedPath);
+    expect(readRes.status).toBe(404);
+  });
 });

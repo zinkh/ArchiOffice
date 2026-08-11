@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
+import { resolveSignedUrl } from '../lib/signedStorageUrl';
 
 // Self-hosted worker (bundled by Vite) instead of a public CDN, so the
 // annotator keeps working offline (Electron build) and isn't at the mercy
@@ -46,7 +47,23 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
   // Plan uploads accept any file type (see handlePlanUpload in ProjectDetail),
   // so a "plan" can be a scanned image rather than a PDF — fall back to a
   // plain <img> in that case instead of feeding a non-PDF into react-pdf.
+  // Checked against the stable stored reference, not the resolved signed URL
+  // (whose token query string doesn't change the file extension it's built
+  // from, but there's no reason to wait on the resolve just to know this).
   const isPdf = fileUrl.includes('application/pdf') || /\.pdf(\?|$)/i.test(fileUrl);
+
+  // The `plans` bucket is private — fileUrl is a stable reference, not a
+  // directly fetchable URL, so it's exchanged for a short-lived signed URL
+  // before being handed to react-pdf/<img>.
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setResolvedUrl(null);
+    resolveSignedUrl(fileUrl)
+      .then((url) => { if (!cancelled) setResolvedUrl(url); })
+      .catch((err) => console.error('[PlanAnnotator] Failed to resolve plan URL:', err));
+    return () => { cancelled = true; };
+  }, [fileUrl]);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
@@ -110,9 +127,11 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
           onClick={handleCanvasClick}
           style={{ cursor: isAddingMode ? 'crosshair' : 'default' }}
         >
-          {isPdf ? (
+          {!resolvedUrl ? (
+            <div className="p-20 text-zinc-500 italic">Chargement du plan...</div>
+          ) : isPdf ? (
             <Document
-              file={fileUrl}
+              file={resolvedUrl}
               onLoadSuccess={onDocumentLoadSuccess}
               loading={<div className="p-20 text-zinc-500 italic">Chargement du plan...</div>}
               error={<div className="p-20 text-red-500 italic">Erreur lors du chargement du plan.</div>}
@@ -126,7 +145,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
             </Document>
           ) : (
             <img
-              src={fileUrl}
+              src={resolvedUrl}
               alt="Plan"
               draggable={false}
               onLoad={(e) => setImgNaturalWidth(e.currentTarget.naturalWidth)}

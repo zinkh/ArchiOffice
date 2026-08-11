@@ -4,16 +4,16 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  upload: any;
 }
 
-export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload }: RouteDeps) {
+export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage }: RouteDeps) {
   app.get("/api/profile/:userId", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -65,7 +65,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
-  app.post("/api/profile/cv", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/profile/cv", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const file = req.file;

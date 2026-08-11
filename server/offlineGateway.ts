@@ -173,13 +173,65 @@ function mountStorageShim(router: Router, serviceRoleKey: string) {
     if (!fs.existsSync(path.join(dir, req.params.id))) {
       return res.status(404).json({ message: 'Bucket not found' });
     }
-    res.json({ id: req.params.id, name: req.params.id, public: true });
+    // Always reports `public: false` here — this shim's actual access model
+    // doesn't key off this flag (writes/deletes always require the gateway
+    // secret above; unauthenticated GETs are only ever served at the fixed
+    // /object/public/* and /object/sign/* routes below, for whichever
+    // buckets server.ts's caller chooses to fetch through them), so there's
+    // nothing for server.ts's ensureStorageBuckets() migration check to do.
+    res.json({ id: req.params.id, name: req.params.id, public: false });
+  });
+
+  // No-op: mirrors real Supabase Storage's updateBucket() response shape so
+  // ensureStorageBuckets()'s public→private migration call doesn't 404 here
+  // (moot in this shim — see the GET handler above).
+  router.put('/bucket/:id', requireGatewaySecret(serviceRoleKey), express.json(), (_req: Request, res: Response) => {
+    res.json({ message: 'ok' });
   });
 
   // Order matters: the public-URL GET route is more specific than the
   // generic object upload/remove route below, so it must be registered first.
   router.get('/object/public/:bucket/*', (req: Request, res: Response) => {
     const relPath = (req.params as any)[0] as string;
+    const filePath = safeObjectPath(req.params.bucket, relPath);
+    if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ message: 'Object not found' });
+    res.sendFile(filePath);
+  });
+
+  // Mirrors real Supabase Storage's sign/token flow for server/routes/
+  // storageAccess.ts's createSignedUrl() call: POST (service-role only,
+  // called server-side by supabaseAdmin) mints a random token good for
+  // `expiresIn` seconds; GET (deliberately unauthenticated, same reasoning
+  // as /object/public/* above — the renderer loads this as a plain <img
+  // src>/<a href>) serves the object only while presenting that token.
+  const signedTokens = new Map<string, { bucket: string; path: string; expiresAt: number }>();
+  router.post(
+    '/object/sign/:bucket/*',
+    requireGatewaySecret(serviceRoleKey),
+    express.json(),
+    (req: Request, res: Response) => {
+      const relPath = (req.params as any)[0] as string;
+      if (!safeObjectPath(req.params.bucket, relPath)) {
+        return res.status(400).json({ message: 'Invalid object path' });
+      }
+      const expiresIn = Number(req.body?.expiresIn) > 0 ? Number(req.body.expiresIn) : 3600;
+      const token = crypto.randomBytes(24).toString('hex');
+      signedTokens.set(token, { bucket: req.params.bucket, path: relPath, expiresAt: Date.now() + expiresIn * 1000 });
+      res.json({ signedURL: `/object/sign/${req.params.bucket}/${relPath}?token=${token}` });
+    },
+  );
+
+  router.get('/object/sign/:bucket/*', (req: Request, res: Response) => {
+    const relPath = (req.params as any)[0] as string;
+    const token = req.query.token as string | undefined;
+    const entry = token ? signedTokens.get(token) : undefined;
+    if (!entry || entry.bucket !== req.params.bucket || entry.path !== relPath) {
+      return res.status(404).json({ message: 'Object not found' });
+    }
+    if (Date.now() > entry.expiresAt) {
+      signedTokens.delete(token!);
+      return res.status(404).json({ message: 'Signed URL expired' });
+    }
     const filePath = safeObjectPath(req.params.bucket, relPath);
     if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ message: 'Object not found' });
     res.sendFile(filePath);

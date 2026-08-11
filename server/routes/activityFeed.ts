@@ -11,6 +11,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -18,10 +19,9 @@ export interface RouteDeps {
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   captureWithContext: (error: any, context: { route: string; tenantId?: string; userId?: string }) => void;
-  upload: any;
 }
 
-export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext, upload }: RouteDeps) {
+export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext }: RouteDeps) {
   // Matches "@Full Name" against known tenant members — longest names first so
   // "Jean Dupont" isn't shadowed by a coincidental "Jean" member.
   const extractMentionedUserIds = (content: string, members: { id: string; name: string }[]): string[] => {
@@ -131,7 +131,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  app.post("/api/feed/posts", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/feed/posts", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { content } = req.body;
@@ -218,7 +218,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  app.post("/api/feed/posts/:id/comments", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/feed/posts/:id/comments", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;

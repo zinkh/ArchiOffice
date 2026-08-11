@@ -37,6 +37,15 @@ describe('Activity Feed', () => {
     expect(feed.body.some((item: any) => item.id === postId)).toBe(true);
   });
 
+  it('rejects a post attachment whose real content is HTML, disguised as an image', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/feed/posts').set(authHeader(token))
+      .field('content', 'Pièce jointe piégée')
+      .attach('file', Buffer.from('<html><body><script>alert(1)</script></body></html>'), { filename: 'photo.png', contentType: 'image/png' });
+    expect(res.status).toBe(400);
+  });
+
   it('toggles the like on an activity item', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
