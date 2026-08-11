@@ -1563,7 +1563,7 @@ export async function createApp() {
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext, upload });
+  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext });
   registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
@@ -1590,7 +1590,7 @@ export async function createApp() {
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
