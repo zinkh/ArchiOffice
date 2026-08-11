@@ -6,6 +6,7 @@
 // package's registerAgentRoutes call) and are injected here the same way.
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
+import { aiGenerationLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -16,7 +17,7 @@ export interface RouteDeps {
 }
 
 export function registerAiSuggestionRoutes(app: Express, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit }: RouteDeps) {
-  app.post("/api/ai/suggest-articles", async (req: any, res: any) => {
+  app.post("/api/ai/suggest-articles", aiGenerationLimiter, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { lot_name, existing_articles = [] } = req.body;

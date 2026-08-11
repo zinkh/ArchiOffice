@@ -34,6 +34,13 @@ describe('Super-Admin gate', () => {
     expect(admin.body.isAdmin).toBe(true);
   });
 
+  it('matches the configured super-admin email case-insensitively', async () => {
+    const token = `mixed-case-admin-token-${Date.now()}`;
+    fakeSupabaseAdmin.registerUser(token, { id: crypto.randomUUID(), email: SUPER_ADMIN_EMAIL.toUpperCase() });
+    const res = await request(app).get('/api/admin/is-admin').set(authHeader(token));
+    expect(res.body.isAdmin).toBe(true);
+  });
+
   it('rejects every admin route for a non-super-admin caller', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

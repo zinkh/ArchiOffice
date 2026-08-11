@@ -54,6 +54,26 @@ describe('Marchés Entreprises CRUD', () => {
     await request(app).delete(`/api/marches-entreprises/${id}`).set(authHeader(token));
     expect(fakeSupabaseAdmin.getTable('marches_entreprises').find(m => m.id === id)).toBeDefined();
   });
+
+  // The route spreads the raw request body into tenantScopedFrom(...).update()
+  // (server/routes/marchesEntreprises.ts) — without tenantScopedFrom itself
+  // stripping a `tenant_id` key from that payload, a caller could re-parent a
+  // row they own into a different tenant's namespace by just including
+  // tenant_id in the PUT body.
+  it('never lets a caller re-parent their own marché into another tenant via a tenant_id in the body', async () => {
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+    const tenantB = makeTenant();
+
+    const created = await request(app).post('/api/marches-entreprises').set(authHeader(token)).send({
+      project_id: 'p1', entreprise_nom: 'BTP Dupont', lot_numero: '01', lot_titre: 'Gros œuvre', montant_ht: 150000, tva_rate: 20,
+    });
+    const id = created.body.id;
+
+    const updated = await request(app).put(`/api/marches-entreprises/${id}`).set(authHeader(token)).send({ montant_ht: 1, tenant_id: tenantB });
+    expect(updated.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('marches_entreprises').find(m => m.id === id)?.tenant_id).toBe(tenantA);
+  });
 });
 
 describe('Situations enrichment', () => {

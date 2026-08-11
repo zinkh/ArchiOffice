@@ -4,6 +4,7 @@
 // (used before a tenant/its settings exist at all).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { sendEmailLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -11,9 +12,14 @@ export interface RouteDeps {
 }
 
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
-  app.post("/api/send-email", async (req: any, res: any) => {
+  app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
       const { to, subject, text, html, attachments, userEmail } = req.body;
+      const hasCrlf = (v: unknown): boolean =>
+        Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
+      if (hasCrlf(to) || hasCrlf(subject) || hasCrlf(userEmail)) {
+        return res.status(400).json({ error: "Invalid characters in email fields" });
+      }
 
       // Get settings from Supabase
       const tenantId = await getTenantId(req.user.id);

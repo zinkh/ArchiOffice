@@ -20,6 +20,12 @@ async function sendPlatformMail(to: string, subject: string, html: string): Prom
     console.warn('[mail] SMTP_HOST/SMTP_USER/SMTP_PASS not configured — email not sent.');
     return false;
   }
+  // `to` comes straight from the request body — reject header-injection attempts
+  // rather than pass a CR/LF-bearing address into the mail headers.
+  if (/[\r\n]/.test(to) || /[\r\n]/.test(subject)) {
+    console.warn('[mail] Rejected send: invalid characters in recipient/subject.');
+    return false;
+  }
   try {
     const transporter = nodemailer.createTransport({
       host: smtpHost,

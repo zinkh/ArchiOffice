@@ -153,6 +153,35 @@ describe('Geo Proxy input validation', () => {
     expect(res.status).toBe(400);
   });
 
+  // rnb-buildings used a bare, unbounded `fetch()` (unlike every other proxy
+  // in this file, which goes through fetchWithTimeout) — a hung upstream
+  // could tie up the request indefinitely. Covers both the fix (still calls
+  // through and returns data normally) and the AbortError → 504 mapping now
+  // shared with the rest of the module.
+  describe('rnb-buildings network calls', () => {
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('proxies a successful RNB API response', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ([{ rnb_id: 'ABC123' }]) })) as any;
+
+      const res = await request(app).get('/api/rnb-buildings').query({ q: '10 rue de Paris' }).set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([{ rnb_id: 'ABC123' }]);
+    });
+
+    it('maps a timed-out RNB API call to 504', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => { const e: any = new Error('aborted'); e.name = 'AbortError'; throw e; }) as any;
+
+      const res = await request(app).get('/api/rnb-buildings').query({ q: '10 rue de Paris' }).set(authHeader(token));
+      expect(res.status).toBe(504);
+    });
+  });
+
   it('rejects georisques without latitude/longitude/code_insee', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

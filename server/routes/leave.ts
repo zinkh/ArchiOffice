@@ -48,7 +48,11 @@ export function registerLeaveRoutes(app: Express, { supabaseAdmin, getTenantId, 
       const validTypes = ['conges_payes', 'rtt', 'maladie', 'sans_solde', 'exceptionnel'];
       if (!validTypes.includes(leave_type)) return res.status(400).json({ error: 'Type de congé invalide' });
       if (!start_date || !end_date) return res.status(400).json({ error: 'start_date et end_date requis' });
-      if (new Date(end_date) < new Date(start_date)) return res.status(400).json({ error: 'end_date doit être après start_date' });
+      const startMs = new Date(start_date).getTime();
+      const endMs = new Date(end_date).getTime();
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) return res.status(400).json({ error: 'Date invalide' });
+      if (endMs < startMs) return res.status(400).json({ error: 'end_date doit être après start_date' });
+      if (endMs - startMs > 5 * 365 * 24 * 60 * 60 * 1000) return res.status(400).json({ error: 'Intervalle de dates trop grand (5 ans max)' });
       const business_days = businessDaysBetween(start_date, end_date);
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

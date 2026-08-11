@@ -53,9 +53,39 @@ describe('Settings', () => {
 
   it('rejects a test-smtp call with incomplete configuration', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     const res = await request(app).post('/api/test-smtp').set(authHeader(token)).send({ smtpHost: 'smtp.example.test' });
     expect(res.status).toBe(400);
+  });
+
+  it('blocks a non-admin from calling test-smtp', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    const res = await request(app).post('/api/test-smtp').set(authHeader(token)).send({ smtpHost: 'smtp.example.test' });
+    expect(res.status).toBe(403);
+  });
+
+  it('never echoes stored secrets back through GET /api/settings', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, agency_name: 'Cabinet Test', smtp_pass: 'super-secret', zoho_client_secret: 'zoho-secret' }]);
+
+    const res = await request(app).get('/api/settings').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.smtpPass).toBeUndefined();
+    expect(res.body.zoho_client_secret).toBeUndefined();
+    expect(res.body.smtpPassSet).toBe(true);
+    expect(res.body.zoho_client_secretSet).toBe(true);
+  });
+
+  it('does not clobber a stored secret when saving settings with a blank secret field', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, smtp_pass: 'super-secret' }]);
+
+    const res = await request(app).put('/api/settings').set(authHeader(token)).send({ agencyName: 'Nouveau nom', smtpPass: '' });
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.smtp_pass).toBe('super-secret');
   });
 });
 
