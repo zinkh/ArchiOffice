@@ -88,6 +88,21 @@ describe('Ragic', () => {
       .send({ _ragicId: '1', first_name: 'X' });
     expect(res.status).toBe(403);
   });
+
+  it('rejects a webhook call with no secret at all, even though the tenant is configured', async () => {
+    // Security fix: the check used to be `if (secret && secret !== apiKey)`,
+    // so omitting `secret` entirely skipped validation outright — anyone who
+    // guessed a tenant id could upsert contacts/projects/invoices/proposals.
+    const tenantId = makeTenant();
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, ragic_api_key: 'the-real-secret' }]);
+
+    const res = await request(app)
+      .post('/api/ragic/webhook')
+      .query({ entity: 'contacts', tenant: tenantId })
+      .send({ _ragicId: '1', first_name: 'X' });
+    expect(res.status).toBe(403);
+    expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.ragic_id === '1')).toBeUndefined();
+  });
 });
 
 describe('Odoo', () => {

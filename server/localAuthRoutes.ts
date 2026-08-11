@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readLocalAccount, writeLocalAccount, signLocalJwt, goTrueUserFromAccount, LocalAccount } from './offlineAccount';
+import { localLoginLimiter } from './rateLimit';
 
 function accountResponse(account: LocalAccount) {
   // Field name matches src/lib/authToken.ts's LocalSession shape (access_token, not token).
@@ -54,7 +55,7 @@ export function createLocalAuthRouter(supabaseAdmin: SupabaseClient): Router {
     res.json(accountResponse(account));
   });
 
-  router.post('/local-login', express.json(), async (req: Request, res: Response) => {
+  router.post('/local-login', localLoginLimiter, express.json(), async (req: Request, res: Response) => {
     const account = readLocalAccount();
     if (!account) return res.status(404).json({ error: 'Aucun compte local configuré' });
 

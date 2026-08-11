@@ -6,6 +6,7 @@
 // and these three route groups satisfy those three sub-clients — without
 // touching any of the 259 existing /api/* routes or their helpers.
 import express, { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -68,7 +69,34 @@ function bearerToken(req: Request): string | null {
   return token || null;
 }
 
-function mountAuthShim(router: Router) {
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Gate every write/admin capability of the gateway behind the same random,
+// per-launch secret that `supabaseAdmin` already sends as its own Authorization
+// header (see electron/main.cjs's SUPABASE_SERVICE_ROLE_KEY) — nothing else on
+// the machine knows this value, so this closes the local network off entirely
+// from a stranger without weakening anything `supabaseAdmin` itself relies on.
+function requireGatewaySecret(secret: string) {
+  return (req: Request, res: Response, next: () => void) => {
+    const token = bearerToken(req);
+    if (!token || !timingSafeEqualStr(token, secret)) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    next();
+  };
+}
+
+function mountAuthShim(router: Router, serviceRoleKey: string) {
+  // Called with the caller's own local-account JWT (see verifyLocalJwt below),
+  // not the service-role secret — this mirrors real GoTrue's GET /auth/v1/user,
+  // which validates whatever access token it's handed rather than requiring
+  // the service role. The JWT itself is unforgeable (random per-install secret,
+  // written with 0600 perms — see offlineAccount.ts), so this is already gated.
   router.get('/user', (req: Request, res: Response) => {
     const token = bearerToken(req);
     const claims = token ? verifyLocalJwt(token) : null;
@@ -77,6 +105,10 @@ function mountAuthShim(router: Router) {
     if (!account || account.userId !== claims.sub) return res.status(401).json({ message: 'Invalid token' });
     res.json(goTrueUserFromAccount(account));
   });
+
+  // /admin/* mirrors GoTrue's admin API, which only ever accepts the service
+  // role key — gate it the same way here instead of leaving it wide open.
+  router.use('/admin', requireGatewaySecret(serviceRoleKey));
 
   router.post('/admin/users', express.json(), (req: Request, res: Response) => {
     const users = readAdminUsers();
@@ -108,8 +140,28 @@ function mountAuthShim(router: Router) {
   });
 }
 
-function mountStorageShim(router: Router) {
-  router.post('/bucket', express.json(), (req: Request, res: Response) => {
+// Resolves a bucket-relative object path and rejects anything (`../…`,
+// absolute paths) that would resolve outside that bucket's own directory —
+// none of the write/read/delete handlers below validated this before, so a
+// crafted relative path could otherwise reach arbitrary files on disk.
+function safeObjectPath(bucket: string, relPath: string): string | null {
+  const dir = storageDir(bucket);
+  const resolved = path.resolve(dir, relPath);
+  const dirWithSep = dir.endsWith(path.sep) ? dir : dir + path.sep;
+  if (resolved !== dir && !resolved.startsWith(dirWithSep)) return null;
+  return resolved;
+}
+
+function mountStorageShim(router: Router, serviceRoleKey: string) {
+  // Bucket administration (create/inspect) and object writes/deletes require
+  // the service-role secret, matching real Supabase Storage (RLS or service
+  // role only). GET /object/public/* is deliberately left open below — that's
+  // the one route meant to be fetched unauthenticated, the same way a real
+  // "public" bucket's objects are (see the offline-mode plan; the renderer
+  // loads these directly as <img src>, which can't attach an Authorization
+  // header), and it only ever serves objects already living under a bucket
+  // whose objects the app treats as public.
+  router.post('/bucket', requireGatewaySecret(serviceRoleKey), express.json(), (req: Request, res: Response) => {
     const id = req.body?.id || req.body?.name;
     if (!id) return res.status(400).json({ message: 'Bucket id required' });
     storageDir(id);
@@ -128,17 +180,19 @@ function mountStorageShim(router: Router) {
   // generic object upload/remove route below, so it must be registered first.
   router.get('/object/public/:bucket/*', (req: Request, res: Response) => {
     const relPath = (req.params as any)[0] as string;
-    const filePath = path.join(storageDir(req.params.bucket), relPath);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Object not found' });
+    const filePath = safeObjectPath(req.params.bucket, relPath);
+    if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ message: 'Object not found' });
     res.sendFile(filePath);
   });
 
   router.post(
     '/object/:bucket/*',
+    requireGatewaySecret(serviceRoleKey),
     express.raw({ type: '*/*', limit: '50mb' }),
     (req: Request, res: Response) => {
       const relPath = (req.params as any)[0] as string;
-      const filePath = path.join(storageDir(req.params.bucket), relPath);
+      const filePath = safeObjectPath(req.params.bucket, relPath);
+      if (!filePath) return res.status(400).json({ message: 'Invalid object path' });
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, req.body);
       res.json({ Id: relPath, Key: `${req.params.bucket}/${relPath}` });
@@ -147,21 +201,23 @@ function mountStorageShim(router: Router) {
 
   router.put(
     '/object/:bucket/*',
+    requireGatewaySecret(serviceRoleKey),
     express.raw({ type: '*/*', limit: '50mb' }),
     (req: Request, res: Response) => {
       const relPath = (req.params as any)[0] as string;
-      const filePath = path.join(storageDir(req.params.bucket), relPath);
+      const filePath = safeObjectPath(req.params.bucket, relPath);
+      if (!filePath) return res.status(400).json({ message: 'Invalid object path' });
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, req.body);
       res.json({ Id: relPath, Key: `${req.params.bucket}/${relPath}` });
     },
   );
 
-  router.delete('/object/:bucket', express.json(), (req: Request, res: Response) => {
+  router.delete('/object/:bucket', requireGatewaySecret(serviceRoleKey), express.json(), (req: Request, res: Response) => {
     const prefixes: string[] = req.body?.prefixes || [];
-    const dir = storageDir(req.params.bucket);
     for (const p of prefixes) {
-      const filePath = path.join(dir, p);
+      const filePath = safeObjectPath(req.params.bucket, p);
+      if (!filePath) continue;
       fs.rmSync(filePath, { force: true });
     }
     res.json(prefixes.map((p) => ({ name: p })));
@@ -175,9 +231,15 @@ export interface OfflineGatewayOptions {
    *  sync (server/localPendingPush.ts); business-data reads/writes never use
    *  this, they always go through the /rest/v1 → PostgREST proxy above. */
   pgUrl?: string;
+  /** electron/main.cjs's random per-launch SUPABASE_SERVICE_ROLE_KEY — the
+   *  only thing `supabaseAdmin` authenticates itself with. Required so this
+   *  gateway can demand it back on every non-public route instead of trusting
+   *  anything that can reach the port (see the offline-mode plan / security
+   *  audit: this server used to listen on 0.0.0.0 with zero auth here). */
+  serviceRoleKey: string;
 }
 
-export function createOfflineGateway({ postgrestUrl, pgUrl }: OfflineGatewayOptions): Router {
+export function createOfflineGateway({ postgrestUrl, pgUrl, serviceRoleKey }: OfflineGatewayOptions): Router {
   const router = Router();
 
   // Mounted before server.ts's own express.json()/urlencoded() so PostgREST
@@ -189,6 +251,7 @@ export function createOfflineGateway({ postgrestUrl, pgUrl }: OfflineGatewayOpti
   // already consumed the raw stream).
   router.use(
     '/rest/v1',
+    requireGatewaySecret(serviceRoleKey),
     express.json({ limit: '10mb' }),
     createProxyMiddleware({
       target: postgrestUrl,
@@ -224,11 +287,11 @@ export function createOfflineGateway({ postgrestUrl, pgUrl }: OfflineGatewayOpti
   );
 
   const authRouter = Router();
-  mountAuthShim(authRouter);
+  mountAuthShim(authRouter, serviceRoleKey);
   router.use('/auth/v1', authRouter);
 
   const storageRouter = Router();
-  mountStorageShim(storageRouter);
+  mountStorageShim(storageRouter, serviceRoleKey);
   router.use('/storage/v1', storageRouter);
 
   return router;

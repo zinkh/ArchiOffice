@@ -1044,19 +1044,52 @@ if (false as any) {
 // routes) without binding a port — the production entry point (startServer(),
 // below) adds the .listen() call. Exported so Supertest can drive the app
 // in-process; see tests/testServer.ts.
+// Hostname allow-list shared by the CORS and Host-header-redirect middleware
+// below — both used to trust whatever the client/proxy sent verbatim
+// (reflected Origin, unchecked Host), which lets an arbitrary site get a CORS
+// grant or poison a redirect target. archioffice.fr and any tenant subdomain
+// (e.g. aacz.archioffice.fr) are legitimate; APP_URL covers non-default
+// deployments; localhost/127.0.0.1 covers dev and the Electron desktop client
+// (which loads this same server from http://127.0.0.1:<port>).
+function isKnownAppHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === 'archioffice.fr' || h.endsWith('.archioffice.fr')) return true;
+  if (h === 'localhost' || h === '127.0.0.1') return true;
+  if (process.env.APP_URL) {
+    try {
+      if (h === new URL(process.env.APP_URL).hostname.toLowerCase()) return true;
+    } catch { /* malformed APP_URL — ignore */ }
+  }
+  return false;
+}
+
 export async function createApp() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
 
   // CORS headers — must run before any redirect so that redirect responses also
   // carry Access-Control-Allow-Origin (browsers check CORS on redirect responses too).
+  // Only grant CORS to known ArchiOffice origins (plus true same-origin callers,
+  // e.g. the Electron client talking to its own loopback server) — reflecting
+  // any Origin back with credentials:true previously let any site read
+  // authenticated responses via a victim's browser.
   app.use((req: any, res: any, next: any) => {
-    const origin = req.headers.origin;
+    const origin = req.headers.origin as string | undefined;
     if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      let allowed = `${req.protocol}://${req.headers.host}` === origin;
+      if (!allowed) {
+        try {
+          const originUrl = new URL(origin);
+          allowed = originUrl.protocol === 'https:' && isKnownAppHostname(originUrl.hostname);
+        } catch { /* not a valid absolute origin — ignore */ }
+      }
+      if (allowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      }
+      res.setHeader('Vary', 'Origin');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -1064,13 +1097,21 @@ export async function createApp() {
 
   // Redirect HTTP → HTTPS so the HTML page and all its assets share the same origin.
   app.use((req, res, next) => {
+    // req.headers.host is client/proxy-controlled — reject anything outside the
+    // known hostnames before using it to build a redirect target, otherwise an
+    // attacker-supplied Host (paired with a spoofed X-Forwarded-Proto: http)
+    // could redirect victims to an arbitrary domain.
+    const host = req.headers.host || '';
+    const hostname = host.split(':')[0];
+    if (!isKnownAppHostname(hostname)) {
+      return res.status(400).send('Invalid host header');
+    }
     if (req.headers['x-forwarded-proto'] === 'http') {
-      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+      return res.redirect(301, `https://${host}${req.url}`);
     }
     // Canonicalize bare apex → www so all assets and the HTML share the same origin.
     // Only the exact apex domain is redirected — tenant subdomains (e.g.
     // aacz.archioffice.fr) and www itself must pass through untouched.
-    const host = req.headers.host || '';
     if (host === 'archioffice.fr') {
       return res.redirect(301, `https://www.archioffice.fr${req.url}`);
     }
@@ -1091,6 +1132,7 @@ export async function createApp() {
     app.use(createOfflineGateway({
       postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555',
       pgUrl: process.env.OFFLINE_PG_URL,
+      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
     }));
   }
 
@@ -1536,12 +1578,12 @@ export async function createApp() {
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, upload });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, upload, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
-  registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
@@ -1633,8 +1675,14 @@ export async function createApp() {
 // is still the only thing invoked at module load.
 async function startServer() {
   const { app, supabaseAdmin, ensureStorageBuckets, PORT } = await createApp();
+  // In offline (Electron) mode this server is the local Supabase gateway for
+  // supabaseAdmin itself (server/offlineGateway.ts) — it has no reason to be
+  // reachable from the LAN/Wi-Fi, so bind it to loopback only there. Docker/
+  // cloud deployments still need 0.0.0.0 to accept the container's incoming
+  // traffic.
+  const host = process.env.OFFLINE_MODE === 'true' ? '127.0.0.1' : '0.0.0.0';
   // Start listening after all middleware is set up
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, host, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();
