@@ -3,12 +3,32 @@
 // part of Settings even though it never touches the settings table itself).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import rateLimit from 'express-rate-limit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   requireTenantAdmin: (userId: string) => Promise<string>;
 }
+
+// Never echo these back to the browser: GET /api/settings is reachable by any
+// tenant member, not just admins, and these columns hold live SMTP/OAuth/API
+// credentials in plaintext.
+const SECRET_COLS = new Set([
+  'smtp_pass', 'zoho_client_secret', 'zoho_refresh_token', 'ragic_api_key',
+  'odoo_api_key', 'superpdp_client_secret', 'chorus_pro_piste_client_secret',
+  'chorus_pro_technical_password',
+]);
+
+// SMTP test emails can be triggered by any tenant admin config change attempt;
+// cap it so the server can't be turned into an open mail relay probe.
+const testSmtpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives. Veuillez réessayer plus tard.' },
+});
 
 // camelCase (frontend) ↔ snake_case (Supabase settings table)
 const toSnake: Record<string, string> = {
@@ -33,9 +53,14 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!settings) { res.json({ tenant_id: tenantId }); return; }
-      // Return camelCase keys expected by the frontend
+      // Return camelCase keys expected by the frontend, minus stored secrets
+      // (only whether one is set, so the UI can show "configured").
       const out: any = {};
       for (const [k, v] of Object.entries(settings)) {
+        if (SECRET_COLS.has(k)) {
+          out[`${toCamel[k] ?? k}Set`] = v != null && v !== '';
+          continue;
+        }
         out[toCamel[k] ?? k] = v;
       }
       res.json(out);
@@ -79,6 +104,11 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       const filteredData: any = Object.fromEntries(
         Object.entries(snakeData)
           .filter(([k]) => validCols.has(k))
+          // GET no longer echoes secret values back to the client (see SECRET_COLS),
+          // so the round-tripped form submits them blank on every save unless the
+          // admin is deliberately setting a new one — an empty secret must not
+          // clobber the value already stored.
+          .filter(([k, v]) => !(SECRET_COLS.has(k) && (v === '' || v == null)))
           .map(([k, v]) => [k, numericCols.has(k) && v === '' ? null : v])
       );
 
@@ -128,8 +158,9 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
     }
   });
 
-  app.post("/api/test-smtp", async (req, res) => {
+  app.post("/api/test-smtp", testSmtpLimiter, async (req: any, res) => {
     try {
+      await requireTenantAdmin(req.user.id);
       const { smtpHost, smtpPort, smtpUser, smtpPass } = req.body;
 
       if (!smtpHost || !smtpUser || !smtpPass) {
@@ -157,7 +188,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       res.json({ success: true });
     } catch (error: any) {
       console.error("SMTP Test Error:", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 }

@@ -9,7 +9,9 @@
 // as dependencies rather than duplicated.
 import type { Express } from 'express';
 import express from 'express';
+import crypto from 'crypto';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { billingWebhookLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -137,8 +139,15 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
-  // POST /api/billing/webhook — Stancer event delivery (no JWT auth, see AUTH_EXEMPT in server.ts)
-  app.post('/api/billing/webhook', express.json(), async (req: any, res: any) => {
+  // POST /api/billing/webhook — Stancer event delivery (no JWT auth, see AUTH_EXEMPT in server.ts).
+  // Stancer doesn't document a webhook payload signature we can verify here, so
+  // the request body itself is never trusted: the only thing it supplies is a
+  // payment id, which is then used to fetch the *authoritative* status straight
+  // from the Stancer API using our own secret key. A forged POST with an
+  // arbitrary/guessed id either fails that lookup or reflects a real payment's
+  // real status — it can't inject a fake "captured" state. Rate-limited so the
+  // endpoint can't be used to flood outbound calls to the Stancer API.
+  app.post('/api/billing/webhook', billingWebhookLimiter, express.json(), async (req: any, res: any) => {
     try {
       const event = req.body;
       const paymentId = event.id || event.payment?.id;

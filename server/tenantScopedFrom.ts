@@ -19,7 +19,16 @@ export function tenantScopedFrom(supabaseAdmin: any, tenantId: string, table: st
   return {
     select: (columns?: string, opts?: { count?: 'exact' | 'planned' | 'estimated'; head?: boolean }) =>
       supabaseAdmin.from(table).select(columns, opts).eq('tenant_id', tenantId),
-    update: (payload: Record<string, unknown>) => supabaseAdmin.from(table).update(payload).eq('tenant_id', tenantId),
+    // Several routes spread the raw request body straight into this (e.g.
+    // maf.ts, marchesEntreprises.ts) — the .eq('tenant_id', tenantId) below
+    // only scopes *which row* can be matched, it doesn't stop a `tenant_id`
+    // key inside the payload itself from being written by the UPDATE's SET
+    // clause. Without stripping it here, a caller could re-parent a row they
+    // own into a different tenant's namespace, the exact isolation boundary
+    // this helper exists to enforce. insert() below already gets this right
+    // by overwriting tenant_id after the spread; update needs the same.
+    update: (payload: Record<string, unknown>) =>
+      supabaseAdmin.from(table).update({ ...payload, tenant_id: tenantId }).eq('tenant_id', tenantId),
     delete: () => supabaseAdmin.from(table).delete().eq('tenant_id', tenantId),
     insert: (payload: Record<string, unknown> | Record<string, unknown>[]) =>
       supabaseAdmin.from(table).insert(

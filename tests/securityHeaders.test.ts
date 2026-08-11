@@ -33,6 +33,20 @@ describe('CORS allow-list', () => {
   });
 });
 
+describe('Baseline security headers (helmet)', () => {
+  it('sets clickjacking, MIME-sniffing, and transport-security headers on every response', async () => {
+    const res = await request(app).get('/api/health');
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(res.headers['content-security-policy']).toBe("frame-ancestors 'self'");
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['strict-transport-security']).toBeDefined();
+    // Intentionally NOT set: a full default-src CSP or cross-origin-embedder
+    // policy would break the app's own map-tile/Storage-image loading from
+    // external hosts — see the comment above helmet(...) in server.ts.
+    expect(res.headers['cross-origin-embedder-policy']).toBeUndefined();
+  });
+});
+
 describe('Host-header redirect hardening', () => {
   it('rejects a request carrying an unknown Host', async () => {
     const res = await request(app).get('/api/health').set('Host', 'attacker-controlled.test');

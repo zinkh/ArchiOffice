@@ -155,7 +155,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
 
       const superpdpId = sent?.id;
       const superpdpStatus = sent?.events?.[sent.events.length - 1]?.status_code || 'api:uploaded';
-      await supabaseAdmin.from('invoices').update({ superpdp_id: superpdpId, superpdp_status: superpdpStatus }).eq('id', invoiceId);
+      await supabaseAdmin.from('invoices').update({ superpdp_id: superpdpId, superpdp_status: superpdpStatus }).eq('id', invoiceId).eq('tenant_id', tenantId);
 
       res.json({ success: true, superpdp_id: superpdpId, status: superpdpStatus });
     } catch (e: any) {

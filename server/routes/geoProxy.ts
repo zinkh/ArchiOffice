@@ -735,7 +735,7 @@ export function registerGeoProxyRoutes(app: Express) {
       const url = `https://rnb-api.beta.gouv.fr/api/alpha/buildings/address/?q=${encodeURIComponent(q as string)}`;
       console.log(`Calling RNB API: ${url}`);
 
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url, {}, 10000);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -746,6 +746,10 @@ export function registerGeoProxyRoutes(app: Express) {
       const data = await response.json();
       res.json(data);
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.error("RNB API request timed out");
+        return res.status(504).json({ error: "RNB API request timed out" });
+      }
       console.error("Error in /api/rnb-buildings:", error);
       res.status(500).json({ error: "Internal server error" });
     }
