@@ -14,7 +14,6 @@
 // server.ts referenced them.
 import type { Express } from 'express';
 import axios from 'axios';
-import https from 'https';
 import { fetchWithTimeout } from '../fetchWithTimeout';
 
 interface GeoJSONGeometry {
@@ -161,7 +160,6 @@ async function getGeorisques(lon: number, lat: number, codeInsee: string): Promi
 
   try {
     const v1Response = await axios.get<GeorisquesV1Response>(v1Url, {
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       timeout: 15000 // Increased timeout
     });
 
@@ -533,7 +531,6 @@ export function registerGeoProxyRoutes(app: Express) {
         params: {
           limit: 1,
         },
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         timeout: 10000
       });
 
@@ -556,7 +553,6 @@ export function registerGeoProxyRoutes(app: Express) {
           where: `within_distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})', ${distance}m)`,
           order_by: `distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})')`
         },
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         timeout: 15000
       });
 

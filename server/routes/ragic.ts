@@ -15,6 +15,14 @@
 // — the webhook has likely never received a single real notification.
 import type { Express } from 'express';
 import axios from 'axios';
+import crypto from 'crypto';
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -312,7 +320,9 @@ export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId }
         .select('ragic_api_key,ragic_sheet_contacts,ragic_sheet_projects,ragic_sheet_invoices,ragic_sheet_proposals')
         .eq('tenant_id', tenantId).single();
       if (!(settings as any)?.ragic_api_key) return res.status(403).json({ error: 'Tenant non configuré' });
-      if (secret && secret !== (settings as any).ragic_api_key) return res.status(403).json({ error: 'Secret invalide' });
+      if (!secret || !timingSafeEqualStr(secret, (settings as any).ragic_api_key)) {
+        return res.status(403).json({ error: 'Secret invalide' });
+      }
 
       const records: any[] = Array.isArray(body) ? body : [body];
       let upserted = 0;
