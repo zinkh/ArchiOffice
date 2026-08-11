@@ -28,10 +28,12 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         return res.status(500).json({ error: "Settings not found" });
       }
 
-      const smtpHost = (settings as any).smtpHost || process.env.SMTP_HOST;
-      const smtpPort = (settings as any).smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = (settings as any).smtpUser || process.env.SMTP_USER;
-      const smtpPass = (settings as any).smtpPass || process.env.SMTP_PASS;
+      // `settings` is a raw select('*') row — snake_case DB columns, not the
+      // camelCase shape GET /api/settings maps them to for the frontend.
+      const smtpHost = (settings as any).smtp_host || process.env.SMTP_HOST;
+      const smtpPort = (settings as any).smtp_port || process.env.SMTP_PORT || '587';
+      const smtpUser = (settings as any).smtp_user || process.env.SMTP_USER;
+      const smtpPass = (settings as any).smtp_pass || process.env.SMTP_PASS;
 
       if (!smtpHost || !smtpUser || !smtpPass) {
         return res.status(500).json({ error: "Configuration SMTP manquante" });
@@ -47,8 +49,8 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         },
       });
 
-      const from = (settings as any).senderOption === 'personal' ? userEmail : (settings as any).email;
-      const cc = (settings as any).senderOption === 'personal' ? (settings as any).email : undefined;
+      const from = (settings as any).sender_option === 'personal' ? userEmail : (settings as any).email;
+      const cc = (settings as any).sender_option === 'personal' ? (settings as any).email : undefined;
 
       await transporter.sendMail({
         from,
