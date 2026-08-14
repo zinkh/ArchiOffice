@@ -7,6 +7,7 @@
 // tenantScopedFrom, matching zohoInvoice.ts/zohoBooks.ts/ragic.ts.
 import type { Express } from 'express';
 import axios from 'axios';
+import { assertPublicHttpUrl } from '../ssrfGuard';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -74,6 +75,15 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const s = settings as any;
       if (!s?.odoo_url || !s?.odoo_api_key || !s?.odoo_username || !s?.odoo_db) {
         return res.status(400).json({ error: 'Odoo non configuré. Veuillez renseigner l\'URL, la base de données, l\'identifiant et la clé API dans les Paramètres.' });
+      }
+
+      // The stored Odoo URL is used verbatim as an outbound RPC target —
+      // validate it resolves to a public host so a private/internal URL saved
+      // in settings can't turn this sync into an SSRF proxy.
+      try {
+        await assertPublicHttpUrl(s.odoo_url);
+      } catch (e: any) {
+        return res.status(e.status || 400).json({ error: `URL Odoo non autorisée : ${e.message}` });
       }
 
       const rpc = (model: string, method: string, args: any[], kwargs?: any) =>
