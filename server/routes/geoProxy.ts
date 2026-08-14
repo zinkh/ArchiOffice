@@ -510,16 +510,20 @@ export function registerGeoProxyRoutes(app: Express) {
   // Proxy for Historical Monuments (Culture API)
   app.get("/api/historical-monuments", async (req, res) => {
     try {
-      const { lat: latQuery, lon: lonQuery, distance = 1000 } = req.query;
+      const { lat: latQuery, lon: lonQuery, distance: distanceQuery } = req.query;
       if (!latQuery || !lonQuery) {
         return res.status(400).json({ error: "Latitude and longitude are required" });
       }
 
       const lat = parseFloat(latQuery as string);
       const lon = parseFloat(lonQuery as string);
+      const distance = distanceQuery === undefined ? 1000 : Number(distanceQuery);
 
       if (isNaN(lat) || isNaN(lon)) {
         return res.status(400).json({ error: "Invalid latitude or longitude" });
+      }
+      if (!Number.isFinite(distance) || distance <= 0 || distance > 50000) {
+        return res.status(400).json({ error: "Invalid distance" });
       }
 
       const dataset = "liste-des-immeubles-proteges-au-titre-des-monuments-historiques";
