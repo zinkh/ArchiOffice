@@ -400,13 +400,14 @@ export default function Contacts() {
           const worksheet = workbook.Sheets[sheetName];
           const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
+          const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
           const headers = json[0] as string[];
           const rows = json.slice(1) as any[][];
 
           const dataRows = rows.map(row => {
-            const obj: any = {};
+            const obj: any = Object.create(null);
             headers.forEach((header, index) => {
-              obj[header] = row[index];
+              if (!UNSAFE_KEYS.has(header)) obj[header] = row[index];
             });
             return obj;
           });
