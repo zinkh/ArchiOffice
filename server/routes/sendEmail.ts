@@ -4,6 +4,7 @@
 // (used before a tenant/its settings exist at all).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { sendEmailLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -11,9 +12,14 @@ export interface RouteDeps {
 }
 
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
-  app.post("/api/send-email", async (req: any, res: any) => {
+  app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
       const { to, subject, text, html, attachments, userEmail } = req.body;
+      const hasCrlf = (v: unknown): boolean =>
+        Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
+      if (hasCrlf(to) || hasCrlf(subject) || hasCrlf(userEmail)) {
+        return res.status(400).json({ error: "Invalid characters in email fields" });
+      }
 
       // Get settings from Supabase
       const tenantId = await getTenantId(req.user.id);
@@ -22,10 +28,12 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         return res.status(500).json({ error: "Settings not found" });
       }
 
-      const smtpHost = (settings as any).smtpHost || process.env.SMTP_HOST;
-      const smtpPort = (settings as any).smtpPort || process.env.SMTP_PORT || '587';
-      const smtpUser = (settings as any).smtpUser || process.env.SMTP_USER;
-      const smtpPass = (settings as any).smtpPass || process.env.SMTP_PASS;
+      // `settings` is a raw select('*') row — snake_case DB columns, not the
+      // camelCase shape GET /api/settings maps them to for the frontend.
+      const smtpHost = (settings as any).smtp_host || process.env.SMTP_HOST;
+      const smtpPort = (settings as any).smtp_port || process.env.SMTP_PORT || '587';
+      const smtpUser = (settings as any).smtp_user || process.env.SMTP_USER;
+      const smtpPass = (settings as any).smtp_pass || process.env.SMTP_PASS;
 
       if (!smtpHost || !smtpUser || !smtpPass) {
         return res.status(500).json({ error: "Configuration SMTP manquante" });
@@ -41,8 +49,8 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         },
       });
 
-      const from = (settings as any).senderOption === 'personal' ? userEmail : (settings as any).email;
-      const cc = (settings as any).senderOption === 'personal' ? (settings as any).email : undefined;
+      const from = (settings as any).sender_option === 'personal' ? userEmail : (settings as any).email;
+      const cc = (settings as any).sender_option === 'personal' ? (settings as any).email : undefined;
 
       await transporter.sendMail({
         from,

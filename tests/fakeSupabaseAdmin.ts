@@ -99,15 +99,16 @@ export class FakeSupabaseAdmin {
   // to complete without touching real Supabase Storage.
   private buckets = new Set<string>();
   // In-memory object store backing `.storage.from(bucket)`, used by
-  // server.ts's uploadToStorage/deleteFromStorage/resolveFileUrl
-  // (documents.ts, plans.ts, visas.ts, meetings.ts, ...). Objects aren't
-  // retained for assertions — routes only ever pass the stored path/signed
-  // URL back around — so a Set of "uploaded" paths per bucket is enough to
-  // make delete/remove meaningful.
+  // server.ts's uploadToStorage/deleteFromStorage (documents.ts, plans.ts,
+  // visas.ts, meetings.ts, ...) and server/routes/storageAccess.ts's signed-URL
+  // exchange. Objects aren't retained for assertions — routes only ever pass
+  // the returned public URL back around — so a Set of "uploaded" paths per
+  // bucket is enough to make delete/remove/list/download meaningful.
   private storageObjects = new Map<string, Set<string>>();
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
     createBucket: async (name: string, _opts?: any) => { this.buckets.add(name); return { data: { name }, error: null }; },
+    updateBucket: async (name: string, _opts?: any) => ({ data: { name }, error: null }),
     from: (bucket: string) => ({
       upload: async (path: string, _buffer: Buffer, _opts?: any) => {
         if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
@@ -115,10 +116,14 @@ export class FakeSupabaseAdmin {
         return { data: { path }, error: null };
       },
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
-      createSignedUrl: async (path: string, expiresIn: number) => ({
-        data: { signedUrl: `https://fake.supabase.test/storage/v1/object/sign/${bucket}/${path}?token=fake&expiresIn=${expiresIn}` },
-        error: null,
-      }),
+      // Mirrors the real API closely enough for server/routes/storageAccess.ts's
+      // tests: only "succeeds" for a path this fake actually has on record as
+      // uploaded (matching real Storage returning an error for an unknown object).
+      createSignedUrl: async (path: string, _expiresIn: number) => {
+        const set = this.storageObjects.get(bucket);
+        if (!set || !set.has(path)) return { data: null, error: { message: 'Object not found' } };
+        return { data: { signedUrl: `https://fake.supabase.test/storage/v1/object/sign/${bucket}/${path}?token=fake-token` }, error: null };
+      },
       // Minimal stand-in for Storage's list()/download(), used by
       // server/tenantExport.ts's addStorageFolder to walk a tenant's files.
       // Only ever needs to reflect what upload() above actually recorded —

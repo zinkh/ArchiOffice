@@ -53,18 +53,53 @@ describe('Settings', () => {
 
   it('rejects a test-smtp call with incomplete configuration', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     const res = await request(app).post('/api/test-smtp').set(authHeader(token)).send({ smtpHost: 'smtp.example.test' });
     expect(res.status).toBe(400);
   });
+
+  it('blocks a non-admin from calling test-smtp', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    const res = await request(app).post('/api/test-smtp').set(authHeader(token)).send({ smtpHost: 'smtp.example.test' });
+    expect(res.status).toBe(403);
+  });
+
+  it('never echoes stored secrets back through GET /api/settings', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, agency_name: 'Cabinet Test', smtp_pass: 'super-secret', zoho_client_secret: 'zoho-secret' }]);
+
+    const res = await request(app).get('/api/settings').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.smtpPass).toBeUndefined();
+    expect(res.body.zoho_client_secret).toBeUndefined();
+    expect(res.body.smtpPassSet).toBe(true);
+    expect(res.body.zoho_client_secretSet).toBe(true);
+  });
+
+  it('does not clobber a stored secret when saving settings with a blank secret field', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, smtp_pass: 'super-secret' }]);
+
+    const res = await request(app).put('/api/settings').set(authHeader(token)).send({ agencyName: 'Nouveau nom', smtpPass: '' });
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.smtp_pass).toBe('super-secret');
+  });
 });
+
+// A real (8-byte) PNG signature — server/imageUpload.ts's sniffImageMime()
+// checks actual file bytes, not just the client-claimed Content-Type/extension,
+// so fixtures need to look like a genuine image now.
+const PNG_MAGIC_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
 
 describe('Uploads', () => {
   it('uploads a logo, creating the bucket if missing, and persists it to settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
 
-    const res = await request(app).post('/api/upload/logo').set(authHeader(token)).attach('file', Buffer.from('fake-png'), 'logo.png');
+    const res = await request(app).post('/api/upload/logo').set(authHeader(token)).attach('file', PNG_MAGIC_BYTES, 'logo.png');
     expect(res.status).toBe(200);
     expect(res.body.url).toContain('/logos/');
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.logo_url).toBe(res.body.url);
@@ -72,9 +107,26 @@ describe('Uploads', () => {
 
   it('rejects a logo upload with no file', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     const res = await request(app).post('/api/upload/logo').set(authHeader(token));
     expect(res.status).toBe(400);
+  });
+
+  it('rejects a logo upload whose content is not actually an image, regardless of filename/Content-Type', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    const res = await request(app)
+      .post('/api/upload/logo')
+      .set(authHeader(token))
+      .attach('file', Buffer.from('<script>alert(1)</script>'), { filename: 'logo.png', contentType: 'image/png' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a logo upload from a non-admin member of the tenant', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    const res = await request(app).post('/api/upload/logo').set(authHeader(token)).attach('file', PNG_MAGIC_BYTES, 'logo.png');
+    expect(res.status).toBe(403);
   });
 
   it('uploads an avatar and updates the caller\'s own profile', async () => {
@@ -82,7 +134,7 @@ describe('Uploads', () => {
     const { token, userId } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('profiles', [{ id: userId, tenant_id: tenantId, email: 'x@example.test' }]);
 
-    const res = await request(app).post('/api/upload/avatar').set(authHeader(token)).attach('file', Buffer.from('fake-png'), 'avatar.png');
+    const res = await request(app).post('/api/upload/avatar').set(authHeader(token)).attach('file', PNG_MAGIC_BYTES, 'avatar.png');
     expect(res.status).toBe(200);
     expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.avatar).toBe(res.body.url);
   });

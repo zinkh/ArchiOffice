@@ -6,6 +6,8 @@ import {
   IconLink, IconQuote
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { openSignedUrl } from '../lib/signedStorageUrl';
+import { SignedImage } from '../components/SignedImage';
 import { getAccessToken } from '../lib/authToken';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
@@ -429,13 +431,13 @@ export default function Messages() {
                       {msg.content && <div className="text-sm">{renderTextWithMentions(msg.content, [])}</div>}
                       {msg.attachment_url && (
                         msg.attachment_type?.startsWith('image/') ? (
-                          <a href={msg.attachment_url} target="_blank" rel="noreferrer">
-                            <img src={msg.attachment_url} alt={msg.attachment_name || 'pièce jointe'} className="mt-1 rounded-lg max-w-full max-h-48" />
-                          </a>
+                          <button type="button" onClick={() => openSignedUrl(msg.attachment_url!)} className="block">
+                            <SignedImage src={msg.attachment_url} alt={msg.attachment_name || 'pièce jointe'} className="mt-1 rounded-lg max-w-full max-h-48" />
+                          </button>
                         ) : (
-                          <a href={msg.attachment_url} target="_blank" rel="noreferrer" className={cn("flex items-center gap-1.5 text-xs mt-1 hover:underline", isMine ? "text-white" : "text-blue-600 dark:text-blue-400")}>
+                          <button type="button" onClick={() => openSignedUrl(msg.attachment_url!)} className={cn("flex items-center gap-1.5 text-xs mt-1 hover:underline", isMine ? "text-white" : "text-blue-600 dark:text-blue-400")}>
                             <IconFile size={13} /> {msg.attachment_name} <IconDownload size={12} />
-                          </a>
+                          </button>
                         )
                       )}
                       <p className={cn("text-[9px] mt-1", isMine ? "text-blue-100" : "text-zinc-400")}>{timeAgo(msg.created_at)}</p>

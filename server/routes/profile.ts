@@ -4,17 +4,17 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
+import { parseStorageRef } from '../storagePaths';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
-  upload: any;
 }
 
-export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
+export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage }: RouteDeps) {
   app.get("/api/profile/:userId", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -39,7 +39,6 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
 
       res.json({
         ...profile,
-        cv_url: await resolveFileUrl('cv', (profile as any).cv_url),
         jobTitle: profile.job_title,
         education: education || [],
         experience: experience || [],
@@ -67,7 +66,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
-  app.post("/api/profile/cv", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/profile/cv", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const file = req.file;
@@ -75,8 +74,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       const storagePath = `${tenantId}/${req.user.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
       const url = await uploadToStorage('cv', storagePath, file.buffer, file.mimetype);
       await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').update({ cv_url: url, cv_filename: file.originalname }).eq('id', req.user.id);
-      const signedUrl = await resolveFileUrl('cv', url);
-      res.json({ url: signedUrl, filename: file.originalname });
+      res.json({ url, filename: file.originalname });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to upload CV" });
@@ -141,6 +139,19 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
+  // Resolves a stored CV reference (see server/storagePaths.ts) to a
+  // short-lived signed URL, same mechanism as server/routes/storageAccess.ts —
+  // called server-side here since the export bundles the link directly into
+  // the downloaded JSON rather than making the browser ask for it separately.
+  async function resolveCvDownloadUrl(cvUrl: string | null | undefined): Promise<string | null> {
+    if (!cvUrl) return null;
+    const ref = parseStorageRef(cvUrl);
+    if (!ref) return null;
+    const { data, error } = await supabaseAdmin.storage.from(ref.bucket).createSignedUrl(ref.path, 60 * 60 * 24 * 7);
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  }
+
   // RGPD — droit à la portabilité : export de toutes les données personnelles
   // du compte courant (profil, CV/avatar, formations, expériences). Volontairement
   // limité aux données propres à l'individu, pas aux données professionnelles
@@ -157,7 +168,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       ]);
       if (!profile) return res.status(404).json({ error: "Profil introuvable" });
       const p = profile as any;
-      const cvDownloadUrl = await resolveFileUrl('cv', p.cv_url);
+      const cvDownloadUrl = await resolveCvDownloadUrl(p.cv_url);
 
       res.json({
         exported_at: new Date().toISOString(),

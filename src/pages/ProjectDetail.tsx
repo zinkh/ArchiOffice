@@ -50,6 +50,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { openSignedUrl } from '../lib/signedStorageUrl';
 import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
@@ -3561,9 +3562,9 @@ export default function ProjectDetail() {
                             className="w-full text-xs text-[var(--tblr-muted)] file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-[var(--tblr-text)]"
                           />
                           {editingVisa?.document_url && !visaFile && (
-                            <a href={editingVisa.document_url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                            <button type="button" onClick={() => openSignedUrl(editingVisa.document_url!)} className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
                               <IconExternalLink size={12} /> Document actuel
-                            </a>
+                            </button>
                           )}
                         </div>
                         <div>
@@ -3719,9 +3720,9 @@ export default function ProjectDetail() {
                               <div className="flex items-center gap-2">
                                 {visa.title}
                                 {visa.document_url && (
-                                  <a href={visa.document_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Voir le document" className="text-[var(--tblr-muted)] hover:text-blue-600">
+                                  <button type="button" onClick={e => { e.stopPropagation(); openSignedUrl(visa.document_url!); }} title="Voir le document" className="text-[var(--tblr-muted)] hover:text-blue-600">
                                     <IconExternalLink size={13} />
-                                  </a>
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -4481,9 +4482,9 @@ export default function ProjectDetail() {
                                           >
                                             <IconMessageDots size={15} />
                                           </button>
-                                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title="Télécharger">
+                                          <button type="button" onClick={() => openSignedUrl(doc.file_url)} className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title="Télécharger">
                                             <IconExternalLink size={15} />
-                                          </a>
+                                          </button>
                                           <button
                                             onClick={async () => {
                                               if (!confirm('Supprimer ce document DOE ?')) return;
@@ -4584,9 +4585,9 @@ export default function ProjectDetail() {
                                     >
                                       <IconRefresh size={16} />
                                     </button>
-                                    <a href={plan.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
+                                    <button type="button" onClick={() => openSignedUrl(plan.file_url)} className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
                                       <IconExternalLink size={16} />
-                                    </a>
+                                    </button>
                                     <button 
                                       onClick={async () => {
                                         if (!confirm('Supprimer ce plan ?')) return;

@@ -11,17 +11,25 @@ export interface RouteDeps {
 }
 
 export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
-  function requireSuperAdmin(req: any, res: any, next: any) {
+  // Case/whitespace-insensitive so a differently-cased SUPER_ADMIN_EMAIL env
+  // value (or an auth provider that doesn't lowercase emails) can't either
+  // lock the real operator out or, worse, leave the comparison looking like
+  // it matches when it silently doesn't.
+  function isSuperAdminEmail(email: string | undefined): boolean {
     const adminEmail = process.env.SUPER_ADMIN_EMAIL;
-    if (!adminEmail || req.user?.email !== adminEmail) {
+    if (!adminEmail || !email) return false;
+    return email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
+  }
+
+  function requireSuperAdmin(req: any, res: any, next: any) {
+    if (!isSuperAdminEmail(req.user?.email)) {
       return res.status(403).json({ error: 'Accès réservé au super-administrateur' });
     }
     next();
   }
 
   app.get('/api/admin/is-admin', async (req: any, res: any) => {
-    const adminEmail = process.env.SUPER_ADMIN_EMAIL;
-    res.json({ isAdmin: !!(adminEmail && req.user?.email === adminEmail) });
+    res.json({ isAdmin: isSuperAdminEmail(req.user?.email) });
   });
 
   app.get('/api/admin/stats', requireSuperAdmin, async (_req: any, res: any) => {

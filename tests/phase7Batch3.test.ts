@@ -4,11 +4,9 @@
 // enforces tenant isolation through the real app, and locks in the fix for
 // the observation_reports cross-tenant linking gap found during extraction.
 //
-// Storage-backed routes (meeting photo upload/delete) are not exercised here:
-// FakeSupabaseAdmin's storage stub only implements getBucket/createBucket
-// (used by createApp()'s startup bucket check), not from()/upload()/
-// getPublicUrl()/remove() — no test in this suite has needed those yet. The
-// photo caption route, which only touches the DB, is covered instead.
+// Meeting photo upload (POST /api/meetings/:id/photos) is covered below —
+// image-only content validation (server/imageUpload.ts), same as the logo/
+// avatar uploads, since these render as <img> in Reunions.tsx.
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
@@ -152,6 +150,29 @@ describe('Meetings', () => {
     const { token: tokenB } = makeUser(tenantB);
     await request(app).patch('/api/meetings/photos/photo-1/caption').set(authHeader(tokenB)).send({ caption: 'Hacked' });
     expect(fakeSupabaseAdmin.getTable('meeting_photos').find(p => p.id === 'photo-1')?.caption).toBe('Façade nord');
+  });
+
+  it('uploads a real photo to a meeting', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const created = await request(app).post('/api/meetings').set(authHeader(token)).send({ project_id: 'p1', type: 'chantier', title: 'Réunion', date: '2026-01-15' });
+
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+    const res = await request(app).post(`/api/meetings/${created.body.id}/photos`).set(authHeader(token))
+      .field('caption', 'Façade nord')
+      .attach('file', pngBytes, 'photo.png');
+    expect(res.status).toBe(201);
+    expect(fakeSupabaseAdmin.getTable('meeting_photos').find(p => p.id === res.body.id)?.file_url).toContain('/object/public/meeting-photos/');
+  });
+
+  it('rejects a meeting photo upload whose content is not actually an image', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const created = await request(app).post('/api/meetings').set(authHeader(token)).send({ project_id: 'p1', type: 'chantier', title: 'Réunion', date: '2026-01-15' });
+
+    const res = await request(app).post(`/api/meetings/${created.body.id}/photos`).set(authHeader(token))
+      .attach('file', Buffer.from('<script>alert(1)</script>'), { filename: 'photo.png', contentType: 'image/png' });
+    expect(res.status).toBe(400);
   });
 });
 

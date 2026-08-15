@@ -4,10 +4,23 @@
 // that joined cctps.ts/dpgf.ts this same lot — a different route shape (one
 // JSON blob per project, upserted wholesale) than those modules' existing
 // per-field CRUD on the same tables.
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
+
+// `settings` rows are raw select('*') results — snake_case DB columns, not
+// the camelCase shape GET /api/settings maps them to for the frontend.
+// sendEmail.ts used to read settings.smtpHost/smtpPass/senderOption (always
+// undefined on a raw row), so it silently fell through to the platform env
+// vars — or failed outright with them unset — regardless of what a tenant
+// had actually configured. Stub sendMail so the "settings resolved
+// correctly" tests below can assert on what was actually handed to
+// nodemailer, not just the HTTP status.
+const sendMailMock = vi.fn(async (_opts: Record<string, unknown>) => ({}));
+vi.mock('nodemailer', () => ({
+  default: { createTransport: () => ({ sendMail: sendMailMock }) },
+}));
 
 let app: Express;
 
@@ -65,6 +78,48 @@ describe('Send email', () => {
     const res = await request(app).post('/api/send-email').set(authHeader(token)).send({ to: 'x@example.test', subject: 'Test', text: 'Hello' });
     expect(res.status).toBe(500);
     expect(res.body.error).toMatch(/Settings/);
+  });
+
+  it('sends using the tenant\'s own configured SMTP settings, from the agency address by default', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{
+      tenant_id: tenantId, email: 'agence@example.test', sender_option: 'agency',
+      smtp_host: 'smtp.tenant.test', smtp_port: '587', smtp_user: 'tenant-user', smtp_pass: 'tenant-pass',
+    }]);
+    sendMailMock.mockClear();
+
+    const res = await request(app).post('/api/send-email').set(authHeader(token)).send({ to: 'x@example.test', subject: 'Test', text: 'Hello' });
+    expect(res.status).toBe(200);
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    expect(sendMailMock.mock.calls[0][0]).toMatchObject({ from: 'agence@example.test', cc: undefined, to: 'x@example.test' });
+  });
+
+  it('sends from the caller\'s own address, cc\'ing the agency, when senderOption is personal', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{
+      tenant_id: tenantId, email: 'agence@example.test', sender_option: 'personal',
+      smtp_host: 'smtp.tenant.test', smtp_port: '587', smtp_user: 'tenant-user', smtp_pass: 'tenant-pass',
+    }]);
+    sendMailMock.mockClear();
+
+    const res = await request(app).post('/api/send-email').set(authHeader(token))
+      .send({ to: 'x@example.test', subject: 'Test', text: 'Hello', userEmail: 'perso@example.test' });
+    expect(res.status).toBe(200);
+    expect(sendMailMock.mock.calls[0][0]).toMatchObject({ from: 'perso@example.test', cc: 'agence@example.test' });
+  });
+
+  it('rejects a subject containing CR/LF (header injection)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, smtp_host: 'h', smtp_user: 'u', smtp_pass: 'p' }]);
+    sendMailMock.mockClear();
+
+    const res = await request(app).post('/api/send-email').set(authHeader(token))
+      .send({ to: 'x@example.test', subject: 'Test\r\nBcc: attacker@evil.test', text: 'Hello' });
+    expect(res.status).toBe(400);
+    expect(sendMailMock).not.toHaveBeenCalled();
   });
 });
 

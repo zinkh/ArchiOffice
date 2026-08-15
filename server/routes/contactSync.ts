@@ -3,6 +3,7 @@
 // source using tenant-scoped dedup-by-email, then upsert into `contacts`.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertPublicHttpUrl } from '../ssrfGuard';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -128,6 +129,15 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       const { url, username, password } = req.body;
       if (!url || !username) {
         return res.status(400).json({ error: "URL et nom d'utilisateur requis" });
+      }
+
+      // `url` is fully caller-controlled — validate it points at a public
+      // host before fetching, so this route can't be used to reach internal
+      // services or the cloud metadata endpoint (SSRF).
+      try {
+        await assertPublicHttpUrl(url);
+      } catch (e: any) {
+        return res.status(e.status || 400).json({ error: e.message || 'URL invalide' });
       }
 
       const auth = Buffer.from(`${username}:${password}`).toString('base64');

@@ -5,16 +5,15 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
-  upload: any;
 }
 
-export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload }: RouteDeps) {
+export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage }: RouteDeps) {
   const getProfileDisplayName = async (tenantId: string, userId: string): Promise<string> => {
     const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('name').eq('id', userId).maybeSingle();
     return (data as any)?.name || 'Utilisateur';
@@ -128,15 +127,14 @@ export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenant
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'messages').select('*').eq('conversation_id', id)
         .order('created_at', { ascending: true }).limit(200);
       if (error) throw error;
-      const withUrls = await Promise.all((data || []).map(async (m: any) => ({ ...m, attachment_url: await resolveFileUrl('message-attachments', m.attachment_url) })));
-      res.json(withUrls);
+      res.json(data || []);
     } catch (e: any) {
       console.error("[GET /api/conversations/:id/messages]", e);
       res.status(e.status || 500).json({ error: e.message || "Failed to fetch messages" });
     }
   });
 
-  app.post("/api/conversations/:id/messages", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/conversations/:id/messages", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
@@ -165,10 +163,9 @@ export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenant
       // Sending counts as having read the thread up to now
       await tenantScopedFrom(supabaseAdmin, tenantId, 'conversation_participants').update({ last_read_at: created_at }).eq('conversation_id', id).eq('user_id', req.user.id);
 
-      const signedAttachmentUrl = await resolveFileUrl('message-attachments', attachment_url);
       res.status(201).json({
         id: msgId, conversation_id: id, sender_id: req.user.id, sender_name: senderName,
-        content: content?.trim() || null, attachment_url: signedAttachmentUrl, attachment_name, attachment_type, created_at
+        content: content?.trim() || null, attachment_url, attachment_name, attachment_type, created_at
       });
     } catch (e: any) {
       console.error(e);

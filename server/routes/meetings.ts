@@ -7,6 +7,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleSingleImageUpload, sniffImageMime } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -15,11 +16,9 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
-  upload: any;
 }
 
-export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
+export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage }: RouteDeps) {
   app.get("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -43,8 +42,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: meeting, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', id).single();
       if (error) throw error;
       const { data: photos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('meeting_id', id).order('uploaded_at');
-      const photosWithUrls = await Promise.all((photos || []).map(async (p: any) => ({ ...p, file_url: await resolveFileUrl('meeting-photos', p.file_url) })));
-      res.json({ ...meeting, photos: photosWithUrls });
+      res.json({ ...meeting, photos: photos || [] });
     } catch (e: any) {
       console.error("[GET /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
@@ -96,21 +94,28 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       console.error("[DELETE /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/meetings/:id/photos", upload.single('file'), async (req: any, res: any) => {
+  // Photos are rendered inline as <img> in Reunions.tsx, so — unlike the
+  // other file uploads in this app — an image-only whitelist is the right
+  // fit here (same magic-byte sniffing as the logo/avatar uploads), not just
+  // a generic dangerous-content blocklist: anything that isn't a real image
+  // wouldn't render there anyway.
+  app.post("/api/meetings/:id/photos", handleSingleImageUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { caption } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
+      if (!sniffImageMime(file.buffer)) {
+        return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
+      }
       const photoId = crypto.randomUUID();
       const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('meeting-photos', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').insert({ id: photoId, meeting_id: id, file_url, caption: caption || null, uploaded_at });
       if (error) throw error;
-      const signedUrl = await resolveFileUrl('meeting-photos', file_url);
-      res.status(201).json({ id: photoId, meeting_id: id, file_url: signedUrl, caption, uploaded_at });
+      res.status(201).json({ id: photoId, meeting_id: id, file_url, caption, uploaded_at });
     } catch (e: any) {
       console.error("[POST /api/meetings/:id/photos]", e); res.status(500).json({ error: e.message }); }
   });

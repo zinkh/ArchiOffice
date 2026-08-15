@@ -2,6 +2,8 @@ import express from "express";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import helmet from "helmet";
+import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
@@ -61,9 +63,12 @@ import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
+import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
+import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
 import { getNextDocNumber as getNextDocNumberImpl } from "./server/getNextDocNumber";
+import { getNextAffaireInvoiceNumber as getNextAffaireInvoiceNumberImpl } from "./server/getNextAffaireInvoiceNumber";
 import { sanitizeFilename } from "./server/sanitizeFilename";
 import { fetchWithTimeout } from "./server/fetchWithTimeout";
 import multer from "multer";
@@ -87,975 +92,80 @@ if (!fs.existsSync(uploadDir)) {
 
 dotenv.config();
 
-/* SQLite initialization removed — using Supabase PostgreSQL */
-if (false as any) {
-  const db: any = null; // stub to satisfy TypeScript inside dead-code block
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      client TEXT NOT NULL,
-      client_id TEXT,
-      status TEXT NOT NULL,
-      budget REAL,
-      category TEXT,
-      start_date TEXT,
-      end_date TEXT,
-      description TEXT,
-      image_url TEXT,
-      project_code TEXT,
-      address TEXT,
-      client_siret TEXT,
-      client_vat_number TEXT,
-      client_email TEXT,
-      is_public_client INTEGER DEFAULT 0,
-      reference TEXT,
-      projet_detail TEXT,
-      is_entreprise INTEGER DEFAULT 0,
-      nom_societe TEXT,
-      rcs TEXT,
-      representant TEXT,
-      qualite TEXT,
-      adresse_client TEXT,
-      cp_client TEXT,
-      ville_client TEXT,
-      telephone TEXT,
-      portable TEXT,
-      email_client TEXT,
-      adresse_terrain TEXT,
-      cp_ville_terrain TEXT,
-      ban_id_terrain TEXT,
-      city_code_terrain TEXT,
-      ref_cadastrale TEXT,
-      zone_plu TEXT,
-      surface_parcelle TEXT,
-      nom_etablissement TEXT,
-      avant_trav TEXT,
-      apres_trav TEXT,
-      type_et_cat TEXT,
-      type_projet TEXT,
-      categorie_projet TEXT,
-      surface_plancher TEXT,
-      surface_plancher_ext TEXT,
-      surface_erp TEXT,
-      surface_ert TEXT,
-      effectif_public TEXT,
-      effectif_personnel TEXT,
-      ind TEXT,
-      date_modification TEXT,
-      FOREIGN KEY(client_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS ordres_de_service (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      os_number TEXT NOT NULL,
-      march_number TEXT,
-      title TEXT NOT NULL,
-      date TEXT NOT NULL,
-      description TEXT,
-      lot TEXT,
-      status TEXT DEFAULT 'draft',
-      maitrise_oeuvre_adresse TEXT,
-      entreprise TEXT,
-      origine_demande TEXT,
-      montant_marche_ht REAL,
-      objet TEXT,
-      date_fourniture TEXT,
-      article_ccap TEXT,
-      incidences_delais_type TEXT,
-      incidences_delais_details TEXT,
-      incidences_couts_type TEXT,
-      montant_devis_presente REAL,
-      montant_devis_accepte REAL,
-      date_signature TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS project_categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE
-    );
-
-    CREATE TABLE IF NOT EXISTS project_categories_junction (
-      project_id TEXT,
-      category_id TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(category_id) REFERENCES project_categories(id),
-      PRIMARY KEY(project_id, category_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS team_members (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      email TEXT UNIQUE,
-      avatar TEXT,
-      system_role TEXT DEFAULT 'user',
-      password TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS project_team (
-      project_id TEXT,
-      member_id TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(member_id) REFERENCES team_members(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS milestones (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      proposal_id TEXT,
-      tender_id TEXT,
-      title TEXT NOT NULL,
-      due_date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(proposal_id) REFERENCES proposals(id),
-      FOREIGN KEY(tender_id) REFERENCES tenders(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS tenders (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      client TEXT NOT NULL,
-      submission_deadline TEXT NOT NULL,
-      status TEXT NOT NULL,
-      value REAL,
-      notes TEXT,
-      mandataire_id TEXT,
-      type TEXT,
-      surface REAL,
-      construction_cost REAL,
-      honoraires_percent REAL,
-      mandatory_visit INTEGER DEFAULT 0,
-      visit_date TEXT,
-      withdrawal_deadline TEXT,
-      archived INTEGER DEFAULT 0,
-      FOREIGN KEY(mandataire_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS tender_specialties (
-      id TEXT PRIMARY KEY,
-      tender_id TEXT,
-      specialty_name TEXT NOT NULL,
-      contact_id TEXT,
-      FOREIGN KEY(tender_id) REFERENCES tenders(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS specifications (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      title TEXT NOT NULL,
-      content TEXT, -- JSON string of spec sections
-      last_updated TEXT,
-      is_template INTEGER DEFAULT 0,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS contacts (
-      id TEXT PRIMARY KEY,
-      prefix TEXT,
-      first_name TEXT NOT NULL,
-      middle_name TEXT,
-      last_name TEXT NOT NULL,
-      suffix TEXT,
-      nickname TEXT,
-      company_name TEXT,
-      job_title TEXT,
-      department TEXT,
-      email_work TEXT,
-      email_home TEXT,
-      email_other TEXT,
-      email TEXT,
-      phone_mobile TEXT,
-      phone_work TEXT,
-      market_number TEXT,
-      market_amount_base REAL,
-      market_amount_options REAL,
-      market_amount_avenants REAL,
-      phone_home TEXT,
-      phone_main TEXT,
-      phone_fax_work TEXT,
-      phone_fax_home TEXT,
-      phone_pager TEXT,
-      phone_other TEXT,
-      phone TEXT,
-      address_work_street TEXT,
-      address_work_city TEXT,
-      address_work_state TEXT,
-      address_work_zip TEXT,
-      address_work_country TEXT,
-      address_home_street TEXT,
-      address_home_city TEXT,
-      address_home_state TEXT,
-      address_home_zip TEXT,
-      address_home_country TEXT,
-      address TEXT,
-      zip TEXT,
-      city TEXT,
-      state TEXT,
-      country TEXT,
-      candidatures TEXT,
-      affaires TEXT,
-      logo TEXT,
-      ca_amount REAL,
-      electronic_signature TEXT,
-      contact_references TEXT,
-      tags TEXT,
-      category TEXT,
-      notes TEXT,
-      birthday TEXT,
-      website TEXT,
-      created_at TEXT,
-      created_by TEXT,
-      siret TEXT,
-      vat_number TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS contact_categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE
-    );
-
-    CREATE TABLE IF NOT EXISTS proposals (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      client_id TEXT,
-      amount REAL,
-      status TEXT NOT NULL,
-      description TEXT,
-      created_at TEXT,
-      reference TEXT,
-      projet_detail TEXT,
-      is_entreprise INTEGER DEFAULT 0,
-      nom_societe TEXT,
-      rcs TEXT,
-      representant TEXT,
-      qualite TEXT,
-      adresse_client TEXT,
-      cp_client TEXT,
-      ville_client TEXT,
-      telephone TEXT,
-      portable TEXT,
-      email_client TEXT,
-      adresse_terrain TEXT,
-      cp_ville_terrain TEXT,
-      ref_cadastrale TEXT,
-      zone_plu TEXT,
-      surface_parcelle TEXT,
-      nom_etablissement TEXT,
-      avant_trav TEXT,
-      apres_trav TEXT,
-      type_et_cat TEXT,
-      type_projet TEXT,
-      categorie_projet TEXT,
-      surface_plancher TEXT,
-      surface_plancher_ext TEXT,
-      surface_erp TEXT,
-      surface_ert TEXT,
-      effectif_public TEXT,
-      effectif_personnel TEXT,
-      ind TEXT,
-      date_modification TEXT,
-      
-      -- New XML fields
-      project_code TEXT,
-      project_number TEXT,
-      project_status TEXT,
-      keywords TEXT,
-      notes TEXT,
-      site_name TEXT,
-      site_description TEXT,
-      site_id TEXT,
-      site_address_1 TEXT,
-      site_address_2 TEXT,
-      site_address_3 TEXT,
-      site_postbox TEXT,
-      site_city TEXT,
-      site_state TEXT,
-      site_postcode TEXT,
-      site_country TEXT,
-      site_gross_perimeter TEXT,
-      site_gross_area TEXT,
-      building_name TEXT,
-      building_description TEXT,
-      building_id TEXT,
-      contact_fullname TEXT,
-      contact_prefixtitle TEXT,
-      contact_givenname TEXT,
-      contact_middlename TEXT,
-      contact_familyname TEXT,
-      contact_suffixtitle TEXT,
-      contact_nameorder TEXT,
-      contact_id TEXT,
-      contact_role TEXT,
-      contact_department TEXT,
-      contact_company TEXT,
-      contact_companycode TEXT,
-      contact_fulladdress TEXT,
-      contact_address_1 TEXT,
-      contact_address_2 TEXT,
-      contact_address_3 TEXT,
-      contact_postbox TEXT,
-      contact_city TEXT,
-      contact_state TEXT,
-      contact_postcode TEXT,
-      contact_country TEXT,
-      contact_email TEXT,
-      contact_phone TEXT,
-      contact_fax TEXT,
-      contact_web TEXT,
-      cad_technician_fullname TEXT,
-      cad_technician_prefixtitle TEXT,
-      cad_technician_givenname TEXT,
-      cad_technician_middlename TEXT,
-      cad_technician_familyname TEXT,
-      cad_technician_suffixtitle TEXT,
-      cad_technician_nameorder TEXT,
-      client_fullname TEXT,
-      client_prefixtitle TEXT,
-      client_givenname TEXT,
-      client_middlename TEXT,
-      client_familyname TEXT,
-      client_suffixtitle TEXT,
-      client_nameorder TEXT,
-      client_company TEXT,
-      client_fulladdress TEXT,
-      client_address_1 TEXT,
-      client_address_2 TEXT,
-      client_address_3 TEXT,
-      client_postbox TEXT,
-      client_city TEXT,
-      client_state TEXT,
-      client_postcode TEXT,
-      client_country TEXT,
-      client_email TEXT,
-      client_phone TEXT,
-      client_fax TEXT,
-      ed_report_header TEXT,
-      custom_building TEXT,
-      custom_architect TEXT,
-      custom_client TEXT,
-      fee_distribution TEXT,
-
-      FOREIGN KEY(client_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS invoices (
-      id TEXT PRIMARY KEY,
-      invoice_number TEXT,
-      project_id TEXT,
-      amount REAL,
-      tax_amount REAL,
-      total_amount REAL,
-      status TEXT NOT NULL,
-      due_date TEXT,
-      issue_date TEXT,
-      description TEXT,
-      created_at TEXT,
-      seller_name TEXT,
-      seller_address TEXT,
-      seller_siret TEXT,
-      seller_vat_number TEXT,
-      seller_iban TEXT,
-      seller_bic TEXT,
-      vat_rate REAL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS invoice_items (
-      id TEXT PRIMARY KEY,
-      invoice_id TEXT,
-      description TEXT,
-      quantity REAL,
-      unit_price REAL,
-      vat_rate REAL,
-      FOREIGN KEY(invoice_id) REFERENCES invoices(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS project_cotraitants (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      specialty TEXT NOT NULL,
-      contact_id TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS project_stakeholders (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      contact_id TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS proposal_specialties (
-      id TEXT PRIMARY KEY,
-      proposal_id TEXT,
-      specialty_name TEXT NOT NULL,
-      contact_id TEXT,
-      FOREIGN KEY(proposal_id) REFERENCES proposals(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS project_lots (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      lot_number TEXT NOT NULL,
-      lot_title TEXT NOT NULL,
-      contact_id TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      title TEXT NOT NULL,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      progress INTEGER DEFAULT 0,
-      dependencies TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS site_reports (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      date TEXT NOT NULL,
-      report_number INTEGER NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS site_report_notes (
-      id TEXT PRIMARY KEY,
-      report_id TEXT,
-      category TEXT NOT NULL,
-      note_number INTEGER NOT NULL,
-      responsible_company TEXT,
-      issue_date TEXT NOT NULL,
-      due_date TEXT,
-      realization_date TEXT,
-      status TEXT DEFAULT 'open',
-      FOREIGN KEY(report_id) REFERENCES site_reports(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      lot_id TEXT,
-      contact_id TEXT,
-      texte TEXT NOT NULL DEFAULT '',
-      statut TEXT NOT NULL DEFAULT 'À faire',
-      due_date TEXT,
-      created_report_id TEXT,
-      resolved_report_id TEXT,
-      number INTEGER,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(created_report_id) REFERENCES site_reports(id),
-      FOREIGN KEY(resolved_report_id) REFERENCES site_reports(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observation_reports (
-      observation_id TEXT,
-      report_id TEXT,
-      PRIMARY KEY (observation_id, report_id),
-      FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE,
-      FOREIGN KEY(report_id) REFERENCES site_reports(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS documents (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      phase TEXT,
-      version INTEGER DEFAULT 1,
-      file_url TEXT NOT NULL,
-      uploaded_by TEXT,
-      uploaded_at TEXT NOT NULL,
-      description TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS document_versions (
-      id TEXT PRIMARY KEY,
-      document_id TEXT,
-      version INTEGER NOT NULL,
-      file_url TEXT NOT NULL,
-      uploaded_by TEXT,
-      uploaded_at TEXT NOT NULL,
-      description TEXT,
-      FOREIGN KEY(document_id) REFERENCES documents(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS visas (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      title TEXT NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      comments TEXT,
-      document_url TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS receptions (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      date TEXT NOT NULL,
-      type TEXT NOT NULL,
-      has_reserves INTEGER DEFAULT 0,
-      reserves_count INTEGER DEFAULT 0,
-      document_url TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS reserves (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      reception_id TEXT,
-      title TEXT NOT NULL,
-      batiment TEXT,
-      local TEXT,
-      status TEXT DEFAULT 'A faire',
-      lots TEXT, -- JSON array
-      entreprises TEXT, -- JSON array
-      created_at TEXT,
-      due_date TEXT,
-      plan_id TEXT,
-      x REAL,
-      y REAL,
-      number INTEGER,
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(reception_id) REFERENCES receptions(id),
-      FOREIGN KEY(plan_id) REFERENCES plans(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS plans (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      name TEXT NOT NULL,
-      file_url TEXT NOT NULL,
-      uploaded_at TEXT NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS dpgf_items (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      designation TEXT NOT NULL,
-      unite TEXT NOT NULL,
-      quantite_prevue REAL NOT NULL,
-      prix_unitaire_ht REAL NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS situations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      numero_situation INTEGER NOT NULL,
-      date_situation TEXT NOT NULL,
-      etat TEXT NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS detail_situations (
-      id TEXT PRIMARY KEY,
-      situation_id TEXT,
-      dpgf_item_id TEXT,
-      pourcentage_avancement REAL NOT NULL,
-      FOREIGN KEY(situation_id) REFERENCES situations(id),
-      FOREIGN KEY(dpgf_item_id) REFERENCES dpgf_items(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS cctps (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      data TEXT, -- JSON string of CCTP structure
-      FOREIGN KEY(project_id) REFERENCES projects(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS dpgfs (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      cctp_id TEXT,
-      data TEXT, -- JSON string of DPGF structure
-      FOREIGN KEY(project_id) REFERENCES projects(id),
-      FOREIGN KEY(cctp_id) REFERENCES cctps(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      id TEXT PRIMARY KEY,
-      agencyName TEXT,
-      address TEXT,
-      phone TEXT,
-      email TEXT,
-      siret TEXT,
-      vatNumber TEXT,
-      currency TEXT,
-      language TEXT,
-      senderOption TEXT,
-      defaultEmailTemplate TEXT,
-      logoUrl TEXT,
-      seller_iban TEXT,
-      seller_bic TEXT,
-      smtpHost TEXT,
-      smtpPort TEXT,
-      smtpUser TEXT,
-      smtpPass TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS activities (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT,
-      user_id TEXT,
-      user_name TEXT,
-      action TEXT NOT NULL,
-      target TEXT,
-      target_id TEXT,
-      target_type TEXT,
-      category TEXT,
-      created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS feed_posts (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT,
-      user_id TEXT,
-      user_name TEXT,
-      content TEXT NOT NULL,
-      created_at TEXT,
-      likes_count INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS feed_comments (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT,
-      post_id TEXT,
-      user_id TEXT,
-      user_name TEXT,
-      content TEXT,
-      created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS feed_likes (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT,
-      item_id TEXT NOT NULL,
-      item_type TEXT NOT NULL,
-      user_id TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS meetings (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      project_id TEXT,
-      proposal_id TEXT,
-      tender_id TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      date TEXT NOT NULL,
-      notes TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS meeting_photos (
-      id TEXT PRIMARY KEY,
-      meeting_id TEXT NOT NULL,
-      tenant_id TEXT NOT NULL,
-      file_url TEXT NOT NULL,
-      caption TEXT,
-      uploaded_at TEXT NOT NULL,
-      FOREIGN KEY(meeting_id) REFERENCES meetings(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS meeting_attendees (
-      id TEXT PRIMARY KEY,
-      meeting_id TEXT NOT NULL,
-      tenant_id TEXT NOT NULL,
-      contact_id TEXT NOT NULL,
-      role TEXT,
-      FOREIGN KEY(meeting_id) REFERENCES meetings(id),
-      FOREIGN KEY(contact_id) REFERENCES contacts(id)
-    );
-  `);
-
-  // Add columns if they don't exist (for existing databases)
-  const tablesToUpdate = [
-    { table: 'settings', columns: ['smtpHost', 'smtpPort', 'smtpUser', 'smtpPass'] },
-    { table: 'projects', columns: [
-      'category', 'image_url', 'project_code', 'address', 'client_id', 'client_siret', 'client_vat_number', 'client_email', 'is_public_client', 'is_complete_mission', 'is_chantier', 'etudes_notes', 'chantier_notes', 'surface', 'construction_cost', 'remuneration', 'progression', 'project_manager', 'cotraitants', 'external_intervenants', 'entreprises',
-      'reference', 'projet_detail', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite', 
-      'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client', 
-      'adresse_terrain', 'cp_ville_terrain', 'ban_id_terrain', 'city_code_terrain', 'ref_cadastrale', 'zone_plu', 'surface_parcelle', 
-      'nom_etablissement', 'avant_trav', 'apres_trav', 'type_et_cat', 'type_projet', 
-      'categorie_projet', 'surface_plancher', 'surface_plancher_ext', 'surface_erp', 
-      'surface_ert', 'effectif_public', 'effectif_personnel', 'ind', 'date_modification'
-    ] },
-    { table: 'milestones', columns: ['proposal_id', 'tender_id'] },
-    { table: 'site_reports', columns: ['pageFormat', 'stakeholders', 'companies', 'meetingNotes', 'nextMeeting', 'meteo', 'temperature', 'effectif_total'] },
-    { table: 'site_report_notes', columns: ['text', 'lot_concerne', 'photo_url', 'position', 'description', 'statut'] },
-    { table: 'contacts', columns: [
-      'prefix', 'middle_name', 'suffix', 'nickname', 'job_title', 'department', 
-      'email_work', 'email_home', 'email_other', 
-      'phone_mobile', 'phone_work', 'phone_home', 'phone_main', 'phone_fax_work', 'phone_fax_home', 'phone_pager', 'phone_other',
-      'address_work_street', 'address_work_city', 'address_work_state', 'address_work_zip', 'address_work_country',
-      'address_home_street', 'address_home_city', 'address_home_state', 'address_home_zip', 'address_home_country',
-      'notes', 'birthday', 'category', 'company_name', 'siret', 'vat_number', 'website'
-    ] },
-    { table: 'team_members', columns: ['system_role', 'senderOption', 'defaultEmailTemplate', 'password'] },
-    { table: 'invoices', columns: ['invoice_number', 'tax_amount', 'total_amount', 'issue_date', 'seller_name', 'seller_address', 'seller_siret', 'seller_vat_number', 'seller_iban', 'seller_bic', 'vat_rate'] },
-    { table: 'tenders', columns: ['mandataire_id', 'type', 'surface', 'construction_cost', 'honoraires_percent', 'mandatory_visit', 'visit_date', 'withdrawal_deadline', 'archived'] },
-    { table: 'proposals', columns: [
-      'reference', 'projet_detail', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite', 
-      'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client', 
-      'adresse_terrain', 'cp_ville_terrain', 'ref_cadastrale', 'zone_plu', 'surface_parcelle', 
-      'nom_etablissement', 'avant_trav', 'apres_trav', 'type_et_cat', 'type_projet', 
-      'categorie_projet', 'surface_plancher', 'surface_plancher_ext', 'surface_erp', 
-      'surface_ert', 'effectif_public', 'effectif_personnel', 'ind', 'date_modification',
-      'project_code', 'project_number', 'project_status', 'keywords', 'notes',
-      'site_name', 'site_description', 'site_id', 'site_address_1', 'site_address_2', 'site_address_3',
-      'site_postbox', 'site_city', 'site_state', 'site_postcode', 'site_country', 'site_gross_perimeter', 'site_gross_area',
-      'building_name', 'building_description', 'building_id',
-      'contact_fullname', 'contact_prefixtitle', 'contact_givenname', 'contact_middlename', 'contact_familyname',
-      'contact_suffixtitle', 'contact_nameorder', 'contact_id', 'contact_role', 'contact_department',
-      'contact_company', 'contact_companycode', 'contact_fulladdress', 'contact_address_1', 'contact_address_2',
-      'contact_address_3', 'contact_postbox', 'contact_city', 'contact_state', 'contact_postcode',
-      'contact_country', 'contact_email', 'contact_phone', 'contact_fax', 'contact_web',
-      'cad_technician_fullname', 'cad_technician_prefixtitle', 'cad_technician_givenname', 'cad_technician_middlename',
-      'cad_technician_familyname', 'cad_technician_suffixtitle', 'cad_technician_nameorder',
-      'client_fullname', 'client_prefixtitle', 'client_givenname', 'client_middlename', 'client_familyname',
-      'client_suffixtitle', 'client_nameorder', 'client_company', 'client_fulladdress', 'client_address_1',
-      'client_address_2', 'client_address_3', 'client_postbox', 'client_city', 'client_state',
-      'client_postcode', 'client_country', 'client_email', 'client_phone', 'client_fax',
-      'ed_report_header', 'custom_building', 'custom_architect', 'custom_client', 'fee_distribution',
-      'construction_cost', 'ratio_rehab', 'ratio_extension', 'complexity_rate', 'base_fee_percent', 'exe_fee_percent', 'comp_fee_percent', 'vat_rate', 'decimal_precision'
-    ] },
-    { table: 'ordres_de_service', columns: [
-      'march_number', 'lot', 'maitrise_oeuvre_adresse', 'entreprise', 'origine_demande',
-      'montant_marche_ht', 'objet', 'date_fourniture', 'article_ccap', 'incidences_delais_type',
-      'incidences_delais_details', 'incidences_couts_type', 'montant_devis_presente',
-      'montant_devis_accepte', 'date_signature'
-    ] },
-    { table: 'ordres_de_service', columns: ['type'] },
-    { table: 'reserves', columns: ['batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'plan_id', 'x', 'y', 'number'] },
-    { table: 'observations', columns: ['lot_id', 'contact_id', 'texte', 'statut', 'due_date', 'created_report_id', 'resolved_report_id', 'number', 'created_at'] },
-    { table: 'observation_reports', columns: ['observation_id', 'report_id'] },
-    { table: 'settings', columns: ['seller_iban', 'seller_bic'] },
-    { table: 'settings', columns: ['zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token', 'zoho_books_org_id'] },
-    { table: 'invoices', columns: ['zoho_invoice_id'] },
-    { table: 'invoices', columns: ['invoice_type'] },
-    { table: 'invoices', columns: ['mission_id', 'mission_name'] },
-    { table: 'activities', columns: ['likes_count'] },
-    { table: 'team_members', columns: ['notifications_last_seen'] },
-    { table: 'meetings', columns: ['proposal_id', 'tender_id'] }
-  ];
-
-  for (const { table, columns } of tablesToUpdate) {
-    for (const column of columns) {
-      try {
-        db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`).run();
-      } catch (e) {
-        console.error("[server.ts:948]", e);
-        // Column likely already exists
-      }
-    }
-  }
-
-  try {
-    db.prepare(`ALTER TABLE invoices ADD COLUMN advancement_pct NUMERIC DEFAULT 0`).run();
-  } catch (e) {
-    console.error("[server.ts:956]", e);
-    // Column likely already exists
-  }
-
-  try {
-    db.prepare(`ALTER TABLE specifications ADD COLUMN is_template INTEGER DEFAULT 0`).run();
-  } catch (e) {
-    console.error("[server.ts:962]", e);
-    // Column likely already exists
-  }
-
-  // Migrate OS type column with proper default
-  try {
-    db.prepare(`ALTER TABLE ordres_de_service ADD COLUMN type TEXT DEFAULT 'travaux'`).run();
-  } catch (e) {
-    console.error("[server.ts:969]", e);
-    // Column likely already exists
-  }
-  // Backfill type for existing rows
-  db.prepare(`UPDATE ordres_de_service SET type = 'travaux' WHERE type IS NULL`).run();
-  // Migrate legacy statuses to new workflow values
-  db.prepare(`UPDATE ordres_de_service SET status = 'submitted' WHERE status = 'issued'`).run();
-  db.prepare(`UPDATE ordres_de_service SET status = 'approved' WHERE status = 'signed'`).run();
-
-  // Seed Data
-  db.exec(`
-    INSERT OR IGNORE INTO project_categories (id, name) VALUES 
-    ('pcat1', 'Residential'),
-    ('pcat2', 'Commercial'),
-    ('pcat3', 'Renovation'),
-    ('pcat4', 'Industrial'),
-    ('pcat5', 'Public');
-
-    INSERT OR IGNORE INTO contact_categories (id, name) VALUES 
-    ('cat1', 'Architecte d''Intérieur'),
-    ('cat2', 'Architectes'),
-    ('cat3', 'Artisan'),
-    ('cat4', 'Artiste'),
-    ('cat5', 'BIM Manager'),
-    ('cat6', 'Bureau d''Etudes'),
-    ('cat7', 'Constructeur Maisons Individueles'),
-    ('cat8', 'Contractant général'),
-    ('cat9', 'Contrôleur Technique'),
-    ('cat10', 'Courtier en Travaux'),
-    ('cat11', 'Designer'),
-    ('cat12', 'Diagnostics Immobiliers'),
-    ('cat13', 'Détection Réseaux'),
-    ('cat14', 'Entreprise'),
-    ('cat15', 'Entreprise Générale'),
-    ('cat16', 'Graphiste'),
-    ('cat17', 'Géomètre-expert'),
-    ('cat18', 'Géotechnicien'),
-    ('cat19', 'Historienne du Patrimoine'),
-    ('cat20', 'Maître d''Ouvrages'),
-    ('cat21', 'Maître d''œuvre'),
-    ('cat22', 'Maîtrise d''Usage - Concertation'),
-    ('cat23', 'Paysagiste'),
-    ('cat24', 'Photographe'),
-    ('cat25', 'Promoteur'),
-    ('cat26', 'Urbaniste');
-
-    INSERT OR IGNORE INTO contacts (id, first_name, last_name, company_name, email, category, city) VALUES 
-    ('c1', 'Jean', 'Dupont', 'Dupont Architecture', 'jean@dupont-archi.fr', 'Architectes', 'Paris'),
-    ('c2', 'Marie', 'Curie', 'Ville de Paris', 'marie.curie@paris.fr', 'Maître d''Ouvrages', 'Paris'),
-    ('c3', 'Pierre', 'Martin', 'BET Structure', 'pierre@bet-structure.com', 'Bureau d''Etudes', 'Lyon'),
-    ('c4', 'Sophie', 'Bernard', 'Bernard Design', 'sophie@bernard-design.fr', 'Designer', 'Marseille'),
-    ('c5', 'Thomas', 'Petit', 'Petit Promoteur', 'thomas@petit-immo.fr', 'Promoteur', 'Bordeaux');
-
-    INSERT OR IGNORE INTO proposals (id, title, client_id, amount, status, description, created_at, reference) VALUES 
-    ('prop1', 'Rénovation Appartement Haussmannien', 'c2', 12500, 'Accepted', 'Mission complète de maîtrise d''œuvre pour la rénovation d''un appartement de 120m²', '2023-10-15', 'PROP-2023-001'),
-    ('prop2', 'Extension Maison Individuelle', 'c5', 8500, 'Pending', 'Étude de faisabilité et permis de construire pour une extension de 40m²', '2023-11-02', 'PROP-2023-002'),
-    ('prop3', 'Aménagement Bureaux CCI', 'c1', 15000, 'Draft', 'Conception et suivi de travaux pour l''aménagement des nouveaux bureaux de la CCI', '2023-11-20', 'PROP-2023-003');
-
-    INSERT OR IGNORE INTO projects (id, name, client, status, budget, start_date, end_date, description) VALUES 
-    ('p1', 'Collège ARTEM', 'Enseignement', 'Completed', 18500000, '2016-01-01', '2018-11-07', 'Construction du Collège ARTEM'),
-    ('p2', 'Lycée Heinrich-Nessel', 'Enseignement', 'Completed', 4200000, '2017-03-15', '2018-11-07', 'Ateliers du Lycée Heinrich-Nessel à Haguenau'),
-    ('p3', 'Collège Vallée de l''Orne', 'Enseignement', 'In Progress', 12500000, '2023-06-01', '2026-11-07', 'Restructuration de l’externat. Création d’une demi-pension. Mise aux normes accessibilité PSH. Construction Neuve d’une galerie d’expositions.'),
-    ('p4', 'Lycée Cormontaigne', 'Enseignement', 'In Progress', 6200000, '2024-01-01', '2026-11-07', 'Restructuration du bâtiment 3 - Ateliers, 6 200 m² SHON. Respect des 12 critères de préconisations HQE.'),
-    ('p5', 'Collège de Custines', 'Enseignement', 'Planning', 9500000, '2025-05-01', '2027-11-07', 'Collège de Custines'),
-    ('p6', 'ENSAD Nancy', 'Enseignement', 'In Progress', 24000000, '2024-01-01', '2027-11-07', 'École nationale supérieure d’art et de design de Nancy'),
-    ('p7', 'Restauration Périscolaire Essey', 'Enseignement', 'In Progress', 1200000, '2025-01-01', '2026-12-02', 'Creation de Locaux de Restauration Peri-Scolaire et Annexes dans les Anciennes Ecuries du Haut-Chateau a ESSEY-LES-NANCY'),
-    ('p8', 'Groupe Scolaire Ménil-la-Tour', 'Enseignement', 'Planning', 2100000, '2025-08-01', '2027-12-02', 'Solutions passives (sur isolation) ou semi passives (recuperation des apports). Capteurs solaires pour la production ECS.'),
-    ('p9', 'Groupe Scolaire Marcel Leroy', 'Enseignement', 'In Progress', 1500000, '2024-01-01', '2026-12-02', 'La salle de jeux preexistante est completee a rez-de-chaussee par un bloc sanitaire, une Tisannerie, un degagement sur l''entree.'),
-    ('p10', 'Groupe Scolaire Laneuveville', 'Enseignement', 'In Progress', 3000000, '2024-06-01', '2026-12-02', 'Construction d''un groupe scolaire de 9 classes: 5 classes elementaires 4 classes maternelles et d''un espace de restauration.'),
-    ('p11', 'Collège Liffol-le-Grand', 'Enseignement', 'In Progress', 4000000, '2024-01-01', '2026-12-02', 'Creation de College sur site pente en frange industrielle du village sur l''entree de la Nationale de Haute-Marne dans les Vosges.'),
-    ('p12', 'Collège Emile Gallé', 'Enseignement', 'In Progress', 5500000, '2024-01-01', '2026-12-02', 'College existant a reconstruire, en site occupe, en trois phases de demolition et de deux phases de construction.'),
-    ('p13', 'Cité Scolaire Chopin', 'Enseignement', 'In Progress', 2800000, '2024-01-01', '2026-12-02', 'Batiment en extension sur cour en bordure du Parc Sainte Marie. Liaison a l''existant par passerelle sur 2 niveaux.'),
-    ('p14', 'Amphithéâtre 700', 'Enseignement', 'In Progress', 1100000, '2024-01-01', '2026-12-02', 'Refection complete de l’etancheite avec integration d’une isolation ameliorant le bilan thermique du batiment.'),
-    ('p15', 'Collège Burnhaupt', 'Enseignement', 'In Progress', 8000000, '2024-01-01', '2026-12-02', 'Construction d’un collège 600 et 4 logements de fonction.'),
-    ('p16', 'Lycée Emmanuel Héré', 'Enseignement', 'Completed', 7500000, '2005-01-01', '2017-12-02', 'Demolir et a reconstruire le batiment des ateliers en fonction d’un phasage permettant le fonctionnement de l’etablissement.'),
-    ('p17', 'CERMAB ENSTIB', 'Enseignement', 'Completed', 3200000, '2000-01-01', '2017-12-02', 'Le mail central de distribution en double hauteur est scande par les poteaux biais en auto contreventement.'),
-    ('p18', 'IUT MCQ - CML', 'Enseignement', 'Completed', 2500000, '1998-01-01', '2017-12-02', 'Le C.M.L. Centre de Mesure Lorrain est un laboratoire de metrologie.'),
-    ('p19', 'Pôle de Métiers Epinal', 'Enseignement', 'Completed', 4500000, '1999-01-01', '2017-12-02', 'Administration dans Existant sur rue restructure, Enseignement Mecanique dans Sous-Sol Existant restructure.'),
-    ('p20', 'ENSTIB Epinal', 'Enseignement', 'Completed', 3800000, '1995-01-01', '2017-12-02', 'Bâtiment en Extension jouxtant sur la halle métallique préexistante.'),
-    ('p21', 'Hôtel de Police Verdun', 'Equipements Publics', 'Completed', 6500000, '2008-01-01', '2018-11-05', 'Rehabilitation de deux batiments contigus en un Hotel de Police.'),
-    ('p22', 'Caserne Void-Vacon', 'Equipements Publics', 'Completed', 3200000, '2010-01-01', '2018-11-05', 'Casernement de Gendarmerie.'),
-    ('p23', 'Caserne Seichamps', 'Equipements Publics', 'Completed', 3500000, '2011-01-01', '2018-11-05', 'Caserne de gendarmerie à Seichamps.'),
-    ('p24', 'Unité Alzheimer Arcis', 'Santé', 'Completed', 4200000, '2012-01-01', '2017-12-02', 'Construction d’une Unité dédiée à la prise en charge de personnes atteintes de la maladie d’Alzheimer.'),
-    ('p25', 'Pôle Mère-Enfant Verdun', 'Santé', 'Completed', 15000000, '2010-01-01', '2017-12-02', 'Le projet doit s''inserer entre le batiment principal Saint-Nicolas et le batiment ancien Laennec.'),
-    ('p26', 'Maison de Retraite Commercy', 'Santé', 'Completed', 5800000, '2009-01-01', '2018-11-07', 'Rehabilitation et liaison partielle du batiment du 18eme siecle au batiment existant.'),
-    ('p27', 'Centre Psychothérapique Nancy', 'Santé', 'Completed', 3900000, '2008-01-01', '2018-11-07', 'Construction d''un centre de soins de jour a Essey les Nancy.'),
-    ('p28', 'Complexe aquatique La Seyne', 'Sports', 'Completed', 12000000, '2015-01-01', '2018-11-07', 'Complexe aquatique à la Seyne-sur-Mer.'),
-    ('p29', 'Halle des Sports Vandoeuvre', 'Sports', 'Completed', 8500000, '2004-01-01', '2017-12-02', 'Salle de Danse, salle de Musculation, Grande Halle pour sports collectifs.'),
-    ('p30', 'Salle multisports Granges', 'Sports', 'Completed', 2200000, '2016-01-01', '2018-11-07', 'Le projet se situe en contrebas d''une colline boisee de feuillus et de resineux.'),
-    ('p31', 'Palais des Sports Vandoeuvre', 'Sports', 'Completed', 4500000, '2010-01-01', '2017-12-02', 'Restructuration des vestiaires et tribunes existantes. Nouvelle tribune de 1376 places.'),
-    ('p32', 'Salle Gymnastique Vandoeuvre', 'Sports', 'Completed', 3200000, '2008-01-01', '2017-12-02', 'La pente du terrain est exploitee par une organisation en un rez-de-chaussee haut et bas.'),
-    ('p33', 'EAESL Acacias Terville', 'Sports', 'Completed', 1800000, '2014-01-01', '2018-11-07', 'Accueil et vestiaires des joueurs et arbitres pour le terrain de football.'),
-    ('p34', 'Salle multisports Toul', 'Sports', 'Completed', 2900000, '2012-01-01', '2017-12-02', 'Construction d’un gymnase comprenant une salle de gymnastique et une salle de musculation.'),
-    ('p35', 'Musée Lorrain', 'Socioculturel', 'Completed', 18000000, '2013-01-01', '2017-12-02', 'Restructuration et Extension du Musée Lorrain.'),
-    ('p36', 'Maison des Lacs', 'Socioculturel', 'Completed', 2500000, '2014-01-01', '2018-11-07', 'Maison des lacs et sentiers d''interpretation de Pierre-Percée.'),
-    ('p37', 'Complexe Dommartin-les-Toul', 'Socioculturel', 'Completed', 3100000, '2010-01-01', '2017-12-02', 'Complexe Sportif Associatif Municipal.'),
-    ('p38', 'Zénith de Nancy', 'Socioculturel', 'Completed', 25000000, '2005-01-01', '2017-12-02', 'Salles de spectacles 6000 pers et annexes, amphitheatre plein air 25000 pers.'),
-    ('p39', 'Théâtre Mobile', 'Socioculturel', 'Completed', 1500000, '2008-01-01', '2017-12-02', 'Theatre mobile demontable peut acceuillir un effectif de 264 personnes assises en gradins.'),
-    ('p40', 'Salle des Fêtes Raon', 'Socioculturel', 'Completed', 2100000, '2009-01-01', '2017-12-02', 'Insertion intersticielle tres tendue dans le tissu urbain.'),
-    ('p41', 'Salle François Truffaut', 'Socioculturel', 'Completed', 1800000, '2011-01-01', '2017-12-02', 'Salle multimedia accueillant theatre, musique, video, cinema.'),
-    ('p42', 'Musée Commercy', 'Socioculturel', 'Completed', 2400000, '2010-01-01', '2017-12-02', 'Musee des Ivoires et Faiences dans les anciens Bains Douches municipaux.'),
-    ('p43', 'Salle Saint-Max', 'Socioculturel', 'Completed', 3500000, '2012-01-01', '2017-12-02', 'Salle Socio-Culturelle en plein centre ville.'),
-    ('p44', 'Complexe Ludres', 'Socioculturel', 'Completed', 4200000, '2013-01-01', '2017-12-02', 'Complexe Multifonctions.'),
-    ('p45', 'Maison des Associations Essey', 'Socioculturel', 'Completed', 2800000, '2014-01-01', '2017-12-02', 'Construction neuve Essey les Nancy.'),
-    ('p46', 'CCI Meurthe-et-Moselle', 'Tertiaire', 'Completed', 5500000, '2015-01-01', '2017-12-02', 'Restructuration du Siège de la Chambre de Commerce et d''Industrie.'),
-    ('p47', 'Laboratoire Vétérinaire Epinal', 'Tertiaire', 'Completed', 3800000, '2011-01-01', '2017-12-02', 'Laboratoires d’analyses, annexes techniques.'),
-    ('p48', 'Agence de l''Eau Metz', 'Tertiaire', 'Completed', 4100000, '2012-01-01', '2017-12-02', 'Batiment de bureaux archives et salle du conseil.'),
-    ('p49', 'France Telecom Thionville', 'Tertiaire', 'Completed', 2900000, '2010-01-01', '2017-12-02', 'Agence commerciale France Telecom.'),
-    ('p50', 'DDE Champigneulles', 'Tertiaire', 'Completed', 3600000, '2009-01-01', '2017-12-02', 'Regroupement des Services de la DDE et Centre Commandement.'),
-    ('p51', 'Bureaux Rue Lyautey', 'Tertiaire', 'Completed', 1500000, '2008-01-01', '2017-12-02', 'Reamenagement en deux phases de l''immeuble de bureaux.'),
-    ('p52', 'PRABIL', 'Tertiaire', 'Completed', 4800000, '2013-01-01', '2017-12-02', 'Plate Forme Agro-Bio-Industrielle de Lorraine.'),
-    ('p53', 'Biopark Archamps', 'Tertiaire', 'Completed', 5200000, '2014-01-01', '2017-12-02', 'Animaleries, plateforme technique, laboratoires de recherche.'),
-    ('p54', 'Asagi Behonne', 'Tertiaire', 'Completed', 1200000, '2015-01-01', '2017-12-02', 'Siege d''ASAGI, importateur de poissons.'),
-    ('p55', '36 Logements Villerupt', 'Logements', 'Completed', 4500000, '2011-01-01', '2017-12-02', '36 Logements BBC à Villerupt.'),
-    ('p56', '40 Logements Nancy', 'Logements', 'Completed', 5100000, '2012-01-01', '2017-12-02', '40 Logements THPE à Nancy - Meurthe Canal.'),
-    ('p57', '111 Logements Villers', 'Logements', 'Completed', 12500000, '2006-01-01', '2017-12-02', '111 Logements HQE à Villers les Nancy.'),
-    ('p58', 'La Poste PCIN Lorraine', 'Industriel', 'Completed', 8500000, '2008-01-01', '2017-12-02', 'Plate-forme Colis Industrielle.'),
-    ('p59', 'STAC Verdun', 'Industriel', 'Completed', 3200000, '2009-01-01', '2017-12-02', 'Stockage des Archives Nationales Comptables de la Poste.'),
-    ('p60', 'EquipEst Maxéville', 'Industriel', 'Completed', 2800000, '2010-01-01', '2017-12-02', 'Reconstruction des locaux Equip Est.'),
-    ('p61', 'Parvis Foch Jarville', 'Urbanisme', 'Completed', 1500000, '2011-01-01', '2018-11-07', 'Aménagement du Parvis Urbain Foch-Renémont.'),
-    ('p62', 'Parvis Piscine Maizières', 'Urbanisme', 'Completed', 800000, '2012-01-01', '2018-11-07', 'Revalorisation du Parvis de la Piscine.'),
-    ('p63', 'Friche Didier Longwy', 'Urbanisme', 'Completed', 6500000, '2013-01-01', '2018-11-07', 'Aménagement de la Friche Didier à Longwy/Réhon.'),
-    ('p64', 'Bazancourt', 'Urbanisme', 'Completed', 4200000, '2014-01-01', '2017-12-02', '16 Logements-Mediatheque-Tertiaire.'),
-    ('p65', 'Pont Mobile Bazin', 'Urbanisme', 'Completed', 2100000, '2015-01-01', '2017-12-02', 'Structure metallique de franchissement du canal de la Marne au Rhin.'),
-    ('p66', 'Place Reggio Bar-le-Duc', 'Urbanisme', 'Completed', 1800000, '2016-01-01', '2017-12-02', 'Esplanade, parking, jardins, banc fontaine, kiosque.'),
-    ('p67', 'Etude Thionville', 'Urbanisme', 'Completed', 500000, '2017-01-01', '2017-12-02', 'Reconquete urbaine rive droite de la Moselle a Thionville.');
-
-    INSERT OR IGNORE INTO team_members (id, name, role, email, avatar, system_role) VALUES 
-    ('t1', 'Alexandre Chemetoff', 'Architecte Associé', 'a.chemetoff@aacz.fr', 'https://picsum.photos/seed/alex/200', 'admin'),
-    ('t2', 'Marc Zylber', 'Architecte Associé', 'm.zylber@aacz.fr', 'https://picsum.photos/seed/marc/200', 'pm'),
-    ('t3', 'Sarah Chen', 'Ingénieure Structure', 's.chen@aacz.fr', 'https://picsum.photos/seed/sarah/200', 'user'),
-    ('t4', 'Julie Martin', 'Architecte d''Intérieur', 'j.martin@aacz.fr', 'https://picsum.photos/seed/julie/200', 'user');
-
-    INSERT OR IGNORE INTO milestones (id, project_id, title, due_date, completed) VALUES 
-    ('m1', 'p1', 'Livraison', '2018-08-15', 1),
-    ('m2', 'p2', 'Réception des travaux', '2018-11-20', 1),
-    ('m3', 'p4', 'Inauguration', '2026-09-15', 0),
-    ('m4', 'p3', 'Fin de gros oeuvre', '2026-04-15', 0),
-    ('m5', 'p6', 'Pose des menuiseries', '2026-05-10', 0),
-    ('m6', 'p10', 'Réception lot 1', '2026-04-20', 0);
-
-    INSERT OR IGNORE INTO tenders (id, title, client, submission_deadline, status, value, notes) VALUES 
-    ('ten1', 'Médiathèque de Thionville', 'Ville de Thionville', '2026-06-15', 'Draft', 4500000, 'Concours sur esquisse.'),
-    ('ten2', 'Gymnase de Lunéville', 'Région Grand Est', '2026-05-30', 'Submitted', 3200000, 'Réhabilitation thermique et extension.');
-
-    INSERT OR IGNORE INTO specifications (id, project_id, title, content, last_updated) VALUES 
-    ('s1', 'p1', 'CCTP Lot Gros Œuvre', '[{"id":"sec1","title":"Terrassements","items":[{"id":"i1","code":"02.10","description":"Décapage de la terre végétale","material":"N/A","notes":"Stockage sur site"}]}]', '2016-02-21T10:00:00Z');
-  `);
-
-}
-
 // Builds and fully configures the Express app (all middleware + all ~340
 // routes) without binding a port — the production entry point (startServer(),
 // below) adds the .listen() call. Exported so Supertest can drive the app
 // in-process; see tests/testServer.ts.
+// Hostname allow-list shared by the CORS and Host-header-redirect middleware
+// below — both used to trust whatever the client/proxy sent verbatim
+// (reflected Origin, unchecked Host), which lets an arbitrary site get a CORS
+// grant or poison a redirect target. archioffice.fr and any tenant subdomain
+// (e.g. aacz.archioffice.fr) are legitimate; APP_URL covers non-default
+// deployments; localhost/127.0.0.1 covers dev and the Electron desktop client
+// (which loads this same server from http://127.0.0.1:<port>).
+function isKnownAppHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === 'archioffice.fr' || h.endsWith('.archioffice.fr')) return true;
+  if (h === 'localhost' || h === '127.0.0.1') return true;
+  if (process.env.APP_URL) {
+    try {
+      if (h === new URL(process.env.APP_URL).hostname.toLowerCase()) return true;
+    } catch { /* malformed APP_URL — ignore */ }
+  }
+  return false;
+}
+
 export async function createApp() {
   const app = express();
   app.set('trust proxy', 1); // trust X-Forwarded-Proto/Host from reverse proxies
 
+  // Baseline security headers (X-Content-Type-Options, HSTS, Referrer-Policy,
+  // X-Frame-Options, etc.) — none of this app's own resource loading is
+  // cross-origin, so these are safe to turn on wholesale. What's NOT safe to
+  // turn on blind:
+  //  - contentSecurityPolicy: the app talks to a wide, hard-to-fully-enumerate
+  //    set of external hosts from the browser (MapLibre/IGN tiles,
+  //    Géorisques, APICARTO, Supabase, the Stancer payment page, Zoho/Chorus
+  //    Pro OAuth). A default-src-'self' CSP would break several of those
+  //    without a careful per-host audit this pass didn't do — so CSP is left
+  //    off except for the one directive that's safe in isolation and closes
+  //    the actual finding (missing clickjacking protection): frame-ancestors.
+  //  - crossOriginEmbedderPolicy: would block loading any cross-origin
+  //    resource (map tiles, Supabase Storage images) that doesn't send back
+  //    a matching CORP/CORS header — this app relies on exactly that kind of
+  //    loading, so COEP stays off.
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { frameAncestors: ["'self'"], defaultSrc: helmetCsp.dangerouslyDisableDefaultSrc },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+  }));
+
   // CORS headers — must run before any redirect so that redirect responses also
   // carry Access-Control-Allow-Origin (browsers check CORS on redirect responses too).
+  // Only grant CORS to known ArchiOffice origins (plus true same-origin callers,
+  // e.g. the Electron client talking to its own loopback server) — reflecting
+  // any Origin back with credentials:true previously let any site read
+  // authenticated responses via a victim's browser.
   app.use((req: any, res: any, next: any) => {
-    const origin = req.headers.origin;
+    const origin = req.headers.origin as string | undefined;
     if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      let allowed = `${req.protocol}://${req.headers.host}` === origin;
+      if (!allowed) {
+        try {
+          const originUrl = new URL(origin);
+          allowed = originUrl.protocol === 'https:' && isKnownAppHostname(originUrl.hostname);
+        } catch { /* not a valid absolute origin — ignore */ }
+      }
+      if (allowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      }
+      res.setHeader('Vary', 'Origin');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -1063,13 +173,21 @@ export async function createApp() {
 
   // Redirect HTTP → HTTPS so the HTML page and all its assets share the same origin.
   app.use((req, res, next) => {
+    // req.headers.host is client/proxy-controlled — reject anything outside the
+    // known hostnames before using it to build a redirect target, otherwise an
+    // attacker-supplied Host (paired with a spoofed X-Forwarded-Proto: http)
+    // could redirect victims to an arbitrary domain.
+    const host = req.headers.host || '';
+    const hostname = host.split(':')[0];
+    if (!isKnownAppHostname(hostname)) {
+      return res.status(400).send('Invalid host header');
+    }
     if (req.headers['x-forwarded-proto'] === 'http') {
-      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+      return res.redirect(301, `https://${host}${req.url}`);
     }
     // Canonicalize bare apex → www so all assets and the HTML share the same origin.
     // Only the exact apex domain is redirected — tenant subdomains (e.g.
     // aacz.archioffice.fr) and www itself must pass through untouched.
-    const host = req.headers.host || '';
     if (host === 'archioffice.fr') {
       return res.redirect(301, `https://www.archioffice.fr${req.url}`);
     }
@@ -1090,6 +208,7 @@ export async function createApp() {
     app.use(createOfflineGateway({
       postgrestUrl: process.env.OFFLINE_POSTGREST_URL || 'http://127.0.0.1:5555',
       pgUrl: process.env.OFFLINE_PG_URL,
+      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
     }));
   }
 
@@ -1312,14 +431,16 @@ export async function createApp() {
 
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
-  // These buckets hold personal/professional data (CVs, site documents, plans,
-  // meeting photos, message & feed attachments...), so they're private —
-  // access only ever goes through a short-lived signed URL, never a
-  // permanent public one. (The "logos" bucket is deliberately excluded: it
-  // holds only agency branding assets, not personal data, and is embedded
-  // directly in exported PDFs/DOCX where a non-expiring URL is simpler.)
+  // These hold business documents (CCTP, plans, CVs, chat/feed attachments) —
+  // private, unlike "logos" (agency branding/avatars), which is meant to be
+  // public. uploadToStorage() below still returns a getPublicUrl()-shaped
+  // string for these (that call just builds a URL string; it doesn't check
+  // the bucket's actual public/private flag), so every existing DB row keeps
+  // working as a stable object *reference* — see server/storagePaths.ts and
+  // server/routes/storageAccess.ts, which exchange that reference for a
+  // short-lived signed URL after checking the caller's tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -1327,6 +448,17 @@ export async function createApp() {
           console.error(`[storage] Failed to create bucket "${bucket}":`, error.message);
         } else {
           console.log(`[storage] Created bucket "${bucket}"`);
+        }
+      } else if ((existing as any).public) {
+        // Migrates a bucket created by an older deploy (when these were
+        // still `public: true`) — existing object URLs keep resolving the
+        // same way, they just now require a signed URL instead of being
+        // fetchable directly.
+        const { error } = await supabaseAdmin.storage.updateBucket(bucket, { public: false });
+        if (error) {
+          console.error(`[storage] Failed to make bucket "${bucket}" private:`, error.message);
+        } else {
+          console.log(`[storage] Migrated bucket "${bucket}" to private`);
         }
       }
     }
@@ -1337,47 +469,13 @@ export async function createApp() {
       .from(bucket)
       .upload(storagePath, buffer, { contentType: mimetype, upsert: false });
     if (error) throw new Error(`Storage upload failed: ${error.message}`);
-    // Callers persist this value as the file's DB reference (file_url,
-    // cv_url, document_url...); resolveFileUrl() turns it back into a usable
-    // link on read.
-    return storagePath;
-  }
-
-  // Accepts a bare storage path, a pre-migration public URL, or a
-  // previously-issued signed URL (a client may echo one back unchanged in a
-  // later PUT, e.g. visas.ts) and returns the bare path in all three cases —
-  // so every stored shape keeps resolving/deleting correctly.
-  function storagePathFromValue(bucket: string, value: string): string {
-    if (!value.startsWith('http')) return value;
-    const withoutQuery = value.split('?')[0];
-    const publicMarker = `/object/public/${bucket}/`;
-    const signMarker = `/object/sign/${bucket}/`;
-    if (withoutQuery.includes(publicMarker)) return withoutQuery.split(publicMarker)[1];
-    if (withoutQuery.includes(signMarker)) return withoutQuery.split(signMarker)[1];
-    return value;
-  }
-
-  async function getSignedUrl(bucket: string, storagePath: string, expiresIn = 60 * 60 * 24 * 7): Promise<string | null> {
-    const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(storagePath, expiresIn);
-    if (error) {
-      console.error(`[storage] Failed to sign URL for ${bucket}/${storagePath}:`, error.message);
-      return null;
-    }
-    return data.signedUrl;
-  }
-
-  // Resolves a stored file reference (path, legacy public URL, or an old
-  // signed URL) into a fresh signed URL. Default expiry is 7 days — long
-  // enough to survive a browsing session, and re-derived on every read since
-  // callers re-run this each time a record is fetched, so staleness never
-  // accumulates in the DB.
-  async function resolveFileUrl(bucket: string, value: string | null | undefined, expiresIn?: number): Promise<string | null> {
-    if (!value) return null;
-    return getSignedUrl(bucket, storagePathFromValue(bucket, value), expiresIn);
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+    return data.publicUrl;
   }
 
   async function deleteFromStorage(bucket: string, fileUrl: string) {
-    const path = storagePathFromValue(bucket, fileUrl);
+    const marker = `/object/public/${bucket}/`;
+    const path = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
@@ -1420,7 +518,7 @@ export async function createApp() {
   });
 
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", environment: process.env.NODE_ENV });
+    res.json({ status: "ok" });
   });
 
   async function requireTenantAdmin(userId: string): Promise<string> {
@@ -1463,11 +561,22 @@ export async function createApp() {
     return (reports || []).map((p: any) => p.id);
   }
 
+  // Callers are expected to reject implausible ranges before this point (see
+  // POST /api/leave_requests) — this cap is a second line of defense so a
+  // pathological date pair (e.g. years apart) can't block the event loop by
+  // iterating day-by-day for the life of the request.
+  const BUSINESS_DAYS_MAX_SPAN = 3660; // ~10 years
   function businessDaysBetween(startDateStr: string, endDateStr: string): number {
     let count = 0;
     let d = new Date(startDateStr + 'T00:00:00Z');
     const end = new Date(endDateStr + 'T00:00:00Z');
+    let iterations = 0;
     while (d <= end) {
+      if (++iterations > BUSINESS_DAYS_MAX_SPAN) {
+        const err: any = new Error('Intervalle de dates trop grand');
+        err.status = 400;
+        throw err;
+      }
       const day = d.getUTCDay();
       if (day !== 0 && day !== 6) count++;
       d.setUTCDate(d.getUTCDate() + 1);
@@ -1512,6 +621,12 @@ export async function createApp() {
   const getNextDocNumber = (tenantId: string, settingCol: string, countTable: string, defaultPrefix: string) =>
     getNextDocNumberImpl(supabaseAdmin, tenantId, settingCol, countTable, defaultPrefix);
 
+  // Per-affaire business-reference numbering for acompte invoices — see
+  // server/getNextAffaireInvoiceNumber.ts. Bound to supabaseAdmin the same
+  // way as getNextDocNumber above.
+  const getNextAffaireInvoiceNumber = (tenantId: string, projectId: string) =>
+    getNextAffaireInvoiceNumberImpl(supabaseAdmin, tenantId, projectId);
+
   // Phase 7 pilot: Project Templates / ACT Data / DET Data now live in
   // server/routes/*.ts — see those files for why they were picked first
   // (small, self-contained, low traffic) and server/tenantScopedFrom.ts for
@@ -1528,14 +643,14 @@ export async function createApp() {
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
+  registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
-  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
-  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, resolveFileUrl, captureWithContext, upload });
-  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload });
+  registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
+  registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext });
+  registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
@@ -1559,24 +674,26 @@ export async function createApp() {
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
-  registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber });
+  registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, resolveFileUrl, upload });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, resolveFileUrl, upload });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
-  registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, upload });
+  registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
+  registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
+  registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
 
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
@@ -1665,8 +782,14 @@ export async function createApp() {
 // is still the only thing invoked at module load.
 async function startServer() {
   const { app, supabaseAdmin, ensureStorageBuckets, PORT } = await createApp();
+  // In offline (Electron) mode this server is the local Supabase gateway for
+  // supabaseAdmin itself (server/offlineGateway.ts) — it has no reason to be
+  // reachable from the LAN/Wi-Fi, so bind it to loopback only there. Docker/
+  // cloud deployments still need 0.0.0.0 to accept the container's incoming
+  // traffic.
+  const host = process.env.OFFLINE_MODE === 'true' ? '127.0.0.1' : '0.0.0.0';
   // Start listening after all middleware is set up
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, host, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();

@@ -11,18 +11,17 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
   captureWithContext: (error: any, context: { route: string; tenantId?: string; userId?: string }) => void;
-  upload: any;
 }
 
-export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, resolveFileUrl, captureWithContext, upload }: RouteDeps) {
+export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext }: RouteDeps) {
   // Matches "@Full Name" against known tenant members — longest names first so
   // "Jean Dupont" isn't shadowed by a coincidental "Jean" member.
   const extractMentionedUserIds = (content: string, members: { id: string; name: string }[]): string[] => {
@@ -101,16 +100,16 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
           comments: [],
           comments_count: 0
         })),
-        ...(await Promise.all((posts || []).map(async (p: any) => {
-          const postComments = await Promise.all((allComments || []).filter((c: any) => c.post_id === p.id)
-            .map(async (c: any) => ({ ...c, attachment_url: await resolveFileUrl('feed-attachments', c.attachment_url), mentions_me: mentionedItemIds.has(c.id) })));
+        ...(posts || []).map((p: any) => {
+          const postComments = (allComments || []).filter((c: any) => c.post_id === p.id)
+            .map((c: any) => ({ ...c, mentions_me: mentionedItemIds.has(c.id) }));
           return {
             id: p.id,
             kind: 'post',
             user_name: p.user_name,
             user_id: p.user_id,
             content: p.content,
-            attachment_url: await resolveFileUrl('feed-attachments', p.attachment_url),
+            attachment_url: p.attachment_url,
             attachment_name: p.attachment_name,
             attachment_type: p.attachment_type,
             category: 'Messages',
@@ -122,7 +121,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
             comments: postComments,
             comments_count: postComments.length
           };
-        })))
+        })
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       res.json(feedItems);
@@ -132,7 +131,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  app.post("/api/feed/posts", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/feed/posts", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { content } = req.body;
@@ -159,10 +158,9 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
       });
       if (insertError) throw insertError;
       if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'post', id, id);
-      const signedAttachmentUrl = await resolveFileUrl('feed-attachments', attachment_url);
       res.status(201).json({
         id, kind: 'post', user_name: userName, user_id: req.user.id, content: trimmedContent,
-        attachment_url: signedAttachmentUrl, attachment_name, attachment_type, created_at, likes_count: 0, liked: false, comments: [], comments_count: 0
+        attachment_url, attachment_name, attachment_type, created_at, likes_count: 0, liked: false, comments: [], comments_count: 0
       });
     } catch (err: any) {
       console.error(err);
@@ -220,7 +218,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  app.post("/api/feed/posts/:id/comments", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/feed/posts/:id/comments", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
@@ -246,8 +244,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
       });
       if (insertError) throw insertError;
       if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'comment', commentId, id);
-      const signedAttachmentUrl = await resolveFileUrl('feed-attachments', attachment_url);
-      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: trimmedContent, attachment_url: signedAttachmentUrl, attachment_name, attachment_type, created_at });
+      res.status(201).json({ id: commentId, post_id: id, user_name: userName, content: trimmedContent, attachment_url, attachment_name, attachment_type, created_at });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: "Failed to add comment" });

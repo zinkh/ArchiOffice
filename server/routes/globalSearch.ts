@@ -17,7 +17,15 @@ export function registerGlobalSearchRoutes(app: Express, { supabaseAdmin, getTen
       const q = (req.query.q as string || '').trim();
       if (!q || q.length < 2) return res.json({ projects: [], contacts: [], tenders: [], invoices: [] });
 
-      const pattern = `%${q}%`;
+      // `q` is interpolated into PostgREST `.or()` expressions below, whose
+      // grammar uses comma (condition separator), parentheses (grouping) and
+      // backslash. Strip those so a caller can't inject extra filter
+      // conditions. The tenant scope is still ANDed by tenantScopedFrom, so
+      // this never crossed tenants — but unsanitized input still let a caller
+      // reshape the query and trigger errors. `%`/`_` are left intact as
+      // intentional ilike wildcards.
+      const safeQ = q.replace(/[,()\\]/g, ' ');
+      const pattern = `%${safeQ}%`;
 
       const [projectsRes, contactsRes, tendersRes, invoicesRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name, client, status, address')

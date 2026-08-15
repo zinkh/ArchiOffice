@@ -14,6 +14,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
+import dns from 'dns/promises';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
 
 let app: Express;
@@ -24,7 +25,14 @@ beforeAll(async () => {
 
 describe('Contact Sync', () => {
   const originalFetch = global.fetch;
-  afterEach(() => { global.fetch = originalFetch; });
+  afterEach(() => { global.fetch = originalFetch; vi.restoreAllMocks(); });
+
+  // The CardDAV route validates its URL through the SSRF guard, which resolves
+  // the host and rejects private/unresolvable targets. The sandbox has no DNS,
+  // so stub the lookup to a public address — the analogue of the fetch stubs
+  // below (network calls the test can't actually make).
+  const stubDnsPublic = () =>
+    vi.spyOn(dns, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
 
   it('requires an access_token for Google Contacts sync', async () => {
     const tenantId = makeTenant();
@@ -85,11 +93,25 @@ describe('Contact Sync', () => {
     const { token } = makeUser(tenantId);
     const vcard = 'BEGIN:VCARD\nFN:Jean Dupont\nN:Dupont;Jean\nEMAIL:jean@example.com\nTEL:0600000000\nORG:ArchiCo\nEND:VCARD';
     global.fetch = vi.fn(async () => ({ ok: true, text: async () => vcard })) as any;
+    stubDnsPublic();
 
     const res = await request(app).post('/api/sync/carddav').set(authHeader(token)).send({ url: 'https://carddav.example.com', username: 'u', password: 'p' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ imported: 1, updated: 0 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.email === 'jean@example.com')?.tenant_id).toBe(tenantId);
+  });
+
+  it('rejects a CardDAV URL that resolves to a private address (SSRF guard)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as any;
+    vi.spyOn(dns, 'lookup').mockResolvedValue([{ address: '169.254.169.254', family: 4 }] as any);
+
+    const res = await request(app).post('/api/sync/carddav').set(authHeader(token))
+      .send({ url: 'http://metadata.internal/', username: 'u', password: 'p' });
+    expect(res.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -151,6 +173,35 @@ describe('Geo Proxy input validation', () => {
     const { token } = makeUser(tenantId);
     const res = await request(app).get('/api/rnb-buildings').set(authHeader(token));
     expect(res.status).toBe(400);
+  });
+
+  // rnb-buildings used a bare, unbounded `fetch()` (unlike every other proxy
+  // in this file, which goes through fetchWithTimeout) — a hung upstream
+  // could tie up the request indefinitely. Covers both the fix (still calls
+  // through and returns data normally) and the AbortError → 504 mapping now
+  // shared with the rest of the module.
+  describe('rnb-buildings network calls', () => {
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('proxies a successful RNB API response', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ([{ rnb_id: 'ABC123' }]) })) as any;
+
+      const res = await request(app).get('/api/rnb-buildings').query({ q: '10 rue de Paris' }).set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([{ rnb_id: 'ABC123' }]);
+    });
+
+    it('maps a timed-out RNB API call to 504', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => { const e: any = new Error('aborted'); e.name = 'AbortError'; throw e; }) as any;
+
+      const res = await request(app).get('/api/rnb-buildings').query({ q: '10 rue de Paris' }).set(authHeader(token));
+      expect(res.status).toBe(504);
+    });
   });
 
   it('rejects georisques without latitude/longitude/code_insee', async () => {

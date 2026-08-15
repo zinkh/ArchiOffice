@@ -4,6 +4,7 @@
 // reachable without a session, by design (sign-up, password reset).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { publicAuthLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -17,6 +18,12 @@ async function sendPlatformMail(to: string, subject: string, html: string): Prom
   const smtpPass = process.env.SMTP_PASS;
   if (!smtpHost || !smtpUser || !smtpPass) {
     console.warn('[mail] SMTP_HOST/SMTP_USER/SMTP_PASS not configured — email not sent.');
+    return false;
+  }
+  // `to` comes straight from the request body — reject header-injection attempts
+  // rather than pass a CR/LF-bearing address into the mail headers.
+  if (/[\r\n]/.test(to) || /[\r\n]/.test(subject)) {
+    console.warn('[mail] Rejected send: invalid characters in recipient/subject.');
     return false;
   }
   try {
@@ -36,7 +43,7 @@ async function sendPlatformMail(to: string, subject: string, html: string): Prom
 
 export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
   // ---- Inscription SaaS (route publique) ----
-  app.post("/api/public/register", async (req, res) => {
+  app.post("/api/public/register", publicAuthLimiter, async (req, res) => {
     try {
       const { cabinet_name, slug, admin_name, email, password, consent } = req.body;
       if (!cabinet_name || !slug || !admin_name || !email || !password) {
@@ -113,7 +120,7 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
   });
 
   // Renvoyer l'email de confirmation (ne révèle jamais si le compte existe).
-  app.post("/api/public/resend-confirmation", async (req, res) => {
+  app.post("/api/public/resend-confirmation", publicAuthLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || '').trim();
       if (!email) return res.status(400).json({ error: "Email requis" });
@@ -140,7 +147,7 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
   });
 
   // Envoyer un email de réinitialisation de mot de passe (ne révèle jamais si le compte existe).
-  app.post("/api/public/forgot-password", async (req, res) => {
+  app.post("/api/public/forgot-password", publicAuthLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || '').trim();
       if (!email) return res.status(400).json({ error: "Email requis" });

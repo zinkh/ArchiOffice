@@ -451,6 +451,11 @@ export default {
       "invoices_calculated_amount": "Calculated Amount (excl. VAT)",
       "invoices_project_remuneration": "Project fees",
       "invoices_no_remuneration": "No fee defined for this project",
+      "invoices_phases_label": "Advancement by phase",
+      "invoices_add_phase": "Add a phase",
+      "invoices_remove_phase": "Remove this phase",
+      "invoices_no_phases": "No phase added for this deposit invoice.",
+      "invoices_affaire_number_label": "Project ref.",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",
@@ -827,6 +832,7 @@ export default {
       "ai_draft_project_behind": "Draft an internal message to the team noting that project {{project}} (client {{client}}) is {{progress}}% complete with {{days}} day(s) left until the deadline. Suggest actions to catch up.",
       "ai_suggestion_invoice_overdue": "Invoice {{number}} ({{client}}) is overdue.",
       "ai_draft_invoice_overdue": "Draft a polite payment follow-up email for invoice {{number}} for {{amount}} addressed to {{client}}.",
+      "agent_chat_suggestions_badge": "{{count}} suggestion(s)",
 
       // Calendar page
       "calendar_page_subtitle": "Milestones and tasks, by week and by month",

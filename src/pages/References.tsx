@@ -378,8 +378,16 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = (XLSX.utils.sheet_to_json as (ws: any, opts: any) => Record<string, any>[])(ws, { defval: '' });
-      if (raw.length === 0) { setError('Le fichier semble vide ou non reconnu.'); return; }
+      const rawParsed = (XLSX.utils.sheet_to_json as (ws: any, opts: any) => Record<string, any>[])(ws, { defval: '' });
+      if (rawParsed.length === 0) { setError('Le fichier semble vide ou non reconnu.'); return; }
+      const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+      const raw = rawParsed.map(row => {
+        const clean: Record<string, any> = Object.create(null);
+        for (const [key, value] of Object.entries(row)) {
+          if (!UNSAFE_KEYS.has(key)) clean[key] = value;
+        }
+        return clean;
+      });
       const detectedHeaders = Object.keys(raw[0]);
       setHeaders(detectedHeaders);
       setDataRows(raw);

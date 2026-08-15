@@ -3,9 +3,19 @@ import { useState, useRef, useEffect } from 'react';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
-import type { Invoice, Project, InvoiceItem } from '../types';
+import type { Invoice, Project, InvoiceItem, InvoicePhase } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 import { buildFacturXCiiXml } from '../lib/facturX';
+
+// Factures créées avant le modèle multi-phases : un seul mission_name/
+// advancement_pct — on les affiche comme une phase unique de secours.
+function getEffectivePhases(data: Partial<Invoice>): InvoicePhase[] {
+  if (data.phases && data.phases.length > 0) return data.phases;
+  if (data.mission_name) {
+    return [{ phase_id: data.mission_id || '', phase_name: data.mission_name, avancement_pct: data.advancement_pct || 0, montant_phase: data.amount || 0 }];
+  }
+  return [];
+}
 
 interface InvoiceGeneratorProps {
   onClose: () => void;
@@ -291,6 +301,9 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                       {data.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'}
                     </h2>
                     <p className="text-sm font-bold">N° {data.invoice_number}</p>
+                    {data.affaire_invoice_number && (
+                      <p className="text-xs text-zinc-500">Réf. affaire : {data.affaire_invoice_number}</p>
+                    )}
                     <p className="text-sm text-zinc-500 mt-2">Date : {new Date(data.issue_date || '').toLocaleDateString('fr-FR')}</p>
                   </div>
                 </div>
@@ -315,14 +328,17 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 </div>
 
                 {/* Acompte reference block */}
-                {data.invoice_type === 'acompte' && data.mission_name && (
+                {data.invoice_type === 'acompte' && getEffectivePhases(data).length > 0 && (
                   <div className="mb-6 p-3 border border-amber-200 bg-amber-50 rounded-lg text-[9pt]">
-                    <p className="font-bold text-amber-800 mb-1">Référence de mission</p>
-                    <div className="grid grid-cols-[120px_1fr] gap-y-0.5 text-zinc-700">
-                      <span className="text-zinc-500">Phase :</span>
-                      <span className="font-medium">{data.mission_name}</span>
-                      <span className="text-zinc-500">Avancement :</span>
-                      <span className="font-medium">{data.advancement_pct ?? 0}%</span>
+                    <p className="font-bold text-amber-800 mb-1">Avancement par phase</p>
+                    <div className="space-y-0.5 text-zinc-700">
+                      {getEffectivePhases(data).map((phase, idx) => (
+                        <div key={phase.phase_id || idx} className="grid grid-cols-[1fr_auto_auto] gap-x-4">
+                          <span className="font-medium">{phase.phase_name}</span>
+                          <span>{phase.avancement_pct}% d'avancement</span>
+                          <span className="font-medium">{formatCurrency(phase.montant_phase, data.currency)}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -406,10 +422,21 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"
                         />
                       </div>
+                      {data.affaire_invoice_number && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-zinc-500">Réf. affaire</label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={data.affaire_invoice_number}
+                            className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-mono text-zinc-500"
+                          />
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <label className="text-xs font-medium text-zinc-500">Date d'émission</label>
-                        <input 
-                          type="date" 
+                        <input
+                          type="date"
                           value={data.issue_date || ''}
                           onChange={e => setData({...data, issue_date: e.target.value})}
                           className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm"

@@ -6,6 +6,7 @@
 // as meetings.ts/visas.ts/plans.ts for file attachments and versioning.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { handleDocumentUpload } from '../documentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -15,11 +16,10 @@ export interface RouteDeps {
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
-  resolveFileUrl: (bucket: string, value: string | null | undefined, expiresIn?: number) => Promise<string | null>;
-  upload: any;
+  requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, resolveFileUrl, upload }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole }: RouteDeps) {
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -28,16 +28,19 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       if (project_id) query.eq('project_id', project_id as string);
       const { data, error } = await query;
       if (error) throw error;
-      const withUrls = await Promise.all((data || []).map(async (d: any) => ({ ...d, file_url: await resolveFileUrl('documents', d.file_url) })));
-      res.json(withUrls);
+      res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch documents" }); }
   });
 
-  app.post("/api/documents", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/documents", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       await checkQuota(tenantId, 'documents');
-      const { project_id, name, category, phase, description, uploaded_by } = req.body;
+      const { project_id, name, category, phase, description } = req.body;
+      // Derived from the authenticated caller, never trusted from the request
+      // body — the client used to be able to submit any uploaded_by value and
+      // falsify a document's apparent author (security audit finding).
+      const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
@@ -51,15 +54,18 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
+      logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
 
-  app.delete("/api/documents/:id", async (req: any, res: any) => {
+  // admin/manager/pm only — any authenticated tenant member (including the
+  // base 'user' role) could previously delete any document (security audit
+  // finding); there's no per-document ownership/project-membership model
+  // yet to check against, so this is the narrowest fix available today.
+  app.delete("/api/documents/:id", requireRole('admin', 'manager', 'pm'), async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = req.tenantId as string;
       const { id } = req.params;
       // Fetch all version URLs before deleting DB rows
       const { data: doc } = await supabaseAdmin.from('documents').select('name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
@@ -70,7 +76,9 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       // Delete storage files (best-effort, don't fail if storage cleanup fails)
       if (versions?.length) {
         for (const v of versions) {
-          if (v.file_url) deleteFromStorage('documents', v.file_url).catch(() => {});
+          if (v.file_url?.includes('/object/public/documents/')) {
+            deleteFromStorage('documents', v.file_url).catch(() => {});
+          }
         }
       }
       const docName = (doc as any)?.name || '';
@@ -80,14 +88,17 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete document" }); }
   });
 
-  app.put("/api/documents/:id", upload.single('file'), async (req: any, res: any) => {
+  app.put("/api/documents/:id", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, category, phase, description, uploaded_by, indice, emetteur, doc_type, contact_id, contact_name, validation_status, validation_comments } = req.body;
+      const { name, category, phase, description, indice, emetteur, doc_type, contact_id, contact_name, validation_status, validation_comments } = req.body;
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
+        // Derived from the authenticated caller, not the request body — see the
+        // same fix on POST /api/documents above.
+        const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
         const { data: doc } = await supabaseAdmin.from('documents').select('version, project_id, phase, indice').eq('id', id).eq('tenant_id', tenantId).single();
         const newVersion = ((doc as any)?.version || 1) + 1;
         const currentIndice = (doc as any)?.indice || 'A';
@@ -106,7 +117,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
-        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by: uploaded_by || 'System', uploaded_at, description });
+        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by, uploaded_at, description });
       } else {
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;
@@ -128,8 +139,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const { id } = req.params;
       const { data, error } = await supabaseAdmin.from('document_versions').select('*').eq('tenant_id', tenantId).eq('document_id', id).order('version', { ascending: false });
       if (error) throw error;
-      const withUrls = await Promise.all((data || []).map(async (v: any) => ({ ...v, file_url: await resolveFileUrl('documents', v.file_url) })));
-      res.json(withUrls);
+      res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch document versions" }); }
   });
 

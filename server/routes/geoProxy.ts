@@ -14,7 +14,6 @@
 // server.ts referenced them.
 import type { Express } from 'express';
 import axios from 'axios';
-import https from 'https';
 import { fetchWithTimeout } from '../fetchWithTimeout';
 
 interface GeoJSONGeometry {
@@ -161,7 +160,6 @@ async function getGeorisques(lon: number, lat: number, codeInsee: string): Promi
 
   try {
     const v1Response = await axios.get<GeorisquesV1Response>(v1Url, {
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       timeout: 15000 // Increased timeout
     });
 
@@ -512,16 +510,20 @@ export function registerGeoProxyRoutes(app: Express) {
   // Proxy for Historical Monuments (Culture API)
   app.get("/api/historical-monuments", async (req, res) => {
     try {
-      const { lat: latQuery, lon: lonQuery, distance = 1000 } = req.query;
+      const { lat: latQuery, lon: lonQuery, distance: distanceQuery } = req.query;
       if (!latQuery || !lonQuery) {
         return res.status(400).json({ error: "Latitude and longitude are required" });
       }
 
       const lat = parseFloat(latQuery as string);
       const lon = parseFloat(lonQuery as string);
+      const distance = distanceQuery === undefined ? 1000 : Number(distanceQuery);
 
       if (isNaN(lat) || isNaN(lon)) {
         return res.status(400).json({ error: "Invalid latitude or longitude" });
+      }
+      if (!Number.isFinite(distance) || distance <= 0 || distance > 50000) {
+        return res.status(400).json({ error: "Invalid distance" });
       }
 
       const dataset = "liste-des-immeubles-proteges-au-titre-des-monuments-historiques";
@@ -533,7 +535,6 @@ export function registerGeoProxyRoutes(app: Express) {
         params: {
           limit: 1,
         },
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         timeout: 10000
       });
 
@@ -556,7 +557,6 @@ export function registerGeoProxyRoutes(app: Express) {
           where: `within_distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})', ${distance}m)`,
           order_by: `distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})')`
         },
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         timeout: 15000
       });
 
@@ -739,7 +739,7 @@ export function registerGeoProxyRoutes(app: Express) {
       const url = `https://rnb-api.beta.gouv.fr/api/alpha/buildings/address/?q=${encodeURIComponent(q as string)}`;
       console.log(`Calling RNB API: ${url}`);
 
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url, {}, 10000);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -750,6 +750,10 @@ export function registerGeoProxyRoutes(app: Express) {
       const data = await response.json();
       res.json(data);
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.error("RNB API request timed out");
+        return res.status(504).json({ error: "RNB API request timed out" });
+      }
       console.error("Error in /api/rnb-buildings:", error);
       res.status(500).json({ error: "Internal server error" });
     }

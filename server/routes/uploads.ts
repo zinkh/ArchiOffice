@@ -2,34 +2,37 @@
 // upload routes. Both share the "logos" storage bucket (created on first
 // use if missing) despite serving two different purposes.
 import type { Express } from 'express';
+import { sniffImageMime, extensionForImageMime, handleSingleImageUpload } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  upload: any;
+  requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerUploadRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, upload }: RouteDeps) {
-  // Upload agency logo → save to Supabase Storage, update settings.logo_url
-  app.post("/api/upload/logo", upload.single('file'), async (req: any, res: any) => {
+export function registerUploadRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, requireRole }: RouteDeps) {
+  // Upload agency logo → save to Supabase Storage, update settings.logo_url.
+  // Admin-only: this replaces branding shared by the whole tenant (security
+  // audit finding — previously any authenticated member could change it).
+  app.post("/api/upload/logo", requireRole('admin'), handleSingleImageUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
-      const ext = file.originalname.split('.').pop() || 'png';
-      const storagePath = `${tenantId}/logo/${Date.now()}.${ext}`;
+      // file.mimetype is client-supplied and easily spoofed — trust only what
+      // the actual bytes sniff as (see server/imageUpload.ts).
+      const sniffedMime = sniffImageMime(file.buffer);
+      if (!sniffedMime) {
+        return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
+      }
+      const storagePath = `${tenantId}/logo/${Date.now()}.${extensionForImageMime(sniffedMime)}`;
       // Ensure logos bucket exists
       const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
       if (!bucketData) {
         await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
       }
-      // "logos" is the one bucket left public (branding assets, not personal
-      // data — see server.ts's ensureStorageBuckets), so unlike the other
-      // buckets it's served via a permanent public URL rather than
-      // resolveFileUrl's short-lived signed one.
-      const storedPath = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
-      const url = supabaseAdmin.storage.from('logos').getPublicUrl(storedPath).data.publicUrl;
+      const url = await uploadToStorage('logos', storagePath, file.buffer, sniffedMime);
       // Persist to settings
       const { data: existing } = await supabaseAdmin.from('settings').select('tenant_id').eq('tenant_id', tenantId).single();
       if (existing) {
@@ -42,19 +45,21 @@ export function registerUploadRoutes(app: Express, { supabaseAdmin, getTenantId,
   });
 
   // Upload user avatar → save to Supabase Storage, update profile.avatar
-  app.post("/api/upload/avatar", upload.single('file'), async (req: any, res: any) => {
+  app.post("/api/upload/avatar", handleSingleImageUpload('file'), async (req: any, res: any) => {
     try {
       const userId = req.user.id;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
-      const ext = file.originalname.split('.').pop() || 'png';
-      const storagePath = `avatars/${userId}/${Date.now()}.${ext}`;
+      const sniffedMime = sniffImageMime(file.buffer);
+      if (!sniffedMime) {
+        return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
+      }
+      const storagePath = `avatars/${userId}/${Date.now()}.${extensionForImageMime(sniffedMime)}`;
       const { data: bucketData } = await supabaseAdmin.storage.getBucket('logos');
       if (!bucketData) {
         await supabaseAdmin.storage.createBucket('logos', { public: true, fileSizeLimit: 5242880 });
       }
-      const storedPath = await uploadToStorage('logos', storagePath, file.buffer, file.mimetype);
-      const url = supabaseAdmin.storage.from('logos').getPublicUrl(storedPath).data.publicUrl;
+      const url = await uploadToStorage('logos', storagePath, file.buffer, sniffedMime);
       await supabaseAdmin.from('profiles').update({ avatar: url }).eq('id', userId);
       res.json({ url });
     } catch (e: any) { console.error(e); res.status(500).json({ error: e.message || "Upload failed" }); }

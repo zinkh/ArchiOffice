@@ -174,6 +174,29 @@ describe('Leave requests', () => {
     expect(badRange.status).toBe(400);
   });
 
+  // businessDaysBetween used to walk the range one day at a time with no
+  // upper bound — a multi-century span would block the event loop for the
+  // life of the request. Also covers the unparseable-date branch.
+  it('rejects a leave request spanning an implausible number of years', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/leave_requests').set(authHeader(token)).send({
+      leave_type: 'rtt', start_date: '1900-01-01', end_date: '2900-01-01',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a leave request with an unparseable date', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/leave_requests').set(authHeader(token)).send({
+      leave_type: 'rtt', start_date: 'not-a-date', end_date: '2026-03-02',
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('lets a manager approve a direct report\'s request, and rejects a second decision on the same request', async () => {
     const tenantId = makeTenant();
     const { userId: managerId, token: managerToken } = makeUser(tenantId);
