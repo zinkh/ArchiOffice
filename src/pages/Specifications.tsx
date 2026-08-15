@@ -219,21 +219,33 @@ export default function Specifications() {
     doc.save(`${activeSpec.title}.pdf`);
   };
 
-  const exportToDOCX = () => {
-    if (!activeSpec) return;
-    const data = {
-      projet: { nom: projects.find(p => p.id === activeSpec.project_id)?.name || 'Unknown' },
-      lots: [{ numero: '1', intitule: activeSpec.title, ouvrages: sections.flatMap(s => s.items.map(i => ({ designation: i.description, quantite: 0, unite: '-', prix_unitaire: 0, total_ht: 0 }))) }]
+  const buildSpecExportData = () => {
+    if (!activeSpec) return null;
+    return {
+      projet: { nom: projects.find(p => p.id === activeSpec.project_id)?.name || activeSpec.title },
+      lots: sections.map((section, idx) => ({
+        numero: String(idx + 1),
+        intitule: section.title,
+        ouvrages: section.items.map(i => ({
+          designation: i.material && i.material !== '-' ? `${i.code} — ${i.description} (${i.material})` : `${i.code} — ${i.description}`,
+          quantite: 0,
+          unite: '-',
+          prix_unitaire: 0,
+          total_ht: 0,
+        })),
+      })),
     };
+  };
+
+  const exportToDOCX = () => {
+    const data = buildSpecExportData();
+    if (!data) return;
     import('../services/documentService').then(service => service.generateWordDoc(data));
   };
 
   const exportToExcel = () => {
-    if (!activeSpec) return;
-    const data = {
-      projet: { nom: projects.find(p => p.id === activeSpec.project_id)?.name || 'Unknown' },
-      lots: [{ numero: '1', intitule: activeSpec.title, ouvrages: sections.flatMap(s => s.items.map(i => ({ designation: i.description, quantite: 0, unite: '-', prix_unitaire: 0, total_ht: 0 }))) }]
-    };
+    const data = buildSpecExportData();
+    if (!data) return;
     import('../services/documentService').then(service => service.generateExcelDoc(data));
   };
 

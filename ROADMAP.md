@@ -29,7 +29,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 |---|---|---|
 | PDF (invoices, MAF declarations, états d'acompte, etc.) | ✅ | jsPDF/autotable, works throughout. |
 | Word/DOCX — meeting minutes | ✅ | Real export via `docx`. |
-| Word/Excel — Specifications (CCTP) page | 🚫 | `generateWordDoc`/`generateExcelDoc` in `src/services/documentService.ts` are stubs that show an "not implemented yet" alert. **The Specifications export buttons don't produce a file today.** |
+| Word/Excel — Specifications (CCTP) page | ✅ | `generateWordDoc`/`generateExcelDoc` in `src/services/documentService.ts` build real `.docx` (via `docx`) and `.xlsx` (via `xlsx`) files from the spec's sections/items. |
 
 ## Integrations (Paramètres → Intégrations)
 
