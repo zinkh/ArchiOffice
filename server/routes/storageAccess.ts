@@ -3,8 +3,8 @@
 // caller's own tenant actually owns that object. Every upload route in this
 // app namespaces its storage path as `${tenantId}/...` (confirmed across
 // documents.ts, plans.ts, profile.ts, messaging.ts, activityFeed.ts,
-// visas.ts), so that prefix is what's checked here — there's no per-object
-// ACL table, this *is* the authorization boundary.
+// visas.ts, meetings.ts), so that prefix is what's checked here — there's no
+// per-object ACL table, this *is* the authorization boundary.
 import type { Express } from 'express';
 import { PRIVATE_STORAGE_BUCKETS, parseStorageRef } from '../storagePaths';
 

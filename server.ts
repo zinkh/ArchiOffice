@@ -431,16 +431,17 @@ export async function createApp() {
 
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
-  // These hold business documents (CCTP, plans, CVs, chat/feed attachments) —
-  // private, unlike "logos" (agency branding/avatars), which is meant to be
-  // public. uploadToStorage() below still returns a getPublicUrl()-shaped
-  // string for these (that call just builds a URL string; it doesn't check
-  // the bucket's actual public/private flag), so every existing DB row keeps
-  // working as a stable object *reference* — see server/storagePaths.ts and
-  // server/routes/storageAccess.ts, which exchange that reference for a
-  // short-lived signed URL after checking the caller's tenant owns it.
+  // These hold business documents (CCTP, plans, CVs, chat/feed attachments,
+  // meeting-site photos) — private, unlike "logos" (agency branding/avatars),
+  // which is meant to be public. uploadToStorage() below still returns a
+  // getPublicUrl()-shaped string for these (that call just builds a URL
+  // string; it doesn't check the bucket's actual public/private flag), so
+  // every existing DB row keeps working as a stable object *reference* — see
+  // server/storagePaths.ts and server/routes/storageAccess.ts, which exchange
+  // that reference for a short-lived signed URL after checking the caller's
+  // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });

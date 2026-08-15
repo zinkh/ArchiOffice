@@ -28,6 +28,7 @@ import {
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
+import { SignedImage } from '../components/SignedImage';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
 import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
@@ -1114,7 +1115,7 @@ export default function Reunions() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {(selectedMeeting.photos || []).map(photo => (
                     <div key={photo.id} className="group relative rounded-xl overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
-                      <img
+                      <SignedImage
                         src={photo.file_url}
                         alt={photo.caption || 'Photo'}
                         className="w-full h-full object-cover cursor-pointer"
@@ -1211,7 +1212,7 @@ export default function Reunions() {
           <button onClick={() => setLightboxPhoto(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
             <IconX size={20} />
           </button>
-          <img
+          <SignedImage
             src={lightboxPhoto.file_url}
             alt={lightboxPhoto.caption || 'Photo'}
             className="max-w-full max-h-[80vh] object-contain rounded-lg"
