@@ -23,6 +23,17 @@ export interface RouteDeps {
 
 const STANCER_API_BASE = 'https://api.stancer.com/v2';
 
+// Post-payment return URL base. Prefer the configured APP_URL so the redirect
+// target can't be steered by a spoofed X-Forwarded-Host header; fall back to
+// the request Host, which the app's Host-header allow-list middleware has
+// already validated (X-Forwarded-Host is deliberately not trusted here).
+function appBaseUrl(req: any): string {
+  const configured = process.env.APP_URL;
+  if (configured) return configured.replace(/\/$/, '');
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  return `${proto}://${req.headers.host}`;
+}
+
 function stancerAuthHeader(): string {
   const key = process.env.STANCER_SECRET_KEY || '';
   return 'Basic ' + Buffer.from(key + ':').toString('base64');
@@ -101,9 +112,7 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
         }
       }
 
-      const proto = req.headers['x-forwarded-proto'] || req.protocol;
-      const host = req.headers['x-forwarded-host'] || req.headers.host;
-      const returnUrl = `${proto}://${host}/billing?payment_status=success&plan=${plan_id}`;
+      const returnUrl = `${appBaseUrl(req)}/billing?payment_status=success&plan=${plan_id}`;
 
       // Create payment
       const paymentBody: any = {
@@ -249,9 +258,7 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
         }
       }
 
-      const proto = req.headers['x-forwarded-proto'] || req.protocol;
-      const host = req.headers['x-forwarded-host'] || req.headers.host;
-      const returnUrl = `${proto}://${host}/billing?payment_status=success&type=credit&pack=${pack_id}`;
+      const returnUrl = `${appBaseUrl(req)}/billing?payment_status=success&type=credit&pack=${pack_id}`;
 
       const paymentBody: any = {
         amount: pack.amount_cents,

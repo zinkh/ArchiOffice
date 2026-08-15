@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import axios from 'axios';
+import dns from 'dns/promises';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
 
 let app: Express;
@@ -157,6 +158,10 @@ describe('Odoo', () => {
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'https://odoo.example.test', odoo_db: 'db', odoo_username: 'user', odoo_api_key: 'key' }]);
     fakeSupabaseAdmin.seed('contacts', [{ id: 'c1', tenant_id: tenantId, first_name: 'Jean', last_name: 'Dupont', odoo_id: null }]);
+
+    // /api/odoo/sync validates odoo_url through the SSRF guard, which resolves
+    // the host; the sandbox has no DNS, so stub the lookup to a public address.
+    vi.spyOn(dns, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
 
     vi.spyOn(axios, 'post').mockImplementation(async (_url: string, body: any) => {
       const { model, method } = body.params;
