@@ -100,9 +100,10 @@ export class FakeSupabaseAdmin {
   private buckets = new Set<string>();
   // In-memory object store backing `.storage.from(bucket)`, used by
   // server.ts's uploadToStorage/deleteFromStorage (documents.ts, plans.ts,
-  // visas.ts, meetings.ts, ...). Objects aren't retained for assertions —
-  // routes only ever pass the returned public URL back around — so a Set of
-  // "uploaded" paths per bucket is enough to make delete/remove meaningful.
+  // visas.ts, meetings.ts, ...) and server/routes/storageAccess.ts's signed-URL
+  // exchange. Objects aren't retained for assertions — routes only ever pass
+  // the returned public URL back around — so a Set of "uploaded" paths per
+  // bucket is enough to make delete/remove/list/download meaningful.
   private storageObjects = new Map<string, Set<string>>();
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
@@ -122,6 +123,28 @@ export class FakeSupabaseAdmin {
         const set = this.storageObjects.get(bucket);
         if (!set || !set.has(path)) return { data: null, error: { message: 'Object not found' } };
         return { data: { signedUrl: `https://fake.supabase.test/storage/v1/object/sign/${bucket}/${path}?token=fake-token` }, error: null };
+      },
+      // Minimal stand-in for Storage's list()/download(), used by
+      // server/tenantExport.ts's addStorageFolder to walk a tenant's files.
+      // Only ever needs to reflect what upload() above actually recorded —
+      // one level of "directory" per path segment, files at the leaf.
+      list: async (prefix: string, _opts?: any) => {
+        const set = this.storageObjects.get(bucket) || new Set<string>();
+        const seen = new Map<string, boolean>(); // name -> isFolder
+        for (const path of set) {
+          if (!path.startsWith(`${prefix}/`)) continue;
+          const rest = path.slice(prefix.length + 1);
+          const [first, ...more] = rest.split('/');
+          if (!first) continue;
+          seen.set(first, seen.get(first) || more.length > 0);
+        }
+        const entries = [...seen.entries()].map(([name, isFolder]) => ({ name, id: isFolder ? null : 'fake-object-id' }));
+        return { data: entries, error: null };
+      },
+      download: async (path: string) => {
+        const set = this.storageObjects.get(bucket);
+        if (!set?.has(path)) return { data: null, error: { message: 'Object not found' } };
+        return { data: { arrayBuffer: async () => new TextEncoder().encode('fake-file-content').buffer }, error: null };
       },
       remove: async (paths: string[]) => {
         const set = this.storageObjects.get(bucket);
@@ -292,6 +315,14 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   }
 
   limit() {
+    return this;
+  }
+
+  // No-op, like limit()/order() above: test datasets are always far under a
+  // single page, so returning every matching row still satisfies callers
+  // (e.g. server/tenantExport.ts's fetchAllRows) that loop until a
+  // short-of-a-full-page response tells them to stop.
+  range() {
     return this;
   }
 

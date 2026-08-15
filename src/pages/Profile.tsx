@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   IconCamera, IconPencil, IconCheck, IconX, IconPlus, IconTrash, IconSchool,
   IconBuilding, IconFileText, IconDownload, IconUpload, IconBriefcase,
-  IconMail, IconPhone, IconMapPin, IconMessageCircle, IconBell
+  IconMail, IconPhone, IconMapPin, IconMessageCircle, IconBell, IconShieldLock
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -76,8 +76,10 @@ function SectionCard({ title, icon: Icon, action, children }: { title: string; i
 
 export default function Profile() {
   const { userId: paramUserId } = useParams();
-  const { currentUser, setCurrentUser } = useUser();
+  const { currentUser, setCurrentUser, signOut } = useUser();
   const navigate = useNavigate();
+  const [isExportingData, setIsExportingData] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const targetUserId = paramUserId || currentUser?.id;
   const isViewingSelf = !paramUserId || paramUserId === currentUser?.id;
 
@@ -209,6 +211,44 @@ export default function Profile() {
       await apiFetch(`/api/profile/experience/${id}`, { method: 'DELETE' });
       setProfile(p => p ? { ...p, experience: p.experience.filter(e => e.id !== id) } : p);
     } catch (err) { console.error(err); }
+  };
+
+  const handleExportData = async () => {
+    setIsExportingData(true);
+    try {
+      const data = await apiFetch('/api/profile/me/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `archioffice-mes-donnees-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("Échec de l'export des données. Veuillez réessayer.");
+    } finally {
+      setIsExportingData(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm(
+      "Supprimer définitivement votre compte et vos données personnelles (profil, CV, avatar, formations, expériences) ? " +
+      "Cette action est irréversible. Vous serez déconnecté immédiatement."
+    )) return;
+    setIsDeletingAccount(true);
+    try {
+      await apiFetch('/api/profile/me', { method: 'DELETE' });
+      await signOut();
+      navigate('/login');
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "Échec de la suppression du compte. Veuillez réessayer.");
+      setIsDeletingAccount(false);
+    }
   };
 
   const startConversation = async () => {
@@ -488,6 +528,40 @@ export default function Profile() {
           <input ref={cvInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCvChange} />
         )}
       </SectionCard>
+
+      {/* RGPD — export / suppression des données personnelles (compte courant uniquement) */}
+      {isViewingSelf && (
+        <SectionCard title="Confidentialité" icon={IconShieldLock}>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Télécharger mes données</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Export au format JSON de vos données personnelles (profil, CV, formations, expériences).</p>
+              </div>
+              <button
+                onClick={handleExportData}
+                disabled={isExportingData}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 text-sm font-medium rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
+              >
+                <IconDownload size={14} /> {isExportingData ? 'Export...' : 'Télécharger'}
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-700">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-red-600 dark:text-red-400">Supprimer mon compte</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Suppression immédiate et irréversible de votre compte et de vos données personnelles.</p>
+              </div>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeletingAccount}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50"
+              >
+                <IconTrash size={14} /> {isDeletingAccount ? 'Suppression...' : 'Supprimer'}
+              </button>
+            </div>
+          </div>
+        </SectionCard>
+      )}
     </div>
   );
 }

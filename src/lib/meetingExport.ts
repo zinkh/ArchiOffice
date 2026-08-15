@@ -4,6 +4,7 @@
 import type { Paragraph, TextRun, ImageRun, Table, TableRow } from 'docx';
 import type { Meeting, MeetingAttendee } from '../types';
 import { compressImage, type CompressedImage } from './imageCompression';
+import { resolveSignedUrl } from './signedStorageUrl';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -194,7 +195,10 @@ export async function exportMeetingToPDF(
         rowY = y;
       }
 
-      const compressed = await compressImage(photo.file_url, 360, 270, 0.65);
+      // meeting-photos is a private bucket — photo.file_url is a stable
+      // reference, not a directly fetchable URL (see src/lib/signedStorageUrl.ts).
+      const signedPhotoUrl = await resolveSignedUrl(photo.file_url).catch(() => null);
+      const compressed = signedPhotoUrl ? await compressImage(signedPhotoUrl, 360, 270, 0.65) : null;
       if (compressed) {
         const aspect = compressed.h / compressed.w;
         const actualH = thumbW * aspect;
@@ -366,7 +370,10 @@ export async function exportMeetingToDocx(
     // Compress all photos first
     const compressedPhotos: Array<{ img: CompressedImage; caption?: string } | null> = [];
     for (const photo of photos) {
-      const img = await compressImage(photo.file_url, 360, 270, 0.65);
+      // meeting-photos is a private bucket — photo.file_url is a stable
+      // reference, not a directly fetchable URL (see src/lib/signedStorageUrl.ts).
+      const signedPhotoUrl = await resolveSignedUrl(photo.file_url).catch(() => null);
+      const img = signedPhotoUrl ? await compressImage(signedPhotoUrl, 360, 270, 0.65) : null;
       compressedPhotos.push(img ? { img, caption: photo.caption } : null);
     }
 

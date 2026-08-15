@@ -4,6 +4,7 @@
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
+import { streamTenantExport } from '../tenantExport';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -155,6 +156,62 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
     } catch (error: any) {
       console.error("Error updating settings:", error);
       res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update settings: " + error.message });
+    }
+  });
+
+  // Archivage — export complet et exploitable de toute l'activité du cabinet
+  // (données + fichiers) en une archive ZIP téléchargeable. À utiliser avant
+  // une demande de fermeture de cabinet (ci-dessous) pour conserver ce que
+  // la loi impose (comptabilité : 10 ans) ou ce que le cabinet souhaite garder.
+  app.get("/api/settings/tenant-export", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single();
+      await streamTenantExport(supabaseAdmin, tenantId, (tenant as any)?.name || 'cabinet', res);
+    } catch (error: any) {
+      console.error("[GET /api/settings/tenant-export]", error);
+      if (!res.headersSent) {
+        res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to export tenant data" });
+      }
+    }
+  });
+
+  // RGPD — fermeture de cabinet (droit à l'effacement au niveau du tenant) :
+  // demande réversible avec délai de grâce de 30 jours avant purge
+  // automatisée définitive de tout le tenant (server/tenantPurge.ts).
+  app.get("/api/settings/tenant-deletion", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { data } = await supabaseAdmin.from('tenants').select('deletion_requested_at').eq('id', tenantId).single();
+      res.json({ deletion_requested_at: (data as any)?.deletion_requested_at || null, grace_period_days: 30 });
+    } catch (error: any) {
+      console.error("[GET /api/settings/tenant-deletion]", error);
+      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch deletion status" });
+    }
+  });
+
+  app.post("/api/settings/tenant-deletion", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const now = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('tenants').update({ deletion_requested_at: now, deletion_requested_by: req.user.id }).eq('id', tenantId);
+      if (error) throw error;
+      res.json({ success: true, deletion_requested_at: now });
+    } catch (error: any) {
+      console.error("[POST /api/settings/tenant-deletion]", error);
+      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to request tenant deletion" });
+    }
+  });
+
+  app.delete("/api/settings/tenant-deletion", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { error } = await supabaseAdmin.from('tenants').update({ deletion_requested_at: null, deletion_requested_by: null }).eq('id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[DELETE /api/settings/tenant-deletion]", error);
+      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to cancel tenant deletion" });
     }
   });
 

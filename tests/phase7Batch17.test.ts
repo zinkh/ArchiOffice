@@ -60,7 +60,7 @@ describe('Inscription SaaS', () => {
   it('registers a new cabinet and its admin profile', async () => {
     const slug = uniqueId('cabinet');
     const res = await request(app).post('/api/public/register').send({
-      cabinet_name: 'Cabinet Test', slug, admin_name: 'Jeanne Architecte', email: `${slug}@example.test`, password: 'longenough',
+      cabinet_name: 'Cabinet Test', slug, admin_name: 'Jeanne Architecte', email: `${slug}@example.test`, password: 'longenough', consent: true,
     });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -68,6 +68,7 @@ describe('Inscription SaaS', () => {
     expect(tenant).toBeDefined();
     const profile = fakeSupabaseAdmin.getTable('profiles').find(p => p.tenant_id === tenant!.id);
     expect(profile?.system_role).toBe('admin');
+    expect(profile?.terms_accepted_at).toBeTruthy();
   });
 
   it('rejects a slug that is already taken', async () => {
@@ -75,14 +76,21 @@ describe('Inscription SaaS', () => {
     fakeSupabaseAdmin.seed('tenants', [{ id: uniqueId('tenant'), slug, name: 'Existant' }]);
 
     const res = await request(app).post('/api/public/register').send({
-      cabinet_name: 'Cabinet Test', slug, admin_name: 'Jeanne', email: 'jeanne@example.test', password: 'longenough',
+      cabinet_name: 'Cabinet Test', slug, admin_name: 'Jeanne', email: 'jeanne@example.test', password: 'longenough', consent: true,
     });
     expect(res.status).toBe(409);
   });
 
   it('rejects a password shorter than 8 characters', async () => {
     const res = await request(app).post('/api/public/register').send({
-      cabinet_name: 'Cabinet Test', slug: uniqueId('cabinet'), admin_name: 'Jeanne', email: 'jeanne@example.test', password: 'short',
+      cabinet_name: 'Cabinet Test', slug: uniqueId('cabinet'), admin_name: 'Jeanne', email: 'jeanne@example.test', password: 'short', consent: true,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects registration without explicit consent', async () => {
+    const res = await request(app).post('/api/public/register').send({
+      cabinet_name: 'Cabinet Test', slug: uniqueId('cabinet'), admin_name: 'Jeanne', email: 'jeanne@example.test', password: 'longenough',
     });
     expect(res.status).toBe(400);
   });

@@ -1,7 +1,7 @@
 // <img> for a file stored in one of the private buckets (documents/plans/cv/
-// message-attachments/feed-attachments) — resolves `src` to a signed URL
-// (see src/lib/signedStorageUrl.ts) before rendering, since the raw
-// file_url/attachment_url is no longer directly fetchable.
+// message-attachments/feed-attachments/meeting-photos) — resolves `src` to a
+// signed URL (see src/lib/signedStorageUrl.ts) before rendering, since the
+// raw file_url/attachment_url is no longer directly fetchable.
 import { useEffect, useState } from 'react';
 import { resolveSignedUrl } from '../lib/signedStorageUrl';
 
@@ -10,11 +10,13 @@ export function SignedImage({
   alt,
   className,
   style,
+  onClick,
 }: {
   src: string;
   alt?: string;
   className?: string;
   style?: React.CSSProperties;
+  onClick?: React.MouseEventHandler<HTMLImageElement>;
 }) {
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(null);
 
@@ -36,5 +38,5 @@ export function SignedImage({
       />
     );
   }
-  return <img src={resolvedSrc} alt={alt} className={className} style={style} />;
+  return <img src={resolvedSrc} alt={alt} className={className} style={style} onClick={onClick} />;
 }

@@ -31,6 +31,22 @@ describe('GET /api/storage/signed-url', () => {
     expect(res.body.url).toContain('/object/sign/documents/');
   });
 
+  it('resolves a meeting photo belonging to the caller\'s own tenant', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+    const uploaded = await request(app).post('/api/meetings/m1/photos').set(authHeader(token))
+      .attach('file', pngBytes, 'photo.png');
+    expect(uploaded.status).toBe(201);
+    const photo = fakeSupabaseAdmin.getTable('meeting_photos').find(p => p.id === uploaded.body.id);
+    expect(photo?.file_url).toContain('/object/public/meeting-photos/');
+
+    const res = await request(app).get('/api/storage/signed-url').set(authHeader(token)).query({ url: photo!.file_url });
+    expect(res.status).toBe(200);
+    expect(res.body.url).toContain('/object/sign/meeting-photos/');
+  });
+
   it('refuses to resolve another tenant\'s document', async () => {
     const tenantA = makeTenant();
     const { token: tokenA } = makeUser(tenantA);

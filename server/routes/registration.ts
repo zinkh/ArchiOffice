@@ -45,13 +45,20 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", publicAuthLimiter, async (req, res) => {
     try {
-      const { cabinet_name, slug, admin_name, email, password } = req.body;
+      const { cabinet_name, slug, admin_name, email, password, consent } = req.body;
       if (!cabinet_name || !slug || !admin_name || !email || !password) {
         return res.status(400).json({ error: "Tous les champs sont requis." });
       }
       if (String(password).length < 8) {
         return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
       }
+      // Server-side enforcement of the consent checkbox — the frontend's
+      // `required` attribute alone isn't proof of consent for a CNIL audit,
+      // and a direct API call could otherwise skip it entirely.
+      if (consent !== true) {
+        return res.status(400).json({ error: "Vous devez accepter la politique de confidentialité et les CGU." });
+      }
+      const consentedAt = new Date().toISOString();
       // Vérifier unicité du slug
       const { data: existing } = await supabaseAdmin
         .from("tenants")
@@ -90,7 +97,7 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
       // Lier le profil au tenant
       await supabaseAdmin
         .from("profiles")
-        .upsert({ id: userId, tenant_id: tenant.id, name: admin_name, email, system_role: "admin", role: "admin" });
+        .upsert({ id: userId, tenant_id: tenant.id, name: admin_name, email, system_role: "admin", role: "admin", terms_accepted_at: consentedAt });
 
       const emailSent = linkData.properties?.action_link
         ? await sendPlatformMail(

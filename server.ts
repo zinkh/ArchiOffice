@@ -76,6 +76,7 @@ import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
+import { startTenantPurge } from "./server/tenantPurge";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
 const upload = multer({
@@ -430,16 +431,17 @@ export async function createApp() {
 
   // ─── Supabase Storage helpers ───────────────────────────────────────────────
 
-  // These hold business documents (CCTP, plans, CVs, chat/feed attachments) —
-  // private, unlike "logos" (agency branding/avatars), which is meant to be
-  // public. uploadToStorage() below still returns a getPublicUrl()-shaped
-  // string for these (that call just builds a URL string; it doesn't check
-  // the bucket's actual public/private flag), so every existing DB row keeps
-  // working as a stable object *reference* — see server/storagePaths.ts and
-  // server/routes/storageAccess.ts, which exchange that reference for a
-  // short-lived signed URL after checking the caller's tenant owns it.
+  // These hold business documents (CCTP, plans, CVs, chat/feed attachments,
+  // meeting-site photos) — private, unlike "logos" (agency branding/avatars),
+  // which is meant to be public. uploadToStorage() below still returns a
+  // getPublicUrl()-shaped string for these (that call just builds a URL
+  // string; it doesn't check the bucket's actual public/private flag), so
+  // every existing DB row keeps working as a stable object *reference* — see
+  // server/storagePaths.ts and server/routes/storageAccess.ts, which exchange
+  // that reference for a short-lived signed URL after checking the caller's
+  // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -797,6 +799,9 @@ async function startServer() {
     // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
     // shim REST de ce même serveur, qui n'accepte les requêtes qu'une fois à l'écoute.
     startTenderRssPolling(supabaseAdmin);
+    // RGPD — purge automatisée des cabinets dont le délai de grâce de
+    // fermeture (30 jours, server/routes/settings.ts) est écoulé.
+    startTenantPurge(supabaseAdmin);
   });
 }
 
