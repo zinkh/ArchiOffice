@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose, IconUpload } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
@@ -225,6 +225,7 @@ function saveDraft(agentId: string, value: string): void {
 export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact })[]>([]);
@@ -328,6 +329,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const closeChat = useCallback((): void => {
     setIsOpen(false);
     setAgentSelectorOpen(false);
+    setExpanded(false);
   }, []);
 
   const sendMessage = async () => {
@@ -518,8 +520,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 40 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-20 right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
-            style={{
+            className="fixed bottom-20 right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
+            style={expanded ? {
+              width: 'min(900px, calc(100vw - 24px))',
+              height: 'min(88vh, calc(100vh - 40px))',
+              background: 'var(--tblr-surface)',
+              border: '1px solid var(--tblr-border)',
+            } : {
               width: 'min(420px, calc(100vw - 24px))',
               height: 'min(640px, calc(100vh - 100px))',
               background: 'var(--tblr-surface)',
@@ -573,6 +580,15 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   {activeAgent ? activeAgent.role_title : ''}
                 </div>
               </div>
+              <button
+                onClick={() => setExpanded(e => !e)}
+                className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"
+                title={(expanded ? t('agent_chat_collapse') : t('agent_chat_expand')) as string}
+              >
+                {expanded
+                  ? <IconArrowsMinimize size={16} style={{ color: 'var(--tblr-muted)' }} />
+                  : <IconArrowsMaximize size={16} style={{ color: 'var(--tblr-muted)' }} />}
+              </button>
               <button onClick={closeChat} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors">
                 <IconX size={16} style={{ color: 'var(--tblr-muted)' }} />
               </button>

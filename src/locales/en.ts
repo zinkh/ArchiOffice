@@ -813,6 +813,8 @@ export default {
       "zoho_sync_result": "Sync complete: {{pushed}} sent, {{pulled}} updated",
 
       // AI agent chat — loading feedback
+      "agent_chat_expand": "Expand conversation",
+      "agent_chat_collapse": "Collapse conversation",
       "agent_chat_thinking_slow": "Still working on it…",
       "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
@@ -858,6 +860,7 @@ export default {
       // Calendar page
       "calendar_page_subtitle": "Milestones and tasks, by week and by month",
       "calendar_today_btn": "Today",
+      "calendar_jump_to_date": "Jump to date",
       "calendar_this_week": "This week",
       "calendar_no_events_week": "No milestones or tasks this week.",
       "calendar_no_events_day": "No events this day.",
