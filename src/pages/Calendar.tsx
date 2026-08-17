@@ -16,7 +16,7 @@ import {
   addDays,
 } from 'date-fns';
 import { fr, enUS } from 'date-fns/locale';
-import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck, IconCalendar } from '@tabler/icons-react';
 import { fetchJson } from '../lib/api';
 import type { Project, Milestone, Task } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
@@ -77,6 +77,18 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Parsed as local-time components (not `new Date(value)`, which reads an
+  // <input type="date"> value as UTC midnight and can land on the wrong day
+  // once shifted to the browser's local timezone).
+  const jumpToDate = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (!value) return;
+    const [y, m, d] = value.split('-').map(Number);
+    const picked = new Date(y, m - 1, d);
+    setViewDate(picked);
+    setSelectedDay(picked);
+  };
 
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -200,6 +212,18 @@ export default function CalendarPage() {
             <span className="text-sm font-semibold capitalize ml-1" style={{ color: 'var(--tblr-text)' }}>
               {format(viewDate, 'MMMM yyyy', { locale })}
             </span>
+            <div className="relative flex items-center ml-1">
+              <IconCalendar size={14} className="absolute left-2 pointer-events-none" style={{ color: 'var(--tblr-muted)' }} />
+              <input
+                type="date"
+                value={format(viewDate, 'yyyy-MM-dd')}
+                onChange={jumpToDate}
+                aria-label={t('calendar_jump_to_date') as string}
+                title={t('calendar_jump_to_date') as string}
+                className="pl-7 pr-2 py-1.5 rounded-lg text-xs outline-none"
+                style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)', colorScheme: 'light dark' }}
+              />
+            </div>
           </div>
         )}
       </div>

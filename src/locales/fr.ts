@@ -825,6 +825,8 @@ export default {
       "agent_chat_placeholder": "Posez une question…",
       "agent_chat_send": "Envoyer",
       "agent_chat_new": "Nouvelle conversation",
+      "agent_chat_expand": "Agrandir la conversation",
+      "agent_chat_collapse": "Réduire la conversation",
       "agent_chat_empty": "Pas encore de messages. Dites bonjour !",
       "agent_chat_error": "Une erreur s'est produite. Veuillez réessayer.",
       "agent_chat_thinking": "En train de réfléchir…",
@@ -906,6 +908,7 @@ export default {
       // Calendar page
       "calendar_page_subtitle": "Jalons et tâches, par semaine et par mois",
       "calendar_today_btn": "Aujourd'hui",
+      "calendar_jump_to_date": "Aller à une date",
       "calendar_this_week": "Cette semaine",
       "calendar_no_events_week": "Aucun jalon ni tâche cette semaine.",
       "calendar_no_events_day": "Aucun évènement ce jour.",
