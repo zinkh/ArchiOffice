@@ -21,6 +21,11 @@ import {
   IconArrowRight,
   IconArrowLeft,
   IconCheck,
+  IconEye,
+  IconStar,
+  IconStarFilled,
+  IconUsers,
+  IconPhoto,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
@@ -31,6 +36,19 @@ import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 
 // ── Unified reference type ─────────────────────────────────────────────────
+
+interface Cotraitant {
+  id: string;
+  name: string;
+  remuneration: number | null;
+  fee_share: number | null; // % répartition d'honoraires
+}
+
+interface RefImage {
+  id: string;
+  url: string;
+  is_primary: boolean;
+}
 
 interface CustomRef {
   id: string;
@@ -48,8 +66,11 @@ interface CustomRef {
   project_manager: string;
   construction_cost: number | null;
   remuneration: number | null;
+  fee_rate: number | null;
   progression: number | null;
   custom_data: Record<string, string>;
+  cotraitants: Cotraitant[];
+  images: RefImage[];
 }
 
 interface RefItem {
@@ -71,13 +92,39 @@ function toRefItem(p: Project): RefItem {
 }
 
 function customToRefItem(r: CustomRef): RefItem {
-  return { id: r.id, name: r.name, client: r.client || '', category: r.category || 'Non classé', end_date: r.end_date, surface: r.surface, budget: r.budget, status: r.status, image_url: r.image_url, source: 'manual' };
+  const primary = r.images?.find(im => im.is_primary) || r.images?.[0];
+  return { id: r.id, name: r.name, client: r.client || '', category: r.category || 'Non classé', end_date: r.end_date, surface: r.surface, budget: r.budget, status: r.status, image_url: primary?.url || r.image_url, source: 'manual' };
 }
 
 const EMPTY_FORM: Omit<CustomRef, 'id'> = {
   name: '', client: '', category: '', end_date: '', surface: null, budget: null, status: 'Completed', description: '', image_url: '', location: '',
-  start_date: '', project_manager: '', construction_cost: null, remuneration: null, progression: null, custom_data: {},
+  start_date: '', project_manager: '', construction_cost: null, remuneration: null, fee_rate: null, progression: null, custom_data: {},
+  cotraitants: [], images: [],
 };
+
+/** Downscale + compress an uploaded image file into a base64 JPEG data URL, mirroring the pattern used for project photos. */
+function optimizeReferenceImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_W = 1200, MAX_H = 900;
+        let { width, height } = img;
+        if (width > height) { if (width > MAX_W) { height *= MAX_W / width; width = MAX_W; } }
+        else { if (height > MAX_H) { width *= MAX_H / height; height = MAX_H; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // ── Form modal ─────────────────────────────────────────────────────────────
 
@@ -91,8 +138,15 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
   onContactCreated: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [form, setForm] = useState<Omit<CustomRef, 'id'>>({ ...EMPTY_FORM, ...initial });
+  const [form, setForm] = useState<Omit<CustomRef, 'id'>>(() => {
+    const merged: Omit<CustomRef, 'id'> = { ...EMPTY_FORM, ...initial, cotraitants: initial?.cotraitants ? [...initial.cotraitants] : [], images: initial?.images ? [...initial.images] : [] };
+    if (merged.images.length === 0 && merged.image_url) {
+      merged.images = [{ id: crypto.randomUUID(), url: merged.image_url, is_primary: true }];
+    }
+    return merged;
+  });
   const [saving, setSaving] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(() =>
     Object.entries(initial?.custom_data || {}).map(([key, value]) => ({ key, value: String(value) }))
@@ -106,13 +160,47 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
     setCustomFields(prev => prev.map((f, i) => i === idx ? { ...f, ...patch } : f));
   const removeCustomField = (idx: number) => setCustomFields(prev => prev.filter((_, i) => i !== idx));
 
+  const addCotraitant = () => setForm(p => ({ ...p, cotraitants: [...p.cotraitants, { id: crypto.randomUUID(), name: '', remuneration: null, fee_share: null }] }));
+  const updateCotraitant = (idx: number, patch: Partial<Cotraitant>) =>
+    setForm(p => ({ ...p, cotraitants: p.cotraitants.map((c, i) => i === idx ? { ...c, ...patch } : c) }));
+  const removeCotraitant = (idx: number) => setForm(p => ({ ...p, cotraitants: p.cotraitants.filter((_, i) => i !== idx) }));
+
+  const setPrimaryImage = (id: string) => setForm(p => ({ ...p, images: p.images.map(im => ({ ...im, is_primary: im.id === id })) }));
+  const removeImage = (id: string) => setForm(p => {
+    const remaining = p.images.filter(im => im.id !== id);
+    if (remaining.length > 0 && !remaining.some(im => im.is_primary)) remaining[0] = { ...remaining[0], is_primary: true };
+    return { ...p, images: remaining };
+  });
+  async function handleImagesUpload(e: { target: HTMLInputElement }) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploadingImages(true);
+    try {
+      const newImages: RefImage[] = [];
+      for (const file of files) {
+        const dataUrl = await optimizeReferenceImage(file);
+        newImages.push({ id: crypto.randomUUID(), url: dataUrl, is_primary: false });
+      }
+      setForm(p => {
+        const images = [...p.images, ...newImages];
+        if (!images.some(im => im.is_primary)) images[0] = { ...images[0], is_primary: true };
+        return { ...p, images };
+      });
+    } finally {
+      setUploadingImages(false);
+      e.target.value = '';
+    }
+  }
+
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault();
     setSaving(true);
     try {
       const custom_data: Record<string, string> = {};
       customFields.forEach(({ key, value }) => { if (key.trim()) custom_data[key.trim()] = value; });
-      await onSave({ ...form, custom_data });
+      const cotraitants = form.cotraitants.filter(c => c.name.trim());
+      const primary = form.images.find(im => im.is_primary) || form.images[0];
+      await onSave({ ...form, custom_data, cotraitants, image_url: primary?.url || form.image_url || null });
     } finally { setSaving(false); }
   }
 
@@ -201,6 +289,10 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
               <input type="number" min="0" value={form.remuneration ?? ''} onChange={e => set('remuneration', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
             </div>
             <div>
+              <label className={labelCls} style={labelStyle}>{t('references_field_fee_rate')}</label>
+              <input type="number" min="0" max="100" step="0.01" value={form.fee_rate ?? ''} onChange={e => set('fee_rate', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
+            </div>
+            <div>
               <label className={labelCls} style={labelStyle}>{t('references_field_progression')}</label>
               <input type="number" min="0" max="100" value={form.progression ?? ''} onChange={e => set('progression', e.target.value ? Number(e.target.value) : null)} className={inputCls} style={inputStyle} />
             </div>
@@ -208,14 +300,91 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
               <label className={labelCls} style={labelStyle}>{t('references_field_location')}</label>
               <input value={form.location} onChange={e => set('location', e.target.value)} className={inputCls} style={inputStyle} />
             </div>
-            <div>
-              <label className={labelCls} style={labelStyle}>{t('references_field_image')}</label>
-              <input value={form.image_url || ''} onChange={e => set('image_url', e.target.value || null)} className={inputCls} style={inputStyle} placeholder="https://…" />
-            </div>
             <div className="sm:col-span-2">
               <label className={labelCls} style={labelStyle}>{t('references_field_description')}</label>
               <textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} className={inputCls} style={inputStyle} />
             </div>
+          </div>
+
+          <div className="pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <label className={labelCls} style={{ ...labelStyle, marginBottom: 0 }}>{t('references_images_title')}</label>
+              <label className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer">
+                {uploadingImages ? <IconLoader2 size={14} className="animate-spin" /> : <IconUpload size={14} />}
+                {t('references_images_add')}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={handleImagesUpload} disabled={uploadingImages} />
+              </label>
+            </div>
+            {form.images.length === 0 ? (
+              <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('references_images_empty')}</p>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {form.images.map(img => (
+                  <div key={img.id} className="relative rounded-lg overflow-hidden border aspect-square" style={{ borderColor: img.is_primary ? 'var(--tblr-primary)' : 'var(--tblr-border)' }}>
+                    <img src={img.url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 px-1 py-1" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                      <button type="button" onClick={() => setPrimaryImage(img.id)} title={t('references_images_set_primary') as string} className="p-1 rounded hover:bg-white/20 transition-colors">
+                        {img.is_primary ? <IconStarFilled size={13} className="text-yellow-400" /> : <IconStar size={13} className="text-white" />}
+                      </button>
+                      <button type="button" onClick={() => removeImage(img.id)} className="p-1 rounded hover:bg-white/20 transition-colors">
+                        <IconX size={13} className="text-white" />
+                      </button>
+                    </div>
+                    {img.is_primary && (
+                      <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-semibold bg-blue-600 text-white">{t('references_images_primary_badge')}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <label className={labelCls} style={{ ...labelStyle, marginBottom: 0 }}>{t('references_cotraitants_title')}</label>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_hint')}</p>
+              </div>
+              <button type="button" onClick={addCotraitant} className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors shrink-0">
+                <IconPlus size={14} /> {t('references_cotraitants_add')}
+              </button>
+            </div>
+            {form.cotraitants.length === 0 ? (
+              <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_empty')}</p>
+            ) : (
+              <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ background: 'var(--tblr-surface-2)' }}>
+                      <th className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_name')}</th>
+                      <th className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_remuneration')}</th>
+                      <th className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_fee_share')}</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.cotraitants.map((c, idx) => (
+                      <tr key={c.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                        <td className="px-2 py-1.5">
+                          <input value={c.name} onChange={e => updateCotraitant(idx, { name: e.target.value })} placeholder={t('references_cotraitants_name') as string} className="w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" style={inputStyle} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input type="number" min="0" value={c.remuneration ?? ''} onChange={e => updateCotraitant(idx, { remuneration: e.target.value ? Number(e.target.value) : null })} className="w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" style={inputStyle} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input type="number" min="0" max="100" value={c.fee_share ?? ''} onChange={e => updateCotraitant(idx, { fee_share: e.target.value ? Number(e.target.value) : null })} className="w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" style={inputStyle} />
+                        </td>
+                        <td className="px-1 py-1.5 text-center">
+                          <button type="button" onClick={() => removeCotraitant(idx)} className="p-1.5 rounded hover:bg-red-50 transition-colors" style={{ color: 'var(--tblr-danger)' }}>
+                            <IconTrash size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div className="pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -353,8 +522,11 @@ function rowToRef(row: Record<string, any>, mapping: Partial<Record<ImportField,
     project_manager: '',
     construction_cost: null,
     remuneration: null,
+    fee_rate: null,
     progression: null,
     custom_data: {},
+    cotraitants: [],
+    images: [],
   };
 }
 
@@ -619,6 +791,140 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
   );
 }
 
+// ── Status badge ─────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const style = status === 'In Progress'
+    ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+    : status === 'Completed'
+      ? { background: '#d3f9d8', color: '#2f9e44' }
+      : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' };
+  return <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={style}>{status}</span>;
+}
+
+// ── Detail row helper ─────────────────────────────────────────────────────
+
+function DetailRow({ label, value }: { label: string; value: string | number | null | undefined }) {
+  if (value === null || value === undefined || value === '') return null;
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+      <span className="text-xs shrink-0" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
+      <span className="text-xs font-medium text-right" style={{ color: 'var(--tblr-text)' }}>{value}</span>
+    </div>
+  );
+}
+
+// ── Read-only detail content — shared by the desktop list-detail panel and the mobile modal ──
+
+function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef | undefined }) {
+  const { t } = useTranslation();
+  const images: RefImage[] = full?.images?.length ? full.images : (item.image_url ? [{ id: 'legacy', url: item.image_url, is_primary: true }] : []);
+  const primaryImage = images.find(im => im.is_primary) || images[0];
+  const cotraitants = full?.cotraitants || [];
+  const customData = full?.custom_data || {};
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg overflow-hidden aspect-video" style={{ background: 'var(--tblr-surface-2)' }}>
+        <img src={primaryImage?.url || `https://picsum.photos/seed/${item.id}/400/240`} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={item.status} />
+        {item.source === 'manual' && (
+          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+            <IconBookmark size={9} />{t('references_source_manual')}
+          </span>
+        )}
+        {item.category && (
+          <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>{item.category}</span>
+        )}
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_general')}</h4>
+        <DetailRow label={t('references_field_client') as string} value={item.client} />
+        <DetailRow label={t('references_field_location') as string} value={full?.location} />
+        <DetailRow label={t('references_field_start_date') as string} value={full?.start_date ? new Date(full.start_date).toLocaleDateString('fr-FR') : null} />
+        <DetailRow label={t('references_field_date') as string} value={item.end_date ? new Date(item.end_date).toLocaleDateString('fr-FR') : null} />
+        <DetailRow label={t('references_field_surface') as string} value={item.surface ? `${item.surface} m²` : null} />
+        <DetailRow label={t('references_field_manager') as string} value={full?.project_manager} />
+        <DetailRow label={t('references_field_progression') as string} value={full?.progression != null ? `${full.progression}%` : null} />
+      </div>
+
+      <div>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_financial')}</h4>
+        <DetailRow label={t('references_field_budget') as string} value={item.budget != null ? formatCurrency(item.budget) : null} />
+        <DetailRow label={t('references_field_construction_cost') as string} value={full?.construction_cost != null ? formatCurrency(full.construction_cost) : null} />
+        <DetailRow label={t('references_field_remuneration') as string} value={full?.remuneration != null ? formatCurrency(full.remuneration) : null} />
+        <DetailRow label={t('references_field_fee_rate') as string} value={full?.fee_rate != null ? `${full.fee_rate}%` : null} />
+      </div>
+
+      {cotraitants.length > 0 && (
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+            <IconUsers size={12} /> {t('references_cotraitants_title')}
+          </h4>
+          <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ background: 'var(--tblr-surface-2)' }}>
+                  <th className="px-2.5 py-1.5 text-left font-semibold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_name')}</th>
+                  <th className="px-2.5 py-1.5 text-right font-semibold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_remuneration')}</th>
+                  <th className="px-2.5 py-1.5 text-right font-semibold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_fee_share')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cotraitants.map(c => (
+                  <tr key={c.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                    <td className="px-2.5 py-1.5" style={{ color: 'var(--tblr-text)' }}>{c.name}</td>
+                    <td className="px-2.5 py-1.5 text-right font-mono" style={{ color: 'var(--tblr-text)' }}>{c.remuneration != null ? formatCurrency(c.remuneration) : '—'}</td>
+                    <td className="px-2.5 py-1.5 text-right" style={{ color: 'var(--tblr-text)' }}>{c.fee_share != null ? `${c.fee_share}%` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {images.length > 1 && (
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+            <IconPhoto size={12} /> {t('references_images_title')}
+          </h4>
+          <div className="grid grid-cols-4 gap-1.5">
+            {images.map(img => (
+              <div key={img.id} className="relative rounded overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
+                <img src={img.url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                {img.is_primary && (
+                  <span className="absolute top-0.5 left-0.5 p-0.5 rounded bg-blue-600 flex items-center justify-center">
+                    <IconStarFilled size={9} className="text-white" />
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {full?.description && (
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_field_description')}</h4>
+          <p className="text-xs whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{full.description}</p>
+        </div>
+      )}
+
+      {Object.keys(customData).length > 0 && (
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_custom_data_title')}</h4>
+          {Object.entries(customData).map(([k, v]) => <DetailRow key={k} label={k} value={v} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 interface GroupedRefs { [domain: string]: RefItem[] }
@@ -634,6 +940,7 @@ export default function References() {
   const [dateFilter, setDateFilter] = useState('all');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [modal, setModal] = useState<{ open: boolean; item: Partial<CustomRef> | null }>({ open: false, item: null });
+  const [selectedItem, setSelectedItem] = useState<RefItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
@@ -783,8 +1090,10 @@ export default function References() {
     const id = (modal.item as any)?.id;
     if (id) {
       const updated = await apiFetch<CustomRef>(`/api/references/custom/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-      setItems(prev => prev.map(i => i.id === id ? customToRefItem(updated) : i));
+      const updatedItem = customToRefItem(updated);
+      setItems(prev => prev.map(i => i.id === id ? updatedItem : i));
       setCustomRefsById(prev => ({ ...prev, [id]: updated }));
+      setSelectedItem(prev => prev?.id === id ? updatedItem : prev);
     } else {
       const created = await apiFetch<CustomRef>('/api/references/custom', { method: 'POST', body: JSON.stringify(data) });
       setItems(prev => [...prev, customToRefItem(created)]);
@@ -799,11 +1108,16 @@ export default function References() {
     setItems(prev => prev.filter(i => i.id !== item.id));
     setSelectedIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
     setCustomRefsById(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    setSelectedItem(prev => prev?.id === item.id ? null : prev);
   }
 
   function openEdit(item: RefItem) {
     const full = customRefsById[item.id];
     setModal({ open: true, item: (full || { id: item.id, name: item.name, client: item.client, category: item.category, end_date: item.end_date, surface: item.surface, budget: item.budget, status: item.status, image_url: item.image_url }) as any });
+  }
+
+  function openDetail(item: RefItem) {
+    setSelectedItem(item);
   }
 
   function handleImported(imported: CustomRef[]) {
@@ -849,16 +1163,6 @@ export default function References() {
     XLSX.writeFile(wb, 'references.xlsx');
   };
 
-  // ── Status badge ───────────────────────────────────────────────────────────
-  function StatusBadge({ status }: { status: string }) {
-    const style = status === 'In Progress'
-      ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-      : status === 'Completed'
-        ? { background: '#d3f9d8', color: '#2f9e44' }
-        : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' };
-    return <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={style}>{status}</span>;
-  }
-
   // ── Row renderer (shared between grouped and flat views) ───────────────────
   function RefRow({ item }: { item: RefItem }) {
     return (
@@ -871,7 +1175,7 @@ export default function References() {
         <td className="px-4 py-3">
           <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-4 h-4 rounded" />
         </td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 cursor-pointer" onClick={() => openDetail(item)}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded overflow-hidden shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
               <img src={item.image_url || `https://picsum.photos/seed/${item.id}/100/100`} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -896,6 +1200,7 @@ export default function References() {
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
             <StatusBadge status={item.status} />
+            <button onClick={() => openDetail(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_detail') as string}><IconEye size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
             {item.source === 'manual' && (
               <div className="flex items-center gap-1">
                 <button onClick={() => openEdit(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title="Modifier"><IconPencil size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
@@ -986,8 +1291,9 @@ export default function References() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+      {/* Table + list-detail panel */}
+      <div className="flex flex-col lg:flex-row items-start gap-6">
+      <div className="min-w-0 flex-1 rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         {/* Mobile */}
         <div className="md:hidden">
           <MobileAccordionTable
@@ -1012,6 +1318,17 @@ export default function References() {
               { label: t('references_col_budget'), render: (p: RefItem) => <span className="font-mono">{formatCurrency(p.budget ?? 0)}</span> },
               { label: t('references_col_status'), render: (p: RefItem) => <StatusBadge status={p.status} /> },
             ]}
+            actions={(p: RefItem) => (
+              <div className="flex items-center gap-1">
+                <button onClick={() => openDetail(p)} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_detail') as string}><IconEye size={14} style={{ color: 'var(--tblr-muted)' }} /></button>
+                {p.source === 'manual' && (
+                  <>
+                    <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title="Modifier"><IconPencil size={14} style={{ color: 'var(--tblr-muted)' }} /></button>
+                    <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Supprimer"><IconTrash size={14} className="text-red-500" /></button>
+                  </>
+                )}
+              </div>
+            )}
           />
         </div>
 
@@ -1068,7 +1385,7 @@ export default function References() {
                             <td className="px-4 py-3 pl-8">
                               <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="w-4 h-4 rounded" />
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3 cursor-pointer" onClick={() => openDetail(item)}>
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded overflow-hidden shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
                                   <img src={item.image_url || `https://picsum.photos/seed/${item.id}/100/100`} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -1093,6 +1410,7 @@ export default function References() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <StatusBadge status={item.status} />
+                                <button onClick={() => openDetail(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_detail') as string}><IconEye size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
                                 {item.source === 'manual' && (
                                   <>
                                     <button onClick={() => openEdit(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title="Modifier"><IconPencil size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
@@ -1124,6 +1442,55 @@ export default function References() {
           </table>
         </div>
       </div>
+
+      {/* Desktop list-detail panel — large screens only */}
+      {selectedItem && (
+        <div className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-2rem)] rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+            <h3 className="font-semibold text-sm truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedItem.name}</h3>
+            <button onClick={() => setSelectedItem(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={16} style={{ color: 'var(--tblr-muted)' }} /></button>
+          </div>
+          <div className="overflow-y-auto p-4 flex-1">
+            <ReferenceDetailContent item={selectedItem} full={customRefsById[selectedItem.id]} />
+          </div>
+          {selectedItem.source === 'manual' && (
+            <div className="flex justify-end gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+              <button onClick={() => handleDelete(selectedItem)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-danger)' }}>
+                <IconTrash size={13} /> Supprimer
+              </button>
+              <button onClick={() => openEdit(selectedItem)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                <IconPencil size={13} /> Modifier
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {/* Mobile / small-screen detail modal */}
+      {selectedItem && (
+        <div className="lg:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+              <h3 className="font-semibold text-base truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedItem.name}</h3>
+              <button onClick={() => setSelectedItem(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={18} style={{ color: 'var(--tblr-muted)' }} /></button>
+            </div>
+            <div className="overflow-y-auto p-5 flex-1">
+              <ReferenceDetailContent item={selectedItem} full={customRefsById[selectedItem.id]} />
+            </div>
+            {selectedItem.source === 'manual' && (
+              <div className="flex justify-end gap-2 px-5 py-4 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+                <button onClick={() => handleDelete(selectedItem)} className="flex items-center gap-1.5 px-4 py-2 text-sm rounded border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-danger)' }}>
+                  <IconTrash size={14} /> Supprimer
+                </button>
+                <button onClick={() => openEdit(selectedItem)} className="flex items-center gap-1.5 px-4 py-2 text-sm rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                  <IconPencil size={14} /> Modifier
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Form modal */}
       {modal.open && (
