@@ -196,7 +196,31 @@ function DocumentPicker({ attached, onAttach, onDetach }: {
   );
 }
 
-// ── Main provider + panel ─────────────────────────────────────────────────────
+// ── Draft persistence ────────────────────────────────────────────────────────
+// Keeps an in-progress message in localStorage (per agent) so it survives a
+// hung/failed request, an accidental panel close, or a page reload — the
+// user should never have to retype a request because the agent stalled.
+
+function draftStorageKey(agentId: string): string {
+  return `agent_chat_draft_${agentId}`;
+}
+
+function loadDraft(agentId: string): string {
+  try {
+    return localStorage.getItem(draftStorageKey(agentId)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveDraft(agentId: string, value: string): void {
+  try {
+    if (value) localStorage.setItem(draftStorageKey(agentId), value);
+    else localStorage.removeItem(draftStorageKey(agentId));
+  } catch {
+    // localStorage unavailable (private browsing, quota) — draft just won't persist.
+  }
+}
 
 export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -269,6 +293,10 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setLoadingHistory(true);
     setMessages([]);
     setErrorMsg(null);
+    // Restore a message left over from a failed/hung send (or the panel
+    // simply being closed mid-draft) — but never clobber something the
+    // user is actively typing (e.g. a suggestion draft just prefilled).
+    setInput(prev => prev || loadDraft(agentId));
     try {
       const data = await apiFetch(`/api/agents/${agentId}/conversation`);
       setMessages(data.messages || []);
@@ -288,7 +316,10 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   }, [isOpen, activeAgentId, loadConversation]);
 
   const openChat = useCallback((agentId?: string, draftMessage?: string): void => {
-    if (agentId) setActiveAgentId(agentId);
+    if (agentId) {
+      setActiveAgentId(agentId);
+      if (!draftMessage) setInput(loadDraft(agentId));
+    }
     if (draftMessage) setInput(draftMessage);
     setIsOpen(true);
     if (draftMessage) setTimeout(() => textareaRef.current?.focus(), 50);
@@ -301,12 +332,14 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
   const sendMessage = async () => {
     if (!input.trim() || !activeAgentId || loading) return;
+    const agentId = activeAgentId;
+    const rawInput = input.trim();
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
       conversation_id: '',
       tenant_id: '',
       role: 'user',
-      content: input.trim() + (attachedDocs.length > 0 ? `\n\n📎 Documents joints : ${attachedDocs.map(d => d.name).join(', ')}` : ''),
+      content: rawInput + (attachedDocs.length > 0 ? `\n\n📎 Documents joints : ${attachedDocs.map(d => d.name).join(', ')}` : ''),
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
@@ -315,6 +348,9 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setAttachedDocs([]);
     setLoading(true);
     setErrorMsg(null);
+    // Keep the draft in storage while the request is in flight (rather than
+    // clearing it immediately) — if the tab crashes or reloads during a hang,
+    // the message is still recoverable when the panel reopens.
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -330,7 +366,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ message: input.trim(), document_ids: docsToSend.map(d => d.id) }),
+        body: JSON.stringify({ message: rawInput, document_ids: docsToSend.map(d => d.id) }),
         signal: controller.signal,
       });
       const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
@@ -344,6 +380,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       };
       setMessages(prev => [...prev, assistantMsg]);
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
+      saveDraft(agentId, '');
     } catch (e: any) {
       const errText: string = e?.message ?? t('agent_chat_error');
       if (e?.name === 'AbortError') {
@@ -357,7 +394,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       } else {
         setErrorMsg(errText);
       }
+      // Whatever failed — timeout, cancel, or a real error — the request is
+      // reset, not lost: put the message and its attachments back so the
+      // user can just hit send again instead of retyping everything.
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+      setInput(rawInput);
+      setAttachedDocs(docsToSend);
+      saveDraft(agentId, rawInput);
     } finally {
       clearTimeout(hardTimeout);
       abortControllerRef.current = null;
@@ -441,6 +484,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setActiveAgentId(agentId);
     setAgentSelectorOpen(false);
     setAttachedDocs([]);
+    setInput(loadDraft(agentId));
   };
 
   return (
@@ -682,7 +726,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   ref={textareaRef}
                   rows={1}
                   value={input}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                    const value = e.target.value;
+                    setInput(value);
+                    if (activeAgentId) saveDraft(activeAgentId, value);
+                  }}
                   onKeyDown={handleKeyDown}
                   placeholder={t('agent_chat_placeholder')}
                   className="flex-1 resize-none rounded-lg px-3 py-2 text-[13px] outline-none border transition-colors"
