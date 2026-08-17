@@ -27,10 +27,10 @@ export function registerCustomReferenceRoutes(app: Express, { supabaseAdmin, get
   app.post('/api/references/custom', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, progression, custom_data } = req.body;
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, fee_rate, progression, custom_data, cotraitants, images } = req.body;
       if (!name) return res.status(400).json({ error: 'name requis' });
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'custom_references')
-        .insert({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status: status || 'Completed', description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, progression: progression || null, custom_data: custom_data || {} })
+        .insert({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status: status || 'Completed', description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, fee_rate: fee_rate || null, progression: progression || null, custom_data: custom_data || {}, cotraitants: cotraitants || [], images: images || [] })
         .select().single();
       if (error) throw error;
       res.status(201).json(data);
@@ -43,9 +43,9 @@ export function registerCustomReferenceRoutes(app: Express, { supabaseAdmin, get
   app.put('/api/references/custom/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, progression, custom_data } = req.body;
+      const { name, client, category, end_date, surface, budget, status, description, image_url, location, start_date, project_manager, construction_cost, remuneration, fee_rate, progression, custom_data, cotraitants, images } = req.body;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'custom_references')
-        .update({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status, description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, progression: progression || null, custom_data: custom_data || {} })
+        .update({ name, client, category, end_date: end_date || null, surface: surface || null, budget: budget || null, status, description, image_url, location, start_date: start_date || null, project_manager, construction_cost: construction_cost || null, remuneration: remuneration || null, fee_rate: fee_rate || null, progression: progression || null, custom_data: custom_data || {}, cotraitants: cotraitants || [], images: images || [] })
         .eq('id', req.params.id).select().single();
       if (error) throw error;
       res.json(data);

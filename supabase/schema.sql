@@ -553,8 +553,11 @@ CREATE TABLE IF NOT EXISTS custom_references (
   project_manager   TEXT,
   construction_cost NUMERIC,
   remuneration      NUMERIC,
+  fee_rate          NUMERIC,
   progression       NUMERIC,
   custom_data       JSONB DEFAULT '{}'::jsonb,
+  cotraitants       JSONB DEFAULT '[]'::jsonb,
+  images            JSONB DEFAULT '[]'::jsonb,
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_custom_references_tenant_id ON custom_references(tenant_id);
