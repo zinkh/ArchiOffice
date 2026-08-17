@@ -737,6 +737,8 @@ export default {
       "references_custom_data_value": "Value",
       "references_delete_confirm": "Delete this reference?",
       "references_view_detail": "View details",
+      "references_view_project": "View project",
+      "references_source_project_hint": "This reference comes from a firm project — edit it from the project page.",
       "references_detail_close": "Close",
       "references_detail_no_selection": "Select a reference to see its details.",
       "references_detail_section_general": "General information",

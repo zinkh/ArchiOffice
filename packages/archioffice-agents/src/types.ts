@@ -38,6 +38,9 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     fields: 'title*, client_id*, amount, status (Draft/Sent/Accepted/Rejected), description' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
     fields: 'name*, client*, status*, client_id, budget, category, start_date, end_date, description, address' },
+  { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
+    fields: 'name*, client, category, end_date, surface, budget, status (Completed/In Progress/Planning), description, location, start_date, project_manager, construction_cost, remuneration, fee_rate, progression. ' +
+      'À utiliser quand l\'utilisateur demande d\'ajouter une "référence" (réalisation passée pour la page Références, sans suivi de tâches/factures) — PAS la ressource "projects", réservée aux projets actifs suivis par le cabinet.' },
   { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true, list: true, identityField: 'title',
     fields: 'title*, client*, submission_deadline*, status*, description, amount' },
   { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false, list: true,

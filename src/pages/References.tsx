@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
@@ -26,6 +27,7 @@ import {
   IconStarFilled,
   IconUsers,
   IconPhoto,
+  IconExternalLink,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
@@ -931,6 +933,7 @@ interface GroupedRefs { [domain: string]: RefItem[] }
 
 export default function References() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [items, setItems] = useState<RefItem[]>([]);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1201,11 +1204,13 @@ export default function References() {
           <div className="flex items-center gap-2">
             <StatusBadge status={item.status} />
             <button onClick={() => openDetail(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_detail') as string}><IconEye size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
-            {item.source === 'manual' && (
+            {item.source === 'manual' ? (
               <div className="flex items-center gap-1">
                 <button onClick={() => openEdit(item)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title="Modifier"><IconPencil size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
                 <button onClick={() => handleDelete(item)} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Supprimer"><IconTrash size={13} className="text-red-500" /></button>
               </div>
+            ) : (
+              <button onClick={() => navigate(`/projects/${item.id}`)} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_project') as string}><IconExternalLink size={13} style={{ color: 'var(--tblr-muted)' }} /></button>
             )}
           </div>
         </td>
@@ -1321,11 +1326,13 @@ export default function References() {
             actions={(p: RefItem) => (
               <div className="flex items-center gap-1">
                 <button onClick={() => openDetail(p)} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_detail') as string}><IconEye size={14} style={{ color: 'var(--tblr-muted)' }} /></button>
-                {p.source === 'manual' && (
+                {p.source === 'manual' ? (
                   <>
                     <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title="Modifier"><IconPencil size={14} style={{ color: 'var(--tblr-muted)' }} /></button>
                     <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Supprimer"><IconTrash size={14} className="text-red-500" /></button>
                   </>
+                ) : (
+                  <button onClick={() => navigate(`/projects/${p.id}`)} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)] transition-colors" title={t('references_view_project') as string}><IconExternalLink size={14} style={{ color: 'var(--tblr-muted)' }} /></button>
                 )}
               </div>
             )}
@@ -1453,13 +1460,20 @@ export default function References() {
           <div className="overflow-y-auto p-4 flex-1">
             <ReferenceDetailContent item={selectedItem} full={customRefsById[selectedItem.id]} />
           </div>
-          {selectedItem.source === 'manual' && (
+          {selectedItem.source === 'manual' ? (
             <div className="flex justify-end gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
               <button onClick={() => handleDelete(selectedItem)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-danger)' }}>
                 <IconTrash size={13} /> Supprimer
               </button>
               <button onClick={() => openEdit(selectedItem)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
                 <IconPencil size={13} /> Modifier
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+              <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('references_source_project_hint')}</p>
+              <button onClick={() => navigate(`/projects/${selectedItem.id}`)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0">
+                <IconExternalLink size={13} /> {t('references_view_project')}
               </button>
             </div>
           )}
@@ -1478,13 +1492,20 @@ export default function References() {
             <div className="overflow-y-auto p-5 flex-1">
               <ReferenceDetailContent item={selectedItem} full={customRefsById[selectedItem.id]} />
             </div>
-            {selectedItem.source === 'manual' && (
+            {selectedItem.source === 'manual' ? (
               <div className="flex justify-end gap-2 px-5 py-4 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
                 <button onClick={() => handleDelete(selectedItem)} className="flex items-center gap-1.5 px-4 py-2 text-sm rounded border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-danger)' }}>
                   <IconTrash size={14} /> Supprimer
                 </button>
                 <button onClick={() => openEdit(selectedItem)} className="flex items-center gap-1.5 px-4 py-2 text-sm rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
                   <IconPencil size={14} /> Modifier
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 px-5 py-4 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('references_source_project_hint')}</p>
+                <button onClick={() => navigate(`/projects/${selectedItem.id}`)} className="flex items-center justify-center gap-1.5 px-4 py-2 text-sm rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                  <IconExternalLink size={14} /> {t('references_view_project')}
                 </button>
               </div>
             )}
