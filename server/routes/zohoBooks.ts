@@ -99,7 +99,8 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // state nonce issued by /api/zoho-books/auth above.
   app.get('/api/zoho-books/callback', async (req: any, res: any) => {
     const { code, error: oauthError, state } = req.query as any;
-    const tenantId = consumeOAuthState(state);
+    const consumed = consumeOAuthState(state);
+    const tenantId = consumed?.tenantId;
     if (oauthError || !code || !tenantId) return res.redirect('/settings?zoho_books_error=1');
     try {
       const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_data_center').eq('tenant_id', tenantId).single();
