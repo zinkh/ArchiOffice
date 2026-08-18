@@ -38,6 +38,7 @@ import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
+import { registerGoogleCalendarSyncRoutes } from "./server/routes/googleCalendarSync";
 import { registerZohoBooksRoutes } from "./server/routes/zohoBooks";
 import { registerRagicRoutes } from "./server/routes/ragic";
 import { registerOdooRoutes } from "./server/routes/odoo";
@@ -488,10 +489,11 @@ export async function createApp() {
     "/api/health", "/api/public", "/api/billing/webhook",
     "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
     "/api/auth/cloud-link-status", "/api/auth/cloud-link", "/api/auth/cloud-link-import",
-    // Zoho's OAuth redirect back to us is a bare browser navigation — it
-    // can't carry our app's JWT. These recover the tenant from a one-time
-    // state nonce instead (server/oauthState.ts), not from req.user.
-    "/api/zoho/callback", "/api/zoho-books/callback",
+    // Zoho's and Google's OAuth redirects back to us are a bare browser
+    // navigation — they can't carry our app's JWT. These recover the
+    // tenant (and, for Google Calendar, the user) from a one-time state
+    // nonce instead (server/oauthState.ts), not from req.user.
+    "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback",
     // Called by Ragic itself (external, no JWT) — authenticated via a
     // `secret` query param checked against the tenant's own ragic_api_key
     // inside the handler, not via our session auth. Was missing here, so
@@ -666,6 +668,7 @@ export async function createApp() {
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerRagicRoutes(app, { supabaseAdmin, getTenantId });
   registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

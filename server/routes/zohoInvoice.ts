@@ -144,7 +144,8 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   // comes from the one-time state nonce issued by /api/zoho/auth above.
   app.get('/api/zoho/callback', async (req: any, res: any) => {
     const { code, error: oauthError, state } = req.query as any;
-    const tenantId = consumeOAuthState(state);
+    const consumed = consumeOAuthState(state);
+    const tenantId = consumed?.tenantId;
     if (oauthError || !code || !tenantId) {
       return res.redirect('/settings?zoho_error=1');
     }

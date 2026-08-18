@@ -22,9 +22,9 @@ export function registerTaskRoutes(app: Express, { supabaseAdmin, getTenantId, g
   app.post("/api/tasks", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, project_id, title, start_date, end_date, progress, dependencies } = req.body;
+      const { id: bodyId, project_id, title, start_date, end_date, progress, dependencies, status, due_date } = req.body;
       const id = bodyId || crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('tasks').insert({ id, tenant_id: tenantId, project_id, title, start_date, end_date, progress: progress || 0, dependencies: dependencies || [] });
+      const { error } = await supabaseAdmin.from('tasks').insert({ id, tenant_id: tenantId, project_id, title, start_date, end_date, progress: progress || 0, dependencies: dependencies || [], status: status || 'todo', due_date });
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la tâche "${title}"`, title, id, 'task', 'Tâches');
@@ -36,8 +36,8 @@ export function registerTaskRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { title, start_date, end_date, progress, dependencies } = req.body;
-      const { error } = await supabaseAdmin.from('tasks').update({ title, start_date, end_date, progress, dependencies: dependencies || [] }).eq('id', id).eq('tenant_id', tenantId);
+      const { title, start_date, end_date, progress, dependencies, status, due_date } = req.body;
+      const { error } = await supabaseAdmin.from('tasks').update({ title, start_date, end_date, progress, dependencies: dependencies || [], status, due_date }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update task" }); }

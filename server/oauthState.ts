@@ -14,7 +14,10 @@
 // restart is an acceptable failure mode — the user just clicks it again.
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-const pendingStates = new Map<string, { tenantId: string; expiresAt: number }>();
+// userId is optional — Zoho/Odoo-style integrations are per-tenant and never
+// set it; the Google Calendar sync flow (per-user, not per-tenant, since
+// each team member connects their own personal calendar) does.
+const pendingStates = new Map<string, { tenantId: string; userId?: string; expiresAt: number }>();
 
 function cleanupExpired() {
   const now = Date.now();
@@ -23,20 +26,20 @@ function cleanupExpired() {
   }
 }
 
-export function createOAuthState(tenantId: string): string {
+export function createOAuthState(tenantId: string, userId?: string): string {
   cleanupExpired();
   const state = crypto.randomUUID();
-  pendingStates.set(state, { tenantId, expiresAt: Date.now() + STATE_TTL_MS });
+  pendingStates.set(state, { tenantId, userId, expiresAt: Date.now() + STATE_TTL_MS });
   return state;
 }
 
-// One-time use: returns the tenantId and removes the entry, or null if the
-// state is missing, unknown, expired, or already consumed.
-export function consumeOAuthState(state: string | undefined): string | null {
+// One-time use: returns { tenantId, userId } and removes the entry, or null
+// if the state is missing, unknown, expired, or already consumed.
+export function consumeOAuthState(state: string | undefined): { tenantId: string; userId?: string } | null {
   if (!state) return null;
   const entry = pendingStates.get(state);
   if (!entry) return null;
   pendingStates.delete(state);
   if (entry.expiresAt < Date.now()) return null;
-  return entry.tenantId;
+  return { tenantId: entry.tenantId, userId: entry.userId };
 }

@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-  progress INTEGER DEFAULT 0, dependencies TEXT
+  progress INTEGER DEFAULT 0, dependencies TEXT, status TEXT DEFAULT 'todo', due_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS specifications (
