@@ -6,7 +6,8 @@ import { useUser } from '../UserContext';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
-  IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload
+  IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
+  IconArchive
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
@@ -198,6 +199,15 @@ const CATEGORIES: { id: PluginCategory; label: string }[] = [
   { id: 'communication', label: 'Communication' },
 ];
 
+// Catégories d'activité du flux — tenu en phase avec CATEGORY_COLORS dans
+// src/components/ActivityFeed.tsx et CATEGORY_STYLES dans src/pages/Notifications.tsx
+// (server/notificationArchiver.ts a la même liste côté back).
+const ACTIVITY_ARCHIVE_CATEGORIES = [
+  'Projets', 'Factures', "Appels d'offres", 'Messages', 'Contacts', 'Documents',
+  'CCTP', 'Devis', 'Réunions', 'Ordres de service', 'Tâches', 'Situations/DPGF',
+  'Notes de site', 'Réserves/Observations', 'Intégrations',
+];
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
@@ -256,6 +266,7 @@ export default function Settings() {
     chorus_pro_technical_login: '',
     chorus_pro_technical_password: '',
     chorus_pro_sandbox: true,
+    notificationArchiveDays: {} as Record<string, number>,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -420,6 +431,18 @@ export default function Settings() {
         setProjectCategories(data);
       } catch (err) { console.error('Failed to fetch project categories:', err); }
     }
+  };
+
+  // Empty input clears the override for that category (falls back to
+  // `default`, or never-archived if `default` is also unset — see
+  // server/notificationArchiver.ts).
+  const setArchiveDays = (category: string, value: string) => {
+    setSettings(prev => {
+      const next = { ...(prev.notificationArchiveDays || {}) };
+      if (value.trim() === '') delete next[category];
+      else next[category] = Math.max(0, parseInt(value, 10) || 0);
+      return { ...prev, notificationArchiveDays: next };
+    });
   };
 
   const handleAddProjectCategory = async (e: React.FormEvent) => {
@@ -1600,6 +1623,49 @@ export default function Settings() {
                   <button type="button" onClick={() => handleDeleteProjectCategory(cat.id)} className="p-1 rounded hover:bg-red-50 transition-colors" style={{ color: 'var(--tblr-danger)' }}>
                     <IconTrash size={14} />
                   </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Archivage automatique des notifications ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div className="flex items-center gap-2">
+              <IconArchive size={16} style={{ color: 'var(--tblr-muted)' }} />
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_notif_archive_title')}</h2>
+                <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_notif_archive_desc')}</p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                <span className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('settings_notif_archive_default_label')}</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number" min={0}
+                    className="w-20 p-1.5 rounded-lg text-sm text-right"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    placeholder={t('settings_notif_archive_never')}
+                    value={settings.notificationArchiveDays.default ?? ''}
+                    onChange={e => setArchiveDays('default', e.target.value)}
+                  />
+                  <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('settings_notif_archive_days_unit')}</span>
+                </div>
+              </div>
+              {ACTIVITY_ARCHIVE_CATEGORIES.map(cat => (
+                <div key={cat} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat}</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number" min={0}
+                      className="w-20 p-1.5 rounded-lg text-sm text-right"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      placeholder={t('settings_notif_archive_never')}
+                      value={settings.notificationArchiveDays[cat] ?? ''}
+                      onChange={e => setArchiveDays(cat, e.target.value)}
+                    />
+                    <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('settings_notif_archive_days_unit')}</span>
+                  </div>
                 </div>
               ))}
             </div>
