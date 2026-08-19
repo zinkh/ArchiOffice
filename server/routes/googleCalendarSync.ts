@@ -38,8 +38,20 @@ export interface RouteDeps {
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
+// milestones.due_date / tasks.start_date|end_date are plain TEXT columns —
+// most rows hold a clean yyyy-MM-dd, but some are written elsewhere in the
+// app as a full ISO timestamp (e.g. new Date().toISOString()). Normalize to
+// the date portion first: appending 'T00:00:00Z' to an already-full
+// timestamp produces a malformed string, and `new Date(...).toISOString()`
+// throws RangeError("Invalid time value") on the result — which previously
+// aborted the whole sync instead of just skipping that one record.
+function toDateOnly(dateStr: string): string {
+  return dateStr.slice(0, 10);
+}
+
 function addOneDay(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00Z');
+  const d = new Date(toDateOnly(dateStr) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) throw new Error(`Date invalide : "${dateStr}"`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
@@ -285,8 +297,8 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
           if (!m.due_date) continue;
           const localKey = `milestone-${m.id}`;
           seenLocalKeys.add(localKey);
-          const body = { summary: m.title, start: { date: m.due_date }, end: { date: addOneDay(m.due_date) } };
           try {
+            const body = { summary: m.title, start: { date: toDateOnly(m.due_date) }, end: { date: addOneDay(m.due_date) } };
             const link = linkByLocal.get(localKey);
             if (link) {
               const resp = await fetch(`${eventsBase}/${link.external_event_id}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
@@ -309,8 +321,8 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
           if (!tsk.start_date || !tsk.end_date) continue;
           const localKey = `task-${tsk.id}`;
           seenLocalKeys.add(localKey);
-          const body = { summary: tsk.title, start: { date: tsk.start_date }, end: { date: addOneDay(tsk.end_date) } };
           try {
+            const body = { summary: tsk.title, start: { date: toDateOnly(tsk.start_date) }, end: { date: addOneDay(tsk.end_date) } };
             const link = linkByLocal.get(localKey);
             if (link) {
               const resp = await fetch(`${eventsBase}/${link.external_event_id}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
