@@ -120,6 +120,41 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       console.error("[GET /api/admin/tenants/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
+  // Framed impersonation — mints a one-time magic-sign-in link for a specific
+  // tenant member, for support purposes. The browser opening the link
+  // authenticates AS that user (supabase-js's default detectSessionInUrl
+  // handles this automatically, see src/lib/supabase.ts); we redirect it to
+  // ?impersonating=1 so src/components/ImpersonationBanner.tsx can pick that
+  // up and show a persistent "you are impersonating" banner. Every start is
+  // audit-logged — there is deliberately no "impersonation session" state
+  // tracked server-side beyond that log entry (ending it is just: sign out).
+  app.post('/api/admin/tenants/:id/impersonate', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id: tenantId } = req.params;
+      const { user_id } = req.body;
+      if (!user_id) return res.status(400).json({ error: 'user_id requis' });
+      const { data: member } = await supabaseAdmin.from('profiles').select('id, email, name').eq('id', user_id).eq('tenant_id', tenantId).maybeSingle();
+      if (!member || !(member as any).email) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: (member as any).email,
+        options: { redirectTo: `${appUrl}/?impersonating=1` },
+      });
+      if (error || !linkData?.properties?.action_link) {
+        return res.status(502).json({ error: error?.message || 'Impossible de générer le lien de connexion' });
+      }
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.impersonated', tenantId, {
+        impersonated_user_id: user_id, impersonated_email: (member as any).email,
+      });
+
+      res.json({ action_link: linkData.properties.action_link, impersonated_email: (member as any).email });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/impersonate]", e); res.status(500).json({ error: e.message }); }
+  });
+
   app.patch('/api/admin/tenants/:id/notes', requireSuperAdmin, async (req: any, res: any) => {
     try {
       const { notes } = req.body;

@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/api';
 import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
   IconCoin, IconNotes, IconDeviceFloppy, IconHistory, IconReceipt,
+  IconLogin, IconMessageCircle,
 } from '@tabler/icons-react';
 import { PLAN_LABELS, PlanSelect } from './AdminDashboard';
 
@@ -11,6 +12,7 @@ interface Member { id: string; name: string; email: string; role: string; system
 interface Project { id: string; name: string; status: string; created_at: string }
 interface BillingEvent { id: string; event_type: string; plan_id: string | null; amount: number | null; status: string; created_at: string }
 interface AuditEntry { id: string; actor_email: string | null; action: string; details: Record<string, unknown> | null; created_at: string }
+interface SupportTicket { id: string; subject: string; status: string; last_message_at: string }
 
 interface TenantDetail {
   id: string; slug: string; name: string; plan: string;
@@ -32,7 +34,10 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'tenant.notes_updated': 'Notes internes modifiées',
   'tenant.created': 'Cabinet créé',
   'tenant.deleted': 'Cabinet supprimé',
+  'tenant.impersonated': 'Connexion en tant que…',
 };
+
+const TICKET_STATUS_LABELS: Record<string, string> = { open: 'Ouvert', answered: 'Répondu', closed: 'Fermé' };
 
 function fmtDate(d: string | null): string {
   return d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -61,6 +66,8 @@ export default function AdminTenantDetail() {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -78,6 +85,27 @@ export default function AdminTenantDetail() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!id) return;
+    apiFetch<SupportTicket[]>(`/api/admin/support/tickets?tenant_id=${id}`).then(setTickets).catch(() => {});
+  }, [id]);
+
+  async function handleImpersonate(memberId: string, memberEmail: string) {
+    if (!id) return;
+    if (!window.confirm(`Vous connecter en tant que ${memberEmail} ?\n\nCette action est enregistrée dans le journal d'audit.`)) return;
+    setImpersonating(memberId);
+    try {
+      const res = await apiFetch<{ action_link: string }>(`/api/admin/tenants/${id}/impersonate`, {
+        method: 'POST', body: JSON.stringify({ user_id: memberId }),
+      });
+      window.open(res.action_link, '_blank');
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? 'Erreur lors de la connexion');
+    } finally {
+      setImpersonating(null);
+    }
+  }
 
   async function handleSaveNotes() {
     if (!id) return;
@@ -189,6 +217,17 @@ export default function AdminTenantDetail() {
                       <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{m.email}</p>
                     </td>
                     <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{m.role}{m.system_role === 'admin' ? ' · admin' : ''}</td>
+                    <td className="py-2 pl-2 text-right">
+                      <button
+                        onClick={() => handleImpersonate(m.id, m.email)}
+                        disabled={impersonating === m.id}
+                        title={`Se connecter en tant que ${m.email}`}
+                        className="p-1 rounded hover:bg-[var(--tblr-surface-2)]"
+                        style={{ color: 'var(--tblr-muted)' }}
+                      >
+                        {impersonating === m.id ? <IconLoader2 size={13} className="animate-spin" /> : <IconLogin size={13} />}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -234,6 +273,28 @@ export default function AdminTenantDetail() {
                     </td>
                     <td className="py-2 text-[11px]" style={{ color: b.status === 'paid' ? '#22c55e' : 'var(--tblr-muted)' }}>{b.status}</td>
                     <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(b.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Support tickets */}
+        <Card title={`Tickets support (${tickets.length})`} icon={<IconMessageCircle size={16} style={{ color: 'var(--tblr-primary)' }} />}>
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm">
+              <tbody>
+                {tickets.length === 0 && (
+                  <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun ticket</td></tr>
+                )}
+                {tickets.map(tk => (
+                  <tr key={tk.id} className="border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                    <td className="py-2 pr-2">
+                      <Link to={`/admin/support?tenant_id=${tenant.id}`} className="hover:underline" style={{ color: 'var(--tblr-text)' }}>{tk.subject}</Link>
+                    </td>
+                    <td className="py-2 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{TICKET_STATUS_LABELS[tk.status] ?? tk.status}</td>
+                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(tk.last_message_at)}</td>
                   </tr>
                 ))}
               </tbody>

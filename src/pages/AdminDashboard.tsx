@@ -6,7 +6,7 @@ import {
   IconUsers, IconBuildingSkyscraper, IconCreditCard,
   IconLoader2, IconRefresh, IconChevronDown, IconTrash,
   IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX, IconCoin,
-  IconCircleCheck, IconShieldLock,
+  IconCircleCheck, IconShieldLock, IconMessageCircle,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -663,6 +663,14 @@ export default function AdminDashboard() {
           <p className="text-sm mt-0.5" style={{ color: 'var(--tblr-muted)' }}>Vue globale de tous les cabinets ArchiOffice</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to="/admin/support"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          >
+            <IconMessageCircle size={14} />
+            Support
+          </Link>
           <button
             onClick={() => setShowPlatformAdmins(v => !v)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"

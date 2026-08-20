@@ -52,3 +52,17 @@ export async function notifyTenantAdmins(supabaseAdmin: any, tenantId: string, s
   if (!recipients.length) return false;
   return sendPlatformMail(recipients.join(','), subject, html);
 }
+
+// Notifies the ArchiOffice platform team (platform_admins, see
+// server/superAdminAuth.ts) — used when a tenant raises a new support
+// ticket. Falls back to SUPER_ADMIN_EMAIL if platform_admins is still empty,
+// mirroring isSuperAdmin's own bootstrap fallback.
+export async function notifyPlatformAdmins(supabaseAdmin: any, subject: string, html: string): Promise<boolean> {
+  const { data: admins, error } = await supabaseAdmin.from('platform_admins').select('email');
+  if (error) console.error('[mail] Failed to list platform_admins:', error.message);
+  const recipients = new Set(((admins || []) as { email: string | null }[]).map(a => a.email).filter(Boolean) as string[]);
+  const envEmail = process.env.SUPER_ADMIN_EMAIL;
+  if (envEmail) recipients.add(envEmail.trim());
+  if (!recipients.size) return false;
+  return sendPlatformMail([...recipients].join(','), subject, html);
+}

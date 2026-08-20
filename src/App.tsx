@@ -15,6 +15,7 @@ import {
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
+import ImpersonationBanner from './components/ImpersonationBanner';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -67,6 +68,8 @@ const Contrats = lazy(() => import('./pages/Contrats'));
 const GoogleAuthCallback = lazy(() => import('./pages/GoogleAuthCallback'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminTenantDetail = lazy(() => import('./pages/AdminTenantDetail'));
+const AdminSupport = lazy(() => import('./pages/AdminSupport'));
+const Support = lazy(() => import('./pages/Support'));
 const MafDeclaration = lazy(() => import('./pages/MafDeclaration'));
 const SuperPDPPortal = lazy(() => import('./pages/SuperPDPPortal'));
 const ChorusProPortal = lazy(() => import('./pages/ChorusProPortal'));
@@ -756,6 +759,7 @@ export default function App() {
       <UserProvider>
         <UpdateBanner />
         <Router>
+          <ImpersonationBanner />
           <Suspense fallback={<PageLoadingFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -802,6 +806,8 @@ export default function App() {
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
               <Route path="/admin" element={<RequireSuperAdmin><AdminDashboard /></RequireSuperAdmin>} />
               <Route path="/admin/tenants/:id" element={<RequireSuperAdmin><AdminTenantDetail /></RequireSuperAdmin>} />
+              <Route path="/admin/support" element={<RequireSuperAdmin><AdminSupport /></RequireSuperAdmin>} />
+              <Route path="/support" element={<Support />} />
               <Route path="/maf-declaration" element={<MafDeclaration />} />
               <Route path="/superpdp" element={<SuperPDPPortal />} />
               <Route path="/chorus-pro" element={<ChorusProPortal />} />

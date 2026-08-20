@@ -35,6 +35,8 @@ import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerSpecificationRoutes } from "./server/routes/specifications";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
+import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
+import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
@@ -684,6 +686,8 @@ export async function createApp() {
   registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
+  registerAdminSupportRoutes(app, { supabaseAdmin });
+  registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
