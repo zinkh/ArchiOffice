@@ -19,6 +19,7 @@ interface BillingStatus {
     projects: { used: number; limit: number };
     users: { used: number; limit: number };
     documents: { used: number; limit: number };
+    storage: { used: number; limit: number };
   };
   ai_credits?: {
     balance_eur_cents: number;
@@ -41,7 +42,7 @@ interface BillingEvent {
   created_at: string;
 }
 
-function UsageBar({ label, used, limit }: { label: string; used: number; limit: number }) {
+function UsageBar({ label, used, limit, suffix = '' }: { label: string; used: number; limit: number; suffix?: string }) {
   const unlimited = limit >= 999;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
   const isWarning = !unlimited && pct >= 80;
@@ -52,7 +53,7 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit: 
       <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
         <span>{label}</span>
         <span className={cn(isFull ? 'text-red-500' : isWarning ? 'text-amber-500' : '')}>
-          {used} / {unlimited ? '∞' : limit}
+          {used}{suffix} / {unlimited ? '∞' : `${limit}${suffix}`}
         </span>
       </div>
       {!unlimited && (
@@ -262,10 +263,11 @@ export default function Billing() {
         </div>
 
         {status && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <UsageBar label="Projets" used={status.usage.projects.used} limit={status.usage.projects.limit} />
             <UsageBar label="Utilisateurs" used={status.usage.users.used} limit={status.usage.users.limit} />
             <UsageBar label="Documents" used={status.usage.documents.used} limit={status.usage.documents.limit} />
+            <UsageBar label="Stockage" used={status.usage.storage.used} limit={status.usage.storage.limit} suffix=" Mo" />
           </div>
         )}
       </div>

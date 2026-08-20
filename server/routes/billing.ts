@@ -12,11 +12,12 @@ import express from 'express';
 import crypto from 'crypto';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { billingWebhookLimiter } from '../rateLimit';
+import type { PlanLimits } from '../../src/lib/billing';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
-  PLAN_LIMITS: Record<string, { projects: number; users: number; documents: number }>;
+  PLAN_LIMITS: Record<string, PlanLimits>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
   AI_CREDIT_PACKS: Record<string, { amount_cents: number; label: string }>;
 }
@@ -58,10 +59,11 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { data: tenant } = await supabaseAdmin.from('tenants')
         .select('plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents').eq('id', tenantId).single();
-      const [projectsRes, usersRes, docsRes] = await Promise.all([
+      const [projectsRes, usersRes, docsRes, versionsRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('*', { count: 'exact', head: true }),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'document_versions').select('size_bytes'),
       ]);
       const plan = (tenant as any)?.plan || 'trial';
       const trial_ends_at = (tenant as any)?.trial_ends_at ?? null;
@@ -69,6 +71,7 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const is_expired = isTrial && trial_ends_at && new Date(trial_ends_at) < new Date();
       const effectivePlan = is_expired ? 'expired' : plan;
       const limits = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.trial;
+      const usedBytes = ((versionsRes.data as any[]) || []).reduce((sum, r) => sum + (r.size_bytes || 0), 0);
       res.json({
         plan: effectivePlan,
         trial_ends_at,
@@ -77,6 +80,7 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
           projects:  { used: projectsRes.count ?? 0, limit: limits.projects },
           users:     { used: usersRes.count ?? 0, limit: limits.users },
           documents: { used: docsRes.count ?? 0, limit: limits.documents },
+          storage:   { used: Math.round(usedBytes / 1024 / 1024), limit: limits.storage_mb },
         },
         ai_credits: {
           balance_eur_cents: (tenant as any)?.ai_credit_balance_eur_cents ?? 0,
