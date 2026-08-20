@@ -17,6 +17,7 @@ import type { PlanLimits } from '../../src/lib/billing';
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   PLAN_LIMITS: Record<string, PlanLimits>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
   AI_CREDIT_PACKS: Record<string, { amount_cents: number; label: string }>;
@@ -52,13 +53,13 @@ async function stancerFetch(path: string, opts: { method?: string; body?: any } 
   return res.json();
 }
 
-export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS }: RouteDeps) {
+export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS }: RouteDeps) {
   // GET /api/billing/status
   app.get('/api/billing/status', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: tenant } = await supabaseAdmin.from('tenants')
-        .select('plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents').eq('id', tenantId).single();
+        .select('name, plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents, pending_plan, plan_change_requested_at').eq('id', tenantId).single();
       const [projectsRes, usersRes, docsRes, versionsRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*', { count: 'exact', head: true }),
@@ -76,6 +77,9 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
         plan: effectivePlan,
         trial_ends_at,
         is_expired: !!is_expired,
+        tenant_name: (tenant as any)?.name ?? null,
+        pending_plan: (tenant as any)?.pending_plan ?? null,
+        plan_change_requested_at: (tenant as any)?.plan_change_requested_at ?? null,
         usage: {
           projects:  { used: projectsRes.count ?? 0, limit: limits.projects },
           users:     { used: usersRes.count ?? 0, limit: limits.users },
@@ -220,6 +224,49 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       console.error('[Stancer webhook error]', e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // POST /api/billing/cancel — schedule a downgrade/cancellation to take
+  // effect at the end of the tenant's current paid-through period
+  // (tenants.trial_ends_at). Applied by server/planChanges.ts. No
+  // proration/refund — the tenant keeps their current plan until then.
+  app.post('/api/billing/cancel', async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const targetPlan = req.body?.target_plan || 'trial';
+      if (!['trial', 'starter', 'pro'].includes(targetPlan)) {
+        return res.status(400).json({ error: 'Plan cible invalide' });
+      }
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('plan').eq('id', tenantId).single();
+      const currentPlan = (tenant as any)?.plan;
+      if (!currentPlan || currentPlan === 'trial') {
+        return res.status(400).json({ error: 'Aucun abonnement actif à résilier' });
+      }
+      if (targetPlan === currentPlan) {
+        return res.status(400).json({ error: 'Ce plan est déjà votre plan actuel' });
+      }
+      const { error } = await supabaseAdmin.from('tenants').update({
+        pending_plan: targetPlan,
+        plan_change_requested_at: new Date().toISOString(),
+      }).eq('id', tenantId);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[POST /api/billing/cancel]", e); res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/billing/cancel — undo a scheduled downgrade/cancellation.
+  app.delete('/api/billing/cancel', async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { error } = await supabaseAdmin.from('tenants').update({
+        pending_plan: null,
+        plan_change_requested_at: null,
+      }).eq('id', tenantId);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[DELETE /api/billing/cancel]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // GET /api/billing/history — payment history for current tenant

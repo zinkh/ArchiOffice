@@ -80,6 +80,7 @@ import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startTenantPurge } from "./server/tenantPurge";
 import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
+import { startPlanChanges } from "./server/planChanges";
 import { PLAN_LIMITS } from "./src/lib/billing";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
@@ -684,7 +685,7 @@ export async function createApp() {
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
-  registerBillingRoutes(app, { supabaseAdmin, getTenantId, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
+  registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -829,6 +830,9 @@ async function startServer() {
     // Emails de cycle de vie — essai bientôt/déjà expiré, cabinets inactifs
     // (server/lifecycleEmails.ts).
     startLifecycleEmails(supabaseAdmin);
+    // Applique les résiliations/rétrogradations programmées une fois la
+    // période déjà payée écoulée (server/planChanges.ts).
+    startPlanChanges(supabaseAdmin);
   });
 }
 
