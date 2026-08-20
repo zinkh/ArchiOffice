@@ -460,6 +460,10 @@ export interface TeamMember {
   jobTitle?: string;
   department?: string;
   tenantId?: string | null;
+  // Platform back-office access — orthogonal to system_role (see
+  // server/superAdminAuth.ts). Only ever set on the current user's own
+  // profile via GET /api/me, never on other TeamMember rows.
+  isSuperAdmin?: boolean;
 }
 
 export interface Milestone {

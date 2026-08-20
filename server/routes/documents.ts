@@ -14,12 +14,13 @@ export interface RouteDeps {
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
+  checkStorageQuota: (tenantId: string, incomingBytes: number) => Promise<void>;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole }: RouteDeps) {
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -35,14 +36,15 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
   app.post("/api/documents", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
       await checkQuota(tenantId, 'documents');
+      await checkStorageQuota(tenantId, file.size);
       const { project_id, name, category, phase, description } = req.body;
       // Derived from the authenticated caller, never trusted from the request
       // body — the client used to be able to submit any uploaded_by value and
       // falsify a document's apparent author (security audit finding).
       const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
-      const file = req.file;
-      if (!file) return res.status(400).json({ error: "No file uploaded" });
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
       const phaseVal = phase || null;
       const id = crypto.randomUUID();
@@ -53,7 +55,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const { indice, emetteur, doc_type, contact_id, contact_name } = req.body;
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
-      await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description });
+      await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description, size_bytes: file.size });
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
@@ -96,6 +98,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
+        await checkStorageQuota(tenantId, file.size);
         // Derived from the authenticated caller, not the request body — see the
         // same fix on POST /api/documents above.
         const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
@@ -117,7 +120,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
-        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by, uploaded_at, description });
+        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by, uploaded_at, description, size_bytes: file.size });
       } else {
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;

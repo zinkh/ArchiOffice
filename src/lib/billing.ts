@@ -50,6 +50,15 @@ export const PLANS: Record<PlanId, Plan> = {
 
 export const PLAN_ORDER: PlanId[] = ['trial', 'starter', 'pro', 'enterprise'];
 
+// Single source of truth for plan limits, shared between the frontend
+// (pricing/usage display) and the backend (quota enforcement). Includes an
+// `expired` entry — not a real PlanId — used to zero out quotas once a
+// trial has lapsed (see GET /api/billing/status).
+export const PLAN_LIMITS: Record<string, PlanLimits> = {
+  ...Object.fromEntries(PLAN_ORDER.map(id => [id, PLANS[id].limits])),
+  expired: { projects: 0, users: 0, documents: 0, storage_mb: 0 },
+};
+
 export function isPlanAtLeast(currentPlan: string, requiredPlan: PlanId): boolean {
   const ci = PLAN_ORDER.indexOf(currentPlan as PlanId);
   const ri = PLAN_ORDER.indexOf(requiredPlan);

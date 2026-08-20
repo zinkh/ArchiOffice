@@ -32,6 +32,7 @@ import {
   IconFileDescription,
   IconClockHour4,
   IconPlaneDeparture,
+  IconMessageCircle,
 } from '@tabler/icons-react';
 import { BrandLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -64,6 +65,7 @@ export const NAV_ITEMS = [
   { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
   { name: 'time_tracking',  path: '/temps',          icon: IconClockHour4 },
   { name: 'leave',          path: '/conges',         icon: IconPlaneDeparture },
+  { name: 'support',        path: '/support',        icon: IconMessageCircle },
 ];
 
 const NAV_SECTIONS = [
@@ -118,6 +120,7 @@ const NAV_SECTIONS = [
       { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
       { name: 'settings',  path: '/settings',  icon: IconSettings },
       { name: 'billing',   path: '/billing',   icon: IconCreditCard },
+      { name: 'support',   path: '/support',   icon: IconMessageCircle },
     ],
   },
 ];

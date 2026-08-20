@@ -74,6 +74,7 @@ export default {
       "profile": "Profil",
       "settings": "Paramètres",
       "billing": "Abonnement",
+      "support": "Support",
       "filter": "Filtrer",
       "add_project": "Ajouter un projet",
       "description": "Description",

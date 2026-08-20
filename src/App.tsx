@@ -15,6 +15,7 @@ import {
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
+import ImpersonationBanner from './components/ImpersonationBanner';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -66,6 +67,9 @@ const OrdresDeService = lazy(() => import('./pages/OrdresDeService'));
 const Contrats = lazy(() => import('./pages/Contrats'));
 const GoogleAuthCallback = lazy(() => import('./pages/GoogleAuthCallback'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminTenantDetail = lazy(() => import('./pages/AdminTenantDetail'));
+const AdminSupport = lazy(() => import('./pages/AdminSupport'));
+const Support = lazy(() => import('./pages/Support'));
 const MafDeclaration = lazy(() => import('./pages/MafDeclaration'));
 const SuperPDPPortal = lazy(() => import('./pages/SuperPDPPortal'));
 const ChorusProPortal = lazy(() => import('./pages/ChorusProPortal'));
@@ -736,13 +740,16 @@ function ProtectedLayout() {
   );
 }
 
-// Role-gated route guard, nested inside ProtectedLayout (which only checks
-// session presence) — pilot use: /admin. currentUser.system_role is always
+// Platform back-office guard, nested inside ProtectedLayout (which only
+// checks session presence) — gates /admin and /admin/tenants/:id.
+// currentUser.isSuperAdmin is orthogonal to system_role (which means "admin
+// of one's own tenant", a completely different concept) and is always
 // server-authoritative by the time ProtectedLayout renders its children (see
-// UserContext.tsx's loadFullProfile, which overrides it from GET /api/me).
-function RequireRole({ role, children }: { role: string; children: React.ReactNode }) {
+// UserContext.tsx's loadFullProfile, sourced from GET /api/me, itself backed
+// by the platform_admins table — see server/superAdminAuth.ts).
+function RequireSuperAdmin({ children }: { children: React.ReactNode }) {
   const { currentUser } = useUser();
-  if (currentUser?.system_role !== role) return <Navigate to="/" replace />;
+  if (!currentUser?.isSuperAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -752,6 +759,7 @@ export default function App() {
       <UserProvider>
         <UpdateBanner />
         <Router>
+          <ImpersonationBanner />
           <Suspense fallback={<PageLoadingFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -796,7 +804,10 @@ export default function App() {
               <Route path="/conges" element={<Leave />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
-              <Route path="/admin" element={<RequireRole role="admin"><AdminDashboard /></RequireRole>} />
+              <Route path="/admin" element={<RequireSuperAdmin><AdminDashboard /></RequireSuperAdmin>} />
+              <Route path="/admin/tenants/:id" element={<RequireSuperAdmin><AdminTenantDetail /></RequireSuperAdmin>} />
+              <Route path="/admin/support" element={<RequireSuperAdmin><AdminSupport /></RequireSuperAdmin>} />
+              <Route path="/support" element={<Support />} />
               <Route path="/maf-declaration" element={<MafDeclaration />} />
               <Route path="/superpdp" element={<SuperPDPPortal />} />
               <Route path="/chorus-pro" element={<ChorusProPortal />} />

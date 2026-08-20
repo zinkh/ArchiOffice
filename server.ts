@@ -35,6 +35,8 @@ import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerSpecificationRoutes } from "./server/routes/specifications";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
+import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
+import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
@@ -79,6 +81,9 @@ import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startTenantPurge } from "./server/tenantPurge";
 import { startNotificationArchiver } from "./server/notificationArchiver";
+import { startLifecycleEmails } from "./server/lifecycleEmails";
+import { startPlanChanges } from "./server/planChanges";
+import { PLAN_LIMITS } from "./src/lib/billing";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
 const upload = multer({
@@ -314,14 +319,8 @@ export async function createApp() {
   }
 
   // ─── Billing / Plan quota ──────────────────────────────────────────────────
-
-  const PLAN_LIMITS: Record<string, { projects: number; users: number; documents: number }> = {
-    trial:      { projects: 3,   users: 1,   documents: 10  },
-    starter:    { projects: 10,  users: 2,   documents: 100 },
-    pro:        { projects: 999, users: 10,  documents: 999 },
-    enterprise: { projects: 999, users: 999, documents: 999 },
-    expired:    { projects: 0,   users: 0,   documents: 0   },
-  };
+  // PLAN_LIMITS is imported from src/lib/billing.ts — the single source of
+  // truth shared with the pricing/usage display, instead of a duplicate map.
 
   // ─── AI Token Pricing ────────────────────────────────────────────────────────
   // Recalibrated for the gemini-3-flash-preview migration (see server.ts's
@@ -426,6 +425,27 @@ export async function createApp() {
     }
     if (count >= limit) {
       const err: any = new Error(`Limite du plan atteinte : ${limit} ${resource}. Passez à un plan supérieur.`);
+      err.status = 402;
+      throw err;
+    }
+  }
+
+  // Storage quota, checked in bytes rather than row count — the "documents"
+  // resource above is unlimited on the pro/enterprise tiers, but storage_mb
+  // still caps total upload size on every tier.
+  async function checkStorageQuota(tenantId: string, incomingBytes: number): Promise<void> {
+    const { plan, is_expired } = await getTenantPlan(tenantId);
+    if (is_expired) {
+      const err: any = new Error("Votre période d'essai a expiré. Veuillez souscrire à un abonnement.");
+      err.status = 402;
+      throw err;
+    }
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
+    const { data } = await supabaseAdmin.from('document_versions').select('size_bytes').eq('tenant_id', tenantId);
+    const usedBytes = (data || []).reduce((sum: number, r: any) => sum + (r.size_bytes || 0), 0);
+    const limitBytes = limits.storage_mb * 1024 * 1024;
+    if (usedBytes + incomingBytes > limitBytes) {
+      const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
       err.status = 402;
       throw err;
     }
@@ -666,8 +686,10 @@ export async function createApp() {
   registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
+  registerAdminSupportRoutes(app, { supabaseAdmin });
+  registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
-  registerBillingRoutes(app, { supabaseAdmin, getTenantId, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
+  registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -689,7 +711,7 @@ export async function createApp() {
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, uploadToStorage, deleteFromStorage, requireRole });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
@@ -809,6 +831,12 @@ async function startServer() {
     // Auto-archivage du flux d'activité selon la durée de rétention réglée
     // par catégorie (server/notificationArchiver.ts).
     startNotificationArchiver(supabaseAdmin);
+    // Emails de cycle de vie — essai bientôt/déjà expiré, cabinets inactifs
+    // (server/lifecycleEmails.ts).
+    startLifecycleEmails(supabaseAdmin);
+    // Applique les résiliations/rétrogradations programmées une fois la
+    // période déjà payée écoulée (server/planChanges.ts).
+    startPlanChanges(supabaseAdmin);
   });
 }
 

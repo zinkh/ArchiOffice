@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { PLANS, PLAN_ORDER, formatPrice } from '../lib/billing';
 import type { PlanId } from '../lib/billing';
+import { exportSubscriptionInvoicePdf } from '../lib/subscriptionInvoice';
 import {
   IconCheck, IconLoader2, IconAlertTriangle, IconCreditCard,
   IconRocket, IconCircleCheck, IconRefresh, IconExternalLink,
-  IconChevronRight, IconClock, IconBolt,
+  IconChevronRight, IconClock, IconBolt, IconDownload, IconBan,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -15,10 +16,14 @@ interface BillingStatus {
   plan: string;
   trial_ends_at: string | null;
   is_expired: boolean;
+  tenant_name?: string | null;
+  pending_plan?: string | null;
+  plan_change_requested_at?: string | null;
   usage: {
     projects: { used: number; limit: number };
     users: { used: number; limit: number };
     documents: { used: number; limit: number };
+    storage: { used: number; limit: number };
   };
   ai_credits?: {
     balance_eur_cents: number;
@@ -41,7 +46,7 @@ interface BillingEvent {
   created_at: string;
 }
 
-function UsageBar({ label, used, limit }: { label: string; used: number; limit: number }) {
+function UsageBar({ label, used, limit, suffix = '' }: { label: string; used: number; limit: number; suffix?: string }) {
   const unlimited = limit >= 999;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
   const isWarning = !unlimited && pct >= 80;
@@ -52,7 +57,7 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit: 
       <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
         <span>{label}</span>
         <span className={cn(isFull ? 'text-red-500' : isWarning ? 'text-amber-500' : '')}>
-          {used} / {unlimited ? '∞' : limit}
+          {used}{suffix} / {unlimited ? '∞' : `${limit}${suffix}`}
         </span>
       </div>
       {!unlimited && (
@@ -99,6 +104,7 @@ export default function Billing() {
   const [checkingTopup, setCheckingTopup] = useState<string | null>(null);
   const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const fetchStatus = async () => {
     const res = await fetch('/api/billing/status');
@@ -184,6 +190,45 @@ export default function Billing() {
     }
   };
 
+  const handleScheduleCancel = async (targetPlan: PlanId, confirmMsg: string) => {
+    if (!window.confirm(confirmMsg)) return;
+    setCancelling(true);
+    try {
+      const res = await fetch('/api/billing/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_plan: targetPlan }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setNotice({ type: 'error', msg: data.error || 'Erreur lors de la demande' });
+        return;
+      }
+      await fetchStatus();
+    } catch {
+      setNotice({ type: 'error', msg: 'Impossible de contacter le serveur.' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleUndoCancel = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch('/api/billing/cancel', { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        setNotice({ type: 'error', msg: data.error || 'Erreur' });
+        return;
+      }
+      await fetchStatus();
+    } catch {
+      setNotice({ type: 'error', msg: 'Impossible de contacter le serveur.' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const currentPlanId = (status?.plan || 'trial') as PlanId | 'expired';
   const currentPlanIdx = PLAN_ORDER.indexOf(currentPlanId as PlanId);
 
@@ -233,6 +278,24 @@ export default function Billing() {
         </div>
       )}
 
+      {status?.pending_plan && (
+        <div className="flex items-center gap-3 p-4 rounded-xl border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-400 text-sm">
+          <IconBan size={18} className="flex-shrink-0" />
+          <span className="flex-1">
+            Changement de plan programmé : passage à <strong>{PLANS[status.pending_plan as PlanId]?.name || status.pending_plan}</strong>
+            {status.trial_ends_at && ` le ${new Date(status.trial_ends_at).toLocaleDateString('fr-FR')}`}.
+            Vous conservez votre accès actuel jusqu'à cette date.
+          </span>
+          <button
+            onClick={handleUndoCancel}
+            disabled={cancelling}
+            className="text-xs font-semibold underline hover:no-underline disabled:opacity-50 flex-shrink-0"
+          >
+            Annuler
+          </button>
+        </div>
+      )}
+
       {/* Current plan card */}
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
         <div className="flex items-start justify-between gap-4 mb-6">
@@ -251,6 +314,17 @@ export default function Billing() {
                 </span>
               )}
             </div>
+            {status?.plan !== 'trial' && status?.plan !== 'expired' && !status?.pending_plan && (
+              <button
+                onClick={() => handleScheduleCancel('trial',
+                  "Résilier votre abonnement ArchiOffice ?\n\nVous conserverez l'accès à votre plan actuel jusqu'à la fin de la période déjà payée, puis votre cabinet repassera automatiquement en formule d'essai (limites réduites)."
+                )}
+                disabled={cancelling}
+                className="text-xs text-zinc-400 hover:text-red-500 underline mt-1 disabled:opacity-50"
+              >
+                Résilier mon abonnement
+              </button>
+            )}
           </div>
           <button
             onClick={() => { fetchStatus(); fetchHistory(); }}
@@ -262,10 +336,11 @@ export default function Billing() {
         </div>
 
         {status && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <UsageBar label="Projets" used={status.usage.projects.used} limit={status.usage.projects.limit} />
             <UsageBar label="Utilisateurs" used={status.usage.users.used} limit={status.usage.users.limit} />
             <UsageBar label="Documents" used={status.usage.documents.used} limit={status.usage.documents.limit} />
+            <UsageBar label="Stockage" used={status.usage.storage.used} limit={status.usage.storage.limit} suffix=" Mo" />
           </div>
         )}
       </div>
@@ -331,7 +406,19 @@ export default function Billing() {
             const plan = PLANS[planId];
             const planIdx = PLAN_ORDER.indexOf(planId);
             const isCurrent = currentPlanId === planId;
-            const isDowngrade = planIdx < currentPlanIdx && currentPlanId !== 'trial' && currentPlanId !== 'expired';
+            const isDowngrade = planIdx < currentPlanIdx && currentPlanId !== 'trial' && currentPlanId !== 'expired' && planId !== 'enterprise';
+            const isPendingTarget = status?.pending_plan === planId;
+
+            const handleClick = () => {
+              if (isCurrent || checkingOut !== null || cancelling) return;
+              if (isDowngrade) {
+                handleScheduleCancel(planId,
+                  `Passer au plan ${plan.name} ?\n\nVous conserverez l'accès à votre plan actuel jusqu'à la fin de la période déjà payée, puis vous passerez automatiquement au plan ${plan.name}.`
+                );
+              } else {
+                handleCheckout(planId);
+              }
+            };
 
             return (
               <div
@@ -376,23 +463,23 @@ export default function Billing() {
                 </ul>
 
                 <button
-                  onClick={() => !isCurrent && !isDowngrade && handleCheckout(planId)}
-                  disabled={isCurrent || isDowngrade || checkingOut !== null}
+                  onClick={handleClick}
+                  disabled={isCurrent || isPendingTarget || checkingOut !== null || cancelling}
                   className={cn(
                     'w-full py-2 px-4 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2',
-                    isCurrent
+                    isCurrent || isPendingTarget
                       ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-default'
-                      : isDowngrade
-                      ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                       : plan.highlight
                       ? 'bg-violet-600 hover:bg-violet-700 text-white'
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   )}
                 >
-                  {checkingOut === planId ? (
+                  {checkingOut === planId || (cancelling && isDowngrade) ? (
                     <IconLoader2 size={14} className="animate-spin" />
                   ) : isCurrent ? (
                     <><IconCircleCheck size={14} /> Plan actuel</>
+                  ) : isPendingTarget ? (
+                    <><IconClock size={14} /> Programmé</>
                   ) : planId === 'enterprise' ? (
                     <><IconExternalLink size={14} /> Contacter</>
                   ) : (
@@ -450,6 +537,15 @@ export default function Billing() {
                     <span className="font-medium text-zinc-900 dark:text-white">
                       {formatPrice(evt.amount)}
                     </span>
+                  )}
+                  {evt.status === 'paid' && (
+                    <button
+                      onClick={() => exportSubscriptionInvoicePdf(evt, status?.tenant_name || 'Cabinet')}
+                      title="Télécharger la facture"
+                      className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded transition-colors"
+                    >
+                      <IconDownload size={15} />
+                    </button>
                   )}
                 </div>
               </div>

@@ -9,6 +9,7 @@ import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import { validateBody } from '../../src/lib/validateRequest';
 import { createTeamMemberSchema, updateTeamMemberRoleSchema } from '../../src/schemas/team.schema';
+import { isSuperAdmin } from '../superAdminAuth';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -43,6 +44,10 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         senderOption: data.sender_option,
         defaultEmailTemplate: data.default_email_template,
         jobTitle: data.job_title,
+        // Platform back-office access — an orthogonal, cross-tenant concept
+        // from system_role (see server/superAdminAuth.ts). Drives whether the
+        // frontend renders the /admin back-office link at all.
+        isSuperAdmin: await isSuperAdmin(supabaseAdmin, req.user),
       });
     } catch (e: any) {
       console.error("[GET /api/me]", e); res.status(500).json({ error: "Failed to fetch profile" }); }
