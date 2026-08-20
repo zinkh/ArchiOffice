@@ -79,6 +79,7 @@ import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startTenantPurge } from "./server/tenantPurge";
 import { startNotificationArchiver } from "./server/notificationArchiver";
+import { startLifecycleEmails } from "./server/lifecycleEmails";
 import { PLAN_LIMITS } from "./src/lib/billing";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
@@ -825,6 +826,9 @@ async function startServer() {
     // Auto-archivage du flux d'activité selon la durée de rétention réglée
     // par catégorie (server/notificationArchiver.ts).
     startNotificationArchiver(supabaseAdmin);
+    // Emails de cycle de vie — essai bientôt/déjà expiré, cabinets inactifs
+    // (server/lifecycleEmails.ts).
+    startLifecycleEmails(supabaseAdmin);
   });
 }
 

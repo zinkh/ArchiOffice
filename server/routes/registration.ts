@@ -3,42 +3,11 @@
 // lookup. All four routes are under the AUTH_EXEMPT "/api/public" prefix —
 // reachable without a session, by design (sign-up, password reset).
 import type { Express } from 'express';
-import nodemailer from 'nodemailer';
 import { publicAuthLimiter } from '../rateLimit';
+import { sendPlatformMail } from '../mailer';
 
 export interface RouteDeps {
   supabaseAdmin: any;
-}
-
-// Best-effort platform-level SMTP send (used before a tenant exists, so tenant
-// settings' own SMTP config isn't available yet). Returns whether it was sent.
-async function sendPlatformMail(to: string, subject: string, html: string): Promise<boolean> {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    console.warn('[mail] SMTP_HOST/SMTP_USER/SMTP_PASS not configured — email not sent.');
-    return false;
-  }
-  // `to` comes straight from the request body — reject header-injection attempts
-  // rather than pass a CR/LF-bearing address into the mail headers.
-  if (/[\r\n]/.test(to) || /[\r\n]/.test(subject)) {
-    console.warn('[mail] Rejected send: invalid characters in recipient/subject.');
-    return false;
-  }
-  try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: parseInt(String(process.env.SMTP_PORT || '587')),
-      secure: String(process.env.SMTP_PORT) === '465',
-      auth: { user: smtpUser, pass: smtpPass },
-    });
-    await transporter.sendMail({ from: `"ArchiOffice" <${smtpUser}>`, to, subject, html });
-    return true;
-  } catch (err: any) {
-    console.error('[mail] Send failed:', err.message);
-    return false;
-  }
 }
 
 export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
@@ -106,6 +75,7 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
             `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
                <h2 style="color: #2563eb;">Bienvenue sur ArchiOffice</h2>
                <p>Bonjour ${admin_name},</p>
+               <p>Le cabinet <strong>${cabinet_name}</strong> dispose de 14 jours d'essai gratuit pour découvrir ArchiOffice : projets, devis, CCTP, planning, et bien plus.</p>
                <p style="margin: 24px 0;"><a href="${linkData.properties.action_link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Confirmer mon adresse email</a></p>
                <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${linkData.properties.action_link}</p>
              </div>`
