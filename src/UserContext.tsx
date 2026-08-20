@@ -76,6 +76,7 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
       // null = confirmed no agency yet (drives the /agency-setup redirect below);
       // offline builds have no /api/me tenantId field, so this stays undefined there.
       tenantId: profile.tenantId ?? null,
+      isSuperAdmin: profile.isSuperAdmin ?? false,
     };
   } catch {
     return base;

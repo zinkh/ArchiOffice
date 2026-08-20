@@ -2,34 +2,29 @@
 // ───" section. Unlike every other extracted module, this one deliberately
 // does NOT use tenantScopedFrom/getTenantId: it's the platform operator's
 // cross-tenant admin panel (managing every tenant, not scoped to one), so
-// "no tenant filter" is correct here, not a bug. Access is gated instead by
-// requireSuperAdmin, matching the caller's email against SUPER_ADMIN_EMAIL.
+// "no tenant filter" is correct here, not a bug. Access is gated by
+// requireSuperAdmin — see server/superAdminAuth.ts for the real, DB-backed
+// check (platform_admins table, with SUPER_ADMIN_EMAIL as bootstrap
+// fallback). Every mutating route logs to admin_audit_log via
+// server/adminAudit.ts.
 import type { Express } from 'express';
+import { isSuperAdmin } from '../superAdminAuth';
+import { logAdminAction } from '../adminAudit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
 }
 
 export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
-  // Case/whitespace-insensitive so a differently-cased SUPER_ADMIN_EMAIL env
-  // value (or an auth provider that doesn't lowercase emails) can't either
-  // lock the real operator out or, worse, leave the comparison looking like
-  // it matches when it silently doesn't.
-  function isSuperAdminEmail(email: string | undefined): boolean {
-    const adminEmail = process.env.SUPER_ADMIN_EMAIL;
-    if (!adminEmail || !email) return false;
-    return email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
-  }
-
-  function requireSuperAdmin(req: any, res: any, next: any) {
-    if (!isSuperAdminEmail(req.user?.email)) {
+  async function requireSuperAdmin(req: any, res: any, next: any) {
+    if (!(await isSuperAdmin(supabaseAdmin, req.user))) {
       return res.status(403).json({ error: 'Accès réservé au super-administrateur' });
     }
     next();
   }
 
   app.get('/api/admin/is-admin', async (req: any, res: any) => {
-    res.json({ isAdmin: isSuperAdminEmail(req.user?.email) });
+    res.json({ isAdmin: await isSuperAdmin(supabaseAdmin, req.user) });
   });
 
   app.get('/api/admin/stats', requireSuperAdmin, async (_req: any, res: any) => {
@@ -90,6 +85,52 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       console.error("[GET /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
   });
 
+  // Fiche cabinet — drill-down utilisé par la page /admin/tenants/:id.
+  app.get('/api/admin/tenants/:id', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { data: tenant, error } = await supabaseAdmin
+        .from('tenants')
+        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents, internal_notes')
+        .eq('id', id)
+        .single();
+      if (error || !tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+
+      const [membersRes, projectsRes, billingRes, auditRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id, name, email, role, system_role, created_at').eq('tenant_id', id).order('created_at', { ascending: true }),
+        supabaseAdmin.from('projects').select('id, name, status, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(20),
+        supabaseAdmin.from('billing_events').select('id, event_type, plan_id, amount, status, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(50),
+        supabaseAdmin.from('admin_audit_log').select('id, actor_email, action, details, created_at').eq('target_tenant_id', id).order('created_at', { ascending: false }).limit(50),
+      ]);
+      const members = membersRes.data ?? [];
+      const owner = members.find((m: any) => m.system_role === 'admin');
+
+      res.json({
+        ...tenant,
+        user_count: members.length,
+        project_count: (projectsRes.data ?? []).length,
+        owner_email: owner?.email ?? null,
+        owner_name: owner?.name ?? null,
+        members,
+        recent_projects: projectsRes.data ?? [],
+        billing_events: billingRes.data ?? [],
+        audit_log: auditRes.data ?? [],
+      });
+    } catch (e: any) {
+      console.error("[GET /api/admin/tenants/:id]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/admin/tenants/:id/notes', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { notes } = req.body;
+      const { error } = await supabaseAdmin.from('tenants').update({ internal_notes: notes ?? null }).eq('id', req.params.id);
+      if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.notes_updated', req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[PATCH /api/admin/tenants/:id/notes]", e); res.status(500).json({ error: e.message }); }
+  });
+
   app.patch('/api/admin/tenants/:id/plan', requireSuperAdmin, async (req: any, res: any) => {
     try {
       const { plan } = req.body;
@@ -98,6 +139,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       }
       const { error } = await supabaseAdmin.from('tenants').update({ plan }).eq('id', req.params.id);
       if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.plan_changed', req.params.id, { plan });
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[PATCH /api/admin/tenants/:id/plan]", e); res.status(500).json({ error: e.message }); }
@@ -112,6 +154,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       const newDate = new Date(Date.now() + days * 86_400_000).toISOString();
       const { error } = await supabaseAdmin.from('tenants').update({ trial_ends_at: newDate, plan: 'trial' }).eq('id', req.params.id);
       if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.trial_extended', req.params.id, { days, trial_ends_at: newDate });
       res.json({ ok: true, trial_ends_at: newDate });
     } catch (e: any) {
       console.error("[PATCH /api/admin/tenants/:id/trial]", e); res.status(500).json({ error: e.message }); }
@@ -127,6 +170,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       if (rpcErr) throw rpcErr;
       const { data: tenant, error } = await supabaseAdmin.from('tenants').select('ai_credit_balance_eur_cents').eq('id', req.params.id).single();
       if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.ai_credit_adjusted', req.params.id, { amount_cents: Math.round(amount_cents) });
       res.json({ ok: true, balance_eur_cents: (tenant as any).ai_credit_balance_eur_cents });
     } catch (e: any) {
       console.error("[PATCH /api/admin/tenants/:id/ai-credit]", e); res.status(500).json({ error: e.message }); }
@@ -158,6 +202,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         role: 'Admin', system_role: 'admin',
       });
 
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.created', tenantId, { name, slug: cleanSlug, plan, adminEmail });
       res.status(201).json({ tenantId, slug: cleanSlug, tempPassword });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
@@ -166,14 +211,59 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
   app.delete('/api/admin/tenants/:id', requireSuperAdmin, async (req: any, res: any) => {
     try {
       const { id } = req.params;
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, slug').eq('id', id).maybeSingle();
       const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', id);
       for (const p of profiles ?? []) {
         await supabaseAdmin.auth.admin.deleteUser(p.id).catch(() => {});
       }
       const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
       if (error) throw error;
+      // Logged after the tenant row is gone — admin_audit_log.target_tenant_id
+      // is ON DELETE SET NULL, so this row survives as an orphaned record of
+      // the deletion itself (name/slug captured in details since the FK will
+      // no longer resolve).
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.deleted', null, { tenant_id: id, name: (tenant as any)?.name, slug: (tenant as any)?.slug });
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[DELETE /api/admin/tenants/:id]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── Platform admins (superadmin role management) ─────────────────────────
+
+  app.get('/api/admin/platform-admins', requireSuperAdmin, async (_req: any, res: any) => {
+    try {
+      const { data, error } = await supabaseAdmin.from('platform_admins').select('user_id, email, created_at').order('created_at', { ascending: true });
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (e: any) {
+      console.error("[GET /api/admin/platform-admins]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/platform-admins', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const email = String(req.body?.email || '').trim();
+      if (!email) return res.status(400).json({ error: 'Email requis' });
+      // Resolves through profiles rather than the Auth admin API — every real
+      // user already has a profile row, and this avoids a listUsers() scan.
+      const { data: profile } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
+      if (!profile) return res.status(404).json({ error: "Aucun utilisateur avec cet email — l'intéressé doit d'abord avoir un compte ArchiOffice." });
+      const { error } = await supabaseAdmin.from('platform_admins').upsert({ user_id: (profile as any).id, email });
+      if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'platform_admin.granted', null, { email });
+      res.status(201).json({ ok: true });
+    } catch (e: any) {
+      console.error("[POST /api/admin/platform-admins]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/admin/platform-admins/:userId', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { userId } = req.params;
+      const { data: target } = await supabaseAdmin.from('platform_admins').select('email').eq('user_id', userId).maybeSingle();
+      const { error } = await supabaseAdmin.from('platform_admins').delete().eq('user_id', userId);
+      if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'platform_admin.revoked', null, { email: (target as any)?.email, user_id: userId });
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[DELETE /api/admin/platform-admins/:userId]", e); res.status(500).json({ error: e.message }); }
   });
 }

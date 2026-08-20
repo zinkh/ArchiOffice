@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import {
   IconUsers, IconBuildingSkyscraper, IconCreditCard,
   IconLoader2, IconRefresh, IconChevronDown, IconTrash,
   IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX, IconCoin,
-  IconCircleCheck,
+  IconCircleCheck, IconShieldLock,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
-const PLAN_LABELS: Record<string, string> = {
+export const PLAN_LABELS: Record<string, string> = {
   trial: 'Essai', starter: 'Starter', pro: 'Pro', enterprise: 'Entreprise',
 };
 
@@ -27,7 +27,7 @@ interface Stats {
   totalAiRevenue?: number; aiRevenueThisMonth?: number;
 }
 
-interface TenantRow {
+export interface TenantRow {
   id: string; slug: string; name: string; plan: string;
   trial_ends_at: string | null; created_at: string;
   user_count: number; project_count: number;
@@ -49,7 +49,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string | number;
   );
 }
 
-function PlanBadge({ plan }: { plan: string }) {
+export function PlanBadge({ plan }: { plan: string }) {
   return (
     <span className={cn('inline-block px-2 py-0.5 rounded text-[11px] font-semibold', PLAN_COLORS[plan] ?? PLAN_COLORS.trial)}>
       {PLAN_LABELS[plan] ?? plan}
@@ -57,7 +57,7 @@ function PlanBadge({ plan }: { plan: string }) {
   );
 }
 
-function PlanSelect({ tenantId, current, onChange }: { tenantId: string; current: string; onChange: (plan: string) => void }) {
+export function PlanSelect({ tenantId, current, onChange }: { tenantId: string; current: string; onChange: (plan: string) => void }) {
   const [loading, setLoading] = useState(false);
 
   async function handleChange(e: ChangeEvent<HTMLSelectElement>) {
@@ -452,6 +452,99 @@ function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
   );
 }
 
+// ─── Platform admins (superadmin role management) ─────────────────────────────
+
+interface PlatformAdminRow { user_id: string; email: string; created_at: string }
+
+function PlatformAdminsPanel({ onClose }: { onClose: () => void }) {
+  const [admins, setAdmins] = useState<PlatformAdminRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setAdmins(await apiFetch<PlatformAdminRow[]>('/api/admin/platform-admins'));
+    } catch (e: any) {
+      setError(e.message ?? 'Erreur de chargement');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    setAdding(true);
+    setError(null);
+    try {
+      await apiFetch('/api/admin/platform-admins', { method: 'POST', body: JSON.stringify({ email }) });
+      setEmail('');
+      await load();
+    } catch (e: any) {
+      setError(e.message ?? "Erreur lors de l'ajout");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleRemove(userId: string) {
+    if (!confirm('Retirer cet accès super-admin ?')) return;
+    try {
+      await apiFetch(`/api/admin/platform-admins/${userId}`, { method: 'DELETE' });
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? 'Erreur');
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <IconShieldLock size={16} style={{ color: 'var(--tblr-primary)' }} />
+          <h2 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>Super-administrateurs</h2>
+        </div>
+        <button onClick={onClose} style={{ color: 'var(--tblr-muted)' }}><IconX size={16} /></button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        Ces comptes ont accès à ce back-office plateforme, indépendamment de leur rôle dans leur propre cabinet.
+      </p>
+      {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <form onSubmit={handleAdd} className="flex gap-2">
+        <input
+          type="email" required placeholder="email@exemple.fr"
+          value={email} onChange={e => setEmail(e.target.value)}
+          className="flex-1 text-sm rounded border px-3 py-1.5"
+          style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+        />
+        <button type="submit" disabled={adding} className="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5" style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: adding ? 0.7 : 1 }}>
+          {adding ? <IconLoader2 size={14} className="animate-spin" /> : <IconPlus size={14} />}
+          Ajouter
+        </button>
+      </form>
+      {loading ? (
+        <IconLoader2 size={18} className="animate-spin" style={{ color: 'var(--tblr-muted)' }} />
+      ) : (
+        <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+          {admins.length === 0 && <li className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun super-admin enregistré (accès via SUPER_ADMIN_EMAIL uniquement).</li>}
+          {admins.map(a => (
+            <li key={a.user_id} className="flex items-center justify-between py-2 text-sm">
+              <span style={{ color: 'var(--tblr-text)' }}>{a.email}</span>
+              <button onClick={() => handleRemove(a.user_id)} className="text-red-500 hover:text-red-600" title="Retirer">
+                <IconTrash size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -468,6 +561,7 @@ export default function AdminDashboard() {
   const [extendTarget, setExtendTarget] = useState<TenantRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TenantRow | null>(null);
   const [creditTarget, setCreditTarget] = useState<TenantRow | null>(null);
+  const [showPlatformAdmins, setShowPlatformAdmins] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -570,6 +664,14 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowPlatformAdmins(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          >
+            <IconShieldLock size={14} />
+            Super-administrateurs
+          </button>
+          <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
@@ -594,6 +696,8 @@ export default function AdminDashboard() {
           {error}
         </div>
       )}
+
+      {showPlatformAdmins && <PlatformAdminsPanel onClose={() => setShowPlatformAdmins(false)} />}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
@@ -701,7 +805,7 @@ export default function AdminDashboard() {
                       style={{ borderColor: 'var(--tblr-border)' }}
                     >
                       <td className="px-4 py-3">
-                        <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{t.name}</p>
+                        <Link to={`/admin/tenants/${t.id}`} className="font-medium hover:underline" style={{ color: 'var(--tblr-text)' }}>{t.name}</Link>
                         <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t.slug}</p>
                       </td>
                       <td className="px-4 py-3">
