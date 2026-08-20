@@ -5,10 +5,11 @@ import {
   IconBell, IconBriefcase, IconFileInvoice, IconClipboardList,
   IconMessageCircle, IconHeart, IconSend, IconCheck, IconFilter,
   IconFileText, IconRefresh, IconX, IconLink, IconQuote, IconPaperclip,
-  IconFile, IconDownload
+  IconFile, IconDownload, IconArchive, IconArrowLeft
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
+import { activeFeedCache, archivedFeedCache } from '../lib/feedCache';
 import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
@@ -251,6 +252,7 @@ export default function Notifications() {
   const { currentUser } = useUser();
   const [items, setItems] = useState<FeedItem[]>([]);
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [viewArchived, setViewArchived] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
@@ -268,11 +270,11 @@ export default function Notifications() {
     apiFetch<TeamMemberLite[]>('/api/team').then(setTeamMembers).catch(() => {});
   }, [currentUser]);
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (archived: boolean) => {
     try {
-      const data = await apiFetch<FeedItem[]>('/api/feed');
+      const cache = archived ? archivedFeedCache : activeFeedCache;
+      await cache.fetch(archived ? '/api/feed?archived=1' : '/api/feed');
       authErrorCount.current = 0;
-      setItems(data);
     } catch (err: any) {
       if (!err?.message?.includes('401')) {
         console.error('Feed fetch failed:', err);
@@ -284,15 +286,27 @@ export default function Notifications() {
     }
   }, []);
 
+  // Show whatever the relevant cache already has instantly (e.g. the active
+  // feed fetched moments ago by the Dashboard's ActivityFeed widget), then
+  // subscribe to stay in sync as either component refreshes it.
+  useEffect(() => {
+    const cache = viewArchived ? archivedFeedCache : activeFeedCache;
+    const cached = cache.getSnapshot();
+    if (cached) { setItems(cached); setIsLoading(false); } else { setIsLoading(true); }
+    return cache.subscribe(setItems);
+  }, [viewArchived]);
+
   useEffect(() => {
     if (!currentUser) return;
     authErrorCount.current = 0;
-    fetchItems();
+    fetchItems(viewArchived);
+    // Archived items rarely change — only poll the live feed.
+    if (viewArchived) return;
     const interval = setInterval(() => {
-      if (authErrorCount.current < 3) fetchItems();
+      if (authErrorCount.current < 3) fetchItems(false);
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchItems, currentUser]);
+  }, [fetchItems, currentUser, viewArchived]);
 
   // Automatically open the comments of any item that mentions the current user
   useEffect(() => {
@@ -309,7 +323,7 @@ export default function Notifications() {
     setIsMarkingRead(true);
     try {
       await apiFetch('/api/notifications/mark-read', { method: 'POST' });
-      setItems(prev => prev.map(i => ({ ...i, unread: false })));
+      setItems(prev => { const next = prev.map(i => ({ ...i, unread: false })); activeFeedCache.setItems(next); return next; });
     } catch (err) {
       console.error(err);
     } finally {
@@ -321,17 +335,17 @@ export default function Notifications() {
     const endpoint = item.kind === 'post'
       ? `/api/feed/posts/${item.id}/like`
       : `/api/feed/activities/${item.id}/like`;
-    setItems(prev => prev.map(i => i.id === item.id
+    setItems(prev => { const next = prev.map(i => i.id === item.id
       ? { ...i, liked: !i.liked, likes_count: i.liked ? i.likes_count - 1 : i.likes_count + 1 }
       : i
-    ));
+    ); activeFeedCache.setItems(next); return next; });
     try {
       await apiFetch(endpoint, { method: 'POST' });
     } catch {
-      setItems(prev => prev.map(i => i.id === item.id
+      setItems(prev => { const next = prev.map(i => i.id === item.id
         ? { ...i, liked: item.liked, likes_count: item.likes_count }
         : i
-      ));
+      ); activeFeedCache.setItems(next); return next; });
     }
   };
 
@@ -349,10 +363,10 @@ export default function Notifications() {
           body: JSON.stringify({ content })
         });
       }
-      setItems(prev => prev.map(i => i.id === itemId
+      setItems(prev => { const next = prev.map(i => i.id === itemId
         ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
         : i
-      ));
+      ); activeFeedCache.setItems(next); return next; });
     } catch (err) {
       console.error(err);
     }
@@ -378,7 +392,7 @@ export default function Notifications() {
           body: JSON.stringify({ content })
         });
       }
-      setItems(prev => [item, ...prev]);
+      setItems(prev => { const next = [item, ...prev]; activeFeedCache.setItems(next); return next; });
     } catch (err) {
       console.error(err);
       setAttachment(file);
@@ -419,21 +433,35 @@ export default function Notifications() {
             <IconBell size={22} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">{t('notif_page_title')}</h1>
-            {unreadCount > 0 && (
+            <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">
+              {viewArchived ? t('notif_archived_title') : t('notif_page_title')}
+            </h1>
+            {!viewArchived && unreadCount > 0 && (
               <p className="text-sm text-rose-500 font-medium">{unreadCount} non lu{unreadCount > 1 ? 's' : ''}</p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchItems}
+            onClick={() => setViewArchived(v => { const next = !v; if (next && filter === 'unread') setFilter('all'); return next; })}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-xl transition-colors border",
+              viewArchived
+                ? "text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                : "text-zinc-500 dark:text-zinc-400 bg-transparent border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            )}
+          >
+            {viewArchived ? <IconArrowLeft size={15} /> : <IconArchive size={15} />}
+            {viewArchived ? t('notif_view_active') : t('notif_view_archived')}
+          </button>
+          <button
+            onClick={() => fetchItems(viewArchived)}
             className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
             title="Rafraîchir"
           >
             <IconRefresh size={18} />
           </button>
-          {unreadCount > 0 && (
+          {!viewArchived && unreadCount > 0 && (
             <button
               onClick={markAllRead}
               disabled={isMarkingRead}
@@ -447,6 +475,7 @@ export default function Notifications() {
       </div>
 
       {/* Compose box */}
+      {!viewArchived && (
       <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm p-4 relative">
         <div className="flex gap-3">
           <Avatar name={currentUser?.name || 'U'} size={36} />
@@ -511,11 +540,12 @@ export default function Notifications() {
           renderAvatar={name => <Avatar name={name} size={22} />}
         />
       </div>
+      )}
 
       {/* Filter tabs */}
       <div className="bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
         <div className="flex overflow-x-auto border-b border-zinc-100 dark:border-zinc-700/50 scrollbar-none">
-          {FILTERS.map(f => {
+          {FILTERS.filter(f => !viewArchived || f.key !== 'unread').map(f => {
             const count = f.key === 'unread' ? unreadCount : f.key === 'all' ? items.length : categoryCount(f.category);
             const isActive = filter === f.key;
             return (
@@ -555,8 +585,8 @@ export default function Notifications() {
           </div>
         ) : filteredItems.length === 0 ? (
           <div className="py-16 text-center text-zinc-400">
-            <IconBell size={36} className="mx-auto mb-3 opacity-20" />
-            <p className="text-sm">{t('notif_empty')}</p>
+            {viewArchived ? <IconArchive size={36} className="mx-auto mb-3 opacity-20" /> : <IconBell size={36} className="mx-auto mb-3 opacity-20" />}
+            <p className="text-sm">{viewArchived ? t('notif_archived_empty') : t('notif_empty')}</p>
           </div>
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-700/50">
@@ -639,10 +669,11 @@ export default function Notifications() {
                             )}
                           </button>
                           <button
-                            onClick={() => handleLike(item)}
+                            onClick={() => !viewArchived && handleLike(item)}
+                            disabled={viewArchived}
                             className={cn(
                               "flex items-center gap-1.5 text-xs font-medium transition-colors",
-                              item.liked ? "text-rose-500" : "text-zinc-400 hover:text-rose-500"
+                              viewArchived ? "text-zinc-400 cursor-default" : item.liked ? "text-rose-500" : "text-zinc-400 hover:text-rose-500"
                             )}
                           >
                             <IconHeart size={14} className={item.liked ? "fill-current" : ''} />
@@ -676,7 +707,7 @@ export default function Notifications() {
                               {item.comments.length === 0 && (
                                 <p className="text-xs text-zinc-400 pl-1">Aucun commentaire. Soyez le premier !</p>
                               )}
-                              {item.kind === 'post' && (
+                              {!viewArchived && item.kind === 'post' && (
                                 <div className="flex gap-2 items-center pt-1">
                                   <Avatar name={currentUser?.name || 'U'} size={26} />
                                   <CommentBox teamMembers={teamMembers} onSubmit={(content, file) => handleComment(item.id, content, file)} />

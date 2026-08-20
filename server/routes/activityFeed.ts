@@ -58,9 +58,17 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
   app.get("/api/feed", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      // ?archived=1 switches to the archived view (see server/notificationArchiver.ts)
+      const archivedView = req.query.archived === '1' || req.query.archived === 'true';
+
+      let actsQuery = tenantScopedFrom(supabaseAdmin, tenantId, 'activities').select('*').order('created_at', { ascending: false }).limit(50);
+      let postsQuery = tenantScopedFrom(supabaseAdmin, tenantId, 'feed_posts').select('*').order('created_at', { ascending: false }).limit(50);
+      actsQuery = archivedView ? actsQuery.not('archived_at', 'is', null) : actsQuery.is('archived_at', null);
+      postsQuery = archivedView ? postsQuery.not('archived_at', 'is', null) : postsQuery.is('archived_at', null);
+
       const [{ data: acts, error: actsError }, { data: posts, error: postsError }, { data: profile }] = await Promise.all([
-        tenantScopedFrom(supabaseAdmin, tenantId, 'activities').select('*').order('created_at', { ascending: false }).limit(50),
-        tenantScopedFrom(supabaseAdmin, tenantId, 'feed_posts').select('*').order('created_at', { ascending: false }).limit(50),
+        actsQuery,
+        postsQuery,
         supabaseAdmin.from('profiles').select('notifications_last_seen').eq('id', req.user.id).maybeSingle()
       ]);
       if (actsError) console.error('[GET /api/feed] activities query failed:', actsError);
@@ -68,18 +76,30 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
 
       const lastSeen = (profile as any)?.notifications_last_seen || new Date(0).toISOString();
 
-      // Fetch likes for current user
-      const { data: myLikes } = await tenantScopedFrom(supabaseAdmin, tenantId, 'feed_likes').select('item_id, item_type').eq('user_id', req.user.id);
-      const likedSet = new Set((myLikes || []).map((l: any) => `${l.item_type}:${l.item_id}`));
-
-      // Fetch comments per post
+      // Bound the "my likes"/"mentions" lookups to the items actually loaded above
+      // instead of the requesting user's entire history — keeps these queries flat
+      // as activity/mentions volume grows, and lets them run alongside the
+      // comments fetch instead of after it.
+      const itemIds = [...(acts || []).map((a: any) => a.id), ...(posts || []).map((p: any) => p.id)];
       const postIds = (posts || []).map((p: any) => p.id);
-      const { data: allComments } = postIds.length
-        ? await supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true })
-        : { data: [] };
 
-      // Items/comments that mention the requesting user, so the UI can surface them
-      const { data: myMentions } = await tenantScopedFrom(supabaseAdmin, tenantId, 'mentions').select('item_id').eq('mentioned_user_id', req.user.id);
+      const [{ data: myLikes }, { data: allComments }, { data: myMentions }] = await Promise.all([
+        itemIds.length
+          ? tenantScopedFrom(supabaseAdmin, tenantId, 'feed_likes').select('item_id, item_type').eq('user_id', req.user.id).in('item_id', itemIds)
+          : Promise.resolve({ data: [] }),
+        postIds.length
+          ? supabaseAdmin.from('feed_comments').select('*').in('post_id', postIds).order('created_at', { ascending: true }).limit(1000)
+          : Promise.resolve({ data: [] }),
+        // mentions.post_id is the parent post for both post- and comment-level
+        // mentions (see supabase/migrate_mentions.sql), so filtering on the
+        // posts we already loaded covers comment mentions too without needing
+        // comment ids up front.
+        postIds.length
+          ? tenantScopedFrom(supabaseAdmin, tenantId, 'mentions').select('item_id').eq('mentioned_user_id', req.user.id).in('post_id', postIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const likedSet = new Set((myLikes || []).map((l: any) => `${l.item_type}:${l.item_id}`));
       const mentionedItemIds = new Set((myMentions || []).map((m: any) => m.item_id));
 
       const feedItems = [

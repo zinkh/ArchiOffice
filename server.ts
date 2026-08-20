@@ -78,6 +78,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startTenantPurge } from "./server/tenantPurge";
+import { startNotificationArchiver } from "./server/notificationArchiver";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
 const upload = multer({
@@ -805,6 +806,9 @@ async function startServer() {
     // RGPD — purge automatisée des cabinets dont le délai de grâce de
     // fermeture (30 jours, server/routes/settings.ts) est écoulé.
     startTenantPurge(supabaseAdmin);
+    // Auto-archivage du flux d'activité selon la durée de rétention réglée
+    // par catégorie (server/notificationArchiver.ts).
+    startNotificationArchiver(supabaseAdmin);
   });
 }
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { IconPaperclip, IconLink, IconQuote, IconChevronDown, IconHeart, IconMessageCircle, IconSend, IconX, IconBriefcase, IconFileInvoice, IconFileText, IconClipboardList, IconUser, IconFile, IconFileDescription, IconUsers, IconFileCheck, IconChecklist, IconReceipt2, IconNotes, IconAlertTriangle, IconPlugConnected, IconDownload } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
+import { activeFeedCache } from '../lib/feedCache';
 import { getAccessToken } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { TeamMemberLite, useMentionComposer, MentionDropdown, renderTextWithMentions, insertLinkInto, insertQuoteInto } from '../lib/mentions';
@@ -236,9 +237,8 @@ export default function ActivityFeed() {
 
   const fetchFeed = useCallback(async () => {
     try {
-      const data = await apiFetch<FeedItem[]>('/api/feed');
+      await activeFeedCache.fetch('/api/feed');
       authErrorCount.current = 0;
-      setItems(data);
     } catch (err: any) {
       if (err?.message?.includes('401')) {
         authErrorCount.current += 1;
@@ -246,6 +246,14 @@ export default function ActivityFeed() {
         console.error('Feed fetch failed:', err);
       }
     }
+  }, []);
+
+  // Show whatever the cache already has (e.g. fetched moments ago by the
+  // Notifications page) instantly, then subscribe to keep in sync.
+  useEffect(() => {
+    const cached = activeFeedCache.getSnapshot();
+    if (cached) setItems(cached);
+    return activeFeedCache.subscribe(setItems);
   }, []);
 
   useEffect(() => {
@@ -302,7 +310,7 @@ export default function ActivityFeed() {
           body: JSON.stringify({ content })
         });
       }
-      setItems(prev => [newItem, ...prev]);
+      setItems(prev => { const next = [newItem, ...prev]; activeFeedCache.setItems(next); return next; });
     } catch (err) {
       console.error(err);
       composer.setValue(content);
@@ -317,18 +325,18 @@ export default function ActivityFeed() {
       ? `/api/feed/posts/${item.id}/like`
       : `/api/feed/activities/${item.id}/like`;
     // Optimistic update
-    setItems(prev => prev.map(i => i.id === item.id
+    setItems(prev => { const next = prev.map(i => i.id === item.id
       ? { ...i, liked: !i.liked, likes_count: i.liked ? i.likes_count - 1 : i.likes_count + 1 }
       : i
-    ));
+    ); activeFeedCache.setItems(next); return next; });
     try {
       await apiFetch(endpoint, { method: 'POST' });
     } catch {
       // Revert on error
-      setItems(prev => prev.map(i => i.id === item.id
+      setItems(prev => { const next = prev.map(i => i.id === item.id
         ? { ...i, liked: item.liked, likes_count: item.likes_count }
         : i
-      ));
+      ); activeFeedCache.setItems(next); return next; });
     }
   };
 
@@ -346,10 +354,10 @@ export default function ActivityFeed() {
           body: JSON.stringify({ content })
         });
       }
-      setItems(prev => prev.map(i => i.id === itemId
+      setItems(prev => { const next = prev.map(i => i.id === itemId
         ? { ...i, comments: [...i.comments, comment], comments_count: i.comments_count + 1 }
         : i
-      ));
+      ); activeFeedCache.setItems(next); return next; });
     } catch (err) {
       console.error(err);
     }
