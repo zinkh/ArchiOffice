@@ -83,6 +83,7 @@ import { startTenantPurge } from "./server/tenantPurge";
 import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
 import { startPlanChanges } from "./server/planChanges";
+import { startDunning } from "./server/dunning";
 import { PLAN_LIMITS } from "./src/lib/billing";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
@@ -837,6 +838,9 @@ async function startServer() {
     // Applique les résiliations/rétrogradations programmées une fois la
     // période déjà payée écoulée (server/planChanges.ts).
     startPlanChanges(supabaseAdmin);
+    // Relance de paiement (dunning) — notice immédiate dans le webhook
+    // Stancer, relance différée ici si toujours non résolu (server/dunning.ts).
+    startDunning(supabaseAdmin);
   });
 }
 

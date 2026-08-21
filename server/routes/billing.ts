@@ -13,6 +13,8 @@ import crypto from 'crypto';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { billingWebhookLimiter } from '../rateLimit';
 import type { PlanLimits } from '../../src/lib/billing';
+import { notifyTenantAdmins } from '../mailer';
+import { emailShell, ctaButton, appUrl } from '../lifecycleEmails';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -24,6 +26,10 @@ export interface RouteDeps {
 }
 
 const STANCER_API_BASE = 'https://api.stancer.com/v2';
+// Enterprise is contact-sales-only, no self-serve checkout — see PlanId in
+// src/lib/billing.ts for the full set.
+const PLAN_PRICES: Record<string, number> = { starter: 2900, pro: 5900 };
+const PLAN_NAMES: Record<string, string> = { starter: 'Starter', pro: 'Pro' };
 
 // Post-payment return URL base. Prefer the configured APP_URL so the redirect
 // target can't be steered by a spoofed X-Forwarded-Host header; fall back to
@@ -60,11 +66,16 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { data: tenant } = await supabaseAdmin.from('tenants')
         .select('name, plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents, pending_plan, plan_change_requested_at').eq('id', tenantId).single();
-      const [projectsRes, usersRes, docsRes, versionsRes] = await Promise.all([
+      const [projectsRes, usersRes, docsRes, versionsRes, lastCheckoutRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('*', { count: 'exact', head: true }),
         tenantScopedFrom(supabaseAdmin, tenantId, 'document_versions').select('size_bytes'),
+        // Dunning: a tenant is in an unresolved payment-failed state exactly
+        // when their MOST RECENT subscription checkout attempt failed — a
+        // successful retry (a newer row) or an in-flight one both self-
+        // resolve this, since each checkout is its own billing_events row.
+        tenantScopedFrom(supabaseAdmin, tenantId, 'billing_events').select('plan_id, status').eq('event_type', 'checkout_created').order('created_at', { ascending: false }).limit(1),
       ]);
       const plan = (tenant as any)?.plan || 'trial';
       const trial_ends_at = (tenant as any)?.trial_ends_at ?? null;
@@ -73,6 +84,8 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const effectivePlan = is_expired ? 'expired' : plan;
       const limits = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.trial;
       const usedBytes = ((versionsRes.data as any[]) || []).reduce((sum, r) => sum + (r.size_bytes || 0), 0);
+      const lastCheckout = (lastCheckoutRes.data as any[])?.[0];
+      const payment_failed = lastCheckout?.status === 'failed';
       res.json({
         plan: effectivePlan,
         trial_ends_at,
@@ -80,6 +93,8 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
         tenant_name: (tenant as any)?.name ?? null,
         pending_plan: (tenant as any)?.pending_plan ?? null,
         plan_change_requested_at: (tenant as any)?.plan_change_requested_at ?? null,
+        payment_failed,
+        failed_plan_id: payment_failed ? lastCheckout.plan_id : null,
         usage: {
           projects:  { used: projectsRes.count ?? 0, limit: limits.projects },
           users:     { used: usersRes.count ?? 0, limit: limits.users },
@@ -100,8 +115,6 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { plan_id } = req.body;
-      const PLAN_PRICES: Record<string, number> = { starter: 2900, pro: 5900 };
-      const PLAN_NAMES: Record<string, string> = { starter: 'Starter', pro: 'Pro' };
       const amount = PLAN_PRICES[plan_id];
       if (!amount) return res.status(400).json({ error: 'Plan invalide ou contact commercial requis' });
 
@@ -211,11 +224,30 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (status === 'failed' || status === 'refused') {
         const { data: billingEvent } = await supabaseAdmin
           .from('billing_events')
-          .select('id')
+          .select('id, tenant_id, plan_id, event_type')
           .eq('stancer_payment_id', paymentId)
           .maybeSingle();
         if (billingEvent) {
           await supabaseAdmin.from('billing_events').update({ status: 'failed' }).eq('id', (billingEvent as any).id);
+          // Dunning — immediate notice. The follow-up reminder if this stays
+          // unresolved a few days later is server/dunning.ts; only subscription
+          // checkouts are dunned, not AI-credit top-ups (running low on
+          // pay-as-you-go credits isn't "your subscription is unpaid").
+          if ((billingEvent as any).event_type === 'checkout_created') {
+            const { tenant_id, plan_id } = billingEvent as any;
+            const planName = PLAN_NAMES[plan_id] || plan_id;
+            notifyTenantAdmins(
+              supabaseAdmin, tenant_id,
+              `[ArchiOffice] Échec de votre paiement`,
+              emailShell(
+                'Votre paiement a échoué',
+                `<p>Bonjour,</p>
+                 <p>Le paiement de l'abonnement <strong>${planName}</strong> pour votre cabinet n'a pas pu être validé par votre banque. Votre accès actuel n'est pas affecté, mais le changement de plan n'a pas eu lieu.</p>
+                 <p>Vous pouvez réessayer à tout moment depuis la page Facturation.</p>
+                 ${ctaButton(`${appUrl()}/billing`, 'Réessayer le paiement')}`
+              )
+            ).catch(() => {});
+          }
         }
       }
 
