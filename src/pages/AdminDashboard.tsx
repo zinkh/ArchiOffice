@@ -657,12 +657,12 @@ export default function AdminDashboard() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>Super Admin</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--tblr-muted)' }}>Vue globale de tous les cabinets ArchiOffice</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/admin/support"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"

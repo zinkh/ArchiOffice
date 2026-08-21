@@ -4,7 +4,7 @@ import { apiFetch } from '../lib/api';
 import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
   IconCoin, IconNotes, IconDeviceFloppy, IconHistory, IconReceipt,
-  IconLogin, IconMessageCircle,
+  IconLogin, IconMessageCircle, IconMail, IconX, IconSend,
 } from '@tabler/icons-react';
 import { PLAN_LABELS, PlanSelect } from './AdminDashboard';
 
@@ -35,6 +35,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'tenant.created': 'Cabinet créé',
   'tenant.deleted': 'Cabinet supprimé',
   'tenant.impersonated': 'Connexion en tant que…',
+  'tenant.email_sent': 'Email envoyé',
 };
 
 const TICKET_STATUS_LABELS: Record<string, string> = { open: 'Ouvert', answered: 'Répondu', closed: 'Fermé' };
@@ -47,14 +48,90 @@ function fmtDateTime(d: string): string {
   return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function Card({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Card({ title, icon, action, children }: { title: string; icon: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
-      <div className="flex items-center gap-2">
-        {icon}
-        <h2 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{title}</h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h2 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{title}</h2>
+        </div>
+        {action}
       </div>
       {children}
+    </div>
+  );
+}
+
+interface EmailTarget { mode: 'member' | 'tenant'; memberId?: string; label: string }
+
+function SendEmailDialog({ tenantId, target, onClose, onSent }: {
+  tenantId: string; target: EmailTarget; onClose: () => void; onSent: () => void;
+}) {
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault();
+    setSending(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/admin/tenants/${tenantId}/send-email`, {
+        method: 'POST',
+        body: JSON.stringify(
+          target.mode === 'member'
+            ? { recipient: 'member', user_id: target.memberId, subject, message }
+            : { recipient: 'tenant', subject, message }
+        ),
+      });
+      onSent();
+      onClose();
+    } catch (e: any) {
+      setError(e.message ?? "Erreur lors de l'envoi");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl shadow-xl p-6 relative" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+        <button onClick={onClose} className="absolute top-4 right-4" style={{ color: 'var(--tblr-muted)' }}>
+          <IconX size={18} />
+        </button>
+        <h2 className="text-base font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Envoyer un email</h2>
+        <p className="text-sm mb-4" style={{ color: 'var(--tblr-muted)' }}>À : {target.label}</p>
+        {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
+        <form onSubmit={handleSend} className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Sujet</label>
+            <input
+              required value={subject} onChange={e => setSubject(e.target.value)}
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Message</label>
+            <textarea
+              required rows={5} value={message} onChange={e => setMessage(e.target.value)}
+              className="w-full p-2 rounded-lg text-sm resize-y"
+              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={sending}
+            className="w-full py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
+            style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: sending ? 0.7 : 1 }}
+          >
+            {sending ? <IconLoader2 size={14} className="animate-spin" /> : <IconSend size={14} />}
+            Envoyer
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -68,6 +145,7 @@ export default function AdminTenantDetail() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [emailTarget, setEmailTarget] = useState<EmailTarget | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -137,6 +215,15 @@ export default function AdminTenantDetail() {
 
   return (
     <div className="space-y-6">
+      {emailTarget && (
+        <SendEmailDialog
+          tenantId={tenant.id}
+          target={emailTarget}
+          onClose={() => setEmailTarget(null)}
+          onSent={load}
+        />
+      )}
+
       <Link to="/admin" className="inline-flex items-center gap-1.5 text-sm hover:underline" style={{ color: 'var(--tblr-muted)' }}>
         <IconArrowLeft size={14} />
         Retour au back-office
@@ -203,7 +290,21 @@ export default function AdminTenantDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Members */}
-        <Card title={`Membres (${tenant.members.length})`} icon={<IconUsers size={16} style={{ color: 'var(--tblr-primary)' }} />}>
+        <Card
+          title={`Membres (${tenant.members.length})`}
+          icon={<IconUsers size={16} style={{ color: 'var(--tblr-primary)' }} />}
+          action={
+            <button
+              onClick={() => setEmailTarget({ mode: 'tenant', label: `Tous les membres de ${tenant.name}` })}
+              disabled={tenant.members.length === 0}
+              title="Envoyer un email à tous les membres"
+              className="flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+              style={{ color: 'var(--tblr-primary)' }}
+            >
+              <IconMail size={13} /> Email au cabinet
+            </button>
+          }
+        >
           <div className="overflow-x-auto -mx-1">
             <table className="w-full text-sm">
               <tbody>
@@ -217,7 +318,15 @@ export default function AdminTenantDetail() {
                       <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{m.email}</p>
                     </td>
                     <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{m.role}{m.system_role === 'admin' ? ' · admin' : ''}</td>
-                    <td className="py-2 pl-2 text-right">
+                    <td className="py-2 pl-2 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => setEmailTarget({ mode: 'member', memberId: m.id, label: `${m.name} (${m.email})` })}
+                        title={`Envoyer un email à ${m.email}`}
+                        className="p-1 rounded hover:bg-[var(--tblr-surface-2)]"
+                        style={{ color: 'var(--tblr-muted)' }}
+                      >
+                        <IconMail size={13} />
+                      </button>
                       <button
                         onClick={() => handleImpersonate(m.id, m.email)}
                         disabled={impersonating === m.id}
