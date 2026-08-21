@@ -14,18 +14,21 @@ const DEFAULT_CHECK_INTERVAL_HOURS = 12;
 const TRIAL_ENDING_SOON_DAYS = 3;
 const INACTIVITY_THRESHOLD_DAYS = 21;
 
-function appUrl(): string {
+// Exported for reuse by server/dunning.ts and server/routes/billing.ts's
+// webhook — same platform-notice email shell, no reason to duplicate it a
+// third time.
+export function appUrl(): string {
   return (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
-function emailShell(title: string, bodyHtml: string): string {
+export function emailShell(title: string, bodyHtml: string): string {
   return `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
     <h2 style="color: #2563eb;">${title}</h2>
     ${bodyHtml}
   </div>`;
 }
 
-function ctaButton(href: string, label: string): string {
+export function ctaButton(href: string, label: string): string {
   return `<p style="margin: 24px 0;"><a href="${href}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">${label}</a></p>`;
 }
 

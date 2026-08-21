@@ -12,6 +12,7 @@ import {
   IconLogout,
   IconMessageCircle,
   IconUser,
+  IconShieldLock,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -630,6 +631,29 @@ function Header() {
                     </Link>
                   );
                 })}
+                {currentUser?.isSuperAdmin && (
+                  <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                    {[{ path: '/admin', label: 'Super Admin', icon: IconShieldLock }, { path: '/admin/support', label: 'Support (back-office)', icon: IconMessageCircle }].map(item => {
+                      const isActive = location.pathname === item.path;
+                      return (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          onClick={() => setIsMobileMenuOpen(false)}
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
+                            isActive
+                              ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                              : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                          )}
+                        >
+                          <item.icon size={18} />
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </nav>
             </motion.div>
           </>

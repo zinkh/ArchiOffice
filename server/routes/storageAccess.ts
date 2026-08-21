@@ -7,6 +7,7 @@
 // per-object ACL table, this *is* the authorization boundary.
 import type { Express } from 'express';
 import { PRIVATE_STORAGE_BUCKETS, parseStorageRef } from '../storagePaths';
+import { isSuperAdmin } from '../superAdminAuth';
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour — long enough for a page view/download, short enough to bound a leaked link's lifetime.
 
@@ -18,7 +19,6 @@ export interface RouteDeps {
 export function registerStorageAccessRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.get('/api/storage/signed-url', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
       const fileUrl = req.query.url as string;
       if (!fileUrl) return res.status(400).json({ error: "Paramètre 'url' requis" });
 
@@ -26,8 +26,16 @@ export function registerStorageAccessRoutes(app: Express, { supabaseAdmin, getTe
       if (!ref || !PRIVATE_STORAGE_BUCKETS.has(ref.bucket)) {
         return res.status(400).json({ error: 'Référence de stockage invalide' });
       }
-      if (!ref.path.startsWith(`${tenantId}/`)) {
-        return res.status(403).json({ error: 'Accès refusé' });
+      // A platform superadmin has no tenant of their own (see
+      // server/superAdminAuth.ts) but legitimately needs to resolve a
+      // tenant's support-ticket attachment from /admin/support — they
+      // already read arbitrary tenant data everywhere else via
+      // supabaseAdmin, so this isn't a new privilege, just extending it here.
+      if (!(await isSuperAdmin(supabaseAdmin, req.user))) {
+        const tenantId = await getTenantId(req.user.id);
+        if (!ref.path.startsWith(`${tenantId}/`)) {
+          return res.status(403).json({ error: 'Accès refusé' });
+        }
       }
 
       const { data, error } = await supabaseAdmin.storage

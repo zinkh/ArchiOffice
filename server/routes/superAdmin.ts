@@ -10,6 +10,7 @@
 import type { Express } from 'express';
 import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
+import { sendPlatformMail } from '../mailer';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -153,6 +154,48 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       res.json({ action_link: linkData.properties.action_link, impersonated_email: (member as any).email });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants/:id/impersonate]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Free-form email from the platform team to a tenant — either one named
+  // member or every member of the cabinet. Distinct from the automated
+  // lifecycle/dunning notices (server/lifecycleEmails.ts, server/dunning.ts):
+  // this one is operator-authored, one-off, and always audit-logged.
+  app.post('/api/admin/tenants/:id/send-email', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id: tenantId } = req.params;
+      const { recipient, user_id, subject, message } = req.body;
+      if (!subject?.trim() || !message?.trim()) return res.status(400).json({ error: 'Sujet et message requis' });
+      if (!['member', 'tenant'].includes(recipient)) return res.status(400).json({ error: 'Destinataire invalide' });
+
+      let recipients: string[];
+      if (recipient === 'member') {
+        if (!user_id) return res.status(400).json({ error: 'user_id requis' });
+        const { data: member } = await supabaseAdmin.from('profiles').select('email').eq('id', user_id).eq('tenant_id', tenantId).maybeSingle();
+        if (!(member as any)?.email) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+        recipients = [(member as any).email];
+      } else {
+        const { data: members } = await supabaseAdmin.from('profiles').select('email').eq('tenant_id', tenantId);
+        recipients = ((members || []) as { email: string | null }[]).map(m => m.email).filter(Boolean) as string[];
+        if (!recipients.length) return res.status(404).json({ error: 'Aucun membre avec une adresse email dans ce cabinet' });
+      }
+
+      const html = `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+        <p>${message.trim().replace(/\n/g, '<br>')}</p>
+        <p style="color:#9ca3af;font-size:12px;margin-top:24px;">Message envoyé par l'équipe ArchiOffice.</p>
+      </div>`;
+      const sent = await sendPlatformMail(recipients.join(','), subject.trim(), html);
+      if (!sent) return res.status(502).json({ error: "Échec de l'envoi (SMTP non configuré ou erreur d'envoi)" });
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.email_sent', tenantId, {
+        recipient_type: recipient,
+        user_id: recipient === 'member' ? user_id : undefined,
+        recipient_count: recipients.length,
+        subject: subject.trim(),
+      });
+
+      res.json({ ok: true, recipient_count: recipients.length });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/send-email]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.patch('/api/admin/tenants/:id/notes', requireSuperAdmin, async (req: any, res: any) => {

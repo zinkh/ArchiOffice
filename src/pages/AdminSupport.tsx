@@ -1,8 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
+import { openSignedUrl } from '../lib/signedStorageUrl';
+import { SignedImage } from '../components/SignedImage';
 import {
   IconMessageCircle, IconLoader2, IconArrowLeft, IconSend, IconLock, IconLockOpen,
+  IconPaperclip, IconX, IconFile, IconDownload,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -11,7 +15,9 @@ interface Ticket {
   created_by_name: string | null; created_at: string; last_message_at: string;
 }
 interface Message {
-  id: string; author_type: 'tenant' | 'platform'; author_name: string | null; body: string; created_at: string;
+  id: string; author_type: 'tenant' | 'platform'; author_name: string | null; body: string;
+  attachment_url?: string | null; attachment_name?: string | null; attachment_type?: string | null;
+  created_at: string;
 }
 interface TicketDetail extends Ticket { messages: Message[] }
 
@@ -31,7 +37,18 @@ function Bubble({ msg }: { msg: Message }) {
         isPlatform ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
       )}>
         <p className="text-[11px] opacity-70 mb-0.5">{msg.author_name || (isPlatform ? 'Support ArchiOffice' : 'Cabinet')}</p>
-        <p className="whitespace-pre-wrap">{msg.body}</p>
+        {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
+        {msg.attachment_url && (
+          msg.attachment_type?.startsWith('image/') ? (
+            <button type="button" onClick={() => openSignedUrl(msg.attachment_url!)} className="block">
+              <SignedImage src={msg.attachment_url} alt={msg.attachment_name || 'pièce jointe'} className="mt-1 rounded-lg max-w-full max-h-48" />
+            </button>
+          ) : (
+            <button type="button" onClick={() => openSignedUrl(msg.attachment_url!)} className={cn('flex items-center gap-1.5 text-xs mt-1 hover:underline', isPlatform ? 'text-white' : 'text-blue-600 dark:text-blue-400')}>
+              <IconFile size={13} /> {msg.attachment_name} <IconDownload size={12} />
+            </button>
+          )
+        )}
         <p className="text-[10px] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
       </div>
     </div>
@@ -46,7 +63,9 @@ export default function AdminSupport() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [reply, setReply] = useState('');
+  const [replyAttachment, setReplyAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const replyFileRef = useRef<HTMLInputElement>(null);
 
   const loadTickets = useCallback(async () => {
     setLoading(true);
@@ -66,11 +85,20 @@ export default function AdminSupport() {
   useEffect(() => { if (activeId) loadDetail(activeId); }, [activeId, loadDetail]);
 
   async function handleReply() {
-    if (!activeId || !reply.trim()) return;
+    if (!activeId || (!reply.trim() && !replyAttachment)) return;
     setSending(true);
     try {
-      await apiFetch(`/api/admin/support/tickets/${activeId}/messages`, { method: 'POST', body: JSON.stringify({ body: reply }) });
-      setReply('');
+      if (replyAttachment) {
+        const fd = new FormData();
+        if (reply.trim()) fd.append('body', reply);
+        fd.append('file', replyAttachment);
+        const token = await getAccessToken();
+        const res = await fetch(`/api/admin/support/tickets/${activeId}/messages`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Erreur lors de l'envoi");
+      } else {
+        await apiFetch(`/api/admin/support/tickets/${activeId}/messages`, { method: 'POST', body: JSON.stringify({ body: reply }) });
+      }
+      setReply(''); setReplyAttachment(null);
       await loadDetail(activeId);
       await loadTickets();
     } catch (e: any) {
@@ -111,21 +139,33 @@ export default function AdminSupport() {
           <div className="space-y-3 max-h-[50vh] overflow-y-auto py-2">
             {detail.messages.map(m => <Bubble key={m.id} msg={m} />)}
           </div>
-          <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
-            <textarea
-              value={reply} onChange={e => setReply(e.target.value)} rows={2}
-              placeholder="Votre réponse…"
-              className="flex-1 p-2 rounded-lg text-sm resize-none"
-              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-            />
-            <button
-              onClick={handleReply}
-              disabled={sending || !reply.trim()}
-              className="px-3 rounded-lg text-white disabled:opacity-50 flex items-center justify-center"
-              style={{ background: 'var(--tblr-primary)' }}
-            >
-              {sending ? <IconLoader2 size={16} className="animate-spin" /> : <IconSend size={16} />}
-            </button>
+          <div className="pt-2 border-t space-y-2" style={{ borderColor: 'var(--tblr-border)' }}>
+            {replyAttachment && (
+              <div className="flex items-center gap-1.5 text-xs rounded-lg px-2 py-1 w-fit" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                <IconFile size={13} /> {replyAttachment.name}
+                <button onClick={() => setReplyAttachment(null)} className="hover:text-red-500"><IconX size={12} /></button>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input type="file" ref={replyFileRef} className="hidden" onChange={e => setReplyAttachment(e.target.files?.[0] || null)} />
+              <button onClick={() => replyFileRef.current?.click()} className="p-2 hover:text-blue-600 transition-colors flex-shrink-0" style={{ color: 'var(--tblr-muted)' }} title="Joindre un fichier">
+                <IconPaperclip size={18} />
+              </button>
+              <textarea
+                value={reply} onChange={e => setReply(e.target.value)} rows={2}
+                placeholder="Votre réponse…"
+                className="flex-1 p-2 rounded-lg text-sm resize-none"
+                style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              />
+              <button
+                onClick={handleReply}
+                disabled={sending || (!reply.trim() && !replyAttachment)}
+                className="px-3 rounded-lg text-white disabled:opacity-50 flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--tblr-primary)' }}
+              >
+                {sending ? <IconLoader2 size={16} className="animate-spin" /> : <IconSend size={16} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>

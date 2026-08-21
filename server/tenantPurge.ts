@@ -14,7 +14,7 @@ const DEFAULT_CHECK_INTERVAL_HOURS = 24;
 // Buckets whose files are namespaced by `${tenantId}/...` (see server.ts's
 // uploadToStorage call sites) — best-effort cleanup, not privacy-critical
 // once the referencing rows are gone, but avoids leaving orphaned files.
-const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos'];
+const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos', 'support-attachments'];
 
 async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
   for (const bucket of TENANT_PREFIXED_BUCKETS) {

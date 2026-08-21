@@ -19,6 +19,8 @@ interface BillingStatus {
   tenant_name?: string | null;
   pending_plan?: string | null;
   plan_change_requested_at?: string | null;
+  payment_failed?: boolean;
+  failed_plan_id?: string | null;
   usage: {
     projects: { used: number; limit: number };
     users: { used: number; limit: number };
@@ -275,6 +277,25 @@ export default function Billing() {
         <div className="flex items-center gap-3 p-4 rounded-xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-400 text-sm">
           <IconAlertTriangle size={18} />
           Votre période d'essai a expiré. Souscrivez à un plan pour retrouver l'accès à toutes les fonctionnalités.
+        </div>
+      )}
+
+      {status?.payment_failed && (
+        <div className="flex items-center gap-3 p-4 rounded-xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-400 text-sm">
+          <IconAlertTriangle size={18} className="flex-shrink-0" />
+          <span className="flex-1">
+            Le paiement de votre abonnement {status.failed_plan_id ? <strong>{PLANS[status.failed_plan_id as PlanId]?.name || status.failed_plan_id}</strong> : ''} a échoué.
+            Votre accès actuel n'est pas affecté, mais le changement de plan n'a pas eu lieu.
+          </span>
+          {status.failed_plan_id && (
+            <button
+              onClick={() => handleCheckout(status.failed_plan_id as PlanId)}
+              disabled={checkingOut !== null}
+              className="text-xs font-semibold underline hover:no-underline disabled:opacity-50 flex-shrink-0"
+            >
+              Réessayer
+            </button>
+          )}
         </div>
       )}
 
