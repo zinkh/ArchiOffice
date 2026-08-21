@@ -972,6 +972,7 @@ export default {
       "calendar_google_connected_toast": "Google Calendar connecté. Les événements de votre agenda Google s'affichent en lecture seule sur le Calendrier ; les jalons et tâches que vous synchronisez sont créés dans Google Calendar et toute modification faite directement là-bas sera écrasée à la prochaine synchronisation.",
       "correspondence_title": "Correspondance",
       "correspondence_connect_gmail": "Connecter Gmail",
+      "correspondence_connect_outlook": "Connecter Outlook",
       "correspondence_connect_imap": "Connecter ma messagerie",
       "correspondence_connect_imap_host": "Serveur IMAP",
       "correspondence_connect_imap_port": "Port",

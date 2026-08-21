@@ -924,6 +924,7 @@ export default {
       "calendar_google_connected_toast": "Google Calendar connected. Events from your Google calendar show up read-only on the Calendar page; milestones and tasks you sync are created in Google Calendar, and any change made directly there will be overwritten on the next sync.",
       "correspondence_title": "Correspondence",
       "correspondence_connect_gmail": "Connect Gmail",
+      "correspondence_connect_outlook": "Connect Outlook",
       "correspondence_connect_imap": "Connect my mailbox",
       "correspondence_connect_imap_host": "IMAP server",
       "correspondence_connect_imap_port": "Port",

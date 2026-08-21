@@ -30,9 +30,33 @@ const SEARCH_LIMIT = 20;
 const INBOX_DEFAULT_LIMIT = 25;
 const INBOX_MAX_LIMIT = 100;
 const CONNECT_TIMEOUT_MS = 10000;
+// imapflow's own `connectionTimeout` bounds the connect phase, but a TCP
+// handshake that's silently dropped by a firewall (SYN sent, nothing back —
+// as opposed to an active refusal) can still leave requests hanging well
+// past that budget in some environments. This is a second, unconditional
+// backstop around every ImapFlow operation in this file so the HTTP
+// response is never held open indefinitely: on expiry it force-closes the
+// client (safe to call at any point, even mid-connect) and rejects.
+const HARD_TIMEOUT_MS = 15000;
+
+function withHardTimeout<T>(client: ImapFlow, promise: Promise<T>, ms = HARD_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try { client.close(); } catch { /* already closed / never opened */ }
+      const err: any = new Error('Délai dépassé : le serveur IMAP ne répond pas.');
+      err.code = 'HARD_TIMEOUT';
+      reject(err);
+    }, ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
 
 function friendlyImapError(error: any): string {
   const msg = String(error?.message || error);
+  if (error?.code === 'HARD_TIMEOUT') return msg;
   if (/auth/i.test(msg) || error?.authenticationFailed) return "Échec de l'authentification : vérifiez l'adresse et le mot de passe.";
   if (/ENOTFOUND|EAI_AGAIN/.test(msg)) return "Serveur IMAP introuvable : vérifiez l'hôte.";
   if (/ECONNREFUSED/.test(msg)) return "Connexion refusée : vérifiez l'hôte et le port.";
@@ -89,7 +113,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
         connectionTimeout: CONNECT_TIMEOUT_MS,
       });
       try {
-        await client.connect();
+        await withHardTimeout(client, client.connect());
       } catch (err: any) {
         return res.status(400).json({ error: friendlyImapError(err) });
       }
@@ -159,38 +183,40 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
 
       const results: any[] = [];
       try {
-        await client.connect();
+        await withHardTimeout(client, (async () => {
+          await client.connect();
 
-        const mailboxes = await client.list();
-        const sentBox = mailboxes.find(m => m.specialUse === '\\Sent');
-        const folders = ['INBOX', ...(sentBox ? [sentBox.path] : [])];
+          const mailboxes = await client.list();
+          const sentBox = mailboxes.find(m => m.specialUse === '\\Sent');
+          const folders = ['INBOX', ...(sentBox ? [sentBox.path] : [])];
 
-        for (const folder of folders) {
-          if (results.length >= SEARCH_LIMIT) break;
-          try {
-            await client.mailboxOpen(folder);
-          } catch {
-            continue; // folder may not exist / not selectable — skip it
-          }
-          const uids = await client.search({ or: [{ from: email }, { to: email }] }, { uid: true });
-          if (!uids || uids.length === 0) continue;
-          const recentUids = uids.slice(-SEARCH_LIMIT).reverse();
-          for await (const msg of client.fetch(recentUids, { envelope: true, uid: true }, { uid: true })) {
-            const addr = (list?: { name?: string; address?: string }[]) =>
-              (list || []).map(a => a.address).filter(Boolean).join(', ');
-            results.push({
-              uid: msg.uid,
-              folder,
-              subject: msg.envelope?.subject || '',
-              from: addr(msg.envelope?.from),
-              to: addr(msg.envelope?.to),
-              date: msg.envelope?.date || null,
-            });
+          for (const folder of folders) {
             if (results.length >= SEARCH_LIMIT) break;
+            try {
+              await client.mailboxOpen(folder);
+            } catch {
+              continue; // folder may not exist / not selectable — skip it
+            }
+            const uids = await client.search({ or: [{ from: email }, { to: email }] }, { uid: true });
+            if (!uids || uids.length === 0) continue;
+            const recentUids = uids.slice(-SEARCH_LIMIT).reverse();
+            for await (const msg of client.fetch(recentUids, { envelope: true, uid: true }, { uid: true })) {
+              const addr = (list?: { name?: string; address?: string }[]) =>
+                (list || []).map(a => a.address).filter(Boolean).join(', ');
+              results.push({
+                uid: msg.uid,
+                folder,
+                subject: msg.envelope?.subject || '',
+                from: addr(msg.envelope?.from),
+                to: addr(msg.envelope?.to),
+                date: msg.envelope?.date || null,
+              });
+              if (results.length >= SEARCH_LIMIT) break;
+            }
           }
-        }
+        })());
       } finally {
-        try { await client.logout(); } catch { /* connection may already be closed */ }
+        try { await client.logout(); } catch { /* connection may already be closed, or force-closed by the hard timeout */ }
       }
 
       await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update({ last_synced_at: new Date().toISOString() }).eq('id', connection.id);
@@ -224,25 +250,27 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
 
       const results: any[] = [];
       try {
-        await client.connect();
-        const mailbox = await client.mailboxOpen('INBOX');
-        if (mailbox.exists > 0) {
-          const start = Math.max(1, mailbox.exists - limit + 1);
-          const addr = (list?: { name?: string; address?: string }[]) =>
-            (list || []).map(a => a.address).filter(Boolean).join(', ');
-          for await (const msg of client.fetch(`${start}:*`, { envelope: true, uid: true }, { uid: true })) {
-            results.push({
-              uid: msg.uid,
-              folder: 'INBOX',
-              subject: msg.envelope?.subject || '',
-              from: addr(msg.envelope?.from),
-              to: addr(msg.envelope?.to),
-              date: msg.envelope?.date || null,
-            });
+        await withHardTimeout(client, (async () => {
+          await client.connect();
+          const mailbox = await client.mailboxOpen('INBOX');
+          if (mailbox.exists > 0) {
+            const start = Math.max(1, mailbox.exists - limit + 1);
+            const addr = (list?: { name?: string; address?: string }[]) =>
+              (list || []).map(a => a.address).filter(Boolean).join(', ');
+            for await (const msg of client.fetch(`${start}:*`, { envelope: true, uid: true }, { uid: true })) {
+              results.push({
+                uid: msg.uid,
+                folder: 'INBOX',
+                subject: msg.envelope?.subject || '',
+                from: addr(msg.envelope?.from),
+                to: addr(msg.envelope?.to),
+                date: msg.envelope?.date || null,
+              });
+            }
           }
-        }
+        })());
       } finally {
-        try { await client.logout(); } catch { /* connection may already be closed */ }
+        try { await client.logout(); } catch { /* connection may already be closed, or force-closed by the hard timeout */ }
       }
 
       results.reverse(); // fetch returns ascending sequence order — newest last

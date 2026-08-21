@@ -6,7 +6,7 @@
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
 import { useMailConnections } from '../hooks/useMailConnections';
@@ -14,7 +14,7 @@ import { useMailConnections } from '../hooks/useMailConnections';
 type LocalType = 'project' | 'proposal' | 'tender';
 
 interface Message {
-  provider: 'google' | 'infomaniak';
+  provider: 'google' | 'microsoft' | 'infomaniak';
   externalMessageId: string;
   externalThreadId?: string | null;
   subject: string;
@@ -29,15 +29,17 @@ const PAGE_SIZE = 25;
 export default function Mailbox() {
   const { t } = useTranslation();
   const {
-    gmailStatus, imapStatus, error, setError,
+    gmailStatus, outlookStatus, imapStatus, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
-    connectGmail, disconnectGmail, connectImap, disconnectImap, anyConnected,
+    connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
   } = useMailConnections();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [gmailPageToken, setGmailPageToken] = useState<string | null>(null);
   const [gmailHasMore, setGmailHasMore] = useState(true);
+  const [outlookPageToken, setOutlookPageToken] = useState<string | null>(null);
+  const [outlookHasMore, setOutlookHasMore] = useState(true);
   const [imapLimit, setImapLimit] = useState(PAGE_SIZE);
   const [imapHasMore, setImapHasMore] = useState(true);
   const [attachTarget, setAttachTarget] = useState<Message | null>(null);
@@ -69,6 +71,21 @@ export default function Mailbox() {
               provider: 'google' as const,
               externalMessageId: r.id,
               externalThreadId: r.threadId,
+              subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
+            }));
+          })
+        );
+      }
+      if (outlookStatus.connected && (opts.append ? outlookHasMore : true)) {
+        jobs.push(
+          apiFetch<{ messages: any[]; nextPageToken: string | null }>(
+            `/api/outlook/messages${opts.append && outlookPageToken ? `?pageToken=${encodeURIComponent(outlookPageToken)}` : ''}`
+          ).then(res => {
+            setOutlookPageToken(res.nextPageToken);
+            setOutlookHasMore(!!res.nextPageToken);
+            return res.messages.map(r => ({
+              provider: 'microsoft' as const,
+              externalMessageId: r.id,
               subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
             }));
           })
@@ -109,20 +126,26 @@ export default function Mailbox() {
     } finally {
       setLoading(false);
     }
-  }, [gmailStatus.connected, imapStatus.connected, gmailPageToken, gmailHasMore, imapLimit, imapHasMore, setError, t]);
+  }, [
+    gmailStatus.connected, outlookStatus.connected, imapStatus.connected,
+    gmailPageToken, gmailHasMore, outlookPageToken, outlookHasMore, imapLimit, imapHasMore,
+    setError, t,
+  ]);
 
   useEffect(() => {
     if (anyConnected) {
       setGmailPageToken(null);
       setGmailHasMore(true);
+      setOutlookPageToken(null);
+      setOutlookHasMore(true);
       setImapLimit(PAGE_SIZE);
       setImapHasMore(true);
       loadMessages({ append: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gmailStatus.connected, imapStatus.connected]);
+  }, [gmailStatus.connected, outlookStatus.connected, imapStatus.connected]);
 
-  const hasMore = (gmailStatus.connected && gmailHasMore) || (imapStatus.connected && imapHasMore);
+  const hasMore = (gmailStatus.connected && gmailHasMore) || (outlookStatus.connected && outlookHasMore) || (imapStatus.connected && imapHasMore);
 
   const attach = async (localType: LocalType, localId: string) => {
     if (!attachTarget) return;
@@ -165,6 +188,17 @@ export default function Mailbox() {
         ) : (
           <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
             <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
+          </button>
+        )}
+
+        {outlookStatus.connected ? (
+          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            <IconBrandWindows size={13} /> {outlookStatus.email}
+            <button onClick={disconnectOutlook} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
+          </span>
+        ) : (
+          <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+            <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
           </button>
         )}
 
