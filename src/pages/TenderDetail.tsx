@@ -16,6 +16,7 @@ import { fetchJson } from '../lib/api';
 import { Tender, Contact, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
+import CorrespondenceTab from '../components/CorrespondenceTab';
 import { formatCurrency, cn } from '../lib/utils';
 
 export default function TenderDetail() {
@@ -212,6 +213,16 @@ export default function TenderDetail() {
         <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-8 overflow-hidden">
           <OrgChart data={orgData} />
         </div>
+      </div>
+
+      {/* Correspondance */}
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
+        <h3 className="font-bold text-zinc-900 dark:text-white mb-6">{t('correspondence_title')}</h3>
+        <CorrespondenceTab
+          localType="tender"
+          localId={tender.id}
+          contactEmail={contacts.find(c => c.id === tender.mandataire_id)?.email}
+        />
       </div>
 
       {/* Management Controls */}
