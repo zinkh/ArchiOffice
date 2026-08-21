@@ -6,12 +6,15 @@ import type { Express } from 'express';
 import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { notifyTenantAdmins } from '../mailer';
+import { handleDocumentUpload } from '../documentUpload';
+import { sanitizeFilename } from '../sanitizeFilename';
 
 export interface RouteDeps {
   supabaseAdmin: any;
+  uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
 }
 
-export function registerAdminSupportRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
+export function registerAdminSupportRoutes(app: Express, { supabaseAdmin, uploadToStorage }: RouteDeps) {
   async function requireSuperAdmin(req: any, res: any, next: any) {
     if (!(await isSuperAdmin(supabaseAdmin, req.user))) {
       return res.status(403).json({ error: 'Accès réservé au super-administrateur' });
@@ -44,22 +47,35 @@ export function registerAdminSupportRoutes(app: Express, { supabaseAdmin }: Rout
       if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
       const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', (ticket as any).tenant_id).maybeSingle();
       const { data: messages } = await supabaseAdmin.from('support_messages')
-        .select('id, author_type, author_name, body, created_at').eq('ticket_id', req.params.id).order('created_at', { ascending: true });
+        .select('id, author_type, author_name, body, attachment_url, attachment_name, attachment_type, created_at').eq('ticket_id', req.params.id).order('created_at', { ascending: true });
       res.json({ ...ticket, tenant_name: (tenant as any)?.name || null, messages: messages || [] });
     } catch (e: any) {
       console.error("[GET /api/admin/support/tickets/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/admin/support/tickets/:id/messages', requireSuperAdmin, async (req: any, res: any) => {
+  app.post('/api/admin/support/tickets/:id/messages', requireSuperAdmin, handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const { body } = req.body;
-      if (!body?.trim()) return res.status(400).json({ error: 'Message requis' });
+      const file = req.file;
+      if (!body?.trim() && !file) return res.status(400).json({ error: 'Message ou pièce jointe requis' });
       const { data: ticket } = await supabaseAdmin.from('support_tickets').select('id, tenant_id, subject').eq('id', req.params.id).maybeSingle();
       if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
       const authorName = req.user.email || 'Support ArchiOffice';
 
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        // No tenant of their own to namespace under — use the ticket's
+        // actual tenant, matching the storage-path convention every other
+        // upload route follows (server/routes/storageAccess.ts's
+        // ownership check relies on that `${tenantId}/...` prefix).
+        const storagePath = `${(ticket as any).tenant_id}/${req.params.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('support-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const { data: message, error } = await supabaseAdmin.from('support_messages')
-        .insert({ ticket_id: req.params.id, tenant_id: (ticket as any).tenant_id, author_type: 'platform', author_name: authorName, body: body.trim() })
+        .insert({ ticket_id: req.params.id, tenant_id: (ticket as any).tenant_id, author_type: 'platform', author_name: authorName, body: body?.trim() || '', attachment_url, attachment_name, attachment_type })
         .select().single();
       if (error) throw error;
       await supabaseAdmin.from('support_tickets')
@@ -70,7 +86,7 @@ export function registerAdminSupportRoutes(app: Express, { supabaseAdmin }: Rout
       notifyTenantAdmins(
         supabaseAdmin, (ticket as any).tenant_id,
         `[Support ArchiOffice] Réponse à votre ticket — ${(ticket as any).subject}`,
-        `<p>L'équipe ArchiOffice a répondu à votre ticket :</p><p>${body.trim().replace(/\n/g, '<br>')}</p>`
+        `<p>L'équipe ArchiOffice a répondu à votre ticket :</p><p>${(body?.trim() || '(pièce jointe seule)').replace(/\n/g, '<br>')}</p>`
       ).catch(() => {});
 
       res.status(201).json(message);

@@ -6,14 +6,17 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { notifyPlatformAdmins } from '../mailer';
+import { handleDocumentUpload } from '../documentUpload';
+import { sanitizeFilename } from '../sanitizeFilename';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
+  uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
 }
 
-export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName }: RouteDeps) {
+export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, uploadToStorage }: RouteDeps) {
   app.get('/api/support/tickets', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -26,12 +29,13 @@ export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId
       console.error("[GET /api/support/tickets]", e); res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/support/tickets', async (req: any, res: any) => {
+  app.post('/api/support/tickets', handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { subject, message } = req.body;
-      if (!subject?.trim() || !message?.trim()) {
-        return res.status(400).json({ error: 'Sujet et message requis' });
+      const file = req.file;
+      if (!subject?.trim() || (!message?.trim() && !file)) {
+        return res.status(400).json({ error: 'Sujet et message (ou pièce jointe) requis' });
       }
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single();
@@ -42,8 +46,17 @@ export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId
         .single();
       if (error) throw error;
 
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${(ticket as any).id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('support-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       await tenantScopedFrom(supabaseAdmin, tenantId, 'support_messages').insert({
-        ticket_id: (ticket as any).id, author_type: 'tenant', author_name: userName, body: message.trim(),
+        ticket_id: (ticket as any).id, author_type: 'tenant', author_name: userName,
+        body: message?.trim() || '', attachment_url, attachment_name, attachment_type,
       });
 
       notifyPlatformAdmins(
@@ -51,7 +64,7 @@ export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId
         `[Support ArchiOffice] Nouveau ticket — ${(tenant as any)?.name || 'Cabinet'}`,
         `<p><strong>${userName}</strong> (${(tenant as any)?.name || 'Cabinet'}) a ouvert un ticket :</p>
          <p><strong>${subject.trim()}</strong></p>
-         <p>${message.trim().replace(/\n/g, '<br>')}</p>`
+         <p>${(message?.trim() || '(pièce jointe seule)').replace(/\n/g, '<br>')}</p>`
       ).catch(() => {});
 
       res.status(201).json(ticket);
@@ -67,23 +80,32 @@ export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId
       if (error) throw error;
       if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
       const { data: messages } = await tenantScopedFrom(supabaseAdmin, tenantId, 'support_messages')
-        .select('id, author_type, author_name, body, created_at').eq('ticket_id', req.params.id).order('created_at', { ascending: true });
+        .select('id, author_type, author_name, body, attachment_url, attachment_name, attachment_type, created_at').eq('ticket_id', req.params.id).order('created_at', { ascending: true });
       res.json({ ...ticket, messages: messages || [] });
     } catch (e: any) {
       console.error("[GET /api/support/tickets/:id]", e); res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/support/tickets/:id/messages', async (req: any, res: any) => {
+  app.post('/api/support/tickets/:id/messages', handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { body } = req.body;
-      if (!body?.trim()) return res.status(400).json({ error: 'Message requis' });
+      const file = req.file;
+      if (!body?.trim() && !file) return res.status(400).json({ error: 'Message ou pièce jointe requis' });
       const { data: ticket } = await tenantScopedFrom(supabaseAdmin, tenantId, 'support_tickets').select('id, subject').eq('id', req.params.id).maybeSingle();
       if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
 
+      let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
+      if (file) {
+        const storagePath = `${tenantId}/${req.params.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+        attachment_url = await uploadToStorage('support-attachments', storagePath, file.buffer, file.mimetype);
+        attachment_name = file.originalname;
+        attachment_type = file.mimetype;
+      }
+
       const { data: message, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'support_messages')
-        .insert({ ticket_id: req.params.id, author_type: 'tenant', author_name: userName, body: body.trim() })
+        .insert({ ticket_id: req.params.id, author_type: 'tenant', author_name: userName, body: body?.trim() || '', attachment_url, attachment_name, attachment_type })
         .select().single();
       if (error) throw error;
       await tenantScopedFrom(supabaseAdmin, tenantId, 'support_tickets')
@@ -92,7 +114,7 @@ export function registerSupportRoutes(app: Express, { supabaseAdmin, getTenantId
       notifyPlatformAdmins(
         supabaseAdmin,
         `[Support ArchiOffice] Réponse — ${(ticket as any).subject}`,
-        `<p><strong>${userName}</strong> a répondu :</p><p>${body.trim().replace(/\n/g, '<br>')}</p>`
+        `<p><strong>${userName}</strong> a répondu :</p><p>${(body?.trim() || '(pièce jointe seule)').replace(/\n/g, '<br>')}</p>`
       ).catch(() => {});
 
       res.status(201).json(message);

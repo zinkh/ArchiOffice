@@ -463,7 +463,7 @@ export async function createApp() {
   // that reference for a short-lived signed URL after checking the caller's
   // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'support-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -686,8 +686,8 @@ export async function createApp() {
   registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
-  registerAdminSupportRoutes(app, { supabaseAdmin });
-  registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerAdminSupportRoutes(app, { supabaseAdmin, uploadToStorage });
+  registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

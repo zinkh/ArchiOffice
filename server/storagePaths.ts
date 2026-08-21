@@ -23,6 +23,7 @@ export const PRIVATE_STORAGE_BUCKETS = new Set([
   'message-attachments',
   'feed-attachments',
   'meeting-photos',
+  'support-attachments',
 ]);
 
 export interface ParsedStorageRef {
