@@ -41,6 +41,9 @@ import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntrepr
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
 import { registerGoogleCalendarSyncRoutes } from "./server/routes/googleCalendarSync";
+import { registerGmailSyncRoutes } from "./server/routes/gmailSync";
+import { registerImapMailSyncRoutes } from "./server/routes/imapMailSync";
+import { registerMailLinkRoutes } from "./server/mailLinks";
 import { registerZohoBooksRoutes } from "./server/routes/zohoBooks";
 import { registerRagicRoutes } from "./server/routes/ragic";
 import { registerOdooRoutes } from "./server/routes/odoo";
@@ -515,7 +518,7 @@ export async function createApp() {
     // navigation — they can't carry our app's JWT. These recover the
     // tenant (and, for Google Calendar, the user) from a one-time state
     // nonce instead (server/oauthState.ts), not from req.user.
-    "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback",
+    "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback", "/api/gmail/callback",
     // Called by Ragic itself (external, no JWT) — authenticated via a
     // `secret` query param checked against the tenant's own ragic_api_key
     // inside the handler, not via our session auth. Was missing here, so
@@ -693,6 +696,9 @@ export async function createApp() {
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerGmailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerImapMailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerRagicRoutes(app, { supabaseAdmin, getTenantId });
   registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

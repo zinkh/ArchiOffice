@@ -17,7 +17,11 @@ const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // userId is optional — Zoho/Odoo-style integrations are per-tenant and never
 // set it; the Google Calendar sync flow (per-user, not per-tenant, since
 // each team member connects their own personal calendar) does.
-const pendingStates = new Map<string, { tenantId: string; userId?: string; expiresAt: number }>();
+// returnTo is optional too — the Gmail connector (server/routes/
+// gmailSync.ts) uses it so the callback can redirect back to whichever
+// project/contact page the user started the connection from, instead of a
+// single hardcoded page like Google Calendar's.
+const pendingStates = new Map<string, { tenantId: string; userId?: string; returnTo?: string; expiresAt: number }>();
 
 function cleanupExpired() {
   const now = Date.now();
@@ -26,20 +30,21 @@ function cleanupExpired() {
   }
 }
 
-export function createOAuthState(tenantId: string, userId?: string): string {
+export function createOAuthState(tenantId: string, userId?: string, returnTo?: string): string {
   cleanupExpired();
   const state = crypto.randomUUID();
-  pendingStates.set(state, { tenantId, userId, expiresAt: Date.now() + STATE_TTL_MS });
+  pendingStates.set(state, { tenantId, userId, returnTo, expiresAt: Date.now() + STATE_TTL_MS });
   return state;
 }
 
-// One-time use: returns { tenantId, userId } and removes the entry, or null
-// if the state is missing, unknown, expired, or already consumed.
-export function consumeOAuthState(state: string | undefined): { tenantId: string; userId?: string } | null {
+// One-time use: returns { tenantId, userId, returnTo } and removes the
+// entry, or null if the state is missing, unknown, expired, or already
+// consumed.
+export function consumeOAuthState(state: string | undefined): { tenantId: string; userId?: string; returnTo?: string } | null {
   if (!state) return null;
   const entry = pendingStates.get(state);
   if (!entry) return null;
   pendingStates.delete(state);
   if (entry.expiresAt < Date.now()) return null;
-  return { tenantId: entry.tenantId, userId: entry.userId };
+  return { tenantId: entry.tenantId, userId: entry.userId, returnTo: entry.returnTo };
 }

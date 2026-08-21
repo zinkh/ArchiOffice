@@ -6,6 +6,7 @@ import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson, apiFetch } from '../lib/api';
 import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import CorrespondenceTab from '../components/CorrespondenceTab';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
@@ -1119,6 +1120,12 @@ export default function Contacts() {
                 </button>
               </div>
             </form>
+            {isEditing && editingId && (
+              <div className="p-6 pt-0">
+                <h4 className="text-sm font-bold uppercase tracking-widest pb-2 mb-4" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('correspondence_title')}</h4>
+                <CorrespondenceTab localType="contact" localId={editingId} contactEmail={newContact.email || newContact.email_work || newContact.email_home} />
+              </div>
+            )}
           </motion.div>
         </div>
       )}

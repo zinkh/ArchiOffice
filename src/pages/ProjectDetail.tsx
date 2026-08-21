@@ -44,6 +44,7 @@ import {
   IconTools,
   IconReportMoney,
   IconClipboardCheck,
+  IconMail,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
@@ -66,6 +67,7 @@ import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ConstructionReportModule from '../components/ConstructionReportModule';
 import SiteReports from '../components/SiteReports';
 import MilestoneGantt from '../components/MilestoneGantt';
+import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProTab } from '../components/pro/ProTab';
 import Situations from './Situations';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
@@ -1495,6 +1497,7 @@ export default function ProjectDetail() {
             { id: 'DET', label: 'DET', icon: IconTools },
             { id: 'RDT', label: 'RDT', icon: IconReportMoney },
             { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
+            { id: 'CORRESPONDANCE', label: t('correspondence_title') as string, icon: IconMail },
           ] as PillTabItem[]).filter(tab =>
             !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
           )}
@@ -3818,6 +3821,11 @@ export default function ProjectDetail() {
               </div>
             )}
 
+            {activeTab === 'CORRESPONDANCE' && (
+              <div className="space-y-8">
+                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} />
+              </div>
+            )}
             {activeTab === 'AOR' && (
               <div className="space-y-8">
                 <ReserveTracker
