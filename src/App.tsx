@@ -43,6 +43,7 @@ const Gantt = lazy(() => import('./pages/Gantt'));
 const CalendarPage = lazy(() => import('./pages/Calendar'));
 const Kanban = lazy(() => import('./pages/Kanban'));
 const Contacts = lazy(() => import('./pages/Contacts'));
+const Mailbox = lazy(() => import('./pages/Mailbox'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const References = lazy(() => import('./pages/References'));
@@ -813,6 +814,7 @@ export default function App() {
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/kanban" element={<Kanban />} />
               <Route path="/contacts" element={<Contacts />} />
+              <Route path="/mailbox" element={<Mailbox />} />
               <Route path="/templates" element={<ProjectTemplates />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />

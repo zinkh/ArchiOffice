@@ -18,6 +18,7 @@ import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProposalExportModal } from '../components/ProposalExportModal';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
 import { useMafCost } from '../hooks/useMafCost';
@@ -1196,6 +1197,13 @@ export default function Proposals() {
                   </div>
                 )}
               </form>
+
+              {editingProposal && (
+                <div className="px-6 pb-6">
+                  <h4 className="text-sm font-bold uppercase tracking-widest pb-2 mb-4" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('correspondence_title')}</h4>
+                  <CorrespondenceTab localType="proposal" localId={editingProposal.id} contactEmail={editingProposal.email_client} />
+                </div>
+              )}
 
               {submitError && (
                 <div className="px-6 py-3 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">

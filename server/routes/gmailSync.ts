@@ -24,6 +24,7 @@ export interface RouteDeps {
 
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const SEARCH_LIMIT = 20;
+const INBOX_PAGE_SIZE = 25;
 
 // Only a same-origin relative path is safe to redirect to — reject anything
 // that could send the post-consent redirect off ArchiOffice (open redirect),
@@ -195,6 +196,43 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
+  // Shared by /search (filtered by an address) and /messages (plain inbox
+  // listing) — lists message ids for a query, then fetches header metadata
+  // only (never the body) for each. `q` follows Gmail's search syntax.
+  async function fetchGmailMessages(accessToken: string, q: string, maxResults: number, pageToken?: string) {
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+    if (q) listUrl.searchParams.set('q', q);
+    listUrl.searchParams.set('maxResults', String(maxResults));
+    if (pageToken) listUrl.searchParams.set('pageToken', pageToken);
+    const listResp = await fetch(listUrl.toString(), { headers });
+    const listData: any = await listResp.json();
+    if (!listResp.ok) throw new Error(listData.error?.message || 'Échec de la récupération Gmail');
+
+    const messages = (listData.messages || []) as { id: string; threadId: string }[];
+    const results = await Promise.all(messages.map(async (m) => {
+      const getUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`);
+      getUrl.searchParams.set('format', 'metadata');
+      ['Subject', 'From', 'To', 'Date'].forEach(h => getUrl.searchParams.append('metadataHeaders', h));
+      const getResp = await fetch(getUrl.toString(), { headers });
+      const getData: any = await getResp.json();
+      if (!getResp.ok) return null;
+      const headerValue = (name: string) => getData.payload?.headers?.find((h: any) => h.name === name)?.value || '';
+      return {
+        id: m.id,
+        threadId: m.threadId,
+        subject: headerValue('Subject'),
+        from: headerValue('From'),
+        to: headerValue('To'),
+        date: headerValue('Date'),
+        snippet: getData.snippet || '',
+      };
+    }));
+
+    return { messages: results.filter(Boolean), nextPageToken: listData.nextPageToken || null };
+  }
+
   // GET /api/gmail/search?email=<adresse> — live search, never persisted.
   app.get('/api/gmail/search', async (req: any, res: any) => {
     try {
@@ -205,39 +243,31 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       if (!email) return res.status(400).json({ error: 'email requis' });
 
       const accessToken = await getAccessToken(connection);
-      const headers = { Authorization: `Bearer ${accessToken}` };
-
-      const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
-      listUrl.searchParams.set('q', `from:${email} OR to:${email}`);
-      listUrl.searchParams.set('maxResults', String(SEARCH_LIMIT));
-      const listResp = await fetch(listUrl.toString(), { headers });
-      const listData: any = await listResp.json();
-      if (!listResp.ok) throw new Error(listData.error?.message || 'Échec de la recherche Gmail');
-
-      const messages = (listData.messages || []) as { id: string; threadId: string }[];
-      const results = await Promise.all(messages.map(async (m) => {
-        const getUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`);
-        getUrl.searchParams.set('format', 'metadata');
-        ['Subject', 'From', 'To', 'Date'].forEach(h => getUrl.searchParams.append('metadataHeaders', h));
-        const getResp = await fetch(getUrl.toString(), { headers });
-        const getData: any = await getResp.json();
-        if (!getResp.ok) return null;
-        const headerValue = (name: string) => getData.payload?.headers?.find((h: any) => h.name === name)?.value || '';
-        return {
-          id: m.id,
-          threadId: m.threadId,
-          subject: headerValue('Subject'),
-          from: headerValue('From'),
-          to: headerValue('To'),
-          date: headerValue('Date'),
-          snippet: getData.snippet || '',
-        };
-      }));
-
-      res.json(results.filter(Boolean));
+      const { messages } = await fetchGmailMessages(accessToken, `from:${email} OR to:${email}`, SEARCH_LIMIT);
+      res.json(messages);
     } catch (error: any) {
       console.error('[GET /api/gmail/search]', error.message);
       res.status(500).json({ error: error.message || 'Échec de la recherche Gmail' });
+    }
+  });
+
+  // GET /api/gmail/messages?pageToken=&maxResults= — plain inbox listing
+  // (most recent first, no address filter) for the Mailbox page, live and
+  // never persisted. pageToken/nextPageToken drive "load more".
+  app.get('/api/gmail/messages', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const { pageToken } = req.query as { pageToken?: string };
+      const maxResults = Math.min(parseInt(String(req.query.maxResults || INBOX_PAGE_SIZE), 10) || INBOX_PAGE_SIZE, 50);
+
+      const accessToken = await getAccessToken(connection);
+      const { messages, nextPageToken } = await fetchGmailMessages(accessToken, 'in:inbox', maxResults, pageToken);
+      res.json({ messages, nextPageToken });
+    } catch (error: any) {
+      console.error('[GET /api/gmail/messages]', error.message);
+      res.status(500).json({ error: error.message || "Échec de la récupération de la boîte de réception Gmail" });
     }
   });
 }

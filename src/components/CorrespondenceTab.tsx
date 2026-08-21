@@ -1,25 +1,20 @@
-// Correspondence connector for a project/contact record — lets the user
-// connect Gmail (OAuth, server/routes/gmailSync.ts) and/or a generic IMAP
-// mailbox defaulting to Infomaniak (server/routes/imapMailSync.ts), search
-// either one live for emails involving a given address, and explicitly
-// attach results to this record (server/mailLinks.ts). On the same
-// read-only, non-storing principle as Calendar.tsx's Google Calendar
-// widget: nothing is fetched or kept beyond what's attached here.
+// Correspondence connector for a project/contact/tender/proposal record —
+// lets the user connect Gmail and/or IMAP (via useMailConnections, shared
+// with the Mailbox page), search either one live for emails involving a
+// given address, and explicitly attach results to this record (server/
+// mailLinks.ts). On the same read-only, non-storing principle as
+// Calendar.tsx's Google Calendar widget: nothing is fetched or kept beyond
+// what's attached here.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconBrandGoogle, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { useMailConnections } from '../hooks/useMailConnections';
 
 interface CorrespondenceTabProps {
   localType: 'project' | 'contact' | 'tender' | 'proposal';
   localId: string;
   contactEmail?: string | null;
-}
-
-interface MailStatus {
-  connected: boolean;
-  email: string | null;
-  last_synced_at?: string | null;
 }
 
 interface SearchResult {
@@ -46,24 +41,14 @@ interface LinkedEmail {
 
 export default function CorrespondenceTab({ localType, localId, contactEmail }: CorrespondenceTabProps) {
   const { t } = useTranslation();
-  const [gmailStatus, setGmailStatus] = useState<MailStatus>({ connected: false, email: null });
-  const [imapStatus, setImapStatus] = useState<MailStatus>({ connected: false, email: null });
+  const {
+    gmailStatus, imapStatus, error, setError,
+    showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
+    connectGmail, disconnectGmail, connectImap, disconnectImap, anyConnected,
+  } = useMailConnections();
   const [linked, setLinked] = useState<LinkedEmail[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showImapForm, setShowImapForm] = useState(false);
-  const [imapForm, setImapForm] = useState({ host: 'mail.infomaniak.com', port: '993', username: '', password: '' });
-  const [imapConnecting, setImapConnecting] = useState(false);
-
-  const loadStatuses = useCallback(async () => {
-    const [gmail, imap] = await Promise.all([
-      apiFetch<MailStatus>('/api/gmail/status').catch(() => ({ connected: false, email: null })),
-      apiFetch<MailStatus>('/api/mail/imap/status').catch(() => ({ connected: false, email: null })),
-    ]);
-    setGmailStatus(gmail);
-    setImapStatus(imap);
-  }, []);
 
   const loadLinked = useCallback(async () => {
     try {
@@ -74,60 +59,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
     }
   }, [localType, localId]);
 
-  useEffect(() => { loadStatuses(); loadLinked(); }, [loadStatuses, loadLinked]);
-
-  // Handles the redirect back from Gmail's OAuth consent screen — the
-  // callback (server/routes/gmailSync.ts) sends the browser back to the
-  // page it started from, with one of these query params.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('gmail_connected')) {
-      loadStatuses();
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (params.has('gmail_error')) {
-      setError(t('correspondence_connect_imap_error') as string);
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const connectGmail = async () => {
-    try {
-      const returnTo = window.location.pathname + window.location.search;
-      const { url } = await apiFetch<{ url: string }>(`/api/gmail/auth?returnTo=${encodeURIComponent(returnTo)}`);
-      window.location.href = url;
-    } catch (err: any) {
-      setError(err?.message || null);
-    }
-  };
-
-  const disconnectGmail = async () => {
-    await apiFetch('/api/gmail/disconnect', { method: 'DELETE' });
-    setGmailStatus({ connected: false, email: null });
-    setResults(r => r.filter(res => res.provider !== 'google'));
-  };
-
-  const connectImap = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setImapConnecting(true);
-    setError(null);
-    try {
-      await apiFetch('/api/mail/imap/connect', { method: 'POST', body: JSON.stringify(imapForm) });
-      setShowImapForm(false);
-      setImapForm(f => ({ ...f, password: '' }));
-      await loadStatuses();
-    } catch (err: any) {
-      setError(err?.message || t('correspondence_connect_imap_error') as string);
-    } finally {
-      setImapConnecting(false);
-    }
-  };
-
-  const disconnectImap = async () => {
-    await apiFetch('/api/mail/imap/disconnect', { method: 'DELETE' });
-    setImapStatus({ connected: false, email: null });
-    setResults(r => r.filter(res => res.provider !== 'infomaniak'));
-  };
+  useEffect(() => { loadLinked(); }, [loadLinked]);
 
   const search = async () => {
     if (!contactEmail) return;
@@ -199,8 +131,6 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
 
   const isLinked = (result: SearchResult) =>
     linked.some(l => l.provider === result.provider && l.external_message_id === result.externalMessageId);
-
-  const anyConnected = gmailStatus.connected || imapStatus.connected;
 
   return (
     <div className="space-y-4">

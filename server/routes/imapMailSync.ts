@@ -27,6 +27,8 @@ export interface RouteDeps {
 }
 
 const SEARCH_LIMIT = 20;
+const INBOX_DEFAULT_LIMIT = 25;
+const INBOX_MAX_LIMIT = 100;
 const CONNECT_TIMEOUT_MS = 10000;
 
 function friendlyImapError(error: any): string {
@@ -195,6 +197,59 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       res.json(results);
     } catch (error: any) {
       console.error('[GET /api/mail/imap/search]', error.message);
+      res.status(500).json({ error: friendlyImapError(error) });
+    }
+  });
+
+  // GET /api/mail/imap/messages?limit= — plain INBOX listing (most recent
+  // first, no address filter) for the Mailbox page. Not cursor-paginated —
+  // "load more" on the frontend just re-requests with a larger `limit`,
+  // which is cheap enough at this scale and keeps the server stateless.
+  app.get('/api/mail/imap/messages', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Messagerie IMAP non connectée.' });
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit || INBOX_DEFAULT_LIMIT), 10) || INBOX_DEFAULT_LIMIT, 1), INBOX_MAX_LIMIT);
+
+      const password = decryptSecret(connection.imap_password_encrypted);
+      const client = new ImapFlow({
+        host: connection.imap_host,
+        port: connection.imap_port,
+        secure: true,
+        auth: { user: connection.imap_username, pass: password },
+        logger: false,
+        connectionTimeout: CONNECT_TIMEOUT_MS,
+      });
+
+      const results: any[] = [];
+      try {
+        await client.connect();
+        const mailbox = await client.mailboxOpen('INBOX');
+        if (mailbox.exists > 0) {
+          const start = Math.max(1, mailbox.exists - limit + 1);
+          const addr = (list?: { name?: string; address?: string }[]) =>
+            (list || []).map(a => a.address).filter(Boolean).join(', ');
+          for await (const msg of client.fetch(`${start}:*`, { envelope: true, uid: true }, { uid: true })) {
+            results.push({
+              uid: msg.uid,
+              folder: 'INBOX',
+              subject: msg.envelope?.subject || '',
+              from: addr(msg.envelope?.from),
+              to: addr(msg.envelope?.to),
+              date: msg.envelope?.date || null,
+            });
+          }
+        }
+      } finally {
+        try { await client.logout(); } catch { /* connection may already be closed */ }
+      }
+
+      results.reverse(); // fetch returns ascending sequence order — newest last
+      await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update({ last_synced_at: new Date().toISOString() }).eq('id', connection.id);
+      res.json(results);
+    } catch (error: any) {
+      console.error('[GET /api/mail/imap/messages]', error.message);
       res.status(500).json({ error: friendlyImapError(error) });
     }
   });
