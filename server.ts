@@ -45,6 +45,7 @@ import { registerGmailSyncRoutes } from "./server/routes/gmailSync";
 import { registerOutlookSyncRoutes } from "./server/routes/outlookSync";
 import { registerImapMailSyncRoutes } from "./server/routes/imapMailSync";
 import { registerMailLinkRoutes } from "./server/mailLinks";
+import { registerMailFolderLinkRoutes } from "./server/mailFolderLinks";
 import { registerZohoBooksRoutes } from "./server/routes/zohoBooks";
 import { registerRagicRoutes } from "./server/routes/ragic";
 import { registerOdooRoutes } from "./server/routes/odoo";
@@ -701,6 +702,7 @@ export async function createApp() {
   registerOutlookSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerImapMailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
+  registerMailFolderLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerRagicRoutes(app, { supabaseAdmin, getTenantId });
   registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

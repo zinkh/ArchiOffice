@@ -7,7 +7,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
-import { handleSingleImageUpload, sniffImageMime } from '../imageUpload';
+import { handleSingleImageUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -106,12 +106,14 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { caption } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
-      if (!sniffImageMime(file.buffer)) {
+      const sniffedMime = sniffImageMime(file.buffer);
+      if (!sniffedMime) {
         return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
       }
+      const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
       const photoId = crypto.randomUUID();
       const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
-      const file_url = await uploadToStorage('meeting-photos', storagePath, file.buffer, file.mimetype);
+      const file_url = await uploadToStorage('meeting-photos', storagePath, buffer, mimetype);
       const uploaded_at = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').insert({ id: photoId, meeting_id: id, file_url, caption: caption || null, uploaded_at });
       if (error) throw error;

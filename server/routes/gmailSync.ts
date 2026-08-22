@@ -1,19 +1,34 @@
-// Gmail connector for the "Correspondance" tab (ProjectDetail, Contacts) —
-// same OAuth shape as server/routes/googleCalendarSync.ts (full-redirect,
-// access_type=offline + stored refresh_token, state nonce from
-// server/oauthState.ts since Google's redirect back can't carry our JWT),
-// reusing the same Google OAuth client (VITE_GOOGLE_CLIENT_ID /
-// GOOGLE_CLIENT_SECRET) with an additional Gmail scope.
+// Gmail connector for the "Correspondance" tab (ProjectDetail, Contacts)
+// and the Mailbox page — same OAuth shape as server/routes/
+// googleCalendarSync.ts (full-redirect, refresh_token stored, state nonce
+// from server/oauthState.ts since Google's redirect back can't carry our
+// JWT), reusing the same Google OAuth client (VITE_GOOGLE_CLIENT_ID /
+// GOOGLE_CLIENT_SECRET).
 //
-// Deliberately read-only and non-persistent: messages are searched live on
-// demand and never stored here — only an explicit "attach" (server/
-// mailLinks.ts, POST /api/mail/links) persists anything, and only the
-// metadata needed to render a list (never the body). Sending mail is
-// unrelated to this file — it stays on the existing tenant SMTP path
-// (server/routes/sendEmail.ts).
+// Scope covers read, archive/trash, and send: `gmail.modify` is a superset
+// of `gmail.readonly` (read + write, short of permanent delete) so there's
+// no need to request both — only `gmail.modify` + `gmail.send` are asked
+// for, in one reconsent, even though send doesn't ship until later in this
+// same change: two separate re-authorization prompts a few weeks apart is
+// worse UX than one, for no implementation savings either way. An account
+// connected before this scope existed still has a token scoped to the old
+// `gmail.readonly` alone — calls to archive/trash/send will 403 with a
+// shape isInsufficientScopeError() recognizes, surfaced to the frontend as
+// { code: 'INSUFFICIENT_SCOPE' } so it can prompt reconnecting instead of
+// showing a dead-end error (src/hooks/useMailConnections.ts).
+//
+// Message content is fetched live on demand (list, full body, attachments)
+// and never persisted here — only an explicit "attach" (server/
+// mailLinks.ts, POST /api/mail/links) or "link a folder" (server/
+// mailFolderLinks.ts) stores anything, and only metadata, never a body.
 import type { Express } from 'express';
+import MailComposer from 'nodemailer/lib/mail-composer';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
+import { fetchGmailFullMessage } from '../mailFullMessage';
+import { normalizeGmailLabels } from '../mailFolders';
+import { isInsufficientScopeError } from '../mailProviderErrors';
+import { mailAttachmentUpload, ATTACHMENT_MAX_FILE_BYTES } from '../mailAttachmentUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -22,7 +37,7 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send';
 const SEARCH_LIMIT = 20;
 const INBOX_PAGE_SIZE = 25;
 
@@ -76,6 +91,15 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     return `${proto}://${host}/api/gmail/callback`;
   }
 
+  // Every handler below that calls a modify/send-scoped Gmail endpoint goes
+  // through this so an INSUFFICIENT_SCOPE response is never one-off code.
+  function respondToGmailError(res: any, resp: Response, data: any, fallbackMessage: string) {
+    if (isInsufficientScopeError('google', resp.status, data)) {
+      return res.status(403).json({ error: 'Permissions insuffisantes — reconnectez Gmail.', code: 'INSUFFICIENT_SCOPE' });
+    }
+    res.status(500).json({ error: data?.error?.message || fallbackMessage });
+  }
+
   // GET /api/gmail/status
   app.get('/api/gmail/status', async (req: any, res: any) => {
     try {
@@ -83,6 +107,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       const connection = await getConnection(tenantId, req.user.id);
       res.json({
         connected: !!connection,
+        id: connection?.id || null,
         email: connection?.external_account_email || null,
         last_synced_at: connection?.last_synced_at || null,
       });
@@ -196,14 +221,33 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
-  // Shared by /search (filtered by an address) and /messages (plain inbox
-  // listing) — lists message ids for a query, then fetches header metadata
-  // only (never the body) for each. `q` follows Gmail's search syntax.
-  async function fetchGmailMessages(accessToken: string, q: string, maxResults: number, pageToken?: string) {
+  // GET /api/gmail/folders — Gmail's labels, filtered/normalized to
+  // something that reads as "folders" (server/mailFolders.ts).
+  app.get('/api/gmail/folders', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const data: any = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || 'Échec de la récupération des labels Gmail');
+      res.json(normalizeGmailLabels(data.labels || []));
+    } catch (error: any) {
+      console.error('[GET /api/gmail/folders]', error.message);
+      res.status(500).json({ error: error.message || 'Échec de la récupération des dossiers Gmail' });
+    }
+  });
+
+  // Shared by /search (filtered by an address) and /messages (folder
+  // listing) — lists message ids for a query/label, then fetches header
+  // metadata only (never the body) for each.
+  async function fetchGmailMessages(accessToken: string, opts: { q?: string; labelIds?: string[] }, maxResults: number, pageToken?: string) {
     const headers = { Authorization: `Bearer ${accessToken}` };
 
     const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
-    if (q) listUrl.searchParams.set('q', q);
+    if (opts.q) listUrl.searchParams.set('q', opts.q);
+    (opts.labelIds || []).forEach(id => listUrl.searchParams.append('labelIds', id));
     listUrl.searchParams.set('maxResults', String(maxResults));
     if (pageToken) listUrl.searchParams.set('pageToken', pageToken);
     const listResp = await fetch(listUrl.toString(), { headers });
@@ -243,7 +287,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       if (!email) return res.status(400).json({ error: 'email requis' });
 
       const accessToken = await getAccessToken(connection);
-      const { messages } = await fetchGmailMessages(accessToken, `from:${email} OR to:${email}`, SEARCH_LIMIT);
+      const { messages } = await fetchGmailMessages(accessToken, { q: `from:${email} OR to:${email}` }, SEARCH_LIMIT);
       res.json(messages);
     } catch (error: any) {
       console.error('[GET /api/gmail/search]', error.message);
@@ -251,23 +295,158 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
-  // GET /api/gmail/messages?pageToken=&maxResults= — plain inbox listing
-  // (most recent first, no address filter) for the Mailbox page, live and
-  // never persisted. pageToken/nextPageToken drive "load more".
+  // GET /api/gmail/messages?pageToken=&maxResults=&labelId= — folder/label
+  // listing (defaults to INBOX) for the Mailbox page, live and never
+  // persisted. pageToken/nextPageToken drive "load more".
   app.get('/api/gmail/messages', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
-      const { pageToken } = req.query as { pageToken?: string };
+      const { pageToken, labelId } = req.query as { pageToken?: string; labelId?: string };
       const maxResults = Math.min(parseInt(String(req.query.maxResults || INBOX_PAGE_SIZE), 10) || INBOX_PAGE_SIZE, 50);
 
       const accessToken = await getAccessToken(connection);
-      const { messages, nextPageToken } = await fetchGmailMessages(accessToken, 'in:inbox', maxResults, pageToken);
+      const { messages, nextPageToken } = await fetchGmailMessages(accessToken, { labelIds: [labelId || 'INBOX'] }, maxResults, pageToken);
       res.json({ messages, nextPageToken });
     } catch (error: any) {
       console.error('[GET /api/gmail/messages]', error.message);
       res.status(500).json({ error: error.message || "Échec de la récupération de la boîte de réception Gmail" });
+    }
+  });
+
+  // GET /api/gmail/messages/:id — full body (sanitized) + attachment
+  // metadata, fetched live and never stored.
+  app.get('/api/gmail/messages/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const message = await fetchGmailFullMessage(accessToken, req.params.id);
+      res.json(message);
+    } catch (error: any) {
+      console.error('[GET /api/gmail/messages/:id]', error.message);
+      res.status(error.status === 404 ? 404 : 500).json({ error: error.message || 'Échec de la récupération du message Gmail' });
+    }
+  });
+
+  // GET /api/gmail/messages/:id/attachments/:attachmentId?filename=&mimeType=
+  // — filename/mimeType come from the full-message fetch's attachment list
+  // (Gmail's attachment endpoint itself returns only size+data).
+  app.get('/api/gmail/messages/:id/attachments/:attachmentId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/attachments/${req.params.attachmentId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data: any = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || 'Échec du téléchargement de la pièce jointe');
+      const buffer = Buffer.from(data.data, 'base64url');
+      const filename = String(req.query.filename || 'piece-jointe');
+      const mimeType = String(req.query.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error('[GET /api/gmail/messages/:id/attachments/:attachmentId]', error.message);
+      res.status(500).json({ error: error.message || 'Échec du téléchargement de la pièce jointe' });
+    }
+  });
+
+  // POST /api/gmail/messages/:id/archive — removes the INBOX label. Real
+  // mailbox action (requires gmail.modify, requested above).
+  app.post('/api/gmail/messages/:id/archive', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/modify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removeLabelIds: ['INBOX'] }),
+      });
+      const data: any = await resp.json();
+      if (!resp.ok) return respondToGmailError(res, resp, data, "Échec de l'archivage");
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('[POST /api/gmail/messages/:id/archive]', error.message);
+      res.status(500).json({ error: error.message || "Échec de l'archivage" });
+    }
+  });
+
+  // POST /api/gmail/messages/:id/trash — moves to Trash (reversible),
+  // deliberately never the permanent .delete endpoint.
+  app.post('/api/gmail/messages/:id/trash', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/trash`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data: any = resp.status === 204 ? {} : await resp.json();
+      if (!resp.ok) return respondToGmailError(res, resp, data, 'Échec de la suppression');
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('[POST /api/gmail/messages/:id/trash]', error.message);
+      res.status(500).json({ error: error.message || 'Échec de la suppression' });
+    }
+  });
+
+  // POST /api/gmail/send — compose (no threadId/inReplyTo) or reply
+  // (threadId + inReplyTo/references from the original message's
+  // messageIdHeader, fetched via GET /api/gmail/messages/:id beforehand).
+  // Builds a real RFC822 message with nodemailer's MailComposer (already a
+  // dependency for the SMTP path) rather than adding a second MIME-building
+  // library, base64url-encodes it for Gmail's raw-message send API.
+  app.post('/api/gmail/send', mailAttachmentUpload, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
+      const { to, cc, subject, text, html, threadId, inReplyTo, references } = req.body;
+      if (!to || !subject) return res.status(400).json({ error: 'to et subject requis' });
+
+      const files = (req.files || []) as Express.Multer.File[];
+      const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+      if (totalSize > ATTACHMENT_MAX_FILE_BYTES) {
+        return res.status(400).json({ error: `Pièces jointes trop volumineuses (limite ${ATTACHMENT_MAX_FILE_BYTES / 1024 / 1024} Mo au total)` });
+      }
+
+      const composer = new MailComposer({
+        from: connection.external_account_email || undefined,
+        to, cc: cc || undefined, subject, text, html,
+        inReplyTo: inReplyTo || undefined,
+        references: references || undefined,
+        attachments: files.map(f => ({ filename: f.originalname, content: f.buffer, contentType: f.mimetype })),
+      });
+      const message: Buffer = await new Promise((resolve, reject) => {
+        composer.compile().build((err: any, msg: Buffer) => (err ? reject(err) : resolve(msg)));
+      });
+
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw: message.toString('base64url'), ...(threadId ? { threadId } : {}) }),
+      });
+      const data: any = await resp.json();
+      if (!resp.ok) return respondToGmailError(res, resp, data, "Échec de l'envoi");
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Email envoyé via Gmail à ${to}`, subject, data.id, 'email', 'Correspondance');
+      res.json({ success: true, id: data.id, threadId: data.threadId });
+    } catch (error: any) {
+      console.error('[POST /api/gmail/send]', error.message);
+      res.status(500).json({ error: error.message || "Échec de l'envoi" });
     }
   });
 }

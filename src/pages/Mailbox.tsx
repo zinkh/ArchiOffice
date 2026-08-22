@@ -6,10 +6,14 @@
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
 import { useMailConnections } from '../hooks/useMailConnections';
+import MailMessageView from '../components/MailMessageView';
+import MailFolderSidebar, { type MailProvider } from '../components/MailFolderSidebar';
+import MailComposeModal from '../components/MailComposeModal';
+import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
 
 type LocalType = 'project' | 'proposal' | 'tender';
 
@@ -32,7 +36,9 @@ export default function Mailbox() {
     gmailStatus, outlookStatus, imapStatus, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
     connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
+    insufficientScopeProvider, setInsufficientScopeProvider, noteMailError,
   } = useMailConnections();
+  const [actioningKey, setActioningKey] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -44,6 +50,9 @@ export default function Mailbox() {
   const [imapHasMore, setImapHasMore] = useState(true);
   const [attachTarget, setAttachTarget] = useState<Message | null>(null);
   const [attachedKeys, setAttachedKeys] = useState<Set<string>>(new Set());
+  const [readTarget, setReadTarget] = useState<Message | null>(null);
+  const [selectedFolders, setSelectedFolders] = useState<Partial<Record<MailProvider, string>>>({});
+  const [composing, setComposing] = useState(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -61,9 +70,12 @@ export default function Mailbox() {
     try {
       const jobs: Promise<Message[]>[] = [];
       if (gmailStatus.connected && (opts.append ? gmailHasMore : true)) {
+        const gmailParams = new URLSearchParams();
+        if (opts.append && gmailPageToken) gmailParams.set('pageToken', gmailPageToken);
+        if (selectedFolders.google) gmailParams.set('labelId', selectedFolders.google);
         jobs.push(
           apiFetch<{ messages: any[]; nextPageToken: string | null }>(
-            `/api/gmail/messages${opts.append && gmailPageToken ? `?pageToken=${encodeURIComponent(gmailPageToken)}` : ''}`
+            `/api/gmail/messages${gmailParams.toString() ? `?${gmailParams.toString()}` : ''}`
           ).then(res => {
             setGmailPageToken(res.nextPageToken);
             setGmailHasMore(!!res.nextPageToken);
@@ -77,9 +89,12 @@ export default function Mailbox() {
         );
       }
       if (outlookStatus.connected && (opts.append ? outlookHasMore : true)) {
+        const outlookParams = new URLSearchParams();
+        if (opts.append && outlookPageToken) outlookParams.set('pageToken', outlookPageToken);
+        if (selectedFolders.microsoft) outlookParams.set('folderId', selectedFolders.microsoft);
         jobs.push(
           apiFetch<{ messages: any[]; nextPageToken: string | null }>(
-            `/api/outlook/messages${opts.append && outlookPageToken ? `?pageToken=${encodeURIComponent(outlookPageToken)}` : ''}`
+            `/api/outlook/messages${outlookParams.toString() ? `?${outlookParams.toString()}` : ''}`
           ).then(res => {
             setOutlookPageToken(res.nextPageToken);
             setOutlookHasMore(!!res.nextPageToken);
@@ -93,8 +108,10 @@ export default function Mailbox() {
       }
       if (imapStatus.connected && (opts.append ? imapHasMore : true)) {
         const nextLimit = opts.append ? imapLimit + PAGE_SIZE : PAGE_SIZE;
+        const imapParams = new URLSearchParams({ limit: String(nextLimit) });
+        if (selectedFolders.infomaniak) imapParams.set('folder', selectedFolders.infomaniak);
         jobs.push(
-          apiFetch<any[]>(`/api/mail/imap/messages?limit=${nextLimit}`).then(rows => {
+          apiFetch<any[]>(`/api/mail/imap/messages?${imapParams.toString()}`).then(rows => {
             setImapHasMore(rows.length >= nextLimit);
             setImapLimit(nextLimit);
             return rows.map(r => ({
@@ -129,8 +146,15 @@ export default function Mailbox() {
   }, [
     gmailStatus.connected, outlookStatus.connected, imapStatus.connected,
     gmailPageToken, gmailHasMore, outlookPageToken, outlookHasMore, imapLimit, imapHasMore,
-    setError, t,
+    selectedFolders, setError, t,
   ]);
+
+  const selectFolder = (provider: MailProvider, folderId: string) => {
+    setSelectedFolders(prev => ({ ...prev, [provider]: folderId }));
+    if (provider === 'google') { setGmailPageToken(null); setGmailHasMore(true); }
+    if (provider === 'microsoft') { setOutlookPageToken(null); setOutlookHasMore(true); }
+    if (provider === 'infomaniak') { setImapLimit(PAGE_SIZE); setImapHasMore(true); }
+  };
 
   useEffect(() => {
     if (anyConnected) {
@@ -144,6 +168,14 @@ export default function Mailbox() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gmailStatus.connected, outlookStatus.connected, imapStatus.connected]);
+
+  // Re-fetch when the user picks a different folder for any provider —
+  // separate from the connection-status effect above so switching folders
+  // doesn't reset every other provider's pagination too.
+  useEffect(() => {
+    if (anyConnected) loadMessages({ append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFolders]);
 
   const hasMore = (gmailStatus.connected && gmailHasMore) || (outlookStatus.connected && outlookHasMore) || (imapStatus.connected && imapHasMore);
 
@@ -168,14 +200,60 @@ export default function Mailbox() {
     setAttachTarget(null);
   };
 
+  // IMAP encodes its provider-agnostic externalMessageId as "folder:uid"
+  // (see loadMessages above) since IMAP has no message id independent of a
+  // mailbox — Gmail/Outlook ids are already globally addressable.
+  function splitImapKey(externalMessageId: string): { folder: string; messageId: string } {
+    const [folder, ...rest] = externalMessageId.split(':');
+    return { folder, messageId: rest.join(':') };
+  }
+
+  const readTargetProps = readTarget
+    ? readTarget.provider === 'infomaniak'
+      ? { provider: readTarget.provider, ...splitImapKey(readTarget.externalMessageId) }
+      : { provider: readTarget.provider, messageId: readTarget.externalMessageId }
+    : null;
+
+  const runMailAction = async (m: Message, action: (provider: MailProvider, messageId: string, folder?: string) => Promise<void>) => {
+    const key = `${m.provider}-${m.externalMessageId}`;
+    setActioningKey(key);
+    try {
+      if (m.provider === 'infomaniak') {
+        const { folder, messageId } = splitImapKey(m.externalMessageId);
+        await action(m.provider, messageId, folder);
+      } else {
+        await action(m.provider, m.externalMessageId);
+      }
+      setMessages(prev => prev.filter(x => `${x.provider}-${x.externalMessageId}` !== key));
+    } catch (err: any) {
+      noteMailError(m.provider, err);
+    } finally {
+      setActioningKey(null);
+    }
+  };
+
+  const handleArchive = (m: Message) => runMailAction(m, archiveMailMessage);
+  const handleDelete = (m: Message) => runMailAction(m, deleteMailMessage);
+
+  const connectedProviders: { provider: MailProvider; email: string }[] = [
+    ...(gmailStatus.connected ? [{ provider: 'google' as const, email: gmailStatus.email || '' }] : []),
+    ...(outlookStatus.connected ? [{ provider: 'microsoft' as const, email: outlookStatus.email || '' }] : []),
+    ...(imapStatus.connected ? [{ provider: 'infomaniak' as const, email: imapStatus.email || '' }] : []),
+  ];
+
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('mailbox_title')}</h1>
         {anyConnected && (
-          <button onClick={() => loadMessages({ append: false })} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            {loading ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} {t('correspondence_search')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setComposing(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium" style={{ background: 'var(--tblr-primary)', color: 'white' }}>
+              <IconPencil size={13} /> {t('mailbox_compose_new')}
+            </button>
+            <button onClick={() => loadMessages({ append: false })} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+              {loading ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} {t('correspondence_search')}
+            </button>
+          </div>
         )}
       </div>
 
@@ -237,28 +315,71 @@ export default function Mailbox() {
         </div>
       )}
 
+      {insufficientScopeProvider && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <span>{t('mail_reconnect_banner')}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={insufficientScopeProvider === 'google' ? connectGmail : connectOutlook}
+              className="px-2.5 py-1 rounded-lg font-medium"
+              style={{ background: 'var(--tblr-primary)', color: 'white' }}
+            >
+              {t('mail_reconnect_button')}
+            </button>
+            <button onClick={() => setInsufficientScopeProvider(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
+          </div>
+        </div>
+      )}
+
       {!anyConnected && (
         <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('correspondence_none_connected')}</p>
       )}
 
       {anyConnected && (
-        <div className="space-y-1.5">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <MailFolderSidebar providers={connectedProviders} selected={selectedFolders} onSelectFolder={selectFolder} />
+          <div className="flex-1 min-w-0 space-y-1.5">
           {messages.map(m => {
             const key = `${m.provider}-${m.externalMessageId}`;
             return (
-              <div key={key} className="flex items-center justify-between gap-3 p-3 rounded-lg text-sm" style={{ border: '1px solid var(--tblr-border)' }}>
+              <div
+                key={key}
+                onClick={() => setReadTarget(m)}
+                className="flex items-center justify-between gap-3 p-3 rounded-lg text-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                style={{ border: '1px solid var(--tblr-border)' }}
+              >
                 <div className="min-w-0">
                   <div className="font-medium truncate">{m.subject || '(Sans objet)'}</div>
                   <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString() : ''}</div>
                 </div>
-                <button
-                  disabled={attachedKeys.has(key)}
-                  onClick={() => setAttachTarget(m)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0 text-xs disabled:opacity-50"
-                  style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}
-                >
-                  <IconLink size={12} /> {attachedKeys.has(key) ? t('correspondence_linked') : t('correspondence_link')}
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={e => { e.stopPropagation(); setAttachTarget(m); }}
+                    disabled={attachedKeys.has(key)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs disabled:opacity-50"
+                    style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+                  >
+                    <IconLink size={12} /> {attachedKeys.has(key) ? t('correspondence_linked') : t('correspondence_link')}
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleArchive(m); }}
+                    disabled={actioningKey === key}
+                    title={t('mail_archive') as string}
+                    className="p-1.5 rounded-lg disabled:opacity-50"
+                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  >
+                    <IconArchive size={13} />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleDelete(m); }}
+                    disabled={actioningKey === key}
+                    title={t('mail_delete') as string}
+                    className="p-1.5 rounded-lg disabled:opacity-50"
+                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-danger)' }}
+                  >
+                    <IconTrash size={13} />
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -272,6 +393,7 @@ export default function Mailbox() {
               </button>
             </div>
           )}
+          </div>
         </div>
       )}
 
@@ -283,6 +405,24 @@ export default function Mailbox() {
           tenders={tenders}
           onAttach={attach}
           onClose={() => setAttachTarget(null)}
+        />
+      )}
+
+      {readTargetProps && (
+        <MailMessageView
+          provider={readTargetProps.provider}
+          messageId={readTargetProps.messageId}
+          folder={'folder' in readTargetProps ? readTargetProps.folder : undefined}
+          connectedProviders={connectedProviders}
+          onClose={() => setReadTarget(null)}
+        />
+      )}
+
+      {composing && (
+        <MailComposeModal
+          connectedProviders={connectedProviders}
+          onClose={() => setComposing(false)}
+          onSent={() => loadMessages({ append: false })}
         />
       )}
     </div>
