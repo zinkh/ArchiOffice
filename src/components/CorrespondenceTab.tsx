@@ -7,7 +7,7 @@
 // what's attached here.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { useMailConnections } from '../hooks/useMailConnections';
 
@@ -18,7 +18,7 @@ interface CorrespondenceTabProps {
 }
 
 interface SearchResult {
-  provider: 'google' | 'infomaniak';
+  provider: 'google' | 'microsoft' | 'infomaniak';
   externalMessageId: string;
   externalThreadId?: string | null;
   subject: string;
@@ -42,9 +42,9 @@ interface LinkedEmail {
 export default function CorrespondenceTab({ localType, localId, contactEmail }: CorrespondenceTabProps) {
   const { t } = useTranslation();
   const {
-    gmailStatus, imapStatus, error, setError,
+    gmailStatus, outlookStatus, imapStatus, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
-    connectGmail, disconnectGmail, connectImap, disconnectImap, anyConnected,
+    connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
   } = useMailConnections();
   const [linked, setLinked] = useState<LinkedEmail[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -75,6 +75,20 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
               provider: 'google' as const,
               externalMessageId: r.id,
               externalThreadId: r.threadId,
+              subject: r.subject,
+              from: r.from,
+              to: r.to,
+              date: r.date,
+              snippet: r.snippet,
+            })))
+        );
+      }
+      if (outlookStatus.connected) {
+        queries.push(
+          apiFetch<any[]>(`/api/outlook/search?email=${encodeURIComponent(contactEmail)}`)
+            .then(rows => rows.map(r => ({
+              provider: 'microsoft' as const,
+              externalMessageId: r.id,
               subject: r.subject,
               from: r.from,
               to: r.to,
@@ -143,6 +157,17 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         ) : (
           <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
             <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
+          </button>
+        )}
+
+        {outlookStatus.connected ? (
+          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            <IconBrandWindows size={13} /> {outlookStatus.email}
+            <button onClick={disconnectOutlook} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
+          </span>
+        ) : (
+          <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+            <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
           </button>
         )}
 
