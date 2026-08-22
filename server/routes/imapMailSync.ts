@@ -54,6 +54,34 @@ function withHardTimeout<T>(client: ImapFlow, promise: Promise<T>, ms = HARD_TIM
   });
 }
 
+// Backstop around the *entire* request, not just the ImapFlow calls —
+// withHardTimeout above only covers the IMAP operations themselves, but a
+// report of these routes hanging indefinitely with no error at all (even
+// past that budget) means something earlier in the handler is stuck instead
+// (most likely getTenantId/getConnection's Supabase round trip). This
+// middleware guarantees every /api/mail/imap/* request gets *a* response
+// within REQUEST_TIMEOUT_MS no matter where in the handler it stalls.
+const REQUEST_TIMEOUT_MS = 20000;
+
+function withRequestTimeout(req: any, res: any, next: any) {
+  res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    console.error(`[imapMailSync] Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${req.method} ${req.originalUrl}`);
+    send(res, 504, { error: 'Délai dépassé : le serveur ne répond pas. Réessayez.' });
+  });
+  next();
+}
+
+// Every response in this file goes through this — once withRequestTimeout's
+// deadline has already answered the request, the original (now-late)
+// handler eventually finishing and calling res.json()/res.status().json()
+// again would throw ERR_HTTP_HEADERS_SENT, which inside an async handler
+// becomes an unhandled rejection that can crash the whole process. Guarding
+// on headersSent here makes that late completion a silent no-op instead.
+function send(res: any, status: number, body: any) {
+  if (res.headersSent) return;
+  res.status(status).json(body);
+}
+
 function friendlyImapError(error: any): string {
   const msg = String(error?.message || error);
   if (error?.code === 'HARD_TIMEOUT') return msg;
@@ -72,11 +100,11 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
   }
 
   // GET /api/mail/imap/status
-  app.get('/api/mail/imap/status', async (req: any, res: any) => {
+  app.get('/api/mail/imap/status', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
-      res.json({
+      send(res, 200, {
         connected: !!connection,
         email: connection?.external_account_email || connection?.imap_username || null,
         host: connection?.imap_host || null,
@@ -84,23 +112,23 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       });
     } catch (error: any) {
       console.error('[GET /api/mail/imap/status]', error);
-      res.status(500).json({ error: 'Failed to get IMAP status' });
+      send(res, 500, { error: 'Failed to get IMAP status' });
     }
   });
 
   // POST /api/mail/imap/connect — { host, port, username, password }.
   // Tests the credentials with a verify-only connection before storing
   // anything, so a typo doesn't silently save a broken connection.
-  app.post('/api/mail/imap/connect', async (req: any, res: any) => {
+  app.post('/api/mail/imap/connect', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { host, port, username, password } = req.body;
       if (!host || !port || !username || !password) {
-        return res.status(400).json({ error: 'host, port, username et password requis' });
+        return send(res, 400, { error: 'host, port, username et password requis' });
       }
       const portNum = parseInt(String(port), 10);
       if (!Number.isFinite(portNum) || portNum <= 0 || portNum > 65535) {
-        return res.status(400).json({ error: 'Port invalide' });
+        return send(res, 400, { error: 'Port invalide' });
       }
 
       const client = new ImapFlow({
@@ -115,7 +143,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       try {
         await withHardTimeout(client, client.connect());
       } catch (err: any) {
-        return res.status(400).json({ error: friendlyImapError(err) });
+        return send(res, 400, { error: friendlyImapError(err) });
       }
 
       const passwordEncrypted = encryptSecret(String(password));
@@ -140,36 +168,36 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       }
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Connexion à la messagerie (IMAP)', '', tenantId, 'integration', 'Intégrations');
-      res.json({ success: true });
+      send(res, 200, { success: true });
     } catch (error: any) {
       console.error('[POST /api/mail/imap/connect]', error.message);
-      res.status(500).json({ error: error.message || 'Échec de la connexion IMAP' });
+      send(res, 500, { error: error.message || 'Échec de la connexion IMAP' });
     }
   });
 
   // DELETE /api/mail/imap/disconnect
-  app.delete('/api/mail/imap/disconnect', async (req: any, res: any) => {
+  app.delete('/api/mail/imap/disconnect', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').delete().eq('user_id', req.user.id).eq('provider', 'infomaniak');
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de la messagerie (IMAP)', '', tenantId, 'integration', 'Intégrations');
-      res.json({ success: true });
+      send(res, 200, { success: true });
     } catch (error: any) {
       console.error('[DELETE /api/mail/imap/disconnect]', error);
-      res.status(500).json({ error: 'Failed to disconnect IMAP' });
+      send(res, 500, { error: 'Failed to disconnect IMAP' });
     }
   });
 
   // GET /api/mail/imap/search?email=<adresse> — live search across INBOX
   // and the Sent folder (if any), envelope metadata only, never persisted.
-  app.get('/api/mail/imap/search', async (req: any, res: any) => {
+  app.get('/api/mail/imap/search', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
-      if (!connection) return res.status(400).json({ error: 'Messagerie IMAP non connectée.' });
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
       const { email } = req.query as { email?: string };
-      if (!email) return res.status(400).json({ error: 'email requis' });
+      if (!email) return send(res, 400, { error: 'email requis' });
 
       const password = decryptSecret(connection.imap_password_encrypted);
       const client = new ImapFlow({
@@ -220,10 +248,10 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       }
 
       await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update({ last_synced_at: new Date().toISOString() }).eq('id', connection.id);
-      res.json(results);
+      send(res, 200, results);
     } catch (error: any) {
       console.error('[GET /api/mail/imap/search]', error.message);
-      res.status(500).json({ error: friendlyImapError(error) });
+      send(res, 500, { error: friendlyImapError(error) });
     }
   });
 
@@ -231,11 +259,11 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
   // first, no address filter) for the Mailbox page. Not cursor-paginated —
   // "load more" on the frontend just re-requests with a larger `limit`,
   // which is cheap enough at this scale and keeps the server stateless.
-  app.get('/api/mail/imap/messages', async (req: any, res: any) => {
+  app.get('/api/mail/imap/messages', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
-      if (!connection) return res.status(400).json({ error: 'Messagerie IMAP non connectée.' });
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
       const limit = Math.min(Math.max(parseInt(String(req.query.limit || INBOX_DEFAULT_LIMIT), 10) || INBOX_DEFAULT_LIMIT, 1), INBOX_MAX_LIMIT);
 
       const password = decryptSecret(connection.imap_password_encrypted);
@@ -275,10 +303,10 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
 
       results.reverse(); // fetch returns ascending sequence order — newest last
       await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update({ last_synced_at: new Date().toISOString() }).eq('id', connection.id);
-      res.json(results);
+      send(res, 200, results);
     } catch (error: any) {
       console.error('[GET /api/mail/imap/messages]', error.message);
-      res.status(500).json({ error: friendlyImapError(error) });
+      send(res, 500, { error: friendlyImapError(error) });
     }
   });
 }
