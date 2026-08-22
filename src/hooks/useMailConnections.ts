@@ -8,6 +8,7 @@ import { apiFetch } from '../lib/api';
 
 export interface MailStatus {
   connected: boolean;
+  id?: string | null;
   email: string | null;
   last_synced_at?: string | null;
 }
@@ -21,6 +22,12 @@ export function useMailConnections() {
   const [showImapForm, setShowImapForm] = useState(false);
   const [imapForm, setImapForm] = useState({ host: 'mail.infomaniak.com', port: '993', username: '', password: '' });
   const [imapConnecting, setImapConnecting] = useState(false);
+  // Set when a Gmail/Outlook API call fails with INSUFFICIENT_SCOPE (the
+  // stored token predates the gmail.modify+gmail.send / Mail.ReadWrite+
+  // Mail.Send scopes added for archive/delete/send) — consumers show a
+  // "reconnect" banner instead of a generic error for this case. IMAP has no
+  // OAuth scopes to widen, so it's never a valid value here.
+  const [insufficientScopeProvider, setInsufficientScopeProvider] = useState<'google' | 'microsoft' | null>(null);
 
   const loadStatuses = useCallback(async () => {
     const [gmail, outlook, imap] = await Promise.all([
@@ -106,10 +113,22 @@ export function useMailConnections() {
     setImapStatus({ connected: false, email: null });
   };
 
+  // Callers wrap a Gmail/Outlook mailbox action (archive/delete/send) in a
+  // try/catch and pass the caught error here instead of duplicating the
+  // err.code === 'INSUFFICIENT_SCOPE' check at every call site.
+  const noteMailError = useCallback((provider: 'google' | 'microsoft' | 'infomaniak', err: any) => {
+    if (err?.code === 'INSUFFICIENT_SCOPE' && provider !== 'infomaniak') {
+      setInsufficientScopeProvider(provider);
+    } else {
+      setError(err?.message || null);
+    }
+  }, []);
+
   return {
     gmailStatus, outlookStatus, imapStatus, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
     connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap,
     anyConnected: gmailStatus.connected || outlookStatus.connected || imapStatus.connected,
+    insufficientScopeProvider, setInsufficientScopeProvider, noteMailError,
   };
 }

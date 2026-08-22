@@ -7,9 +7,12 @@
 // what's attached here.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX, IconArchive, IconTrash, IconFolderPlus, IconFolder, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { useMailConnections } from '../hooks/useMailConnections';
+import MailMessageView, { type MailProvider } from './MailMessageView';
+import MailFolderSidebar from './MailFolderSidebar';
+import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
 
 interface CorrespondenceTabProps {
   localType: 'project' | 'contact' | 'tender' | 'proposal';
@@ -39,16 +42,80 @@ interface LinkedEmail {
   linked_at: string;
 }
 
+interface FolderLink {
+  id: string;
+  provider: MailProvider;
+  folder_id: string;
+  folder_name: string;
+}
+
+interface FolderMessage {
+  provider: MailProvider;
+  externalMessageId: string;
+  subject: string;
+  from: string;
+  to: string;
+  date: string | null;
+}
+
 export default function CorrespondenceTab({ localType, localId, contactEmail }: CorrespondenceTabProps) {
   const { t } = useTranslation();
   const {
     gmailStatus, outlookStatus, imapStatus, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
     connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
+    insufficientScopeProvider, setInsufficientScopeProvider, noteMailError,
   } = useMailConnections();
   const [linked, setLinked] = useState<LinkedEmail[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [readTarget, setReadTarget] = useState<{ provider: MailProvider; messageId: string; folder?: string } | null>(null);
+  const [actioningKey, setActioningKey] = useState<string | null>(null);
+  const [folderLinks, setFolderLinks] = useState<FolderLink[]>([]);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [openFolderLinkId, setOpenFolderLinkId] = useState<string | null>(null);
+  const [folderMessages, setFolderMessages] = useState<FolderMessage[]>([]);
+  const [folderMessagesLoading, setFolderMessagesLoading] = useState(false);
+
+  // IMAP encodes its provider-agnostic external_message_id as "folder:uid"
+  // (see search()/loadLinked() below) since IMAP has no message id
+  // independent of a mailbox — Gmail/Outlook ids are already global.
+  function splitImapKey(externalMessageId: string): { folder: string; messageId: string } {
+    const [folder, ...rest] = externalMessageId.split(':');
+    return { folder, messageId: rest.join(':') };
+  }
+
+  const openReader = (provider: string, externalMessageId: string) => {
+    if (provider === 'infomaniak') {
+      setReadTarget({ provider: 'infomaniak', ...splitImapKey(externalMessageId) });
+    } else {
+      setReadTarget({ provider: provider as MailProvider, messageId: externalMessageId });
+    }
+  };
+
+  const runMailAction = async (r: SearchResult, action: (provider: MailProvider, messageId: string, folder?: string) => Promise<void>) => {
+    const key = `${r.provider}-${r.externalMessageId}`;
+    setActioningKey(key);
+    try {
+      if (r.provider === 'infomaniak') {
+        const { folder, messageId } = splitImapKey(r.externalMessageId);
+        await action(r.provider, messageId, folder);
+      } else {
+        await action(r.provider, r.externalMessageId);
+      }
+      setResults(prev => prev.filter(x => `${x.provider}-${x.externalMessageId}` !== key));
+    } catch (err: any) {
+      noteMailError(r.provider, err);
+    } finally {
+      setActioningKey(null);
+    }
+  };
+
+  const connectedProviders: { provider: MailProvider; email: string }[] = [
+    ...(gmailStatus.connected ? [{ provider: 'google' as const, email: gmailStatus.email || '' }] : []),
+    ...(outlookStatus.connected ? [{ provider: 'microsoft' as const, email: outlookStatus.email || '' }] : []),
+    ...(imapStatus.connected ? [{ provider: 'infomaniak' as const, email: imapStatus.email || '' }] : []),
+  ];
 
   const loadLinked = useCallback(async () => {
     try {
@@ -60,6 +127,65 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
   }, [localType, localId]);
 
   useEffect(() => { loadLinked(); }, [loadLinked]);
+
+  const loadFolderLinks = useCallback(async () => {
+    try {
+      const data = await apiFetch<FolderLink[]>(`/api/mail/folder-links?local_type=${localType}&local_id=${localId}`);
+      setFolderLinks(Array.isArray(data) ? data : []);
+    } catch {
+      setFolderLinks([]);
+    }
+  }, [localType, localId]);
+
+  useEffect(() => { loadFolderLinks(); }, [loadFolderLinks]);
+
+  const linkFolder = async (provider: MailProvider, folderId: string, folderName: string) => {
+    const status = provider === 'google' ? gmailStatus : provider === 'microsoft' ? outlookStatus : imapStatus;
+    if (!status.id) return;
+    try {
+      await apiFetch('/api/mail/folder-links', {
+        method: 'POST',
+        body: JSON.stringify({
+          connection_id: status.id,
+          provider,
+          folder_id: folderId,
+          folder_name: folderName,
+          local_type: localType,
+          local_id: localId,
+        }),
+      });
+      setShowFolderPicker(false);
+      await loadFolderLinks();
+    } catch (err: any) {
+      setError(err?.message || t('mail_action_error') as string);
+    }
+  };
+
+  const unlinkFolder = async (id: string) => {
+    await apiFetch(`/api/mail/folder-links/${id}`, { method: 'DELETE' });
+    setFolderLinks(l => l.filter(x => x.id !== id));
+    if (openFolderLinkId === id) { setOpenFolderLinkId(null); setFolderMessages([]); }
+  };
+
+  const toggleFolderView = async (link: FolderLink) => {
+    if (openFolderLinkId === link.id) { setOpenFolderLinkId(null); setFolderMessages([]); return; }
+    setOpenFolderLinkId(link.id);
+    setFolderMessagesLoading(true);
+    setFolderMessages([]);
+    try {
+      const res = await apiFetch<{ messages: any[] } | any[]>(`/api/mail/folder-links/${link.id}/messages`);
+      const rows = Array.isArray(res) ? res : res.messages || [];
+      setFolderMessages(rows.map((r: any) => ({
+        provider: link.provider,
+        externalMessageId: link.provider === 'infomaniak' ? `${r.folder}:${r.uid}` : r.id,
+        subject: r.subject, from: r.from, to: r.to, date: r.date,
+      })));
+    } catch (err: any) {
+      setError(err?.message || t('mail_action_error') as string);
+    } finally {
+      setFolderMessagesLoading(false);
+    }
+  };
 
   const search = async () => {
     if (!contactEmail) return;
@@ -212,6 +338,22 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         </div>
       )}
 
+      {insufficientScopeProvider && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <span>{t('mail_reconnect_banner')}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={insufficientScopeProvider === 'google' ? connectGmail : connectOutlook}
+              className="px-2.5 py-1 rounded-lg font-medium"
+              style={{ background: 'var(--tblr-primary)', color: 'white' }}
+            >
+              {t('mail_reconnect_button')}
+            </button>
+            <button onClick={() => setInsufficientScopeProvider(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
+          </div>
+        </div>
+      )}
+
       {!anyConnected && (
         <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('correspondence_none_connected')}</p>
       )}
@@ -219,19 +361,44 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
       {results.length > 0 && (
         <div className="space-y-1.5">
           {results.map(r => (
-            <div key={`${r.provider}-${r.externalMessageId}`} className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)' }}>
+            <div
+              key={`${r.provider}-${r.externalMessageId}`}
+              onClick={() => openReader(r.provider, r.externalMessageId)}
+              className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              style={{ border: '1px solid var(--tblr-border)' }}
+            >
               <div className="min-w-0">
                 <div className="font-medium truncate">{r.subject || '(Sans objet)'}</div>
                 <div className="truncate" style={{ color: 'var(--tblr-muted)' }}>{r.from} → {r.to} · {r.date ? new Date(r.date).toLocaleString() : ''}</div>
               </div>
-              <button
-                disabled={isLinked(r)}
-                onClick={() => linkResult(r)}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0 disabled:opacity-50"
-                style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}
-              >
-                <IconLink size={12} /> {isLinked(r) ? t('correspondence_linked') : t('correspondence_link')}
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  disabled={isLinked(r)}
+                  onClick={e => { e.stopPropagation(); linkResult(r); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg disabled:opacity-50"
+                  style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+                >
+                  <IconLink size={12} /> {isLinked(r) ? t('correspondence_linked') : t('correspondence_link')}
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); runMailAction(r, archiveMailMessage); }}
+                  disabled={actioningKey === `${r.provider}-${r.externalMessageId}`}
+                  title={t('mail_archive') as string}
+                  className="p-1.5 rounded-lg disabled:opacity-50"
+                  style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                >
+                  <IconArchive size={12} />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); runMailAction(r, deleteMailMessage); }}
+                  disabled={actioningKey === `${r.provider}-${r.externalMessageId}`}
+                  title={t('mail_delete') as string}
+                  className="p-1.5 rounded-lg disabled:opacity-50"
+                  style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-danger)' }}
+                >
+                  <IconTrash size={12} />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -247,12 +414,17 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         ) : (
           <div className="space-y-1.5">
             {linked.map(l => (
-              <div key={l.id} className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)' }}>
+              <div
+                key={l.id}
+                onClick={() => openReader(l.provider, l.external_message_id)}
+                className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                style={{ border: '1px solid var(--tblr-border)' }}
+              >
                 <div className="min-w-0">
                   <div className="font-medium truncate">{l.subject || '(Sans objet)'}</div>
                   <div className="truncate" style={{ color: 'var(--tblr-muted)' }}>{l.from_address} → {l.to_addresses} · {l.message_date ? new Date(l.message_date).toLocaleString() : ''}</div>
                 </div>
-                <button onClick={() => unlink(l.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0 hover:bg-red-50 dark:hover:bg-red-900/20" style={{ color: 'var(--tblr-danger)' }}>
+                <button onClick={e => { e.stopPropagation(); unlink(l.id); }} className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0 hover:bg-red-50 dark:hover:bg-red-900/20" style={{ color: 'var(--tblr-danger)' }}>
                   <IconUnlink size={12} /> {t('correspondence_unlink')}
                 </button>
               </div>
@@ -260,6 +432,79 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
           </div>
         )}
       </div>
+
+      {anyConnected && (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <h4 className="text-sm font-semibold">{t('mail_folder_links_title')}</h4>
+            <button
+              onClick={() => setShowFolderPicker(v => !v)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              <IconFolderPlus size={13} /> {t('mail_folder_links_add')}
+            </button>
+          </div>
+
+          {showFolderPicker && (
+            <div className="mb-2 p-2 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
+              <MailFolderSidebar providers={connectedProviders} selected={{}} onSelectFolder={linkFolder} />
+            </div>
+          )}
+
+          {folderLinks.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('mail_folder_links_empty')}</p>
+          ) : (
+            <div className="space-y-1.5">
+              {folderLinks.map(fl => (
+                <div key={fl.id} className="rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)' }}>
+                  <div className="flex items-center justify-between gap-3 p-2 cursor-pointer" onClick={() => toggleFolderView(fl)}>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {openFolderLinkId === fl.id ? <IconChevronDown size={13} className="shrink-0" /> : <IconChevronRight size={13} className="shrink-0" />}
+                      <IconFolder size={13} className="shrink-0" />
+                      <span className="truncate font-medium">{fl.folder_name}</span>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); unlinkFolder(fl.id); }} className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0 hover:bg-red-50 dark:hover:bg-red-900/20" style={{ color: 'var(--tblr-danger)' }}>
+                      <IconUnlink size={12} /> {t('correspondence_unlink')}
+                    </button>
+                  </div>
+                  {openFolderLinkId === fl.id && (
+                    <div className="px-2 pb-2 space-y-1">
+                      {folderMessagesLoading && (
+                        <div className="flex items-center justify-center py-3" style={{ color: 'var(--tblr-muted)' }}><IconLoader2 size={14} className="animate-spin" /></div>
+                      )}
+                      {!folderMessagesLoading && folderMessages.length === 0 && (
+                        <p style={{ color: 'var(--tblr-muted)' }}>{t('mail_folder_links_folder_empty')}</p>
+                      )}
+                      {!folderMessagesLoading && folderMessages.map(m => (
+                        <div
+                          key={`${m.provider}-${m.externalMessageId}`}
+                          onClick={() => openReader(m.provider, m.externalMessageId)}
+                          className="p-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                          style={{ border: '1px solid var(--tblr-border)' }}
+                        >
+                          <div className="font-medium truncate">{m.subject || '(Sans objet)'}</div>
+                          <div className="truncate" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString() : ''}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {readTarget && (
+        <MailMessageView
+          provider={readTarget.provider}
+          messageId={readTarget.messageId}
+          folder={readTarget.folder}
+          connectedProviders={connectedProviders}
+          onClose={() => setReadTarget(null)}
+        />
+      )}
     </div>
   );
 }

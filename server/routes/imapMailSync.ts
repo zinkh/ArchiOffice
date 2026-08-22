@@ -18,6 +18,8 @@ import type { Express } from 'express';
 import { ImapFlow } from 'imapflow';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { encryptSecret, decryptSecret } from '../secretsCrypto';
+import { fetchImapFullMessage, fetchImapAttachment } from '../mailFullMessage';
+import { normalizeImapMailboxes } from '../mailFolders';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -106,6 +108,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       const connection = await getConnection(tenantId, req.user.id);
       send(res, 200, {
         connected: !!connection,
+        id: connection?.id || null,
         email: connection?.external_account_email || connection?.imap_username || null,
         host: connection?.imap_host || null,
         last_synced_at: connection?.last_synced_at || null,
@@ -255,16 +258,18 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  // GET /api/mail/imap/messages?limit= — plain INBOX listing (most recent
-  // first, no address filter) for the Mailbox page. Not cursor-paginated —
-  // "load more" on the frontend just re-requests with a larger `limit`,
-  // which is cheap enough at this scale and keeps the server stateless.
+  // GET /api/mail/imap/messages?limit=&folder= — folder listing (defaults
+  // to INBOX), most recent first, for the Mailbox page. Not cursor-
+  // paginated — "load more" on the frontend just re-requests with a larger
+  // `limit`, which is cheap enough at this scale and keeps the server
+  // stateless.
   app.get('/api/mail/imap/messages', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
       if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
       const limit = Math.min(Math.max(parseInt(String(req.query.limit || INBOX_DEFAULT_LIMIT), 10) || INBOX_DEFAULT_LIMIT, 1), INBOX_MAX_LIMIT);
+      const folder = String(req.query.folder || 'INBOX');
 
       const password = decryptSecret(connection.imap_password_encrypted);
       const client = new ImapFlow({
@@ -280,7 +285,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       try {
         await withHardTimeout(client, (async () => {
           await client.connect();
-          const mailbox = await client.mailboxOpen('INBOX');
+          const mailbox = await client.mailboxOpen(folder);
           if (mailbox.exists > 0) {
             const start = Math.max(1, mailbox.exists - limit + 1);
             const addr = (list?: { name?: string; address?: string }[]) =>
@@ -288,7 +293,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
             for await (const msg of client.fetch(`${start}:*`, { envelope: true, uid: true }, { uid: true })) {
               results.push({
                 uid: msg.uid,
-                folder: 'INBOX',
+                folder,
                 subject: msg.envelope?.subject || '',
                 from: addr(msg.envelope?.from),
                 to: addr(msg.envelope?.to),
@@ -306,6 +311,123 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       send(res, 200, results);
     } catch (error: any) {
       console.error('[GET /api/mail/imap/messages]', error.message);
+      send(res, 500, { error: friendlyImapError(error) });
+    }
+  });
+
+  // GET /api/mail/imap/folders
+  app.get('/api/mail/imap/folders', withRequestTimeout, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
+      const password = decryptSecret(connection.imap_password_encrypted);
+      const client = new ImapFlow({
+        host: connection.imap_host,
+        port: connection.imap_port,
+        secure: true,
+        auth: { user: connection.imap_username, pass: password },
+        logger: false,
+        connectionTimeout: CONNECT_TIMEOUT_MS,
+      });
+      let mailboxes: any[] = [];
+      try {
+        mailboxes = await withHardTimeout(client, (async () => {
+          await client.connect();
+          return client.list();
+        })());
+      } finally {
+        try { await client.logout(); } catch { /* connexion déjà fermée, ou coupée par le hard timeout */ }
+      }
+      send(res, 200, normalizeImapMailboxes(mailboxes));
+    } catch (error: any) {
+      console.error('[GET /api/mail/imap/folders]', error.message);
+      send(res, 500, { error: friendlyImapError(error) });
+    }
+  });
+
+  // GET /api/mail/imap/messages/:folder/:uid — corps complet (assaini) +
+  // métadonnées des pièces jointes, jamais mis en cache.
+  app.get('/api/mail/imap/messages/:folder/:uid', withRequestTimeout, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
+      const uid = parseInt(req.params.uid, 10);
+      if (!Number.isFinite(uid)) return send(res, 400, { error: 'uid invalide' });
+      const message = await fetchImapFullMessage(connection, req.params.folder, uid);
+      send(res, 200, message);
+    } catch (error: any) {
+      console.error('[GET /api/mail/imap/messages/:folder/:uid]', error.message);
+      send(res, 500, { error: friendlyImapError(error) });
+    }
+  });
+
+  // GET /api/mail/imap/messages/:folder/:uid/attachments/:attachmentId —
+  // re-fetch et re-parse le message pour extraire une pièce jointe (pas de
+  // mise en cache, cf. server/mailFullMessage.ts).
+  app.get('/api/mail/imap/messages/:folder/:uid/attachments/:attachmentId', withRequestTimeout, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
+      const uid = parseInt(req.params.uid, 10);
+      if (!Number.isFinite(uid)) return send(res, 400, { error: 'uid invalide' });
+      const attachment = await fetchImapAttachment(connection, req.params.folder, uid, req.params.attachmentId);
+      if (!attachment) return send(res, 404, { error: 'Pièce jointe introuvable' });
+      if (res.headersSent) return;
+      res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${attachment.filename.replace(/"/g, '')}"`);
+      res.send(attachment.buffer);
+    } catch (error: any) {
+      console.error('[GET /api/mail/imap/messages/:folder/:uid/attachments/:attachmentId]', error.message);
+      send(res, 500, { error: friendlyImapError(error) });
+    }
+  });
+
+  // POST /api/mail/imap/messages/:folder/:uid/move — { destination:
+  // 'archive'|'trash' }. Real mailbox action: full credentials are already
+  // stored for IMAP (unlike Gmail/Outlook, no separate OAuth scope to
+  // widen). client.messageMove() already falls back to COPY + \Deleted +
+  // EXPUNGE internally when the server lacks the MOVE extension (RFC 6851)
+  // — no need to reimplement that fallback here.
+  app.post('/api/mail/imap/messages/:folder/:uid/move', withRequestTimeout, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const connection = await getConnection(tenantId, req.user.id);
+      if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
+      const uid = parseInt(req.params.uid, 10);
+      if (!Number.isFinite(uid)) return send(res, 400, { error: 'uid invalide' });
+      const destination = req.body?.destination === 'trash' ? 'trash' : req.body?.destination === 'archive' ? 'archive' : null;
+      if (!destination) return send(res, 400, { error: "destination doit être 'archive' ou 'trash'" });
+      const wantedSpecialUse = destination === 'archive' ? '\\Archive' : '\\Trash';
+
+      const password = decryptSecret(connection.imap_password_encrypted);
+      const client = new ImapFlow({
+        host: connection.imap_host,
+        port: connection.imap_port,
+        secure: true,
+        auth: { user: connection.imap_username, pass: password },
+        logger: false,
+        connectionTimeout: CONNECT_TIMEOUT_MS,
+      });
+
+      try {
+        await withHardTimeout(client, (async () => {
+          await client.connect();
+          const mailboxes = await client.list();
+          const target = mailboxes.find(m => m.specialUse === wantedSpecialUse);
+          if (!target) throw new Error(destination === 'archive' ? "Aucun dossier Archive détecté sur ce compte." : "Aucun dossier Corbeille détecté sur ce compte.");
+          await client.mailboxOpen(req.params.folder);
+          const moved = await client.messageMove(uid, target.path, { uid: true });
+          if (!moved) throw new Error('Échec du déplacement');
+        })());
+      } finally {
+        try { await client.logout(); } catch { /* connexion déjà fermée, ou coupée par le hard timeout */ }
+      }
+      send(res, 200, { success: true });
+    } catch (error: any) {
+      console.error('[POST /api/mail/imap/messages/:folder/:uid/move]', error.message);
       send(res, 500, { error: friendlyImapError(error) });
     }
   });

@@ -9,15 +9,22 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
     // actually went wrong server-side — surface that instead of a bare status
     // code, which by itself gives no way to tell a 500 apart from another.
     let message = `Failed to fetch ${url}: ${res.status} ${res.statusText}`;
+    let code: string | undefined;
     try {
       const body = await res.json();
       if (body?.error) message = body.error;
       else if (body?.message) message = body.message;
+      // Lets a caller branch on a stable machine-readable reason (e.g.
+      // 'INSUFFICIENT_SCOPE' from the mail connectors, see
+      // server/mailProviderErrors.ts) instead of matching the French
+      // error text above.
+      code = body?.code;
     } catch {
       // Body wasn't JSON (e.g. an HTML error page) — keep the generic message.
     }
     const err: any = new Error(message);
     err.status = res.status;
+    err.code = code;
     throw err;
   }
 
