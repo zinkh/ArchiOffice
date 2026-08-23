@@ -186,7 +186,7 @@ export default function Invoices() {
   const [sortConfig, setSortConfig] = useState<{ key: keyof Invoice | 'project_name'; direction: 'asc' | 'desc' } | null>({ key: 'due_date', direction: 'desc' });
   const [zohoConnected, setZohoConnected] = useState(false);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
-  const [zohoSyncResult, setZohoSyncResult] = useState<{ pushed: number; pulled: number; errors: string[] } | null>(null);
+  const [zohoSyncResult, setZohoSyncResult] = useState<{ pushed: number; pulled: number; remaining?: number; errors: string[] } | null>(null);
   const [superpdpConnected, setSuperpdpConnected] = useState(false);
   const [sendingToPdp, setSendingToPdp] = useState<string | null>(null);
   const [pdpNotice, setPdpNotice] = useState<{ invoiceId: string; type: 'success' | 'error'; message: string } | null>(null);
@@ -577,6 +577,11 @@ export default function Invoices() {
         >
           <span>
             {t('zoho_sync_result', { pushed: zohoSyncResult.pushed, pulled: zohoSyncResult.pulled })}
+            {/* A sync pushes a bounded number of invoices per run and stops early
+                if Zoho rate-limits it, so anything left over needs another run. */}
+            {!!zohoSyncResult.remaining && (
+              <span className="ml-2">· {zohoSyncResult.remaining} restante(s) : relancez la synchronisation.</span>
+            )}
             {zohoSyncResult.errors.length > 0 && (
               <span className="ml-2">· {zohoSyncResult.errors.join(', ')}</span>
             )}

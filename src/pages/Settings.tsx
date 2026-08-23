@@ -281,6 +281,10 @@ export default function Settings() {
   // Zoho Invoice
   const [zohoStatus, setZohoStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
   const [zohoCallbackUrl, setZohoCallbackUrl] = useState('');
+  // Books redirects to /api/zoho-books/callback, a different path from Zoho
+  // Invoice's — showing Invoice's URL here sent admins to register the wrong
+  // one, and Zoho then rejected the consent with "Invalid Redirect Uri".
+  const [zohoBooksCallbackUrl, setZohoBooksCallbackUrl] = useState('');
   const [isDisconnectingZoho, setIsDisconnectingZoho] = useState(false);
   const [zohoNotice, setZohoNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
@@ -374,10 +378,19 @@ export default function Settings() {
       .catch(() => {});
     if (currentUser?.system_role === 'admin') {
       apiFetch('/api/zoho/status')
-        .then(s => { setZohoStatus(s); setZohoBooksStatus(s); })
+        .then(s => setZohoStatus(s))
+        .catch(() => {});
+      // Books has its own status: it used to be filled from /api/zoho/status,
+      // so connecting Zoho Invoice made Books claim to be connected too and
+      // hid its Connect button behind a token with no ZohoBooks scope.
+      apiFetch('/api/zoho-books/status')
+        .then(s => setZohoBooksStatus(s))
         .catch(() => {});
       apiFetch('/api/zoho/callback-url')
         .then((d: any) => setZohoCallbackUrl(d.url))
+        .catch(() => {});
+      apiFetch('/api/zoho-books/callback-url')
+        .then((d: any) => setZohoBooksCallbackUrl(d.url))
         .catch(() => {});
       apiFetch('/api/ragic/status')
         .then(s => setRagicStatus(s))
@@ -409,16 +422,71 @@ export default function Settings() {
     }
   }, [currentUser]);
 
+  // A sync pushes a bounded number of invoices per run so it can't outlast the
+  // request deadline, and stops early if Zoho rate-limits it. Both leave work
+  // behind, so say so rather than letting the user assume everything went
+  // across — and report per-invoice failures instead of claiming success.
+  const zohoSyncNotice = (
+    prefix: string,
+    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[] },
+  ): { type: 'success' | 'error'; message: string } => {
+    const parts = [`${prefix} — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.`];
+    if (data.remaining) parts.push(`${data.remaining} restante(s) : relancez la synchronisation.`);
+    const errors = data.errors ?? [];
+    if (errors.length) parts.push(`Erreurs : ${errors.slice(0, 3).join(' | ')}`);
+    return { type: errors.length ? 'error' : 'success', message: parts.join(' ') };
+  };
+
+  // The OAuth callbacks now forward Zoho's own error code instead of a bare
+  // "1" (see server/routes/zohoInvoice.ts). Translate the ones an admin can
+  // actually act on; anything else falls back to the generic message with the
+  // raw code appended, so a support request can at least quote it.
+  const zohoConnectErrorMessage = (code: string): string => {
+    switch (code) {
+      case 'invalid_client':
+      case 'invalid_client_secret':
+        return 'Zoho a refusé le Client ID ou le Client Secret. Vérifiez-les dans la console API Zoho.';
+      case 'redirect_uri_mismatch':
+      case 'invalid_redirect_uri':
+        return "L'URL de redirection ci-dessous n'est pas enregistrée à l'identique dans votre application Zoho.";
+      case 'invalid_code':
+      case 'expired_state':
+        return 'La demande de connexion a expiré. Relancez la connexion.';
+      case 'access_denied':
+        return "L'accès a été refusé sur l'écran de consentement Zoho.";
+      case 'no_code':
+        return 'Zoho est revenu sans code d’autorisation. Relancez la connexion.';
+      case '1':
+        return t('zoho_connect_error');
+      default:
+        return `${t('zoho_connect_error')} (${code})`;
+    }
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const zohoError = params.get('zoho_error');
+    const booksError = params.get('zoho_books_error');
     if (params.get('zoho_connected') === '1') {
       setZohoStatus(prev => ({ ...prev!, connected: true }));
-      setZohoBooksStatus(prev => ({ ...prev!, connected: true }));
       setZohoNotice({ type: 'success', message: t('zoho_connected_success') });
       setOpenPlugin('zoho_invoice');
       window.history.replaceState({}, '', '/settings');
-    } else if (params.get('zoho_error') === '1') {
-      setZohoNotice({ type: 'error', message: t('zoho_connect_error') });
+    } else if (zohoError) {
+      setZohoNotice({ type: 'error', message: zohoConnectErrorMessage(zohoError) });
+      setOpenPlugin('zoho_invoice');
+      window.history.replaceState({}, '', '/settings');
+    // The Books callback has always redirected with these two params, but
+    // nothing read them: a successful connect gave no feedback and left the
+    // query string in the address bar, and a failure was completely silent.
+    } else if (params.get('zoho_books_connected') === '1') {
+      setZohoBooksStatus(prev => ({ ...prev!, connected: true }));
+      setZohoBooksNotice({ type: 'success', message: 'Connexion à Zoho Books réussie.' });
+      setOpenPlugin('zoho_books');
+      window.history.replaceState({}, '', '/settings');
+    } else if (booksError) {
+      setZohoBooksNotice({ type: 'error', message: zohoConnectErrorMessage(booksError) });
+      setOpenPlugin('zoho_books');
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
@@ -727,10 +795,25 @@ export default function Settings() {
     try {
       await apiFetch('/api/zoho/disconnect', { method: 'DELETE' });
       setZohoStatus(prev => ({ ...prev!, connected: false }));
-      setZohoBooksStatus(prev => ({ ...prev!, connected: false }));
       setZohoNotice({ type: 'success', message: t('zoho_disconnected') });
     } catch {
       setZohoNotice({ type: 'error', message: t('zoho_connect_error') });
+    } finally {
+      setIsDisconnectingZoho(false);
+    }
+  };
+
+  // The Books panel used to call handleZohoDisconnect, which hits Zoho
+  // Invoice's endpoint — so "Déconnecter" under Zoho Books disconnected the
+  // wrong integration and left Books connected.
+  const handleZohoBooksDisconnect = async () => {
+    setIsDisconnectingZoho(true);
+    try {
+      await apiFetch('/api/zoho-books/disconnect', { method: 'DELETE' });
+      setZohoBooksStatus(prev => ({ ...prev!, connected: false }));
+      setZohoBooksNotice({ type: 'success', message: 'Déconnecté de Zoho Books.' });
+    } catch {
+      setZohoBooksNotice({ type: 'error', message: t('zoho_connect_error') });
     } finally {
       setIsDisconnectingZoho(false);
     }
@@ -741,7 +824,7 @@ export default function Settings() {
     setZohoNotice(null);
     try {
       const data = await apiFetch<any>('/api/zoho/sync', { method: 'POST' });
-      setZohoNotice({ type: 'success', message: `Synchronisation réussie — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.` });
+      setZohoNotice(zohoSyncNotice('Synchronisation réussie', data));
     } catch (e: any) {
       setZohoNotice({ type: 'error', message: e.message || 'Erreur de synchronisation.' });
     } finally {
@@ -754,7 +837,9 @@ export default function Settings() {
     setZohoBooksNotice(null);
     try {
       const data = await apiFetch<any>('/api/zoho-books/sync', { method: 'POST' });
-      setZohoBooksNotice({ type: 'success', message: `Synchronisation Zoho Books réussie — ${data.synced ?? 0} entrées synchronisées.` });
+      // The endpoint returns { pushed, pulled, remaining, errors } — reading
+      // `data.synced` meant this always reported "0 entrées synchronisées".
+      setZohoBooksNotice(zohoSyncNotice('Synchronisation Zoho Books réussie', data));
     } catch (e: any) {
       setZohoBooksNotice({ type: 'error', message: e.message || 'Erreur de synchronisation Zoho Books.' });
     } finally {
@@ -1083,9 +1168,9 @@ export default function Settings() {
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
           <p className="font-bold mb-1">URL de redirection OAuth</p>
           <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
-            {zohoCallbackUrl || `${window.location.origin}/api/zoho/callback`}
+            {zohoBooksCallbackUrl || `${window.location.origin}/api/zoho-books/callback`}
           </code>
-          <p className="mt-1 opacity-75">Même URL que Zoho Invoice. Ajoutez le scope <code className="font-mono px-1 rounded" style={{ background: 'var(--tblr-primary-lt)' }}>ZohoBooks.fullaccess.all</code> dans votre app Zoho.</p>
+          <p className="mt-1 opacity-75">URL <strong>différente</strong> de celle de Zoho Invoice : ajoutez les deux comme « Authorized Redirect URIs » dans votre app Zoho, ainsi que le scope <code className="font-mono px-1 rounded" style={{ background: 'var(--tblr-primary-lt)' }}>ZohoBooks.fullaccess.all</code>.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {renderSaveButton('zoho_books', () => saveSection('zoho_books', { ...zohoSharedFields(), zoho_books_org_id: settings.zoho_books_org_id }))}
@@ -1119,7 +1204,7 @@ export default function Settings() {
                 style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                 {isSyncingZohoBooks ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} Synchroniser
               </button>
-              <button type="button" onClick={handleZohoDisconnect} disabled={isDisconnectingZoho}
+              <button type="button" onClick={handleZohoBooksDisconnect} disabled={isDisconnectingZoho}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
                 style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
                 {isDisconnectingZoho ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnectedX size={13} />} Déconnecter

@@ -16,7 +16,7 @@ export interface RouteDeps {
 // tenant member, not just admins, and these columns hold live SMTP/OAuth/API
 // credentials in plaintext.
 const SECRET_COLS = new Set([
-  'smtp_pass', 'zoho_client_secret', 'zoho_refresh_token', 'ragic_api_key',
+  'smtp_pass', 'zoho_client_secret', 'zoho_refresh_token', 'zoho_books_refresh_token', 'ragic_api_key',
   'odoo_api_key', 'superpdp_client_secret', 'chorus_pro_piste_client_secret',
   'chorus_pro_technical_password',
 ]);

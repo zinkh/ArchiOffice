@@ -2,7 +2,8 @@ import * as React from 'react';
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
-import { isOfflineBuild, getStoredLocalSession, clearLocalSession, withTimeout, AUTH_TIMEOUT_MS } from './lib/authToken';
+import { isOfflineBuild, getStoredLocalSession, clearLocalSession, AUTH_TIMEOUT_MS } from './lib/authToken';
+import { rawFetch } from './lib/authInterceptor';
 
 // Structurally compatible with both a real Supabase Session/User and our
 // locally-signed offline session (src/lib/authToken.ts) — the functions below
@@ -51,7 +52,10 @@ function mapSupabaseUser(user: MinimalUser): UserProfile {
 async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
   const base = mapSupabaseUser(session.user);
   try {
-    const res = await fetch('/api/me', {
+    // rawFetch, not window.fetch: we already hold the access token, so there is
+    // nothing for the auth interceptor to add — and going through it would make
+    // this call wait on the Supabase auth lock for no reason.
+    const res = await rawFetch('/api/me', {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     if (!res.ok) return base;
@@ -85,7 +89,7 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
 
 async function loadBillingStatus(session: MinimalSession): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
   try {
-    const res = await fetch('/api/billing/status', {
+    const res = await rawFetch('/api/billing/status', {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     if (!res.ok) return { plan: 'trial', trial_ends_at: null, is_expired: false };
@@ -139,56 +143,85 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS)
-      .then(async ({ data: { session }, error }) => {
-        if (error) {
-          supabase.auth.signOut();
-          setCurrentUser(null);
-        } else if (session) {
-          sessionRef.current = session;
-          const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
-          setCurrentUser(user);
-          setTenantPlan(billing.plan);
-          setTrialEndsAt(billing.trial_ends_at);
-          setIsTrialExpired(billing.is_expired);
-        } else {
-          setCurrentUser(null);
-        }
-        setIsLoading(false);
-      })
-      .catch(() => {
-        // getSession() hung (e.g. a stuck cross-tab lock, or a slow network
-        // while it silently refreshed an expired access token) rather than
-        // answering — that's inconclusive, not proof the session is dead.
-        // Fall back to the login screen for this load, but don't wipe the
-        // stored token over a transient timeout: forcing a fresh login every
-        // time the refresh is merely slow is worse than occasionally leaving
-        // a stale token around, and the user's next successful load (or
-        // login) sorts it out either way.
+    let cancelled = false;
+    let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
+    // Which user's profile/billing this listener has already fetched, so the
+    // repeat events for one signed-in user (INITIAL_SESSION then SIGNED_IN, and
+    // TOKEN_REFRESHED on every auto-refresh — roughly hourly) don't re-fetch a
+    // profile we already have.
+    let loadedUserId: string | null = null;
+
+    const applySession = async (session: MinimalSession | null) => {
+      if (cancelled) return;
+      sessionRef.current = session;
+      clearTimeout(bootstrapTimer);
+      if (!session) {
+        loadedUserId = null;
         setCurrentUser(null);
         setIsLoading(false);
-      });
+        return;
+      }
+      if (loadedUserId === session.user.id) {
+        setIsLoading(false);
+        return;
+      }
+      loadedUserId = session.user.id;
+      const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
+      if (cancelled) return;
+      setCurrentUser(user);
+      setTenantPlan(billing.plan);
+      setTrialEndsAt(billing.trial_ends_at);
+      setIsTrialExpired(billing.is_expired);
+      setIsLoading(false);
+    };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (_event === 'PASSWORD_RECOVERY') {
+    // supabase-js emits INITIAL_SESSION to every new subscriber once it has
+    // read the persisted session, so this listener alone bootstraps the app —
+    // no separate getSession() call, and therefore one less acquisition of the
+    // browser-wide auth lock during the busiest moment of the page load.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
         // Session temporaire créée par le lien de réinitialisation de mot de passe —
         // ne pas authentifier automatiquement l'utilisateur dans l'app, la page
         // /reset-password gère ce flux séparément.
         return;
       }
-      sessionRef.current = session;
-      if (session) {
-        const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
-        setCurrentUser(user);
-        setTenantPlan(billing.plan);
-        setTrialEndsAt(billing.trial_ends_at);
-        setIsTrialExpired(billing.is_expired);
-      } else {
-        setCurrentUser(null);
-      }
+      // This callback MUST stay synchronous, and must not await anything.
+      // supabase-js awaits auth state listeners *inside* its exclusive
+      // Navigator LockManager lock, so an `async` callback holds that lock
+      // until it settles. This one used to await /api/me and
+      // /api/billing/status, which went through the patched window.fetch
+      // (src/lib/authInterceptor.ts) -> getAccessToken() -> getSession().
+      // getSession() then hit GoTrueClient._acquireLock's reentrant branch
+      // (`if (this.lockAcquired)`), which waits on the queued operation that is
+      // itself waiting on this callback — a circular wait, and one that its own
+      // 5s lockAcquireTimeout never covers because that branch never goes near
+      // navigator.locks. The outer `finally` that resets `lockAcquired` then
+      // never ran, so *every* later getSession()/refreshSession() in the tab
+      // took the same poisoned branch and hung until our 15s auth-timeout —
+      // permanently, until a reload. That is the state the console shows:
+      // `auth-timeout` on every call plus `Acquiring an exclusive Navigator
+      // LockManager lock "lock:sb-...-auth-token" immediately failed` from the
+      // auto-refresh tick. Supabase documents the underlying bug:
+      // https://supabase.com/docs/guides/troubleshooting/why-is-my-supabase-api-call-not-returning-PGzXw0
+      // Deferring to a macrotask lets supabase-js release the lock first.
+      setTimeout(() => { void applySession(session); }, 0);
     });
 
-    return () => subscription.unsubscribe();
+    // Safety net: if supabase-js never emits (e.g. its own bootstrap is wedged
+    // on a network stall), stop showing the spinner and fall back to the login
+    // screen instead of hanging forever. Doesn't wipe the stored token — a
+    // timeout says nothing about whether the session is still valid, and the
+    // listener above still applies the session if it arrives late.
+    bootstrapTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, AUTH_TIMEOUT_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(bootstrapTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {

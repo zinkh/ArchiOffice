@@ -40,6 +40,17 @@ export function createOAuthState(tenantId: string, userId?: string, returnTo?: s
 // One-time use: returns { tenantId, userId, returnTo } and removes the
 // entry, or null if the state is missing, unknown, expired, or already
 // consumed.
+// OAuth providers report failures as short snake_case codes (invalid_client,
+// invalid_code, access_denied, ...). A callback can't render an error page —
+// it has to redirect the browser back into the SPA — so the reason travels as a
+// query param. Pass only that shape through, so an upstream message can never
+// inject arbitrary text (extra params, markup) into the URL the browser lands
+// on; anything else degrades to a generic '1'.
+export function oauthErrorParam(reason: unknown): string {
+  const code = typeof reason === 'string' ? reason : '';
+  return /^[a-z_]{1,40}$/.test(code) ? code : '1';
+}
+
 export function consumeOAuthState(state: string | undefined): { tenantId: string; userId?: string; returnTo?: string } | null {
   if (!state) return null;
   const entry = pendingStates.get(state);
