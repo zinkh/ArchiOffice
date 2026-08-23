@@ -269,11 +269,14 @@ export default function Settings() {
     notificationArchiveDays: {} as Record<string, number>,
   });
 
-  const [isSaving, setIsSaving] = useState(false);
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Per-section save status (Informations du cabinet, SMTP, each Marketplace
+  // plugin, ...) — every section saves independently via its own PUT
+  // /api/settings carrying only its own fields, so a bad value or a DB column
+  // missing for one section (e.g. a pending migration on a Zoho field) can
+  // never block or fail saving an unrelated section.
+  const [sectionStatus, setSectionStatus] = useState<Record<string, { saving: boolean; error: string | null; success: boolean }>>({});
 
   // Zoho Invoice
   const [zohoStatus, setZohoStatus] = useState<{ connected: boolean; has_credentials: boolean } | null>(null);
@@ -466,11 +469,21 @@ export default function Settings() {
     } catch (err) { console.error('Failed to delete project category:', err); }
   };
 
+  const ragicFields = () => ({
+    ragic_api_key: (settings as any).ragic_api_key,
+    ragic_account: (settings as any).ragic_account,
+    ragic_sheet_contacts: (settings as any).ragic_sheet_contacts,
+    ragic_sheet_projects: (settings as any).ragic_sheet_projects,
+    ragic_sheet_invoices: (settings as any).ragic_sheet_invoices,
+    ragic_sheet_proposals: (settings as any).ragic_sheet_proposals,
+  });
+
   const handleRagicSync = async () => {
     setIsSyncingRagic(true);
     setRagicNotice(null);
     try {
-      await handleSave();
+      const saveErr = await saveSection('ragic', ragicFields());
+      if (saveErr) { setRagicNotice({ type: 'error', message: saveErr }); return; }
       const data = await apiFetch<any>('/api/ragic/sync', { method: 'POST' });
       const r = data.results ?? {};
       const total = Object.values(r).reduce((acc: any, v: any) => ({
@@ -507,11 +520,19 @@ export default function Settings() {
     }
   };
 
+  const odooFields = () => ({
+    odoo_url: (settings as any).odoo_url,
+    odoo_db: (settings as any).odoo_db,
+    odoo_username: (settings as any).odoo_username,
+    odoo_api_key: (settings as any).odoo_api_key,
+  });
+
   const handleOdooTest = async () => {
     setIsTestingOdoo(true);
     setOdooNotice(null);
     try {
-      await handleSave();
+      const saveErr = await saveSection('odoo', odooFields());
+      if (saveErr) { setOdooNotice({ type: 'error', message: saveErr }); return; }
       const data = await apiFetch<any>('/api/odoo/test', { method: 'POST' });
       setOdooStatus({ connected: true });
       setOdooNotice({ type: 'success', message: `Connexion réussie — ${data.company}` });
@@ -527,7 +548,8 @@ export default function Settings() {
     setIsSyncingOdoo(true);
     setOdooNotice(null);
     try {
-      await handleSave();
+      const saveErr = await saveSection('odoo', odooFields());
+      if (saveErr) { setOdooNotice({ type: 'error', message: saveErr }); return; }
       const data = await apiFetch<any>('/api/odoo/sync', { method: 'POST' });
       const r = data.results ?? {};
       const total = Object.values(r).reduce((acc: any, v: any) => ({
@@ -559,9 +581,19 @@ export default function Settings() {
     }
   };
 
+  const superpdpFields = () => ({
+    superpdp_client_id: (settings as any).superpdp_client_id,
+    superpdp_client_secret: (settings as any).superpdp_client_secret,
+    superpdp_sandbox: (settings as any).superpdp_sandbox,
+  });
+
   const handleSuperpdpTest = async () => {
     setIsTestingSuperpdp(true);
     try {
+      // /api/superpdp/test reads credentials from the persisted settings row,
+      // not from the request body — must be saved first.
+      const saveErr = await saveSection('superpdp', superpdpFields());
+      if (saveErr) { setSuperpdpNotice({ type: 'error', message: saveErr }); return; }
       const res = await apiFetch<{ connected: boolean; company?: string; error?: string }>('/api/superpdp/test', { method: 'POST' });
       if (res.connected) {
         setSuperpdpStatus({ connected: true });
@@ -590,9 +622,21 @@ export default function Settings() {
     }
   };
 
+  const chorusProFields = () => ({
+    chorus_pro_piste_client_id: (settings as any).chorus_pro_piste_client_id,
+    chorus_pro_piste_client_secret: (settings as any).chorus_pro_piste_client_secret,
+    chorus_pro_technical_login: (settings as any).chorus_pro_technical_login,
+    chorus_pro_technical_password: (settings as any).chorus_pro_technical_password,
+    chorus_pro_sandbox: (settings as any).chorus_pro_sandbox,
+  });
+
   const handleChorusProTest = async () => {
     setIsTestingChorusPro(true);
     try {
+      // /api/chorus-pro/test reads credentials from the persisted settings
+      // row, not from the request body — must be saved first.
+      const saveErr = await saveSection('chorus_pro', chorusProFields());
+      if (saveErr) { setChorusProNotice({ type: 'error', message: saveErr }); return; }
       const res = await apiFetch<{ connected: boolean; sandbox?: boolean; error?: string }>('/api/chorus-pro/test', { method: 'POST' });
       if (res.connected) {
         setChorusProStatus({ connected: true, sandbox: res.sandbox });
@@ -739,50 +783,112 @@ export default function Settings() {
     }
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    // Abort the underlying request(s) once the deadline fires — otherwise a save
-    // that's merely slow (e.g. the server restarting) keeps running in the
-    // background after the user is told it "failed", and can land moments later
-    // with no visible confirmation, silently desyncing what's shown from what's
-    // actually stored (and setting up a retry to clobber/duplicate it).
+  // Shared by every section's save action below. Races the request against a
+  // 30s deadline and aborts it if that fires — otherwise a save that's merely
+  // slow keeps running in the background after the user is told it "failed",
+  // and can land moments later with no visible confirmation, silently
+  // desyncing what's shown from what's actually stored (and setting up a
+  // retry to clobber/duplicate it).
+  //
+  // The 30s deadline only counts time the tab is actually visible: configuring
+  // an integration typically means tabbing away to the provider's console to
+  // copy a Client ID/Secret, then back to paste and hit Save. A plain
+  // wall-clock timer keeps running while the tab is hidden, so it can fire the
+  // instant the user returns — reporting (and, worse, aborting) a save that
+  // was actually about to succeed in well under a second, with nothing slow
+  // or broken on the server at all.
+  const apiPutWithDeadline = async <T,>(url: string, body: any): Promise<T> => {
+    let settled = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
-    const deadline = new Promise<never>((_, reject) =>
-      setTimeout(() => {
+    let rejectDeadline!: (err: Error) => void;
+    const deadline = new Promise<never>((_, reject) => { rejectDeadline = reject; });
+    const armDeadline = () => {
+      clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(() => {
         controller.abort();
-        reject(new Error('Délai dépassé (30s). Le serveur est peut-être en cours de redémarrage — vérifiez votre connexion et réessayez dans un instant.'));
-      }, 30_000)
-    );
+        rejectDeadline(new Error('Délai dépassé (30s). Vérifiez votre connexion et réessayez.'));
+      }, 30_000);
+    };
+    const onVisibilityChange = () => {
+      if (settled) return;
+      if (document.hidden) clearTimeout(deadlineTimer);
+      else armDeadline();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    armDeadline();
     try {
-      await Promise.race([
-        (async () => {
-          if (currentUser?.system_role === 'admin') {
-            await apiFetch('/api/settings', {
-              method: 'PUT',
-              body: JSON.stringify(settings),
-              signal: controller.signal,
-            });
-            db.settings.put(settings).catch(() => {});
-          }
-          if (currentUser) {
-            await apiFetch(`/api/team/${currentUser.id}`, {
-              method: 'PUT',
-              body: JSON.stringify(userSettings),
-              signal: controller.signal,
-            });
-            setCurrentUser({ ...currentUser, ...userSettings } as any);
-          }
-        })(),
+      return await Promise.race([
+        apiFetch<T>(url, { method: 'PUT', body: JSON.stringify(body), signal: controller.signal }),
         deadline,
       ]);
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      console.error('[Settings save]', err);
-      setSaveError(err?.message || 'Erreur lors de la sauvegarde.');
     } finally {
-      setIsSaving(false);
+      settled = true;
+      clearTimeout(deadlineTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
+  };
+
+  // PUTs only the given subset of tenant settings fields — never the whole
+  // `settings` object — so saving e.g. the Zoho panel can never be blocked by,
+  // or block, an unrelated section such as SMTP or Informations du cabinet.
+  const putSettingsFields = async (fields: Record<string, any>) => {
+    await apiPutWithDeadline('/api/settings', fields);
+    db.settings.put({ ...settings, ...fields }).catch(() => {});
+  };
+
+  // Generic per-section save: updates `sectionStatus[key]` for the section's
+  // own "Enregistrer" button, and returns the error message on failure (or
+  // null on success) so callers that need to chain another step (e.g.
+  // "Connecter Zoho" saving credentials before starting the OAuth redirect)
+  // can bail out cleanly without depending on a stale state closure.
+  const saveSection = async (key: string, fields: Record<string, any>): Promise<string | null> => {
+    setSectionStatus(prev => ({ ...prev, [key]: { saving: true, error: null, success: false } }));
+    try {
+      await putSettingsFields(fields);
+      setSectionStatus(prev => ({ ...prev, [key]: { saving: false, error: null, success: true } }));
+      setTimeout(() => setSectionStatus(prev => ({ ...prev, [key]: { ...prev[key], success: false } })), 3000);
+      return null;
+    } catch (err: any) {
+      const message = err?.message || 'Erreur lors de la sauvegarde.';
+      console.error(`[Settings save:${key}]`, err);
+      setSectionStatus(prev => ({ ...prev, [key]: { saving: false, error: message, success: false } }));
+      return message;
+    }
+  };
+
+  // Renders a small self-contained "Enregistrer" button + status for one
+  // section, reading/writing `sectionStatus[key]`.
+  const renderSaveButton = (key: string, onSave: () => void, label = 'Enregistrer') => {
+    const status = sectionStatus[key] || { saving: false, error: null, success: false };
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <button type="button" disabled={status.saving} onClick={onSave}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
+          style={status.success ? { background: 'var(--tblr-success)', color: '#fff' } : { background: 'var(--tblr-primary)', color: '#fff' }}>
+          {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
+          {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+        </button>
+        {status.error && <span className="text-xs font-medium" style={{ color: 'var(--tblr-danger)' }}>{status.error}</span>}
+      </div>
+    );
+  };
+
+  // Profile fields (avatar, phone, job title, "my email settings", ...) live
+  // on the user's own profile row, entirely separate from tenant `settings` —
+  // its own endpoint and its own section, so it can never be affected by (or
+  // affect) any tenant-settings section above.
+  const saveProfile = async () => {
+    if (!currentUser) return;
+    setSectionStatus(prev => ({ ...prev, profile: { saving: true, error: null, success: false } }));
+    try {
+      await apiPutWithDeadline(`/api/team/${currentUser.id}`, userSettings);
+      setCurrentUser({ ...currentUser, ...userSettings } as any);
+      setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: null, success: true } }));
+      setTimeout(() => setSectionStatus(prev => ({ ...prev, profile: { ...prev.profile, success: false } })), 3000);
+    } catch (err: any) {
+      console.error('[Settings save:profile]', err);
+      setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: err?.message || 'Erreur lors de la sauvegarde.', success: false } }));
     }
   };
 
@@ -854,6 +960,12 @@ export default function Settings() {
 
   // ── Plugin config panels ───────────────────────────────────────────────────
 
+  const zohoSharedFields = () => ({
+    zoho_client_id: settings.zoho_client_id,
+    zoho_client_secret: settings.zoho_client_secret,
+    zoho_data_center: settings.zoho_data_center,
+  });
+
   const renderPluginConfig = (pluginId: string) => {
     if (pluginId === 'zoho_invoice') return (
       <div className="space-y-4">
@@ -883,6 +995,7 @@ export default function Settings() {
           <p className="mt-1 opacity-75">Copiez cette URL dans la console API Zoho → Authorized Redirect URIs.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {renderSaveButton('zoho_invoice', () => saveSection('zoho_invoice', { ...zohoSharedFields(), zoho_org_id: settings.zoho_org_id }))}
           <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
@@ -893,11 +1006,12 @@ export default function Settings() {
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_org_id}
               onClick={async () => {
-                await handleSave();
                 // window.location.href = '/api/zoho/auth' used to navigate straight to our
                 // own route — a bare browser navigation carries no JWT, so it 401'd before
                 // ever reaching Zoho. apiFetch attaches the JWT; the server returns the
                 // consent URL as JSON, and we navigate to Zoho ourselves.
+                const saveErr = await saveSection('zoho_invoice', { ...zohoSharedFields(), zoho_org_id: settings.zoho_org_id });
+                if (saveErr) { setZohoNotice({ type: 'error', message: saveErr }); return; }
                 try {
                   const data = await apiFetch<{ url: string }>('/api/zoho/auth');
                   window.location.href = data.url;
@@ -959,6 +1073,7 @@ export default function Settings() {
           <p className="mt-1 opacity-75">Même URL que Zoho Invoice. Ajoutez le scope <code className="font-mono px-1 rounded" style={{ background: 'var(--tblr-primary-lt)' }}>ZohoBooks.fullaccess.all</code> dans votre app Zoho.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {renderSaveButton('zoho_books', () => saveSection('zoho_books', { ...zohoSharedFields(), zoho_books_org_id: settings.zoho_books_org_id }))}
           <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
@@ -969,7 +1084,8 @@ export default function Settings() {
               type="button"
               disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !(settings.zoho_books_org_id || settings.zoho_org_id)}
               onClick={async () => {
-                await handleSave();
+                const saveErr = await saveSection('zoho_books', { ...zohoSharedFields(), zoho_books_org_id: settings.zoho_books_org_id });
+                if (saveErr) { setZohoBooksNotice({ type: 'error', message: saveErr }); return; }
                 try {
                   const data = await apiFetch<{ url: string }>('/api/zoho-books/auth');
                   window.location.href = data.url;
@@ -1056,6 +1172,12 @@ export default function Settings() {
           <p className="font-bold mb-1">Déclaration MAF — Activités professionnelles</p>
           <p>La déclaration annuelle doit être validée et clôturée sur <strong>maf.fr</strong> avant le 31 mars. ArchiOffice vous aide à préparer vos données et calcule vos assiettes de cotisation.</p>
         </div>
+        {renderSaveButton('maf', () => saveSection('maf', {
+          maf_enabled: (settings as any).maf_enabled,
+          maf_numero_adherent: (settings as any).maf_numero_adherent,
+          maf_taux_contrat_permil: (settings as any).maf_taux_contrat_permil,
+          maf_declaration_year: (settings as any).maf_declaration_year,
+        }))}
       </div>
     );
 
@@ -1127,6 +1249,7 @@ export default function Settings() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {renderSaveButton('odoo', () => saveSection('odoo', odooFields()))}
           <button
             type="button"
             disabled={!(settings as any).odoo_url || !(settings as any).odoo_api_key || !(settings as any).odoo_username || !(settings as any).odoo_db || isTestingOdoo}
@@ -1230,6 +1353,7 @@ export default function Settings() {
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
             <IconExternalLink size={13} /> Documentation API Ragic
           </a>
+          {renderSaveButton('ragic', () => saveSection('ragic', ragicFields()))}
           <button
             type="button"
             disabled={!(settings as any).ragic_api_key || !(settings as any).ragic_account || isSyncingRagic}
@@ -1305,6 +1429,7 @@ export default function Settings() {
           <p>Nom agence · Adresse · Email · SIRET · N° TVA. Complétez ces champs dans l'onglet <strong>Général</strong> avant d'envoyer des factures.</p>
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
+          {renderSaveButton('superpdp', () => saveSection('superpdp', superpdpFields()))}
           <button
             type="button"
             disabled={isTestingSuperpdp}
@@ -1401,6 +1526,7 @@ export default function Settings() {
           <p>Nom agence · Adresse · Email · SIRET · N° TVA. Complétez ces champs dans l'onglet <strong>Général</strong>. Le SIRET du destinataire (structure publique), le code du service exécutant et le numéro d'engagement sont demandés à l'envoi de chaque facture, depuis la page <strong>Factures</strong>.</p>
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
+          {renderSaveButton('chorus_pro', () => saveSection('chorus_pro', chorusProFields()))}
           <button
             type="button"
             disabled={isTestingChorusPro}
@@ -1462,6 +1588,12 @@ export default function Settings() {
                 }} />
               {settings.logoUrl && <img src={settings.logoUrl} alt="Logo" className="w-24 h-24 object-contain mt-2 rounded-lg p-1" style={{ border: '1px solid var(--tblr-border)' }} />}
             </div>
+            {renderSaveButton('agency', () => saveSection('agency', {
+              agencyName: settings.agencyName, address: settings.address, phone: settings.phone,
+              email: settings.email, siret: settings.siret, vatNumber: settings.vatNumber,
+              seller_iban: settings.seller_iban, seller_bic: settings.seller_bic, currency: settings.currency,
+              logoUrl: settings.logoUrl,
+            }))}
           </div>
 
           {/* ── Numérotation des documents ── */}
@@ -1527,6 +1659,10 @@ export default function Settings() {
                 </div>
               );
             })}
+            {renderSaveButton('numbering', () => saveSection('numbering', {
+              numPrefixDevis: settings.numPrefixDevis, numPrefixFacture: settings.numPrefixFacture,
+              numPrefixHonoraires: settings.numPrefixHonoraires, numPrefixAffaire: settings.numPrefixAffaire,
+            }))}
           </div>
 
           {/* ── RH : congés par défaut ── */}
@@ -1553,6 +1689,10 @@ export default function Settings() {
                   onChange={e => setSettings({ ...settings, defaultLeaveDaysRtt: parseFloat(e.target.value) || 0 })} />
               </div>
             </div>
+            {renderSaveButton('leave', () => saveSection('leave', {
+              defaultLeaveDaysCongesPayes: settings.defaultLeaveDaysCongesPayes,
+              defaultLeaveDaysRtt: settings.defaultLeaveDaysRtt,
+            }))}
           </div>
 
           {/* ── SMTP ── */}
@@ -1568,12 +1708,17 @@ export default function Settings() {
               <input type="password" className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('settings_smtp_password_placeholder')} value={settings.smtpPass} onChange={e => setSettings({...settings, smtpPass: e.target.value})} />
             </div>
             <div className="flex flex-col gap-2">
-              <button type="button" onClick={handleTestSmtp}
-                disabled={isTestingSmtp || !settings.smtpHost || !settings.smtpUser || !settings.smtpPass}
-                className="w-fit flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
-                {isTestingSmtp ? <><IconLoader2 className="w-4 h-4 animate-spin" />{t('settings_smtp_testing')}</> : t('settings_smtp_test_btn')}
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {renderSaveButton('smtp', () => saveSection('smtp', {
+                  smtpHost: settings.smtpHost, smtpPort: settings.smtpPort, smtpUser: settings.smtpUser, smtpPass: settings.smtpPass,
+                }))}
+                <button type="button" onClick={handleTestSmtp}
+                  disabled={isTestingSmtp || !settings.smtpHost || !settings.smtpUser || !settings.smtpPass}
+                  className="w-fit flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                  {isTestingSmtp ? <><IconLoader2 className="w-4 h-4 animate-spin" />{t('settings_smtp_testing')}</> : t('settings_smtp_test_btn')}
+                </button>
+              </div>
               {smtpTestResult && (
                 <div className="text-sm p-3 rounded-lg border" style={smtpTestResult.success
                   ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
@@ -1601,6 +1746,9 @@ export default function Settings() {
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               placeholder={t('default_email_template')} value={settings.defaultEmailTemplate ?? ''}
               onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} />
+            {renderSaveButton('email', () => saveSection('email', {
+              senderOption: settings.senderOption, defaultEmailTemplate: settings.defaultEmailTemplate,
+            }))}
           </div>
 
           {/* ── Domaines et catégories ── */}
@@ -1680,6 +1828,9 @@ export default function Settings() {
                 </div>
               ))}
             </div>
+            {renderSaveButton('notifications', () => saveSection('notifications', {
+              notificationArchiveDays: settings.notificationArchiveDays,
+            }))}
           </div>
 
           {/* ══════════════════ INTEGRATIONS MARKETPLACE ══════════════════ */}
@@ -1964,26 +2115,10 @@ export default function Settings() {
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
 
-      {/* Save error */}
-      {saveError && (
-        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-          {saveError}
-        </div>
-      )}
-
-      {/* Save button */}
-      <button
-        disabled={isSaving || showSuccess}
-        className="px-6 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 text-sm disabled:opacity-80 disabled:cursor-not-allowed"
-        style={showSuccess
-          ? { background: 'var(--tblr-success)', color: '#fff' }
-          : { background: 'var(--tblr-primary)', color: '#fff' }}
-        onClick={handleSave}
-      >
-        {isSaving ? <><IconLoader2 className="w-4 h-4 animate-spin" />{t('saving')}...</>
-          : showSuccess ? <><IconCircleCheck size={18} />{t('settings_saved')}</>
-          : t('save')}
-      </button>
+      {/* Informations utilisateur + Mes paramètres email share the same profile
+          row (PUT /api/team/:id) — one save action for both, entirely separate
+          from every tenant-settings section above. */}
+      {renderSaveButton('profile', () => saveProfile())}
     </div>
   );
 }
