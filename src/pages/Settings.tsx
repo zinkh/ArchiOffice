@@ -790,13 +790,21 @@ export default function Settings() {
   // desyncing what's shown from what's actually stored (and setting up a
   // retry to clobber/duplicate it).
   //
-  // The 30s deadline only counts time the tab is actually visible: configuring
-  // an integration typically means tabbing away to the provider's console to
+  // The deadline only counts time the tab is actually visible: configuring an
+  // integration typically means tabbing away to the provider's console to
   // copy a Client ID/Secret, then back to paste and hit Save. A plain
   // wall-clock timer keeps running while the tab is hidden, so it can fire the
   // instant the user returns — reporting (and, worse, aborting) a save that
   // was actually about to succeed in well under a second, with nothing slow
   // or broken on the server at all.
+  //
+  // 45s (not 30s): apiFetch's own getAccessToken() budgets up to
+  // AUTH_TIMEOUT_MS (src/lib/authToken.ts) twice in the worst case
+  // (getSession() then refreshSession()) before falling back to an
+  // unauthenticated request — on a slow network (e.g. a corporate VPN, seen
+  // in production) that alone can approach 30s, leaving no room for the
+  // actual save. 45s gives a legitimately slow-but-working network a
+  // realistic chance instead of cutting it off mid-auth-check.
   const apiPutWithDeadline = async <T,>(url: string, body: any): Promise<T> => {
     let settled = false;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -807,8 +815,8 @@ export default function Settings() {
       clearTimeout(deadlineTimer);
       deadlineTimer = setTimeout(() => {
         controller.abort();
-        rejectDeadline(new Error('Délai dépassé (30s). Vérifiez votre connexion et réessayez.'));
-      }, 30_000);
+        rejectDeadline(new Error('Délai dépassé (45s). Vérifiez votre connexion et réessayez.'));
+      }, 45_000);
     };
     const onVisibilityChange = () => {
       if (settled) return;

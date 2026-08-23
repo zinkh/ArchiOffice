@@ -58,7 +58,19 @@ export function clearSupabaseAuthStorage(): void {
 // cross-tab navigator.locks request, or a stale/invalid refresh token that never
 // resolves) with no built-in timeout. Racing against a timeout keeps the app from
 // being stuck behind an infinite spinner.
-const AUTH_TIMEOUT_MS = 8_000;
+//
+// 8s was too tight: a user on a corporate VPN hit this timeout on *every*
+// getSession()/refreshSession() call, every time — not because the session was
+// stuck, but because the VPN's added latency (plus queueing behind
+// supabase-js's own internal auto-refresh, which serializes through the same
+// Navigator Lock and makes a real network call to Supabase's Auth API) pushed
+// otherwise-successful calls past 8s. Confirmed not a corrupted-token problem:
+// clearing storage and forcing a fresh login (see git history — a
+// consecutive-failures auto-wipe briefly lived here) hit the exact same
+// timeout again on the brand-new session, since the new session needs the
+// same slow round-trip. 15s gives real (if slow) network conditions a
+// realistic chance to complete instead of being cut off mid-flight.
+const AUTH_TIMEOUT_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -70,39 +82,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-// Diagnostics landed in a prior deploy (three rounds of plausible-but-wrong
-// theories — load-balancer keepAlive, tab-visibility, concurrent-call
-// coalescing — had each failed to resolve a recurring 30s save-hang) showed
-// real production timings: getSession() timed out at the full AUTH_TIMEOUT_MS
-// on *every single call*, indefinitely, for the whole browser session, always
-// returning hasToken:false. That's not transient contention, and it never
-// self-heals — it's a permanently stuck/corrupted local auth token (or a
-// Navigator Lock that never releases) for that browser tab. The fallback below
-// (attemptStuckSessionRecovery) detects that pattern and clears the token
-// automatically instead of taxing every request 8+ seconds forever.
-const AUTH_RECOVERY_ATTEMPTED_KEY = 'archioffice_auth_recovery_attempted';
-const MAX_CONSECUTIVE_AUTH_FAILURES = 2;
-let consecutiveAuthFailures = 0;
-
-function attemptStuckSessionRecovery(): void {
-  // Guard against a reload loop: if clearing storage doesn't actually fix the
-  // underlying issue, reloading forever would just be a blank-then-reload
-  // page indefinitely. Try exactly once per browser tab session (persists
-  // across the reload this triggers, via sessionStorage) — reset on the next
-  // successful token fetch so a genuinely new stuck state, much later in the
-  // same tab, can still trigger recovery again.
-  try {
-    if (sessionStorage.getItem(AUTH_RECOVERY_ATTEMPTED_KEY) === 'true') return;
-    sessionStorage.setItem(AUTH_RECOVERY_ATTEMPTED_KEY, 'true');
-  } catch {
-    // sessionStorage unavailable (private browsing, etc.) — proceed once;
-    // worst case this can retrigger on repeat failures without the guard.
-  }
-  console.warn('[authToken] getSession()/refreshSession() failed repeatedly with no successful token — clearing a possibly corrupted auth token and reloading.');
-  clearSupabaseAuthStorage();
-  window.location.reload();
-}
-
+// A prior revision wiped the local token and forced a reload after a couple of
+// consecutive getSession()/refreshSession() timeouts, on the theory that
+// repeated failure meant a permanently corrupted token. That theory was
+// disproven in production: a user on a corporate VPN hit the exact same
+// timeout on a *brand-new* session immediately after a fresh, successful
+// login — proving the failures were network latency, not a corrupted token,
+// and the auto-wipe just forced them into a login loop. Don't wipe on a mere
+// timeout — only clear the stored token when Supabase itself explicitly says
+// the refresh token is dead (below), never on our own timeout budget running out.
 async function fetchAccessToken(): Promise<string | null> {
   let session: { access_token: string; expires_at?: number } | null = null;
   try {
@@ -110,11 +98,9 @@ async function fetchAccessToken(): Promise<string | null> {
     session = result.data.session;
   } catch {
     // getSession() hung rather than answering (slow network, a stuck cross-tab
-    // lock) — inconclusive on its own, so don't wipe a possibly-still-good
-    // token over a single transient timeout. But if this keeps happening with
-    // no successful token in between, it isn't transient — recover instead of
-    // taxing every request 8+ seconds forever.
-    if (++consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) attemptStuckSessionRecovery();
+    // lock) — that's inconclusive, not proof the session is invalid. Fail this
+    // one call without wiping a possibly-still-good token; forcing a fresh
+    // login over a transient timeout is worse than letting the caller retry.
     return null;
   }
 
@@ -131,19 +117,12 @@ async function fetchAccessToken(): Promise<string | null> {
         return null;
       }
     } catch {
-      // refreshSession() hung — same as above, inconclusive by itself.
-      if (!session?.access_token && ++consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
-        attemptStuckSessionRecovery();
-      }
+      // refreshSession() hung — same as above, inconclusive. Keep whatever
+      // session we already had rather than forcing a re-login over it.
     }
   }
 
-  const token = session?.access_token ?? null;
-  if (token) {
-    consecutiveAuthFailures = 0;
-    try { sessionStorage.removeItem(AUTH_RECOVERY_ATTEMPTED_KEY); } catch { /* ignore */ }
-  }
-  return token;
+  return session?.access_token ?? null;
 }
 
 // getAccessToken() is called independently by every apiFetch() — a single page
