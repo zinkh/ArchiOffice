@@ -70,12 +70,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Bearer token for the current session — branches offline (local JWT) vs cloud (Supabase). */
-export async function getAccessToken(): Promise<string | null> {
-  if (isOfflineBuild()) {
-    return getStoredLocalSession()?.access_token ?? null;
-  }
-
+async function fetchAccessToken(): Promise<string | null> {
   let session: { access_token: string; expires_at?: number } | null = null;
   try {
     const result = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
@@ -107,6 +102,44 @@ export async function getAccessToken(): Promise<string | null> {
   }
 
   return session?.access_token ?? null;
+}
+
+// getAccessToken() is called independently by every apiFetch() — a single page
+// load routinely fires a dozen-plus concurrent authenticated requests (see
+// Settings.tsx mounting: zoho/ragic/odoo/superpdp/chorus-pro status checks,
+// project categories, tenant deletion, admin check, ...). supabase-js's
+// getSession()/refreshSession() serialize through a single exclusive
+// browser-wide lock (Navigator LockManager) keyed on the auth storage key, so
+// a burst of concurrent callers each re-running getSession()/refreshSession()
+// queues up behind that one lock instead of running in parallel — enough of a
+// pile-up can make a request issued into that same burst (e.g. a Settings
+// save) wait past a client-side deadline despite the backend and network
+// being entirely healthy (confirmed via DigitalOcean metrics showing zero
+// server-side trace of the request during such a stall). Coalescing concurrent
+// callers onto one in-flight check, plus a short cache of the result, cuts a
+// burst of N calls down to ~1 lock acquisition instead of N serialized ones.
+let inFlightToken: Promise<string | null> | null = null;
+let cachedToken: { value: string | null; expiresAt: number } | null = null;
+const TOKEN_CACHE_MS = 3_000;
+
+/** Bearer token for the current session — branches offline (local JWT) vs cloud (Supabase). */
+export async function getAccessToken(): Promise<string | null> {
+  if (isOfflineBuild()) {
+    return getStoredLocalSession()?.access_token ?? null;
+  }
+
+  if (cachedToken && cachedToken.expiresAt > Date.now()) {
+    return cachedToken.value;
+  }
+  if (!inFlightToken) {
+    inFlightToken = fetchAccessToken()
+      .then((token) => {
+        cachedToken = { value: token, expiresAt: Date.now() + TOKEN_CACHE_MS };
+        return token;
+      })
+      .finally(() => { inFlightToken = null; });
+  }
+  return inFlightToken;
 }
 
 export { withTimeout, AUTH_TIMEOUT_MS };
