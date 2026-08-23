@@ -124,7 +124,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
       // One-time nonce mapping back to this tenant — see server/oauthState.ts.
-      authUrl.searchParams.set('state', createOAuthState(tenantId));
+      authUrl.searchParams.set('state', await createOAuthState(tenantId));
       res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error("[GET /api/zoho-books/auth]", error);
@@ -137,7 +137,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // state nonce issued by /api/zoho-books/auth above.
   app.get('/api/zoho-books/callback', async (req: any, res: any) => {
     const { code, error: oauthError, state } = req.query as any;
-    const consumed = consumeOAuthState(state);
+    const consumed = await consumeOAuthState(state);
     const tenantId = consumed?.tenantId;
     if (oauthError || !code || !tenantId) {
       // `state` misses when the nonce expired (10 min), was already consumed, or

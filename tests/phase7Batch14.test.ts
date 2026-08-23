@@ -71,6 +71,31 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBe('new-refresh-token');
   });
 
+  // The nonce has to be readable by whichever instance the provider's redirect
+  // lands on: /auth and /callback are separate requests, and behind the load
+  // balancer they need not hit the same container. Asserting the row itself
+  // (not just that the round trip works) is what distinguishes the shared store
+  // from the per-process fallback, which would pass the round trip either way.
+  it('persists the state nonce to oauth_states and spends it on use', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'rt' } } as any);
+
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+
+    const stored = fakeSupabaseAdmin.getTable('oauth_states').find(r => r.state === state);
+    expect(stored).toBeTruthy();
+    expect(stored?.tenant_id).toBe(tenantId);
+    expect(new Date(stored!.expires_at).getTime()).toBeGreaterThan(Date.now());
+
+    await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+
+    // Single-use: the row is gone, so a replay finds nothing.
+    expect(fakeSupabaseAdmin.getTable('oauth_states').find(r => r.state === state)).toBeUndefined();
+  });
+
   it('rejects a callback with an unknown or reused state (CSRF/replay protection)', async () => {
     const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state: 'not-a-real-nonce' });
     expect(res.status).toBe(302);
