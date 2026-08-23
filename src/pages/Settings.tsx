@@ -422,6 +422,21 @@ export default function Settings() {
     }
   }, [currentUser]);
 
+  // A sync pushes a bounded number of invoices per run so it can't outlast the
+  // request deadline, and stops early if Zoho rate-limits it. Both leave work
+  // behind, so say so rather than letting the user assume everything went
+  // across — and report per-invoice failures instead of claiming success.
+  const zohoSyncNotice = (
+    prefix: string,
+    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[] },
+  ): { type: 'success' | 'error'; message: string } => {
+    const parts = [`${prefix} — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.`];
+    if (data.remaining) parts.push(`${data.remaining} restante(s) : relancez la synchronisation.`);
+    const errors = data.errors ?? [];
+    if (errors.length) parts.push(`Erreurs : ${errors.slice(0, 3).join(' | ')}`);
+    return { type: errors.length ? 'error' : 'success', message: parts.join(' ') };
+  };
+
   // The OAuth callbacks now forward Zoho's own error code instead of a bare
   // "1" (see server/routes/zohoInvoice.ts). Translate the ones an admin can
   // actually act on; anything else falls back to the generic message with the
@@ -809,7 +824,7 @@ export default function Settings() {
     setZohoNotice(null);
     try {
       const data = await apiFetch<any>('/api/zoho/sync', { method: 'POST' });
-      setZohoNotice({ type: 'success', message: `Synchronisation réussie — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.` });
+      setZohoNotice(zohoSyncNotice('Synchronisation réussie', data));
     } catch (e: any) {
       setZohoNotice({ type: 'error', message: e.message || 'Erreur de synchronisation.' });
     } finally {
@@ -822,9 +837,9 @@ export default function Settings() {
     setZohoBooksNotice(null);
     try {
       const data = await apiFetch<any>('/api/zoho-books/sync', { method: 'POST' });
-      // The endpoint returns { pushed, pulled, errors } — reading `data.synced`
-      // meant this always reported "0 entrées synchronisées" after a successful sync.
-      setZohoBooksNotice({ type: 'success', message: `Synchronisation Zoho Books réussie — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.` });
+      // The endpoint returns { pushed, pulled, remaining, errors } — reading
+      // `data.synced` meant this always reported "0 entrées synchronisées".
+      setZohoBooksNotice(zohoSyncNotice('Synchronisation Zoho Books réussie', data));
     } catch (e: any) {
       setZohoBooksNotice({ type: 'error', message: e.message || 'Erreur de synchronisation Zoho Books.' });
     } finally {

@@ -15,6 +15,11 @@
 // recovers the tenant from that nonce instead.
 import type { Express } from 'express';
 import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
+import { fetchWithTimeout } from '../fetchWithTimeout';
+import {
+  ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
+  mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
+} from '../zohoSync';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -44,7 +49,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       client_secret: settings.zoho_client_secret,
       grant_type: 'refresh_token',
     });
-    const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
+    const tokenRes = await fetchWithTimeout(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params }, ZOHO_TIMEOUT_MS);
     const body = await tokenRes.json() as any;
     if (!body?.access_token) {
       // Zoho answers 200 with an { error } body for a dead/invalid refresh
@@ -151,7 +156,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         client_secret: (settings as any).zoho_client_secret,
         redirect_uri: redirectUri, grant_type: 'authorization_code',
       });
-      const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
+      const tokenRes = await fetchWithTimeout(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params }, ZOHO_TIMEOUT_MS);
       const body = await tokenRes.json() as any;
       if (!body?.refresh_token) {
         // Zoho answers 200 with an { error } body here (invalid_client,
@@ -207,7 +212,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         'Content-Type': 'application/json',
       };
 
-      let pushed = 0, pulled = 0;
+      let pushed = 0, pulled = 0, remaining = 0;
       const errors: string[] = [];
 
       // Push local invoices not yet in Zoho Books
@@ -218,29 +223,47 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
           .eq('tenant_id', tenantId)
           .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
 
-        for (const inv of (localInvoices || [])) {
+        const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
+        // Bounded per run — see the matching note in zohoInvoice.ts.
+        const toPush = invoicesArr.slice(0, ZOHO_MAX_PUSH_PER_RUN);
+        remaining = invoicesArr.length - toPush.length;
+
+        for (const inv of toPush) {
           try {
+            // This payload used to read client_name, number and date — none of
+            // which are columns on `invoices` (see supabase/schema.sql). Every
+            // invoice therefore went to Zoho Books as customer "Client", with
+            // its UUID as the invoice number and today's date, carrying a single
+            // untaxed line. These are the real columns, mapped the same way the
+            // Zoho Invoice push maps them.
             const payload = {
-              customer_name: (inv as any).client_name || 'Client',
-              invoice_number: (inv as any).number || (inv as any).id,
-              date: (inv as any).date || new Date().toISOString().split('T')[0],
-              due_date: (inv as any).due_date,
-              line_items: [{ name: `Facture ${(inv as any).number || (inv as any).id}`, rate: (inv as any).amount || 0, quantity: 1 }],
+              customer_name: inv.project_name || inv.description || 'Client',
+              invoice_number: inv.invoice_number || undefined,
+              date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
+              due_date: zohoDate(inv.due_date),
+              line_items: zohoLineItems(inv),
+              notes: inv.description || undefined,
             };
-            const resp = await fetch(`${apiBase}/invoices?organization_id=${orgId}`, {
+            const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {
               method: 'POST', headers, body: JSON.stringify(payload),
-            });
+            }, ZOHO_TIMEOUT_MS);
             const respData = await resp.json() as any;
             const zohoId = respData?.invoice?.invoice_id;
             if (zohoId) {
-              await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', (inv as any).id).eq('tenant_id', tenantId);
+              await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', inv.id).eq('tenant_id', tenantId);
               pushed++;
+            } else if (isRateLimited(resp.status, respData)) {
+              // Zoho's limiter only reopens on a timer — continuing would burn
+              // the rest of the request on calls that are all going to be refused.
+              remaining += toPush.length - pushed;
+              errors.push('Limite de requêtes Zoho atteinte. Relancez la synchronisation dans quelques minutes.');
+              break;
             } else if (respData?.message) {
-              errors.push(`Push ${(inv as any).id}: ${respData.message}`);
+              errors.push(`Envoi échoué (${inv.invoice_number || inv.id}): ${respData.message}`);
             }
           } catch (err: any) {
             console.error("[POST /api/zoho-books/sync]", err);
-            errors.push(`Push ${(inv as any).id}: ${err.message}`);
+            errors.push(`Envoi échoué (${inv.invoice_number || inv.id}): ${err.message}`);
           }
         }
       } catch (err: any) {
@@ -250,18 +273,35 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
 
       // Pull status updates from Zoho Books
       try {
-        const resp = await fetch(`${apiBase}/invoices?organization_id=${orgId}&status=all`, { headers });
-        const respData = await resp.json() as any;
-        const zohoInvoices: any[] = respData?.invoices || [];
+        // Paginated: this used to fetch one default-sized page and stop, so a
+        // tenant past that first page silently stopped receiving status updates.
+        const zohoInvoices: any[] = [];
+        for (let page = 1; page <= ZOHO_MAX_PULL_PAGES; page++) {
+          const resp = await fetchWithTimeout(
+            `${apiBase}/invoices?organization_id=${orgId}&status=all&page=${page}&per_page=${ZOHO_PAGE_SIZE}`,
+            { headers },
+            ZOHO_TIMEOUT_MS,
+          );
+          const respData = await resp.json() as any;
+          zohoInvoices.push(...(respData?.invoices || []));
+          if (!respData?.page_context?.has_more_page) break;
+        }
+
+        // One query for the whole batch instead of one per Zoho invoice.
+        const localByZohoId = await localInvoicesByZohoId(
+          supabaseAdmin, tenantId, zohoInvoices.map((z: any) => z.invoice_id),
+        );
         for (const zohoInv of zohoInvoices) {
-          const { data: local } = await supabaseAdmin.from('invoices').select('id, status').eq('zoho_invoice_id', zohoInv.invoice_id).eq('tenant_id', tenantId).single();
-          if (local) {
-            const statusMap: Record<string, string> = { paid: 'paid', sent: 'sent', draft: 'draft', overdue: 'overdue', void: 'cancelled' };
-            const newStatus = statusMap[zohoInv.status] ?? null;
-            if (newStatus && newStatus !== (local as any).status) {
-              await supabaseAdmin.from('invoices').update({ status: newStatus }).eq('id', (local as any).id).eq('tenant_id', tenantId);
-              pulled++;
-            }
+          const local = localByZohoId.get(zohoInv.invoice_id);
+          if (!local) continue;
+          // Shared with the Zoho Invoice route: this used to keep its own map to
+          // lowercase values ('paid', 'sent', 'cancelled'), none of which are
+          // valid for invoices.status ('Draft' | 'Sent' | 'Paid' | 'Overdue'),
+          // so a Books pull wrote statuses the app couldn't render.
+          const newStatus = mapZohoStatus(zohoInv.status);
+          if (newStatus && newStatus !== local.status) {
+            await supabaseAdmin.from('invoices').update({ status: newStatus }).eq('id', local.id).eq('tenant_id', tenantId);
+            pulled++;
           }
         }
       } catch (err: any) {
@@ -271,7 +311,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
-      res.json({ pushed, pulled, errors });
+      res.json({ pushed, pulled, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho Books sync error]', error.message);
       res.status(500).json({ error: error.message || 'Sync échouée' });

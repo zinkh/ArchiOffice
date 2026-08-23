@@ -199,6 +199,125 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-new')?.zoho_invoice_id).toBe('zoho-new');
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced')?.status).toBe('Paid');
   });
+
+  it('pages through every Zoho invoice instead of stopping at the first page', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-p1', tenant_id: tenantId, zoho_invoice_id: 'z-page1', status: 'Draft' },
+      { id: 'inv-p2', tenant_id: tenantId, zoho_invoice_id: 'z-page2', status: 'Draft' },
+    ]);
+
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string, config: any) => {
+      if (!url.endsWith('/invoices')) return { data: {} } as any;
+      return config.params.page === 1
+        ? { data: { invoices: [{ invoice_id: 'z-page1', status: 'sent' }], page_context: { has_more_page: true } } } as any
+        : { data: { invoices: [{ invoice_id: 'z-page2', status: 'overdue' }], page_context: { has_more_page: false } } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pulled).toBe(2);
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-p1')?.status).toBe('Sent');
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-p2')?.status).toBe('Overdue');
+  });
+
+  // contact_name_contains matched substrings, so an invoice for "Dupont" bound
+  // itself to the existing, unrelated "Dupont-Martin".
+  it('binds an invoice only to an exactly-matching Zoho contact', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-x', tenant_id: tenantId, description: 'Dupont', amount: 100, zoho_invoice_id: null }]);
+
+    let createdContact = false;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) {
+        createdContact = true;
+        expect(body.contact_name).toBe('Dupont');
+        return { data: { contact: { contact_id: 'cust-new' } } } as any;
+      }
+      if (url.endsWith('/invoices')) {
+        expect(body.customer_id).toBe('cust-new');
+        return { data: { invoice: { invoice_id: 'zoho-x' } } } as any;
+      }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      // Zoho answers the near-miss; it must not be adopted.
+      if (url.endsWith('/contacts')) return { data: { contacts: [{ contact_id: 'cust-wrong', contact_name: 'Dupont-Martin' }] } } as any;
+      return { data: { invoices: [] } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(createdContact).toBe(true);
+  });
+
+  // Swallowing the contact search error created a duplicate Zoho contact every
+  // time Zoho hiccuped; the invoice should fail instead.
+  it('does not create a duplicate contact when the contact lookup fails', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-y', tenant_id: tenantId, description: 'Client Y', amount: 100, zoho_invoice_id: null }]);
+
+    let createdContact = false;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) { createdContact = true; return { data: { contact: { contact_id: 'dup' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) throw new Error('Zoho unavailable');
+      return { data: { invoices: [] } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.pushed).toBe(0);
+    expect(createdContact).toBe(false);
+    expect(res.body.errors[0]).toContain('inv-y');
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-y')?.zoho_invoice_id).toBeNull();
+  });
+
+  // Zoho's limiter only reopens on a timer, so continuing would spend the rest
+  // of the request on calls that are all going to be refused.
+  it('stops on a Zoho rate limit and reports what is left', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-a', tenant_id: tenantId, description: 'A', amount: 1, zoho_invoice_id: null },
+      { id: 'inv-b', tenant_id: tenantId, description: 'B', amount: 2, zoho_invoice_id: null },
+      { id: 'inv-c', tenant_id: tenantId, description: 'C', amount: 3, zoho_invoice_id: null },
+    ]);
+
+    let invoiceCalls = 0;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'c' } } } as any;
+      if (url.endsWith('/invoices')) {
+        invoiceCalls++;
+        if (invoiceCalls === 1) return { data: { invoice: { invoice_id: 'zoho-a' } } } as any;
+        throw Object.assign(new Error('Too many requests'), { response: { status: 429, data: {} } });
+      }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      return { data: { invoices: [] } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    // Stopped after the refusal rather than trying the third invoice.
+    expect(invoiceCalls).toBe(2);
+    expect(res.body.remaining).toBe(2);
+    expect(res.body.errors.join(' ')).toContain('Limite de requêtes Zoho');
+  });
 });
 
 describe('Zoho Books', () => {
@@ -339,15 +458,19 @@ describe('Zoho Books', () => {
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
-      { id: 'inv-new-b', tenant_id: tenantId, client_name: 'Client A', amount: 3000, zoho_invoice_id: null },
-      { id: 'inv-synced-b', tenant_id: tenantId, zoho_invoice_id: 'zoho-b-existing', status: 'draft' },
+      { id: 'inv-new-b', tenant_id: tenantId, invoice_number: 'FAC-001', issue_date: '2026-03-04T00:00:00Z', amount: 3000, zoho_invoice_id: null },
+      { id: 'inv-synced-b', tenant_id: tenantId, zoho_invoice_id: 'zoho-b-existing', status: 'Draft' },
     ]);
 
-    global.fetch = vi.fn(async (url: any) => {
+    let pushBody: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
       const u = String(url);
       if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
       if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [{ invoice_id: 'zoho-b-existing', status: 'paid' }] }) } as any;
-      if (u.includes('/invoices')) return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new' } }) } as any;
+      if (u.includes('/invoices')) {
+        pushBody = JSON.parse(init.body);
+        return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new' } }) } as any;
+      }
       return { ok: true, json: async () => ({}) } as any;
     }) as any;
 
@@ -356,7 +479,37 @@ describe('Zoho Books', () => {
     expect(res.body.pushed).toBe(1);
     expect(res.body.pulled).toBe(1);
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-new-b')?.zoho_invoice_id).toBe('zoho-b-new');
-    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced-b')?.status).toBe('paid');
+    // Capitalized: 'paid' (what this used to write) is not one of the values
+    // invoices.status is allowed to hold, so the app couldn't render it.
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced-b')?.status).toBe('Paid');
+    // The push payload reads the real columns — it used to read client_name /
+    // number / date, none of which exist, so every invoice went across as
+    // "Client" with its UUID for a number and today's date.
+    expect(pushBody.invoice_number).toBe('FAC-001');
+    expect(pushBody.date).toBe('2026-03-04');
+    expect(pushBody.line_items[0].rate).toBe(3000);
+  });
+
+  it('pages through every Zoho Books invoice instead of stopping at the first page', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-bp1', tenant_id: tenantId, zoho_invoice_id: 'zb-page1', status: 'Draft' },
+      { id: 'inv-bp2', tenant_id: tenantId, zoho_invoice_id: 'zb-page2', status: 'Draft' },
+    ]);
+
+    global.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('page=1')) return { ok: true, json: async () => ({ invoices: [{ invoice_id: 'zb-page1', status: 'sent' }], page_context: { has_more_page: true } }) } as any;
+      if (u.includes('page=2')) return { ok: true, json: async () => ({ invoices: [{ invoice_id: 'zb-page2', status: 'paid' }], page_context: { has_more_page: false } }) } as any;
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.body.pulled).toBe(2);
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-bp2')?.status).toBe('Paid');
   });
 
   it('never syncs another tenant\'s invoices', async () => {
