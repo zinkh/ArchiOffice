@@ -129,7 +129,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
       authUrl.searchParams.set('scope', `${GOOGLE_CALENDAR_SCOPE} email`);
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
-      authUrl.searchParams.set('state', createOAuthState(tenantId, req.user.id));
+      authUrl.searchParams.set('state', await createOAuthState(tenantId, req.user.id));
       res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error('[GET /api/google-calendar/auth]', error);
@@ -142,7 +142,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
   // one-time state nonce. Registered in server.ts's AUTH_EXEMPT list.
   app.get('/api/google-calendar/callback', async (req: any, res: any) => {
     const { code, error: oauthError, state } = req.query as any;
-    const consumed = consumeOAuthState(state);
+    const consumed = await consumeOAuthState(state);
     const tenantId = consumed?.tenantId;
     const userId = consumed?.userId;
     if (oauthError || !code || !tenantId || !userId) {

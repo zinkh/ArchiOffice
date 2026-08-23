@@ -147,7 +147,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
       authUrl.searchParams.set('scope', OUTLOOK_SCOPE);
       authUrl.searchParams.set('prompt', 'consent');
       const returnTo = sanitizeReturnTo(req.query.returnTo);
-      authUrl.searchParams.set('state', createOAuthState(tenantId, req.user.id, returnTo));
+      authUrl.searchParams.set('state', await createOAuthState(tenantId, req.user.id, returnTo));
       res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error('[GET /api/outlook/auth]', error);
@@ -160,7 +160,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   // Registered in server.ts's AUTH_EXEMPT list.
   app.get('/api/outlook/callback', async (req: any, res: any) => {
     const { code, error: oauthError, state } = req.query as any;
-    const consumed = consumeOAuthState(state);
+    const consumed = await consumeOAuthState(state);
     const tenantId = consumed?.tenantId;
     const userId = consumed?.userId;
     const returnTo = sanitizeReturnTo(consumed?.returnTo);

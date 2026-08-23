@@ -40,6 +40,7 @@ import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
+import { initOAuthStateStore } from "./server/oauthState";
 import { registerGoogleCalendarSyncRoutes } from "./server/routes/googleCalendarSync";
 import { registerGmailSyncRoutes } from "./server/routes/gmailSync";
 import { registerOutlookSyncRoutes } from "./server/routes/outlookSync";
@@ -240,6 +241,11 @@ export async function createApp() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  // OAuth `state` nonces are shared across instances via the oauth_states table
+  // rather than a per-process Map — the consent redirect can land on a different
+  // container than the one that minted the nonce. See server/oauthState.ts.
+  initOAuthStateStore(supabaseAdmin);
 
   // Ensure Supabase Storage buckets exist at startup (after supabaseAdmin is initialized).
   // In offline mode this call loops back into this same server's /storage/v1 shim
