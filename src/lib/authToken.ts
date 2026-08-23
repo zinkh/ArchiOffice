@@ -70,23 +70,40 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+// TEMPORARY diagnostics — three rounds of fixes based on plausible theories
+// (load-balancer keepAlive, tab-visibility, concurrent-call coalescing) have
+// each failed to resolve a recurring 30s hang that Network-tab captures show
+// never even reaches fetch(), meaning getAccessToken() itself is stuck far
+// longer than its own ~8s+8s timeout budget should allow. Rather than guess a
+// fourth theory, log real timings so the next reproduction shows exactly
+// which step the time actually goes into. Remove once the culprit is found.
+const authLog = (...args: unknown[]) => console.log('[authToken]', `+${Date.now() - authLogStart}ms`, ...args);
+let authLogStart = Date.now();
+
 async function fetchAccessToken(): Promise<string | null> {
+  authLogStart = Date.now();
+  authLog('fetchAccessToken: calling getSession()');
   let session: { access_token: string; expires_at?: number } | null = null;
   try {
     const result = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
     session = result.data.session;
-  } catch {
+    authLog('getSession() resolved', { hasToken: !!session?.access_token, expiresAt: session?.expires_at });
+  } catch (err) {
     // getSession() hung rather than answering (slow network, a stuck cross-tab
     // lock) — that's inconclusive, not proof the session is invalid. Fail this
     // one call without wiping a possibly-still-good token; forcing a fresh
     // login over a transient timeout is worse than letting the caller retry.
+    authLog('getSession() failed/timed out', err);
     return null;
   }
 
   const needsRefresh = !session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000);
+  authLog('needsRefresh =', needsRefresh);
   if (needsRefresh) {
     try {
+      authLog('calling refreshSession()');
       const { data: refreshed, error } = await withTimeout(supabase.auth.refreshSession(), AUTH_TIMEOUT_MS);
+      authLog('refreshSession() resolved', { hasSession: !!refreshed.session, error });
       if (refreshed.session) {
         session = refreshed.session;
       } else if (error) {
@@ -95,12 +112,14 @@ async function fetchAccessToken(): Promise<string | null> {
         clearSupabaseAuthStorage();
         return null;
       }
-    } catch {
+    } catch (err) {
       // refreshSession() hung — same as above, inconclusive. Keep whatever
       // session we already had rather than forcing a re-login over it.
+      authLog('refreshSession() failed/timed out', err);
     }
   }
 
+  authLog('fetchAccessToken done, returning', { hasToken: !!session?.access_token });
   return session?.access_token ?? null;
 }
 
@@ -129,16 +148,20 @@ export async function getAccessToken(): Promise<string | null> {
   }
 
   if (cachedToken && cachedToken.expiresAt > Date.now()) {
+    console.log('[authToken] getAccessToken: cache hit');
     return cachedToken.value;
   }
-  if (!inFlightToken) {
-    inFlightToken = fetchAccessToken()
-      .then((token) => {
-        cachedToken = { value: token, expiresAt: Date.now() + TOKEN_CACHE_MS };
-        return token;
-      })
-      .finally(() => { inFlightToken = null; });
+  if (inFlightToken) {
+    console.log('[authToken] getAccessToken: joining in-flight check');
+    return inFlightToken;
   }
+  console.log('[authToken] getAccessToken: starting fresh check');
+  inFlightToken = fetchAccessToken()
+    .then((token) => {
+      cachedToken = { value: token, expiresAt: Date.now() + TOKEN_CACHE_MS };
+      return token;
+    })
+    .finally(() => { inFlightToken = null; });
   return inFlightToken;
 }
 
