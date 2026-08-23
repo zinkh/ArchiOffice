@@ -50,12 +50,7 @@ export const fetchJson = async <T = any>(url: string, options?: RequestInit): Pr
 
 // Authenticated fetch — injecte automatiquement le JWT (Supabase en ligne, local hors-ligne)
 export const apiFetch = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
-  // TEMPORARY diagnostics — see src/lib/authToken.ts. Remove alongside those once
-  // the root cause of the recurring 30s save-hang (never reaching fetch()) is found.
-  const t0 = Date.now();
-  console.log('[apiFetch]', options?.method || 'GET', url, '— calling getAccessToken()');
   const token = await getAccessToken();
-  console.log('[apiFetch]', options?.method || 'GET', url, `— getAccessToken() returned after ${Date.now() - t0}ms`, { hasToken: !!token });
 
   const headers = new Headers(options?.headers);
   if (options?.body && !headers.has('Content-Type')) {
@@ -64,7 +59,5 @@ export const apiFetch = async <T = any>(url: string, options?: RequestInit): Pro
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const result = await baseFetchJson<T>(url, { ...options, headers });
-  console.log('[apiFetch]', options?.method || 'GET', url, `— fetch completed after ${Date.now() - t0}ms total`);
-  return result;
+  return baseFetchJson<T>(url, { ...options, headers });
 };

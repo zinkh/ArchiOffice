@@ -70,40 +70,58 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-// TEMPORARY diagnostics — three rounds of fixes based on plausible theories
-// (load-balancer keepAlive, tab-visibility, concurrent-call coalescing) have
-// each failed to resolve a recurring 30s hang that Network-tab captures show
-// never even reaches fetch(), meaning getAccessToken() itself is stuck far
-// longer than its own ~8s+8s timeout budget should allow. Rather than guess a
-// fourth theory, log real timings so the next reproduction shows exactly
-// which step the time actually goes into. Remove once the culprit is found.
-const authLog = (...args: unknown[]) => console.log('[authToken]', `+${Date.now() - authLogStart}ms`, ...args);
-let authLogStart = Date.now();
+// Diagnostics landed in a prior deploy (three rounds of plausible-but-wrong
+// theories — load-balancer keepAlive, tab-visibility, concurrent-call
+// coalescing — had each failed to resolve a recurring 30s save-hang) showed
+// real production timings: getSession() timed out at the full AUTH_TIMEOUT_MS
+// on *every single call*, indefinitely, for the whole browser session, always
+// returning hasToken:false. That's not transient contention, and it never
+// self-heals — it's a permanently stuck/corrupted local auth token (or a
+// Navigator Lock that never releases) for that browser tab. The fallback below
+// (attemptStuckSessionRecovery) detects that pattern and clears the token
+// automatically instead of taxing every request 8+ seconds forever.
+const AUTH_RECOVERY_ATTEMPTED_KEY = 'archioffice_auth_recovery_attempted';
+const MAX_CONSECUTIVE_AUTH_FAILURES = 2;
+let consecutiveAuthFailures = 0;
+
+function attemptStuckSessionRecovery(): void {
+  // Guard against a reload loop: if clearing storage doesn't actually fix the
+  // underlying issue, reloading forever would just be a blank-then-reload
+  // page indefinitely. Try exactly once per browser tab session (persists
+  // across the reload this triggers, via sessionStorage) — reset on the next
+  // successful token fetch so a genuinely new stuck state, much later in the
+  // same tab, can still trigger recovery again.
+  try {
+    if (sessionStorage.getItem(AUTH_RECOVERY_ATTEMPTED_KEY) === 'true') return;
+    sessionStorage.setItem(AUTH_RECOVERY_ATTEMPTED_KEY, 'true');
+  } catch {
+    // sessionStorage unavailable (private browsing, etc.) — proceed once;
+    // worst case this can retrigger on repeat failures without the guard.
+  }
+  console.warn('[authToken] getSession()/refreshSession() failed repeatedly with no successful token — clearing a possibly corrupted auth token and reloading.');
+  clearSupabaseAuthStorage();
+  window.location.reload();
+}
 
 async function fetchAccessToken(): Promise<string | null> {
-  authLogStart = Date.now();
-  authLog('fetchAccessToken: calling getSession()');
   let session: { access_token: string; expires_at?: number } | null = null;
   try {
     const result = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
     session = result.data.session;
-    authLog('getSession() resolved', { hasToken: !!session?.access_token, expiresAt: session?.expires_at });
-  } catch (err) {
+  } catch {
     // getSession() hung rather than answering (slow network, a stuck cross-tab
-    // lock) — that's inconclusive, not proof the session is invalid. Fail this
-    // one call without wiping a possibly-still-good token; forcing a fresh
-    // login over a transient timeout is worse than letting the caller retry.
-    authLog('getSession() failed/timed out', err);
+    // lock) — inconclusive on its own, so don't wipe a possibly-still-good
+    // token over a single transient timeout. But if this keeps happening with
+    // no successful token in between, it isn't transient — recover instead of
+    // taxing every request 8+ seconds forever.
+    if (++consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) attemptStuckSessionRecovery();
     return null;
   }
 
   const needsRefresh = !session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000);
-  authLog('needsRefresh =', needsRefresh);
   if (needsRefresh) {
     try {
-      authLog('calling refreshSession()');
       const { data: refreshed, error } = await withTimeout(supabase.auth.refreshSession(), AUTH_TIMEOUT_MS);
-      authLog('refreshSession() resolved', { hasSession: !!refreshed.session, error });
       if (refreshed.session) {
         session = refreshed.session;
       } else if (error) {
@@ -112,15 +130,20 @@ async function fetchAccessToken(): Promise<string | null> {
         clearSupabaseAuthStorage();
         return null;
       }
-    } catch (err) {
-      // refreshSession() hung — same as above, inconclusive. Keep whatever
-      // session we already had rather than forcing a re-login over it.
-      authLog('refreshSession() failed/timed out', err);
+    } catch {
+      // refreshSession() hung — same as above, inconclusive by itself.
+      if (!session?.access_token && ++consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
+        attemptStuckSessionRecovery();
+      }
     }
   }
 
-  authLog('fetchAccessToken done, returning', { hasToken: !!session?.access_token });
-  return session?.access_token ?? null;
+  const token = session?.access_token ?? null;
+  if (token) {
+    consecutiveAuthFailures = 0;
+    try { sessionStorage.removeItem(AUTH_RECOVERY_ATTEMPTED_KEY); } catch { /* ignore */ }
+  }
+  return token;
 }
 
 // getAccessToken() is called independently by every apiFetch() — a single page
@@ -148,14 +171,11 @@ export async function getAccessToken(): Promise<string | null> {
   }
 
   if (cachedToken && cachedToken.expiresAt > Date.now()) {
-    console.log('[authToken] getAccessToken: cache hit');
     return cachedToken.value;
   }
   if (inFlightToken) {
-    console.log('[authToken] getAccessToken: joining in-flight check');
     return inFlightToken;
   }
-  console.log('[authToken] getAccessToken: starting fresh check');
   inFlightToken = fetchAccessToken()
     .then((token) => {
       cachedToken = { value: token, expiresAt: Date.now() + TOKEN_CACHE_MS };
