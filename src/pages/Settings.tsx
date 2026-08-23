@@ -743,17 +743,37 @@ export default function Settings() {
     setIsSaving(true);
     setSaveError(null);
     // Abort the underlying request(s) once the deadline fires — otherwise a save
-    // that's merely slow (e.g. the server restarting) keeps running in the
-    // background after the user is told it "failed", and can land moments later
-    // with no visible confirmation, silently desyncing what's shown from what's
-    // actually stored (and setting up a retry to clobber/duplicate it).
+    // that's merely slow keeps running in the background after the user is told
+    // it "failed", and can land moments later with no visible confirmation,
+    // silently desyncing what's shown from what's actually stored (and setting
+    // up a retry to clobber/duplicate it).
+    //
+    // The 30s deadline only counts time the tab is actually visible: configuring
+    // Zoho typically means tabbing away to api-console.zoho.com to copy the
+    // Client ID/Secret, then back to paste and hit Save. A plain wall-clock
+    // timer keeps running while the tab is hidden, so it can fire the instant
+    // the user returns — reporting (and, worse, aborting) a save that was
+    // actually about to succeed in well under a second, with nothing slow or
+    // broken on the server at all.
+    let settled = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
-    const deadline = new Promise<never>((_, reject) =>
-      setTimeout(() => {
+    let rejectDeadline!: (err: Error) => void;
+    const deadline = new Promise<never>((_, reject) => { rejectDeadline = reject; });
+    const armDeadline = () => {
+      clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(() => {
         controller.abort();
-        reject(new Error('Délai dépassé (30s). Le serveur est peut-être en cours de redémarrage — vérifiez votre connexion et réessayez dans un instant.'));
-      }, 30_000)
-    );
+        rejectDeadline(new Error('Délai dépassé (30s). Vérifiez votre connexion et réessayez.'));
+      }, 30_000);
+    };
+    const onVisibilityChange = () => {
+      if (settled) return;
+      if (document.hidden) clearTimeout(deadlineTimer);
+      else armDeadline();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    armDeadline();
     try {
       await Promise.race([
         (async () => {
@@ -782,6 +802,9 @@ export default function Settings() {
       console.error('[Settings save]', err);
       setSaveError(err?.message || 'Erreur lors de la sauvegarde.');
     } finally {
+      settled = true;
+      clearTimeout(deadlineTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       setIsSaving(false);
     }
   };
