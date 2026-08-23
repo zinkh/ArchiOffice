@@ -466,7 +466,9 @@ CREATE TABLE IF NOT EXISTS settings (
   smtp_host TEXT, smtp_port TEXT, smtp_user TEXT, smtp_pass TEXT,
   zoho_client_id TEXT, zoho_client_secret TEXT, zoho_org_id TEXT,
   zoho_data_center TEXT, zoho_refresh_token TEXT,
-  zoho_books_org_id TEXT,
+  -- Books keeps its own refresh token: an OAuth consent only grants the scopes
+  -- its own flow asked for, so the Invoice and Books tokens can't be shared.
+  zoho_books_org_id TEXT, zoho_books_refresh_token TEXT,
   num_prefix_devis TEXT DEFAULT 'DEVIS',
   num_prefix_facture TEXT DEFAULT 'FAC',
   num_prefix_honoraires TEXT DEFAULT 'NH',

@@ -74,7 +74,7 @@ describe('Zoho Invoice', () => {
   it('rejects a callback with an unknown or reused state (CSRF/replay protection)', async () => {
     const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state: 'not-a-real-nonce' });
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/settings?zoho_error=1');
+    expect(res.headers.location).toBe('/settings?zoho_error=expired_state');
 
     // Same nonce used twice — the second attempt must fail even with a valid code.
     const tenantId = makeTenant();
@@ -90,7 +90,7 @@ describe('Zoho Invoice', () => {
 
     const replay = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
     expect(replay.status).toBe(302);
-    expect(replay.headers.location).toBe('/settings?zoho_error=1');
+    expect(replay.headers.location).toBe('/settings?zoho_error=expired_state');
   });
 
   it('disconnects, clearing the refresh token', async () => {
@@ -101,6 +101,65 @@ describe('Zoho Invoice', () => {
     const res = await request(app).delete('/api/zoho/disconnect').set(authHeader(token));
     expect(res.status).toBe(200);
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBeNull();
+  });
+
+  // Zoho can refuse the exchange either with a 200 + { error } body or with a
+  // non-2xx that axios throws on. Both used to collapse into `zoho_error=1`,
+  // which told the admin nothing about which console setting was wrong.
+  it('forwards Zoho\'s error code when the token exchange is refused (200 body)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { error: 'invalid_code' } } as any);
+
+    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+    expect(res.headers.location).toBe('/settings?zoho_error=invalid_code');
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBeUndefined();
+  });
+
+  it('forwards Zoho\'s error code when the token endpoint returns a non-2xx', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+    vi.spyOn(axios, 'post').mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { error: 'invalid_client' } } }),
+    );
+
+    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+    expect(res.headers.location).toBe('/settings?zoho_error=invalid_client');
+  });
+
+  // An upstream message must not be able to inject arbitrary text into the URL
+  // the browser is redirected to.
+  it('degrades an unrecognised error shape to a generic code', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state')!;
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { error: 'boom&injected=1 <script>' } } as any);
+
+    const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
+    expect(res.headers.location).toBe('/settings?zoho_error=1');
+  });
+
+  // The refresh failure reaches the browser through /api/zoho/sync's error
+  // body; it used to JSON.stringify Zoho's whole response, echoing the
+  // client_id and the rest of the request back with it.
+  it('reports a failed token refresh without echoing the raw Zoho response', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'secret-client-id', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { error: 'invalid_code' } } as any);
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('invalid_code');
+    expect(res.body.error).not.toContain('secret-client-id');
   });
 
   it('requires being connected before syncing', async () => {
@@ -149,7 +208,7 @@ describe('Zoho Books', () => {
   it('reports connected/has_credentials from settings (books org id or shared org id)', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'books-org', zoho_refresh_token: 'rt' }]);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'books-org', zoho_books_refresh_token: 'rt' }]);
 
     const res = await request(app).get('/api/zoho-books/status').set(authHeader(token));
     expect(res.status).toBe(200);
@@ -181,29 +240,104 @@ describe('Zoho Books', () => {
     const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/settings?zoho_books_connected=1');
-    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBe('books-refresh-token');
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_books_refresh_token).toBe('books-refresh-token');
   });
 
   it('rejects a Zoho Books callback with an unknown state', async () => {
     const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: 'not-a-real-nonce' });
     expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/settings?zoho_books_error=expired_state');
+  });
+
+  // Books redirects to its own path. Advertising Zoho Invoice's URL (what the
+  // Paramètres page used to show) sends the admin to register the wrong
+  // "Authorized Redirect URI", and Zoho then refuses the consent request.
+  it('advertises a callback URL distinct from Zoho Invoice\'s', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const books = await request(app).get('/api/zoho-books/callback-url').set(authHeader(token));
+    const invoice = await request(app).get('/api/zoho/callback-url').set(authHeader(token));
+
+    expect(books.status).toBe(200);
+    expect(books.body.url).toMatch(/\/api\/zoho-books\/callback$/);
+    expect(books.body.url).not.toBe(invoice.body.url);
+  });
+
+  // The two integrations request different scopes, so their refresh tokens are
+  // not interchangeable. They used to share one column, which meant connecting
+  // either one silently broke the other.
+  it('keeps its refresh token separate from Zoho Invoice\'s', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org', zoho_refresh_token: 'invoice-rt' }]);
+
+    // Zoho Invoice connected, Zoho Books not — Books must not claim otherwise.
+    const before = await request(app).get('/api/zoho-books/status').set(authHeader(token));
+    expect(before.body.connected).toBe(false);
+
+    const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state');
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ refresh_token: 'books-rt' }) })) as any;
+    await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
+
+    const settings = fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId);
+    expect(settings?.zoho_books_refresh_token).toBe('books-rt');
+    expect(settings?.zoho_refresh_token).toBe('invoice-rt');
+
+    // ...and disconnecting Books leaves Zoho Invoice connected.
+    await request(app).delete('/api/zoho-books/disconnect').set(authHeader(token));
+    const after = fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId);
+    expect(after?.zoho_books_refresh_token).toBeNull();
+    expect(after?.zoho_refresh_token).toBe('invoice-rt');
+  });
+
+  // Zoho answers 200 with an { error } body rather than an HTTP error status,
+  // so the old `!refresh_token` check turned every distinct cause into the same
+  // unactionable "zoho_books_error=1".
+  it('forwards Zoho\'s error code when the token exchange is refused', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec' }]);
+
+    const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state');
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ error: 'invalid_client' }) })) as any;
+
+    const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
+    expect(res.headers.location).toBe('/settings?zoho_books_error=invalid_client');
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_books_refresh_token).toBeUndefined();
+  });
+
+  // An upstream message must not be able to inject arbitrary text into the URL
+  // the browser is redirected to.
+  it('degrades an unrecognised error shape to a generic code', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec' }]);
+
+    const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
+    const state = new URL(authRes.body.url).searchParams.get('state');
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ error: 'boom&injected=1 <script>' }) })) as any;
+
+    const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
     expect(res.headers.location).toBe('/settings?zoho_books_error=1');
   });
 
   it('disconnects, clearing the refresh token', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt' }]);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt' }]);
 
     const res = await request(app).delete('/api/zoho-books/disconnect').set(authHeader(token));
     expect(res.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBeNull();
+    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_books_refresh_token).toBeNull();
   });
 
   it('pushes an unsynced invoice and pulls a status update, tenant-scoped', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-new-b', tenant_id: tenantId, client_name: 'Client A', amount: 3000, zoho_invoice_id: null },
       { id: 'inv-synced-b', tenant_id: tenantId, zoho_invoice_id: 'zoho-b-existing', status: 'draft' },
@@ -231,7 +365,7 @@ describe('Zoho Books', () => {
 
     const tenantA = makeTenant();
     const { token } = makeUser(tenantA);
-    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantA, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantA, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
 
     global.fetch = vi.fn(async (url: any) => {
       const u = String(url);

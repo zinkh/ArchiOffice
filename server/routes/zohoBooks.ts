@@ -14,7 +14,7 @@
 // oauthState.ts), and the callback (exempted from auth in server.ts)
 // recovers the tenant from that nonce instead.
 import type { Express } from 'express';
-import { createOAuthState, consumeOAuthState } from '../oauthState';
+import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -37,21 +37,40 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     }
     const dc = settings.zoho_data_center || 'com';
     const params = new URLSearchParams({
-      refresh_token: settings.zoho_refresh_token,
+      // Books' own token, never zoho_refresh_token — see the note on
+      // /api/zoho-books/callback below.
+      refresh_token: settings.zoho_books_refresh_token,
       client_id: settings.zoho_client_id,
       client_secret: settings.zoho_client_secret,
       grant_type: 'refresh_token',
     });
     const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
-    const { access_token, expires_in } = await tokenRes.json() as any;
-    if (!access_token) throw new Error('Failed to refresh Zoho Books access token');
-    zohoBooksAccessTokenCache.set(tenantId, { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 });
-    return access_token;
+    const body = await tokenRes.json() as any;
+    if (!body?.access_token) {
+      // Zoho answers 200 with an { error } body for a dead/invalid refresh
+      // token, so the status code alone tells us nothing — surface the reason
+      // instead of a bare "failed", which is unactionable for the admin.
+      throw new Error(`Échec du rafraîchissement du jeton Zoho Books${body?.error ? ` (${body.error})` : ''}`);
+    }
+    zohoBooksAccessTokenCache.set(tenantId, { token: body.access_token, expiresAt: now + (body.expires_in || 3600) * 1000 });
+    return body.access_token;
   }
 
+  // Books redirects to its OWN path, not Zoho Invoice's /api/zoho/callback:
+  // both URIs have to be registered in the Zoho API console, or Zoho rejects
+  // the consent request with "Invalid Redirect Uri" before the user ever sees
+  // the grant screen. GET /api/zoho-books/callback-url below exposes this so
+  // the Paramètres page can show the admin exactly what to register.
   function getZohoBooksCallbackUrl(req: any): string {
-    const proto = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    // Lets the admin pin the exact registered URI, mirroring ZOHO_REDIRECT_URI
+    // for Zoho Invoice. Separate var: the two paths differ, so one value can't
+    // serve both.
+    if (process.env.ZOHO_BOOKS_REDIRECT_URI) return process.env.ZOHO_BOOKS_REDIRECT_URI;
+    // 'https' fallback: behind a proxy that doesn't set x-forwarded-proto,
+    // req.protocol reports the internal 'http' hop and the resulting
+    // redirect_uri no longer matches the registered https one.
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
     return `${proto}://${host}/api/zoho-books/callback`;
   }
 
@@ -59,15 +78,25 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   app.get('/api/zoho-books/status', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_org_id, zoho_books_org_id, zoho_data_center, zoho_refresh_token').eq('tenant_id', tenantId).single();
+      const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_org_id, zoho_books_org_id, zoho_data_center, zoho_books_refresh_token').eq('tenant_id', tenantId).single();
       res.json({
-        connected: !!(settings as any)?.zoho_refresh_token,
+        // Books' own token: reading zoho_refresh_token here reported "connected"
+        // as soon as Zoho *Invoice* was connected, so the UI hid the Connect
+        // button and every Books call then failed on a token that had no
+        // ZohoBooks scope.
+        connected: !!(settings as any)?.zoho_books_refresh_token,
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && ((settings as any)?.zoho_books_org_id || (settings as any)?.zoho_org_id)),
       });
     } catch (error: any) {
       console.error("[GET /api/zoho-books/status]", error);
       res.status(500).json({ error: error.message });
     }
+  });
+
+  // GET /api/zoho-books/callback-url  — the redirect URI this server will
+  // actually send Zoho, for the admin to register in the Zoho API console.
+  app.get('/api/zoho-books/callback-url', (req, res) => {
+    res.json({ url: getZohoBooksCallbackUrl(req) });
   });
 
   // GET /api/zoho-books/auth  — returns the Zoho OAuth consent-screen URL
@@ -105,7 +134,14 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     const { code, error: oauthError, state } = req.query as any;
     const consumed = consumeOAuthState(state);
     const tenantId = consumed?.tenantId;
-    if (oauthError || !code || !tenantId) return res.redirect('/settings?zoho_books_error=1');
+    if (oauthError || !code || !tenantId) {
+      // `state` misses when the nonce expired (10 min), was already consumed, or
+      // was minted by a server process that has since restarted — distinct from
+      // Zoho refusing the grant, and worth telling the user apart.
+      const reason = oauthError ? oauthErrorParam(oauthError) : (!code ? 'no_code' : 'expired_state');
+      console.error('[GET /api/zoho-books/callback] no grant', { reason });
+      return res.redirect(`/settings?zoho_books_error=${reason}`);
+    }
     try {
       const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_client_secret, zoho_data_center').eq('tenant_id', tenantId).single();
       const dc = (settings as any)?.zoho_data_center || 'com';
@@ -116,13 +152,23 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         redirect_uri: redirectUri, grant_type: 'authorization_code',
       });
       const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
-      const { refresh_token } = await tokenRes.json() as any;
-      if (!refresh_token) return res.redirect('/settings?zoho_books_error=1');
+      const body = await tokenRes.json() as any;
+      if (!body?.refresh_token) {
+        // Zoho answers 200 with an { error } body here (invalid_client,
+        // invalid_code, redirect_uri mismatch, ...). Logging and forwarding the
+        // code is the only way an admin can tell which of their console
+        // settings is wrong — the old bare `zoho_books_error=1` said nothing.
+        console.error('[GET /api/zoho-books/callback] token exchange failed', { status: tokenRes.status, error: body?.error });
+        return res.redirect(`/settings?zoho_books_error=${oauthErrorParam(body?.error)}`);
+      }
       zohoBooksAccessTokenCache.delete(tenantId);
-      await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
+      // zoho_books_refresh_token, not zoho_refresh_token: the two integrations
+      // ask for different scopes, so storing both in one column meant
+      // connecting Books silently broke Zoho Invoice and vice versa.
+      await supabaseAdmin.from('settings').update({ zoho_books_refresh_token: body.refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_books_connected=1');
-    } catch {
-      console.error("[GET /api/zoho-books/callback] Unhandled error");
+    } catch (error: any) {
+      console.error('[GET /api/zoho-books/callback]', error?.message || error);
       res.redirect('/settings?zoho_books_error=1');
     }
   });
@@ -132,7 +178,9 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       zohoBooksAccessTokenCache.delete(tenantId);
-      await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
+      // Only Books' token — this used to null zoho_refresh_token, so
+      // disconnecting Books also disconnected Zoho Invoice.
+      await supabaseAdmin.from('settings').update({ zoho_books_refresh_token: null }).eq('tenant_id', tenantId);
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho Books', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
@@ -147,7 +195,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      if (!(settings as any)?.zoho_refresh_token) {
+      if (!(settings as any)?.zoho_books_refresh_token) {
         return res.status(400).json({ error: 'Zoho Books non connecté' });
       }
       const dc = (settings as any).zoho_data_center || 'com';

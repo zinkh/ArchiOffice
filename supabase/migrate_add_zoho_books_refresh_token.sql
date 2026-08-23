@@ -1,0 +1,11 @@
+-- Zoho Books stored its OAuth refresh token in `zoho_refresh_token` — the same
+-- column Zoho Invoice uses. Each OAuth consent only grants the scopes that
+-- particular flow asked for (ZohoInvoice.* vs ZohoBooks.fullaccess.all), so the
+-- two tokens are not interchangeable: connecting one integration overwrote the
+-- other's token and left it making API calls it had no scope for, and
+-- disconnecting either one disconnected both. Give Books its own column.
+--
+-- No backfill: there is no way to tell which of the two integrations a given
+-- pre-existing zoho_refresh_token was minted for, so it stays with Zoho Invoice
+-- and tenants using Zoho Books reconnect it once (a single click in Paramètres).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS zoho_books_refresh_token TEXT;

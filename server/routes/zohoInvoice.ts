@@ -22,7 +22,7 @@
 // grant for that tenant.
 import type { Express } from 'express';
 import axios from 'axios';
-import { createOAuthState, consumeOAuthState } from '../oauthState';
+import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -59,7 +59,14 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
     const { access_token, expires_in } = resp.data;
-    if (!access_token) throw new Error('Zoho token refresh failed: ' + JSON.stringify(resp.data));
+    if (!access_token) {
+      // Zoho answers 200 with an { error } body for a dead/invalid refresh
+      // token, so the status code alone tells us nothing. Surface just the
+      // code: this message reaches the browser through /api/zoho/sync's error
+      // response, and the raw body it used to stringify carries the client_id
+      // and other request echoes with it.
+      throw new Error(`Échec du rafraîchissement du jeton Zoho${resp.data?.error ? ` (${resp.data.error})` : ''}. Reconnectez Zoho dans les Paramètres.`);
+    }
     zohoAccessTokenCache.set(tenantId, { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 });
     return access_token;
   }
@@ -154,7 +161,12 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     const consumed = consumeOAuthState(state);
     const tenantId = consumed?.tenantId;
     if (oauthError || !code || !tenantId) {
-      return res.redirect('/settings?zoho_error=1');
+      // `state` misses when the nonce expired (10 min), was already consumed, or
+      // was minted by a server process that has since restarted — distinct from
+      // Zoho refusing the grant, and worth telling the user apart.
+      const reason = oauthError ? oauthErrorParam(oauthError) : (!code ? 'no_code' : 'expired_state');
+      console.error('[GET /api/zoho/callback] no grant', { reason });
+      return res.redirect(`/settings?zoho_error=${reason}`);
     }
     try {
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
@@ -173,13 +185,26 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
       const { refresh_token } = resp.data;
-      if (!refresh_token) throw new Error('No refresh_token in response');
+      if (!refresh_token) {
+        // Zoho answers 200 with an { error } body here (invalid_client,
+        // invalid_code, redirect_uri mismatch, ...), so axios doesn't throw.
+        // Logging and forwarding the code is the only way an admin can tell
+        // which of their console settings is wrong — the old bare
+        // `zoho_error=1` said nothing.
+        console.error('[GET /api/zoho/callback] token exchange failed', { error: resp.data?.error });
+        return res.redirect(`/settings?zoho_error=${oauthErrorParam(resp.data?.error)}`);
+      }
       zohoAccessTokenCache.delete(tenantId); // invalidate cache
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_connected=1');
     } catch (error: any) {
-      console.error('[Zoho callback error]', error.message);
-      res.redirect('/settings?zoho_error=1');
+      // Unlike the Books flow (plain fetch), axios throws on a non-2xx — and
+      // Zoho returns 400 with { error: "invalid_client" } for exactly the
+      // misconfigurations an admin needs to see. Without this, every one of
+      // them landed here and became an indistinguishable `zoho_error=1`.
+      const zohoError = error.response?.data?.error;
+      console.error('[Zoho callback error]', error.response?.data ?? error.message);
+      res.redirect(`/settings?zoho_error=${oauthErrorParam(zohoError)}`);
     }
   });
 
