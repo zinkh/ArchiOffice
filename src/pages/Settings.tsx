@@ -974,6 +974,13 @@ export default function Settings() {
     zoho_data_center: settings.zoho_data_center,
   });
 
+  // GET /api/settings never echoes the actual secret back (see SECRET_COLS,
+  // server/routes/settings.ts) — only whether one is already stored, via
+  // zoho_client_secretSet. Without this, settings.zoho_client_secret is
+  // always blank right after a page load even when a secret is already
+  // saved, permanently disabling "Connecter Zoho" until the user retypes it.
+  const hasZohoSecret = !!settings.zoho_client_secret || !!(settings as any).zoho_client_secretSet;
+
   const renderPluginConfig = (pluginId: string) => {
     if (pluginId === 'zoho_invoice') return (
       <div className="space-y-4">
@@ -1012,7 +1019,7 @@ export default function Settings() {
           {!zohoStatus?.connected ? (
             <button
               type="button"
-              disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !settings.zoho_org_id}
+              disabled={!settings.zoho_client_id || !hasZohoSecret || !settings.zoho_org_id}
               onClick={async () => {
                 // window.location.href = '/api/zoho/auth' used to navigate straight to our
                 // own route — a bare browser navigation carries no JWT, so it 401'd before
@@ -1090,7 +1097,7 @@ export default function Settings() {
           {!zohoBooksStatus?.connected ? (
             <button
               type="button"
-              disabled={!settings.zoho_client_id || !settings.zoho_client_secret || !(settings.zoho_books_org_id || settings.zoho_org_id)}
+              disabled={!settings.zoho_client_id || !hasZohoSecret || !(settings.zoho_books_org_id || settings.zoho_org_id)}
               onClick={async () => {
                 const saveErr = await saveSection('zoho_books', { ...zohoSharedFields(), zoho_books_org_id: settings.zoho_books_org_id });
                 if (saveErr) { setZohoBooksNotice({ type: 'error', message: saveErr }); return; }

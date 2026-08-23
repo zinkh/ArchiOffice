@@ -32,12 +32,19 @@ export interface RouteDeps {
 }
 
 export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  let zohoAccessTokenCache: { token: string; expiresAt: number } | null = null;
+  // Keyed by tenantId — this cache is shared by every request the process
+  // handles across every tenant. A single unkeyed value here previously meant
+  // whichever tenant refreshed last "won" the cache for up to an hour: any
+  // other tenant syncing within that window would silently reuse the first
+  // tenant's Zoho access token and operate against their Zoho account instead
+  // of its own.
+  const zohoAccessTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-  async function getZohoAccessToken(settings: any): Promise<string> {
+  async function getZohoAccessToken(tenantId: string, settings: any): Promise<string> {
     const now = Date.now();
-    if (zohoAccessTokenCache && zohoAccessTokenCache.expiresAt > now + 60000) {
-      return zohoAccessTokenCache.token;
+    const cached = zohoAccessTokenCache.get(tenantId);
+    if (cached && cached.expiresAt > now + 60000) {
+      return cached.token;
     }
     const dc = settings.zoho_data_center || 'com';
     const params = new URLSearchParams({
@@ -53,7 +60,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     );
     const { access_token, expires_in } = resp.data;
     if (!access_token) throw new Error('Zoho token refresh failed: ' + JSON.stringify(resp.data));
-    zohoAccessTokenCache = { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 };
+    zohoAccessTokenCache.set(tenantId, { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 });
     return access_token;
   }
 
@@ -167,7 +174,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       );
       const { refresh_token } = resp.data;
       if (!refresh_token) throw new Error('No refresh_token in response');
-      zohoAccessTokenCache = null; // invalidate cache
+      zohoAccessTokenCache.delete(tenantId); // invalidate cache
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_connected=1');
     } catch (error: any) {
@@ -180,7 +187,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   app.delete('/api/zoho/disconnect', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      zohoAccessTokenCache = null;
+      zohoAccessTokenCache.delete(tenantId);
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
@@ -200,7 +207,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         return res.status(400).json({ error: 'Zoho non connecté. Veuillez vous connecter dans les Paramètres.' });
       }
 
-      const accessToken = await getZohoAccessToken(settings);
+      const accessToken = await getZohoAccessToken(tenantId, settings);
       const dc = (settings as any).zoho_data_center || 'com';
       const apiBase = `https://invoice.zoho.${dc}/api/v3`;
       const headers = {
