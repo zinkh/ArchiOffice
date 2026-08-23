@@ -742,8 +742,17 @@ export default function Settings() {
   const handleSave = async () => {
     setIsSaving(true);
     setSaveError(null);
+    // Abort the underlying request(s) once the deadline fires — otherwise a save
+    // that's merely slow (e.g. the server restarting) keeps running in the
+    // background after the user is told it "failed", and can land moments later
+    // with no visible confirmation, silently desyncing what's shown from what's
+    // actually stored (and setting up a retry to clobber/duplicate it).
+    const controller = new AbortController();
     const deadline = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Délai dépassé (30s). Vérifiez votre connexion et réessayez.')), 30_000)
+      setTimeout(() => {
+        controller.abort();
+        reject(new Error('Délai dépassé (30s). Le serveur est peut-être en cours de redémarrage — vérifiez votre connexion et réessayez dans un instant.'));
+      }, 30_000)
     );
     try {
       await Promise.race([
@@ -752,6 +761,7 @@ export default function Settings() {
             await apiFetch('/api/settings', {
               method: 'PUT',
               body: JSON.stringify(settings),
+              signal: controller.signal,
             });
             db.settings.put(settings).catch(() => {});
           }
@@ -759,6 +769,7 @@ export default function Settings() {
             await apiFetch(`/api/team/${currentUser.id}`, {
               method: 'PUT',
               body: JSON.stringify(userSettings),
+              signal: controller.signal,
             });
             setCurrentUser({ ...currentUser, ...userSettings } as any);
           }

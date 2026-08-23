@@ -827,7 +827,7 @@ async function startServer() {
   // traffic.
   const host = process.env.OFFLINE_MODE === 'true' ? '127.0.0.1' : '0.0.0.0';
   // Start listening after all middleware is set up
-  app.listen(PORT, host, () => {
+  const server = app.listen(PORT, host, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();
@@ -852,6 +852,18 @@ async function startServer() {
     // Stancer, relance différée ici si toujours non résolu (server/dunning.ts).
     startDunning(supabaseAdmin);
   });
+  // Node's http.Server defaults keepAliveTimeout to 5s, but the platform's
+  // load balancer / reverse proxy in front of this container (DigitalOcean
+  // App Platform) keeps pooled connections open much longer. If the proxy
+  // reuses a connection to forward a new request at the exact moment Node
+  // decides to close it for being idle past 5s, the request lands on a
+  // socket Node is already tearing down — it never reaches Express (no
+  // request log line), and the client hangs until its own timeout fires.
+  // Setting keepAliveTimeout above any realistic upstream idle timeout
+  // avoids the race; headersTimeout must stay above keepAliveTimeout (Node
+  // requirement).
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
 }
 
 // Vitest sets process.env.VITEST — skip the real listen() when this module is
