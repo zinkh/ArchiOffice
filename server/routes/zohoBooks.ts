@@ -24,12 +24,16 @@ export interface RouteDeps {
 }
 
 export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  let zohoBooksAccessTokenCache: { token: string; expiresAt: number } | null = null;
+  // Keyed by tenantId — see the matching comment in zohoInvoice.ts. An
+  // unkeyed single value here let one tenant's cached Zoho token leak to
+  // whichever other tenant synced next within the ~1h expiry window.
+  const zohoBooksAccessTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-  async function getZohoBooksAccessToken(settings: any): Promise<string> {
+  async function getZohoBooksAccessToken(tenantId: string, settings: any): Promise<string> {
     const now = Date.now();
-    if (zohoBooksAccessTokenCache && zohoBooksAccessTokenCache.expiresAt > now + 60000) {
-      return zohoBooksAccessTokenCache.token;
+    const cached = zohoBooksAccessTokenCache.get(tenantId);
+    if (cached && cached.expiresAt > now + 60000) {
+      return cached.token;
     }
     const dc = settings.zoho_data_center || 'com';
     const params = new URLSearchParams({
@@ -41,7 +45,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
     const { access_token, expires_in } = await tokenRes.json() as any;
     if (!access_token) throw new Error('Failed to refresh Zoho Books access token');
-    zohoBooksAccessTokenCache = { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 };
+    zohoBooksAccessTokenCache.set(tenantId, { token: access_token, expiresAt: now + (expires_in || 3600) * 1000 });
     return access_token;
   }
 
@@ -114,7 +118,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       const tokenRes = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params });
       const { refresh_token } = await tokenRes.json() as any;
       if (!refresh_token) return res.redirect('/settings?zoho_books_error=1');
-      zohoBooksAccessTokenCache = null;
+      zohoBooksAccessTokenCache.delete(tenantId);
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_books_connected=1');
     } catch {
@@ -127,7 +131,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   app.delete('/api/zoho-books/disconnect', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      zohoBooksAccessTokenCache = null;
+      zohoBooksAccessTokenCache.delete(tenantId);
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho Books', '', tenantId, 'integration', 'Intégrations');
@@ -149,7 +153,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       const dc = (settings as any).zoho_data_center || 'com';
       const orgId = (settings as any).zoho_books_org_id || (settings as any).zoho_org_id;
       const apiBase = `https://books.zoho.${dc}/api/v3`;
-      const accessToken = await getZohoBooksAccessToken(settings as any);
+      const accessToken = await getZohoBooksAccessToken(tenantId, settings as any);
       const headers = {
         Authorization: `Zoho-oauthtoken ${accessToken}`,
         'Content-Type': 'application/json',
