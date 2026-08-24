@@ -123,29 +123,97 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        amount, description, status, due_date,
+        project_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
         items
       } = req.body;
 
-      // affaire_invoice_number/phases are only ever set at creation time (or
-      // by a client that explicitly resends them) — an edit form that omits
-      // them (e.g. a standard-invoice form with no phases UI) must not wipe
-      // out the acompte data already stored, unlike the other fields above
-      // which intentionally reset to their default when absent.
-      const { data: existingInvoice } = await supabaseAdmin.from('invoices').select('affaire_invoice_number, phases').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      // maybeSingle(), not single(): a caller passing another tenant's id
+      // must not 404 (that would confirm the id exists) — it falls through
+      // to the tenant-scoped update/select below, which then match nothing
+      // and the response comes back with none of that invoice's data.
+      const { data: existingInvoice } = await supabaseAdmin.from('invoices')
+        .select('status, project_id, affaire_invoice_number, phases, amount, description, due_date, invoice_number, tax_amount, total_amount, issue_date, seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate, invoice_type, mission_id, mission_name, advancement_pct')
+        .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      const existing = (existingInvoice as any) || {};
+
+      // A key omitted from the body (e.g. ProjectDetail's inline status
+      // dropdown, which PUTs only `{ status }`) means "leave unchanged", not
+      // "reset to the field's default" — only an explicit value (including
+      // an explicit null/0/'', to clear or zero a field) overrides what's
+      // stored. This also covers affaire_invoice_number/phases: an edit form
+      // that has no phases UI (e.g. a standard invoice) must not wipe out
+      // acompte data already stored.
+      const merge = (val: any, fallback: any) => val !== undefined ? val : fallback;
+
+      // Once an invoice has left Draft (sent to the client, paid, overdue...),
+      // French e-invoicing rules (Factur-X / EN 16931 audit trail) require its
+      // legal content — amount, description, dates, seller details — to stay
+      // frozen. Recategorizing it (invoice type, mission/phases, status) and
+      // attaching/reattaching it to a project stay editable: those are
+      // ArchiOffice-local bookkeeping, not part of the document already sent.
+      //
+      // A Zoho-imported invoice never had most of these columns populated in
+      // the first place (zohoInvoiceToLocalRow in server/zohoSync.ts sets
+      // only amount/tax/total/dates), so a NULL already stored counts as
+      // "unchanged" the same as a matching real value — the field defaults
+      // below normalize both the incoming and the existing side the same way
+      // before comparing, so a merely-absent existing value never trips the
+      // lock on its own.
+      const fieldDefaults: Record<string, any> = {
+        amount: 0, description: '', due_date: null, invoice_number: null,
+        tax_amount: 0, total_amount: 0, issue_date: null,
+        seller_name: null, seller_address: null, seller_siret: null,
+        seller_vat_number: null, seller_iban: null, seller_bic: null, vat_rate: 20,
+      };
+      const incoming: Record<string, any> = {
+        amount, description, due_date, invoice_number, tax_amount, total_amount, issue_date,
+        seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
+      };
+      const protectedFields: Record<string, any> = {};
+      for (const key of Object.keys(fieldDefaults)) {
+        protectedFields[key] = merge(incoming[key], existing[key]) ?? fieldDefaults[key];
+      }
+      // A row with no status at all (never happens for a real invoice — the
+      // column always defaults to 'Draft' on insert, see the POST route
+      // above) is treated as still editable rather than locked.
+      if (existing.status && existing.status !== 'Draft') {
+        const contentChanged = Object.keys(fieldDefaults)
+          .some(key => protectedFields[key] !== (existing[key] ?? fieldDefaults[key]));
+        if (contentChanged) {
+          return res.status(409).json({
+            error: "Cette facture a déjà été envoyée au client : son montant, sa description, ses dates et ses mentions légales ne peuvent plus être modifiés. Seuls le statut, le type de facture et le rattachement à un projet restent modifiables."
+          });
+        }
+      }
+
+      // Attaching (or re-attaching) an invoice to a project — notably a
+      // Zoho-imported one, which always lands with project_id null, see
+      // zohoInvoiceToLocalRow in server/zohoSync.ts — and, for an acompte
+      // invoice, assigning it a local affaire reference number: a numbering
+      // series ArchiOffice manages itself, independent of Zoho, that accounts
+      // for the acompte invoices already issued on that project. Only
+      // generated when the caller didn't explicitly supply one.
+      const finalProjectId = merge(project_id, existing.project_id) ?? null;
+      const projectChanged = project_id !== undefined && project_id !== existing.project_id;
+      const finalInvoiceType = merge(invoice_type, existing.invoice_type) || 'standard';
+      let finalAffaireInvoiceNumber = merge(affaire_invoice_number, existing.affaire_invoice_number) ?? null;
+      if (affaire_invoice_number === undefined && finalInvoiceType === 'acompte' && finalProjectId
+          && (projectChanged || !finalAffaireInvoiceNumber)) {
+        finalAffaireInvoiceNumber = await getNextAffaireInvoiceNumber(tenantId, finalProjectId);
+      }
 
       const { error: updErr } = await supabaseAdmin.from('invoices').update({
-        amount: amount || 0, description: description || '', status: status || 'Draft', due_date: due_date || null,
-        invoice_number: invoice_number || null, tax_amount: tax_amount || 0, total_amount: total_amount || 0, issue_date: issue_date || null,
-        seller_name: seller_name || null, seller_address: seller_address || null, seller_siret: seller_siret || null,
-        seller_vat_number: seller_vat_number || null, seller_iban: seller_iban || null, seller_bic: seller_bic || null, vat_rate: vat_rate || 20,
-        invoice_type: invoice_type || 'standard',
-        mission_id: mission_id || null, mission_name: mission_name || null, advancement_pct: advancement_pct || 0,
-        affaire_invoice_number: affaire_invoice_number ?? (existingInvoice as any)?.affaire_invoice_number ?? null,
-        phases: phases ?? (existingInvoice as any)?.phases ?? []
+        ...protectedFields,
+        status: merge(status, existing.status) || 'Draft', project_id: finalProjectId,
+        invoice_type: finalInvoiceType,
+        mission_id: merge(mission_id, existing.mission_id) ?? null,
+        mission_name: merge(mission_name, existing.mission_name) ?? null,
+        advancement_pct: merge(advancement_pct, existing.advancement_pct) || 0,
+        affaire_invoice_number: finalAffaireInvoiceNumber,
+        phases: merge(phases, existing.phases) ?? []
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

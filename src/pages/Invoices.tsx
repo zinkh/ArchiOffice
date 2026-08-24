@@ -198,6 +198,7 @@ export default function Invoices() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editForm, setEditForm] = useState<Partial<Invoice>>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [sendingInvoice, setSendingInvoice] = useState<Invoice | null>(null);
   const [sendForm, setSendForm] = useState({ to: '', subject: '', message: '' });
   const [isSending, setIsSending] = useState(false);
@@ -335,12 +336,14 @@ export default function Invoices() {
   const openEditModal = (invoice: Invoice) => {
     setEditingInvoice(invoice);
     setEditForm({ ...invoice });
+    setEditError(null);
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingInvoice) return;
     setIsSavingEdit(true);
+    setEditError(null);
     try {
       const payload = { ...editForm };
       if (acompteCalculated !== null) payload.amount = acompteCalculated;
@@ -356,8 +359,9 @@ export default function Invoices() {
       const enriched = { ...updated, project_name: projects.find(p => p.id === updated.project_id)?.name || updated.project_name };
       setInvoices(invoices.map(i => i.id === enriched.id ? enriched : i));
       setEditingInvoice(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Edit invoice failed:', err);
+      setEditError(err?.message || t('invoices_edit_error'));
     } finally {
       setIsSavingEdit(false);
     }
@@ -405,6 +409,12 @@ export default function Invoices() {
       setIsSending(false);
     }
   };
+
+  // A sent (or later) invoice has its legal content frozen server-side — see
+  // the 409 in PUT /api/invoices/:id — so the amount/dates/description
+  // fields are locked here too, rather than letting the user fill them in
+  // only to have the save rejected.
+  const isEditLocked = !!editingInvoice && editingInvoice.status !== 'Draft';
 
   // Computed: sum of the multi-phase avancement montants (edit modal)
   const acompteCalculated = useMemo(() => {
@@ -1028,7 +1038,7 @@ export default function Invoices() {
                     required
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
-                    value={newInvoice.project_id}
+                    value={newInvoice.project_id || ''}
                     onChange={e => setNewInvoice({...newInvoice, project_id: e.target.value})}
                   >
                     <option value="">{t('invoices_select_project')}</option>
@@ -1142,7 +1152,35 @@ export default function Invoices() {
                 <button onClick={() => setEditingInvoice(null)} style={{ color: 'var(--tblr-muted)' }}><IconX size={24} /></button>
               </div>
               <form onSubmit={handleSaveEdit} className="p-6 space-y-4 overflow-y-auto">
-                {/* Invoice type toggle */}
+                {isEditLocked && (
+                  <div className="flex items-start gap-2 text-xs p-3 rounded-lg" style={{ background: '#fff3bf', color: '#7d4e00', border: '1px solid #ffe066' }}>
+                    <IconInfoCircle size={16} className="shrink-0 mt-0.5" />
+                    <span>{t('invoices_edit_locked_banner')}</span>
+                  </div>
+                )}
+
+                {/* Project attachment — always editable, notably to attach a
+                    Zoho-imported invoice (which lands with no project) or to
+                    reattach one to a different affaire. */}
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_project_label')}</label>
+                  <select
+                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
+                    style={inputStyle}
+                    value={editForm.project_id || ''}
+                    onChange={e => setEditForm({ ...editForm, project_id: e.target.value || null })}
+                  >
+                    <option value="">{t('invoices_no_project_option')}</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Invoice type toggle — always editable: recategorizing an
+                    already-sent invoice (e.g. flagging a Zoho import as a
+                    local acompte, to get its affaire_invoice_number) doesn't
+                    touch the amount/description already sent to the client. */}
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--tblr-text)' }}>{t('invoices_type_label')}</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -1165,14 +1203,16 @@ export default function Invoices() {
                   </div>
                 </div>
 
-                {/* Acompte mission fields */}
-                {editForm.invoice_type === 'acompte' && (
-                  <>
-                    {editForm.affaire_invoice_number && (
-                      <p className="text-xs font-mono" style={{ color: 'var(--tblr-muted)' }}>
-                        {t('invoices_affaire_number_label')} : <strong>{editForm.affaire_invoice_number}</strong>
-                      </p>
-                    )}
+                {editForm.affaire_invoice_number && (
+                  <p className="text-xs font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                    {t('invoices_affaire_number_label')} : <strong>{editForm.affaire_invoice_number}</strong>
+                  </p>
+                )}
+
+                {/* Financial content — locked once the invoice has been sent
+                    (see the 409 the server returns for the same reason). */}
+                <fieldset disabled={isEditLocked} style={{ border: 'none', margin: 0, padding: 0 }} className="space-y-4">
+                  {editForm.invoice_type === 'acompte' && (
                     <AcomptePhasesEditor
                       phases={editForm.phases || []}
                       onChange={phases => setEditForm({ ...editForm, phases })}
@@ -1180,46 +1220,46 @@ export default function Invoices() {
                       currency={currency}
                       t={t}
                     />
-                  </>
-                )}
+                  )}
 
-                {/* Amount */}
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
-                  <input
-                    type="number"
-                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                    style={inputStyle}
-                    value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
-                    readOnly={acompteCalculated !== null}
-                    onChange={e => acompteCalculated === null && setEditForm({ ...editForm, amount: Number(e.target.value) })}
-                  />
-                </div>
+                  {/* Amount */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
+                    <input
+                      type="number"
+                      className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+                      style={inputStyle}
+                      value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
+                      readOnly={acompteCalculated !== null}
+                      onChange={e => acompteCalculated === null && setEditForm({ ...editForm, amount: Number(e.target.value) })}
+                    />
+                  </div>
 
-                {/* Due date */}
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_due_date_label')}</label>
-                  <input
-                    type="date" required
-                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                    style={inputStyle}
-                    value={editForm.due_date || ''}
-                    onChange={e => setEditForm({ ...editForm, due_date: e.target.value })}
-                  />
-                </div>
+                  {/* Due date */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_due_date_label')}</label>
+                    <input
+                      type="date" required
+                      className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+                      style={inputStyle}
+                      value={editForm.due_date || ''}
+                      onChange={e => setEditForm({ ...editForm, due_date: e.target.value })}
+                    />
+                  </div>
 
-                {/* Description */}
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
-                  <textarea
-                    className="w-full h-24 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-                    style={inputStyle}
-                    value={editForm.description || ''}
-                    onChange={e => setEditForm({ ...editForm, description: e.target.value })}
-                  />
-                </div>
+                  {/* Description */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_description_label')}</label>
+                    <textarea
+                      className="w-full h-24 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 resize-none disabled:opacity-60"
+                      style={inputStyle}
+                      value={editForm.description || ''}
+                      onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                    />
+                  </div>
+                </fieldset>
 
-                {/* Status */}
+                {/* Status — always editable (payment workflow) */}
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_col_status')}</label>
                   <select
@@ -1233,6 +1273,12 @@ export default function Invoices() {
                     ))}
                   </select>
                 </div>
+
+                {editError && (
+                  <div className="text-sm p-3 rounded-lg" style={{ background: '#ffe3e3', color: 'var(--tblr-danger)' }}>
+                    {editError}
+                  </div>
+                )}
 
                 <div className="flex gap-3 pt-2">
                   <button

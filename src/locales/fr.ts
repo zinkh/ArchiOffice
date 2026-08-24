@@ -466,6 +466,9 @@ export default {
       "invoices_remove_phase": "Retirer cette phase",
       "invoices_no_phases": "Aucune phase ajoutée pour cet acompte.",
       "invoices_affaire_number_label": "Réf. affaire",
+      "invoices_edit_locked_banner": "Cette facture a déjà été envoyée au client : le montant, la description, la date d'échéance et les mentions légales ne peuvent plus être modifiés. Le statut, le type de facture et le rattachement à un projet restent modifiables.",
+      "invoices_edit_error": "Échec de la modification de la facture.",
+      "invoices_no_project_option": "Aucun projet (facture générale)",
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",

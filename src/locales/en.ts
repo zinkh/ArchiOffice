@@ -466,6 +466,9 @@ export default {
       "invoices_remove_phase": "Remove this phase",
       "invoices_no_phases": "No phase added for this deposit invoice.",
       "invoices_affaire_number_label": "Project ref.",
+      "invoices_edit_locked_banner": "This invoice has already been sent to the client: the amount, description, due date and legal details can no longer be changed. The status, invoice type and linked project can still be updated.",
+      "invoices_edit_error": "Failed to update the invoice.",
+      "invoices_no_project_option": "No project (general invoice)",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",

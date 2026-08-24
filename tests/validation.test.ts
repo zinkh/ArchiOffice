@@ -120,3 +120,113 @@ describe('validation wired into the routes', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('PUT /api/invoices/:id — sent-invoice content lock and project attachment', () => {
+  let app: Express;
+
+  beforeAll(async () => {
+    app = await getTestApp();
+  });
+
+  it('rejects a content change on a Sent invoice with 409 and a French explanation', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    fakeSupabaseAdmin.seed('invoices', [{
+      id: 'inv-sent', tenant_id: tenantId, invoice_number: 'FAC-001', status: 'Sent',
+      amount: 1000, description: 'Honoraires phase 1', due_date: '2026-01-01',
+    }]);
+
+    const res = await request(app)
+      .put('/api/invoices/inv-sent')
+      .set(authHeader(token))
+      .send({ amount: 2000 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('déjà été envoyée');
+    expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-sent')?.amount).toBe(1000);
+  });
+
+  it('allows a status-only update on a Sent invoice without wiping its amount/description (partial-update merge)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    fakeSupabaseAdmin.seed('invoices', [{
+      id: 'inv-sent-2', tenant_id: tenantId, invoice_number: 'FAC-002', status: 'Sent',
+      amount: 1500, description: 'Honoraires phase 2', due_date: '2026-02-01',
+    }]);
+
+    const res = await request(app)
+      .put('/api/invoices/inv-sent-2')
+      .set(authHeader(token))
+      .send({ status: 'Paid' });
+
+    expect(res.status).toBe(200);
+    const row = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-sent-2');
+    expect(row?.status).toBe('Paid');
+    expect(row?.amount).toBe(1500);
+    expect(row?.description).toBe('Honoraires phase 2');
+  });
+
+  it('attaches a Zoho-imported (project-less) invoice to a project without touching its amount', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    fakeSupabaseAdmin.seed('projects', [{ id: 'proj-1', tenant_id: tenantId, name: 'Villa Dupont', project_code: '26014' }]);
+    fakeSupabaseAdmin.seed('invoices', [{
+      id: 'inv-zoho', tenant_id: tenantId, invoice_number: 'ZOHO-9', status: 'Sent',
+      project_id: null, amount: 800, description: 'Zoho import', zoho_invoice_id: 'z-9',
+    }]);
+
+    const res = await request(app)
+      .put('/api/invoices/inv-zoho')
+      .set(authHeader(token))
+      .send({ project_id: 'proj-1' });
+
+    expect(res.status).toBe(200);
+    const row = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-zoho');
+    expect(row?.project_id).toBe('proj-1');
+    expect(row?.amount).toBe(800);
+  });
+
+  it('assigns a local affaire_invoice_number, independent of Zoho, when attaching an acompte invoice to a project', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    fakeSupabaseAdmin.seed('projects', [{ id: 'proj-2', tenant_id: tenantId, name: 'Extension Martin', project_code: '26020' }]);
+    // One acompte invoice already exists on the project — the new local
+    // number must account for it (sequence continues at 02).
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-existing-aco', tenant_id: tenantId, project_id: 'proj-2', invoice_type: 'acompte', status: 'Paid', amount: 500 },
+      { id: 'inv-draft-aco', tenant_id: tenantId, status: 'Draft', invoice_type: 'acompte', amount: 300, project_id: null },
+    ]);
+
+    const res = await request(app)
+      .put('/api/invoices/inv-draft-aco')
+      .set(authHeader(token))
+      .send({ project_id: 'proj-2' });
+
+    expect(res.status).toBe(200);
+    const row = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-draft-aco');
+    expect(row?.project_id).toBe('proj-2');
+    expect(row?.affaire_invoice_number).toBe('26020-ACO-02');
+  });
+
+  it('allows recategorizing a Sent invoice as acompte (local billing) without unlocking its amount', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'user');
+    fakeSupabaseAdmin.seed('projects', [{ id: 'proj-3', tenant_id: tenantId, name: 'Rénovation Petit', project_code: '26030' }]);
+    fakeSupabaseAdmin.seed('invoices', [{
+      id: 'inv-sent-zoho', tenant_id: tenantId, status: 'Sent', invoice_type: 'standard',
+      amount: 600, description: 'Zoho import', project_id: null,
+    }]);
+
+    const res = await request(app)
+      .put('/api/invoices/inv-sent-zoho')
+      .set(authHeader(token))
+      .send({ project_id: 'proj-3', invoice_type: 'acompte' });
+
+    expect(res.status).toBe(200);
+    const row = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-sent-zoho');
+    expect(row?.invoice_type).toBe('acompte');
+    expect(row?.project_id).toBe('proj-3');
+    expect(row?.affaire_invoice_number).toBe('26030-ACO-01');
+    expect(row?.amount).toBe(600);
+  });
+});
