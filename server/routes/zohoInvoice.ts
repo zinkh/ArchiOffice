@@ -26,6 +26,7 @@ import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthSt
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow,
 } from '../zohoSync';
 
 export interface RouteDeps {
@@ -252,7 +253,15 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       let pulled = 0;
 
       // 1. Push local invoices not yet in Zoho
-      const { data: localInvoices } = await supabaseAdmin.from('invoices').select('*, projects(name)').eq('tenant_id', tenantId).or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
+      const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
+        .from('invoices').select('*, projects(name)').eq('tenant_id', tenantId)
+        .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
+      // A failed query (e.g. a column PostgREST doesn't recognise — this table
+      // was missing zoho_invoice_id in production for a while, see
+      // supabase/migrate_add_invoices_zoho_invoice_id.sql) used to be silently
+      // treated as "no invoices to push", which let a completely broken sync
+      // report success. Throw instead.
+      if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
       const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
       // Bounded per run: the browser is waiting on this request, and each push
       // costs up to 3 Zoho calls. Each id is persisted as it goes, so the next
@@ -315,7 +324,23 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         );
         for (const zohoInv of zohoInvoices) {
           const local = localByZohoId.get(zohoInv.invoice_id);
-          if (!local) continue;
+          if (!local) {
+            // A Zoho invoice ArchiOffice has never recorded — most commonly one
+            // created directly in Zoho, or a pre-existing invoice from before
+            // this tenant connected the integration. The pull used to silently
+            // skip these (`continue`), so nothing already sitting in Zoho at
+            // connection time ever showed up in ArchiOffice — only invoices
+            // pushed FROM here and then re-pulled came back with status updates.
+            const { error: importErr } = await supabaseAdmin
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+            if (importErr) {
+              console.error("[POST /api/zoho/sync] import", importErr);
+              errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);
+            } else {
+              pulled++;
+            }
+            continue;
+          }
           const newStatus = mapZohoStatus(zohoInv.status);
           if (newStatus && newStatus !== local.status) {
             await supabaseAdmin.from('invoices').update({ status: newStatus }).eq('id', local.id).eq('tenant_id', tenantId);

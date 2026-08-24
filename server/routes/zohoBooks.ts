@@ -19,6 +19,7 @@ import { fetchWithTimeout } from '../fetchWithTimeout';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow,
 } from '../zohoSync';
 
 export interface RouteDeps {
@@ -217,11 +218,14 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
 
       // Push local invoices not yet in Zoho Books
       try {
-        const { data: localInvoices } = await supabaseAdmin
+        const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
           .from('invoices')
           .select('*, projects(name)')
           .eq('tenant_id', tenantId)
           .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
+        // See the matching note in zohoInvoice.ts: a failed query used to be
+        // silently treated as "no invoices to push".
+        if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
 
         const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
         // Bounded per run — see the matching note in zohoInvoice.ts.
@@ -293,7 +297,21 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         );
         for (const zohoInv of zohoInvoices) {
           const local = localByZohoId.get(zohoInv.invoice_id);
-          if (!local) continue;
+          if (!local) {
+            // A Zoho Books invoice ArchiOffice has never recorded — see the
+            // matching note in zohoInvoice.ts. This used to `continue` here too,
+            // so nothing already in Zoho Books at connection time ever appeared
+            // in ArchiOffice.
+            const { error: importErr } = await supabaseAdmin
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+            if (importErr) {
+              console.error("[POST /api/zoho-books/sync] import", importErr);
+              errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);
+            } else {
+              pulled++;
+            }
+            continue;
+          }
           // Shared with the Zoho Invoice route: this used to keep its own map to
           // lowercase values ('paid', 'sent', 'cancelled'), none of which are
           // valid for invoices.status ('Draft' | 'Sent' | 'Paid' | 'Overdue'),
