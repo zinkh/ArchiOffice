@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
+import { fetchJson } from '../lib/api';
 import type { Invoice, Project, InvoiceItem, InvoicePhase } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 import { buildFacturXCiiXml } from '../lib/facturX';
@@ -117,21 +118,23 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
         tax_amount: vat,
         total_amount: gross
       };
-      
-      const res = await fetch(`/api/invoices/${data.id}`, {
+
+      // fetchJson (unlike a raw fetch) throws with the server's own `error`
+      // message on a non-2xx response — notably the 409 PUT /api/invoices/:id
+      // now returns when the invoice has already been sent and its content is
+      // locked. A bare fetch here used to leave that response's `res.ok ===
+      // false` unhandled: the save silently did nothing, with no feedback at
+      // all — the one thing this screen must never do, since it's the only
+      // invoice-editing surface reachable from the mobile view.
+      const updated = await fetchJson<Invoice>(`/api/invoices/${data.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      
-      if (res.ok) {
-        const updated = await res.json();
-        onSave?.(updated);
-        alert('Facture enregistrée avec succès.');
-      }
-    } catch (err) {
+      onSave?.(updated);
+      alert('Facture enregistrée avec succès.');
+    } catch (err: any) {
       console.error(err);
-      alert('Erreur lors de l\'enregistrement.');
+      alert(err?.message || 'Erreur lors de l\'enregistrement.');
     } finally {
       setIsSaving(false);
     }
