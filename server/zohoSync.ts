@@ -100,16 +100,58 @@ export async function localInvoicesByZohoId(
 
   // Chunked: a very large `.in(...)` list can outgrow PostgREST's URL limit.
   for (let i = 0; i < ids.length; i += ZOHO_PAGE_SIZE) {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('invoices')
       .select('id, status, zoho_invoice_id')
       .eq('tenant_id', tenantId)
       .in('zoho_invoice_id', ids.slice(i, i + ZOHO_PAGE_SIZE));
+    // Throw rather than treat a failed query as "nothing matched". Ignoring
+    // `error` here is what let a missing zoho_invoice_id column (PostgREST 400
+    // on every request) masquerade as an empty result, so the sync reported a
+    // cheerful "0 envoyées, 0 importées" while doing nothing at all.
+    if (error) throw new Error(`Lecture des factures locales échouée: ${error.message}`);
     for (const row of (data || [])) {
       if (row?.zoho_invoice_id) byZohoId.set(row.zoho_invoice_id, { id: row.id, status: row.status });
     }
   }
   return byZohoId;
+}
+
+/**
+ * A local `invoices` row built from a Zoho invoice that ArchiOffice has never
+ * seen. Zoho's list payload is the only source here — fetching each invoice's
+ * detail would cost one API call per invoice — so the untaxed/tax split falls
+ * back to the total when Zoho only returns that.
+ *
+ * Zoho's own invoice_number is kept deliberately: this is the same legal
+ * document, and re-numbering it through getNextDocNumber would both duplicate a
+ * reference that already exists and break the sequential numbering the local
+ * series guarantees. project_id stays null — Zoho has a customer, not one of
+ * our projects, and guessing the link would be worse than leaving it unset.
+ */
+export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string): Record<string, unknown> {
+  const total = Number(zohoInv?.total ?? 0);
+  const untaxed = zohoInv?.sub_total != null ? Number(zohoInv.sub_total) : null;
+  const tax = zohoInv?.tax_total != null
+    ? Number(zohoInv.tax_total)
+    : (untaxed != null ? Number((total - untaxed).toFixed(2)) : 0);
+
+  return {
+    id: crypto.randomUUID(),
+    tenant_id: tenantId,
+    zoho_invoice_id: zohoInv.invoice_id,
+    invoice_number: zohoInv.invoice_number || null,
+    project_id: null,
+    amount: untaxed ?? total,
+    tax_amount: tax,
+    total_amount: total,
+    status: mapZohoStatus(zohoInv.status) ?? 'Draft',
+    issue_date: zohoDate(zohoInv.date) ?? null,
+    due_date: zohoDate(zohoInv.due_date) ?? null,
+    description: zohoInv.customer_name || '',
+    created_at: new Date().toISOString(),
+    invoice_type: 'standard',
+  };
 }
 
 /**

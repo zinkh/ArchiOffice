@@ -17,7 +17,10 @@ beforeAll(async () => {
 });
 
 describe('Zoho Invoice', () => {
-  afterEach(() => { vi.restoreAllMocks(); });
+  // fakeSupabaseAdmin is one module-level instance shared by every test in this
+  // file (see tests/testServer.ts) — breakTable() must not leak past the test
+  // that set it.
+  afterEach(() => { vi.restoreAllMocks(); fakeSupabaseAdmin.unbreakTable('invoices'); });
 
   it('reports connected/has_credentials from settings', async () => {
     const tenantId = makeTenant();
@@ -343,11 +346,82 @@ describe('Zoho Invoice', () => {
     expect(res.body.remaining).toBe(2);
     expect(res.body.errors.join(' ')).toContain('Limite de requêtes Zoho');
   });
+
+  // A Zoho invoice with no local counterpart used to be silently skipped
+  // (`if (!local) continue`), so nothing already sitting in Zoho at connection
+  // time ever appeared in ArchiOffice — only invoices this app had itself
+  // pushed and then re-pulled ever came back with a status. This is the bug
+  // the user actually hit: "la synchronisation n'a pas importé les factures
+  // déjà présentes sur zoho".
+  it('imports a Zoho invoice that has no local counterpart', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/invoices')) {
+        return {
+          data: {
+            invoices: [{
+              invoice_id: 'zoho-preexisting',
+              invoice_number: 'INV-000042',
+              customer_name: 'Client Historique',
+              status: 'sent',
+              date: '2026-01-15',
+              due_date: '2026-02-15',
+              total: 1200,
+              sub_total: 1000,
+              tax_total: 200,
+            }],
+          },
+        } as any;
+      }
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.pulled).toBe(1);
+
+    const imported = fakeSupabaseAdmin.getTable('invoices').find(i => i.zoho_invoice_id === 'zoho-preexisting');
+    expect(imported).toBeTruthy();
+    expect(imported?.tenant_id).toBe(tenantId);
+    expect(imported?.invoice_number).toBe('INV-000042');
+    expect(imported?.status).toBe('Sent');
+    expect(imported?.amount).toBe(1000);
+    expect(imported?.tax_amount).toBe(200);
+    expect(imported?.total_amount).toBe(1200);
+  });
+
+  // The push and pull queries both name zoho_invoice_id; in production this
+  // column was missing from the `invoices` table entirely (declared in
+  // supabase/schema.sql but never migrated onto already-provisioned
+  // databases — see supabase/migrate_add_invoices_zoho_invoice_id.sql), so
+  // PostgREST answered every one of these queries with a 400. Both routes
+  // destructured only `{ data }`, discarding `error`, so a completely broken
+  // sync reported "0 envoyées, 0 importées" as if it had succeeded. This
+  // reproduces that failure mode against the fake table and asserts it now
+  // surfaces instead of being swallowed.
+  it('surfaces a broken invoices query instead of reporting success', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.breakTable('invoices');
+
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
+    vi.spyOn(axios, 'get').mockResolvedValue({ data: { invoices: [] } } as any);
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('factures locales');
+  });
 });
 
 describe('Zoho Books', () => {
   const originalFetch = global.fetch;
-  afterEach(() => { global.fetch = originalFetch; });
+  // See the matching note in the 'Zoho Invoice' describe block above.
+  afterEach(() => { global.fetch = originalFetch; fakeSupabaseAdmin.unbreakTable('invoices'); });
 
   it('reports connected/has_credentials from settings (books org id or shared org id)', async () => {
     const tenantId = makeTenant();
@@ -556,5 +630,69 @@ describe('Zoho Books', () => {
     expect(res.status).toBe(200);
     expect(res.body.pushed).toBe(0);
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-victim')?.zoho_invoice_id).toBeNull();
+  });
+
+  // Same fix as Zoho Invoice: a Zoho Books invoice with no local counterpart
+  // used to be silently skipped, so nothing already sitting in Zoho Books at
+  // connection time ever appeared in ArchiOffice.
+  it('imports a Zoho Books invoice that has no local counterpart', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+
+    global.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('status=all')) {
+        return {
+          ok: true,
+          json: async () => ({
+            invoices: [{
+              invoice_id: 'zb-preexisting',
+              invoice_number: 'BOOKS-007',
+              customer_name: 'Ancien Client Books',
+              status: 'draft',
+              date: '2026-02-01',
+              due_date: '2026-03-01',
+              total: 500,
+            }],
+          }),
+        } as any;
+      }
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.pulled).toBe(1);
+
+    const imported = fakeSupabaseAdmin.getTable('invoices').find(i => i.zoho_invoice_id === 'zb-preexisting');
+    expect(imported).toBeTruthy();
+    expect(imported?.tenant_id).toBe(tenantId);
+    expect(imported?.invoice_number).toBe('BOOKS-007');
+    expect(imported?.status).toBe('Draft');
+    expect(imported?.total_amount).toBe(500);
+  });
+
+  // See the matching Zoho Invoice test: PostgREST's real 400 (a missing
+  // column, in production) used to be discarded, so a completely broken sync
+  // reported success. Reproduced here against the fake table's error-injection
+  // hook.
+  it('surfaces a broken invoices query instead of reporting success', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.breakTable('invoices');
+
+    global.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      return { ok: true, json: async () => ({ invoices: [] }) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.pushed).toBe(0);
+    expect(res.body.errors.join(' ')).toContain('factures locales');
   });
 });

@@ -169,8 +169,27 @@ export class FakeSupabaseAdmin {
     return this.tables.get(table) || [];
   }
 
+  private brokenTables = new Set<string>();
+
+  /**
+   * Test setup: makes every query against `table` resolve to a PostgREST-style
+   * error instead of touching the in-memory rows — this fake has no schema, so
+   * it otherwise cannot reproduce a real "column doesn't exist" 400 (that
+   * silently passed as an empty result and let a broken sync report success;
+   * see server/zohoSync.ts's localInvoicesByZohoId and the Zoho sync routes'
+   * push queries for the fix this exercises).
+   */
+  breakTable(table: string) {
+    this.brokenTables.add(table);
+  }
+
+  /** Test cleanup: undoes breakTable(). */
+  unbreakTable(table: string) {
+    this.brokenTables.delete(table);
+  }
+
   from(table: string) {
-    return new FakeQueryBuilder(this.tables, table);
+    return new FakeQueryBuilder(this.tables, table, this.brokenTables);
   }
 }
 
@@ -184,7 +203,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   private wantSingle = false;
   private wantMaybeSingle = false;
 
-  constructor(private tables: Map<string, Row[]>, private table: string) {}
+  constructor(private tables: Map<string, Row[]>, private table: string, private brokenTables?: Set<string>) {}
 
   select(_columns?: string, _opts?: { count?: string; head?: boolean }) {
     return this;
@@ -351,6 +370,15 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   }
 
   private async execute(): Promise<{ data: any; error: any; count?: number }> {
+    if (this.brokenTables?.has(this.table)) {
+      // Mirrors the shape PostgREST returns for e.g. an unrecognised column —
+      // `data: null` plus an `error`, never a thrown exception. A caller that
+      // destructures only `{ data }` (as the pre-fix Zoho sync routes did)
+      // will see `data` come back `undefined`/`null` and treat that as "no
+      // rows", not as a failure.
+      return { data: null, error: { message: `simulated failure: table "${this.table}" is broken`, code: '42703' } };
+    }
+
     const rows = this.getRows();
 
     if (this.op === 'insert') {
