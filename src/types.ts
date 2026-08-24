@@ -793,7 +793,10 @@ export interface Proposal {
 export interface Invoice {
   id: string;
   invoice_number: string;
-  project_id: string;
+  // Nullable: a Zoho-imported invoice lands with no project (Zoho has a
+  // customer, not one of our projects — see zohoInvoiceToLocalRow in
+  // server/zohoSync.ts) until it's attached to one from the edit modal.
+  project_id: string | null;
   project_name?: string;
   amount: number;
   tax_amount?: number;
