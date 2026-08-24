@@ -442,24 +442,35 @@ export default function Settings() {
   // actually act on; anything else falls back to the generic message with the
   // raw code appended, so a support request can at least quote it.
   const zohoConnectErrorMessage = (code: string): string => {
+    // Every branch ends with the raw code. A previous revision mapped
+    // `invalid_code` and `expired_state` to one "la demande a expiré" message,
+    // which hid the difference between "Zoho refused the authorization code"
+    // and "our own nonce was missing" — two unrelated faults with different
+    // remedies — and sent a whole debugging cycle after the wrong one.
+    const detail = (message: string) => `${message} (${code})`;
     switch (code) {
       case 'invalid_client':
       case 'invalid_client_secret':
-        return 'Zoho a refusé le Client ID ou le Client Secret. Vérifiez-les dans la console API Zoho.';
+        return detail('Zoho a refusé le Client ID ou le Client Secret. Vérifiez-les dans la console API Zoho.');
       case 'redirect_uri_mismatch':
       case 'invalid_redirect_uri':
-        return "L'URL de redirection ci-dessous n'est pas enregistrée à l'identique dans votre application Zoho.";
+        return detail("L'URL de redirection ci-dessous n'est pas enregistrée à l'identique dans votre application Zoho.");
       case 'invalid_code':
+        // Zoho also returns this when the redirect_uri sent with the token
+        // exchange differs from the one sent with the consent request, or when
+        // the OAuth client was created in a different data centre's console
+        // than the one selected above — not only for a genuinely stale code.
+        return detail("Zoho a refusé le code d'autorisation. Vérifiez que l'URL de redirection est identique des deux côtés et que votre application Zoho a été créée dans la console du même centre de données.");
       case 'expired_state':
-        return 'La demande de connexion a expiré. Relancez la connexion.';
+        return detail('La demande de connexion a expiré. Relancez la connexion.');
       case 'access_denied':
-        return "L'accès a été refusé sur l'écran de consentement Zoho.";
+        return detail("L'accès a été refusé sur l'écran de consentement Zoho.");
       case 'no_code':
-        return 'Zoho est revenu sans code d’autorisation. Relancez la connexion.';
+        return detail('Zoho est revenu sans code d’autorisation. Relancez la connexion.');
       case '1':
         return t('zoho_connect_error');
       default:
-        return `${t('zoho_connect_error')} (${code})`;
+        return detail(t('zoho_connect_error'));
     }
   };
 
@@ -1026,6 +1037,11 @@ export default function Settings() {
           <option value="com.au">Australie (.com.au)</option>
           <option value="jp">Japon (.jp)</option>
         </select>
+        <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          Doit correspondre à la console où l'application Zoho a été créée : un
+          Client ID de <code className="font-mono">api-console.zoho.com</code> ne
+          peut pas s'authentifier sur un autre centre de données.
+        </p>
       </div>
       <div>
         <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Client ID</label>
@@ -1052,6 +1068,14 @@ export default function Settings() {
   );
 
   // ── Plugin config panels ───────────────────────────────────────────────────
+
+  // A Zoho OAuth client belongs to the data centre whose console created it: a
+  // client made at api-console.zoho.com cannot complete a token exchange
+  // against accounts.zoho.eu, even though the consent screen appears to work
+  // (Zoho federates the login across data centres, then refuses the code).
+  // This link was hardcoded to .com, which sent every non-US tenant to the
+  // wrong console.
+  const zohoApiConsoleUrl = `https://api-console.zoho.${settings.zoho_data_center || 'com'}/`;
 
   const zohoSharedFields = () => ({
     zoho_client_id: settings.zoho_client_id,
@@ -1096,7 +1120,7 @@ export default function Settings() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {renderSaveButton('zoho_invoice', () => saveSection('zoho_invoice', { ...zohoSharedFields(), zoho_org_id: settings.zoho_org_id }))}
-          <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
+          <a href={zohoApiConsoleUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
             <IconExternalLink size={13} /> Console API Zoho
@@ -1174,7 +1198,7 @@ export default function Settings() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {renderSaveButton('zoho_books', () => saveSection('zoho_books', { ...zohoSharedFields(), zoho_books_org_id: settings.zoho_books_org_id }))}
-          <a href="https://api-console.zoho.com/" target="_blank" rel="noopener noreferrer"
+          <a href={zohoApiConsoleUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
             <IconExternalLink size={13} /> Console API Zoho
