@@ -594,6 +594,16 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
+            {/* Standing AI-content disclosure (EU AI Act, art. 50) — kept
+                short and always visible rather than repeated per message,
+                since every reply and tool action in this panel is AI-generated. */}
+            <div
+              className="px-4 py-1.5 text-[10px] text-center border-b shrink-0"
+              style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+            >
+              {t('agent_chat_ai_disclaimer')}
+            </div>
+
             {/* Agent selector dropdown */}
             <AnimatePresence>
               {agentSelectorOpen && (

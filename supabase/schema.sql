@@ -614,6 +614,9 @@ ALTER TABLE project_templates    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE act_data             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE det_data              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE join_requests        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_events       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_references    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_members      ENABLE ROW LEVEL SECURITY;
 
 -- Helper function : tenant_id du user connecté
 -- SECURITY DEFINER est nécessaire : cette fonction est utilisée dans la
@@ -725,6 +728,13 @@ CREATE POLICY "own_tenant" ON tenants
 -- Join requests : visible par le demandeur ou les membres du tenant visé
 CREATE POLICY "tenant_isolation" ON join_requests
   USING (tenant_id = my_tenant_id() OR user_id = auth.uid());
+
+CREATE POLICY "tenant_isolation" ON billing_events
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON custom_references
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON project_members
+  USING (tenant_id = my_tenant_id());
 
 -- Activity Feed tables
 CREATE TABLE IF NOT EXISTS activities (

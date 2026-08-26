@@ -9,6 +9,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import axios from 'axios';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
+import { decryptSecretMaybe } from '../server/secretsCrypto';
 
 let app: Express;
 
@@ -71,7 +72,7 @@ describe('Zoho Invoice', () => {
     const res = await request(app).get('/api/zoho/callback').query({ code: 'abc', state });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/settings?zoho_connected=1');
-    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token).toBe('new-refresh-token');
+    expect(decryptSecretMaybe(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_refresh_token)).toBe('new-refresh-token');
   });
 
   // The nonce has to be readable by whichever instance the provider's redirect
@@ -458,7 +459,7 @@ describe('Zoho Books', () => {
     const res = await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/settings?zoho_books_connected=1');
-    expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_books_refresh_token).toBe('books-refresh-token');
+    expect(decryptSecretMaybe(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.zoho_books_refresh_token)).toBe('books-refresh-token');
   });
 
   it('rejects a Zoho Books callback with an unknown state', async () => {
@@ -500,7 +501,9 @@ describe('Zoho Books', () => {
     await request(app).get('/api/zoho-books/callback').query({ code: 'abc', state: state! });
 
     const settings = fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId);
-    expect(settings?.zoho_books_refresh_token).toBe('books-rt');
+    // Stored encrypted at rest (server/secretsCrypto.ts) since the 2026-08
+    // compliance pass — decrypt before comparing.
+    expect(decryptSecretMaybe(settings?.zoho_books_refresh_token)).toBe('books-rt');
     expect(settings?.zoho_refresh_token).toBe('invoice-rt');
 
     // ...and disconnecting Books leaves Zoho Invoice connected.

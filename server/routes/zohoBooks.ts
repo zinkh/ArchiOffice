@@ -16,6 +16,7 @@
 import type { Express } from 'express';
 import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
 import { fetchWithTimeout } from '../fetchWithTimeout';
+import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
@@ -45,7 +46,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
     const params = new URLSearchParams({
       // Books' own token, never zoho_refresh_token — see the note on
       // /api/zoho-books/callback below.
-      refresh_token: settings.zoho_books_refresh_token,
+      refresh_token: decryptSecretMaybe(settings.zoho_books_refresh_token),
       client_id: settings.zoho_client_id,
       client_secret: settings.zoho_client_secret,
       grant_type: 'refresh_token',
@@ -171,7 +172,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       // zoho_books_refresh_token, not zoho_refresh_token: the two integrations
       // ask for different scopes, so storing both in one column meant
       // connecting Books silently broke Zoho Invoice and vice versa.
-      await supabaseAdmin.from('settings').update({ zoho_books_refresh_token: body.refresh_token }).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('settings').update({ zoho_books_refresh_token: encryptSecret(body.refresh_token) }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_books_connected=1');
     } catch (error: any) {
       console.error('[GET /api/zoho-books/callback]', error?.message || error);

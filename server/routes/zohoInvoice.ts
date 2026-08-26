@@ -23,6 +23,7 @@
 import type { Express } from 'express';
 import axios from 'axios';
 import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
+import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
@@ -53,7 +54,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     }
     const dc = settings.zoho_data_center || 'com';
     const params = new URLSearchParams({
-      refresh_token: settings.zoho_refresh_token,
+      refresh_token: decryptSecretMaybe(settings.zoho_refresh_token),
       client_id: settings.zoho_client_id,
       client_secret: settings.zoho_client_secret,
       grant_type: 'refresh_token',
@@ -202,7 +203,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         return res.redirect(`/settings?zoho_error=${oauthErrorParam(resp.data?.error)}`);
       }
       zohoAccessTokenCache.delete(tenantId); // invalidate cache
-      await supabaseAdmin.from('settings').update({ zoho_refresh_token: refresh_token }).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('settings').update({ zoho_refresh_token: encryptSecret(refresh_token) }).eq('tenant_id', tenantId);
       res.redirect('/settings?zoho_connected=1');
     } catch (error: any) {
       // Unlike the Books flow (plain fetch), axios throws on a non-2xx — and

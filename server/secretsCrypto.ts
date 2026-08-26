@@ -2,10 +2,12 @@
 // reach (server/ipcCrypto.ts only works inside the packaged desktop app, via
 // IPC to the main process — this server also runs standalone in Docker/SaaS,
 // where that channel doesn't exist). Used for real mailbox passwords
-// (server/routes/imapMailSync.ts) — unlike an OAuth refresh_token, which is
-// revocable from the provider's side and already stored in plaintext for
-// Google Calendar (calendar_connections), a raw IMAP password is the actual
-// account credential, so it gets encrypted at rest here.
+// (server/routes/imapMailSync.ts) and, since the 2026-08 compliance audit,
+// for the OAuth refresh tokens stored per connected integration (Gmail,
+// Google Calendar, Outlook, Zoho — server/routes/*Sync.ts, zohoBooks.ts,
+// zohoInvoice.ts): provider-side revocability reduces the blast radius of a
+// leak but doesn't make plaintext storage of a live, long-lived credential
+// acceptable, so these are encrypted at rest here too.
 import crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -39,4 +41,22 @@ export function decryptSecret(encoded: string): string {
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+/**
+ * Same as decryptSecret, but tolerates rows written before a given field was
+ * encrypted (e.g. OAuth refresh tokens stored in plaintext prior to the
+ * 2026-08 compliance pass) or a missing MAIL_ENCRYPTION_KEY: GCM auth-tag
+ * verification fails deterministically on anything that isn't real
+ * ciphertext, so falling back to the raw value on any decrypt error is safe
+ * and lets already-connected integrations keep working until they next
+ * rotate their token (which re-encrypts it via encryptSecret).
+ */
+export function decryptSecretMaybe(value: string | null | undefined): string {
+  if (!value) return value || '';
+  try {
+    return decryptSecret(value);
+  } catch {
+    return value;
+  }
 }

@@ -676,7 +676,7 @@ function PageLoadingFallback() {
 }
 
 function ProtectedLayout() {
-  const { currentUser, isLoading } = useUser();
+  const { currentUser, isLoading, mfaRequired } = useUser();
   const { settings } = useSettings();
   const { t } = useTranslation();
   const location = useLocation();
@@ -693,6 +693,13 @@ function ProtectedLayout() {
   }
 
   if (!currentUser) {
+    // A password/OAuth sign-in that still needs its TOTP challenge cleared
+    // (see UserContext.tsx's mfaRequired) must never fall into the public
+    // Landing page below just because it landed on "/" — that's exactly
+    // where Google's OAuth redirect lands back after a successful Google
+    // sign-in, MFA challenge still outstanding or not. Send it to /login,
+    // which renders the challenge form itself.
+    if (mfaRequired) return <Navigate to="/login" replace />;
     // The public marketing landing page only lives at "/", and only for the
     // cloud web app — the offline desktop build is an installed app with no
     // anonymous-visitor scenario, so it keeps the plain login redirect.

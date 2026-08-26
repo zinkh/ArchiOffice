@@ -7,9 +7,10 @@ import {
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
-import { getAccessToken } from '../lib/authToken';
+import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { cn } from '../lib/utils';
 import { useUser } from '../UserContext';
+import MfaSettings from '../components/MfaSettings';
 
 interface EducationEntry {
   id: string;
@@ -528,6 +529,13 @@ export default function Profile() {
           <input ref={cvInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCvChange} />
         )}
       </SectionCard>
+
+      {/* Sécurité — double authentification (compte cloud courant uniquement) */}
+      {isViewingSelf && !isOfflineBuild() && (
+        <SectionCard title="Sécurité" icon={IconShieldLock}>
+          <MfaSettings />
+        </SectionCard>
+      )}
 
       {/* RGPD — export / suppression des données personnelles (compte courant uniquement) */}
       {isViewingSelf && (

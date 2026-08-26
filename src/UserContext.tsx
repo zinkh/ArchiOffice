@@ -32,6 +32,21 @@ interface UserContextType {
   trialEndsAt: string | null;
   isTrialExpired: boolean;
   refreshBillingStatus: () => Promise<void>;
+  /**
+   * True once a password/OAuth sign-in has succeeded (Supabase issued a
+   * session) but the account has TOTP MFA enrolled and the session hasn't
+   * cleared the second-factor challenge yet ("aal1", not "aal2"). While
+   * true, currentUser stays null on purpose — completing the challenge
+   * (src/pages/Login.tsx's MfaChallengeForm) is what's supposed to flip
+   * this to false and populate currentUser, not any earlier point in the
+   * sign-in flow. This is what keeps a not-yet-verified session out of the
+   * app for BOTH sign-in paths (password and Google OAuth) without
+   * needing a check duplicated in each: OAuth's redirectTo lands straight
+   * on "/", which ProtectedLayout guards with `if (!currentUser) redirect
+   * to /login` — currentUser staying null here is what makes that existing
+   * guard also cover the OAuth path for free.
+   */
+  mfaRequired: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -111,6 +126,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [tenantPlan, setTenantPlan] = useState('trial');
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [isTrialExpired, setIsTrialExpired] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
   const sessionRef = React.useRef<MinimalSession | null>(null);
 
   const refreshBillingStatus = React.useCallback(async () => {
@@ -158,9 +174,30 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (!session) {
         loadedUserId = null;
         setCurrentUser(null);
+        setMfaRequired(false);
         setIsLoading(false);
         return;
       }
+
+      // Gate on the second factor before treating this session as "logged
+      // in" — see mfaRequired's doc comment above. Passing the access_token
+      // explicitly (already in hand from `session`) makes this decode the
+      // JWT and call getUser(jwt) directly instead of going through
+      // getSession()'s own lock acquisition — the same reason loadFullProfile
+      // above uses rawFetch with this token instead of an ambient session
+      // lookup: see this effect's SIGNED_IN comment on why anything that
+      // touches the Navigator LockManager lock from in here is dangerous.
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel(session.access_token);
+      if (cancelled) return;
+      if (aal && aal.nextLevel === 'aal2' && aal.nextLevel !== aal.currentLevel) {
+        loadedUserId = null; // not "loaded" until the challenge clears — see below
+        setCurrentUser(null);
+        setMfaRequired(true);
+        setIsLoading(false);
+        return;
+      }
+      setMfaRequired(false);
+
       if (loadedUserId === session.user.id) {
         setIsLoading(false);
         return;
@@ -247,6 +284,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       trialEndsAt,
       isTrialExpired,
       refreshBillingStatus,
+      mfaRequired,
     }}>
       {children}
     </UserContext.Provider>

@@ -56,6 +56,7 @@ By using the Service, you agree to the collection and use of information in acco
 • **Stancer**: payment processing for your ArchiOffice subscription (Stripe is integrated but not yet in active use).
 • **Google (Gemini API)**: AI-assisted drafting features (proposals, CCTP...) send the relevant project text to Google's Gemini API for processing.
 • **Email providers**: transactional email delivery (SMTP), using either our platform mailer or your own SMTP configuration.
+• **Sentry**: error monitoring for the Service, so we can detect and fix bugs. Technical error data may include your user ID and the route you were using; we filter out emails and access tokens before they reach Sentry.
 
 In addition, if your cabinet chooses to enable one of the following optional integrations (Settings > Plugins), the data you explicitly sync through it is also shared with that provider, under your cabinet's own relationship with them: **Zoho** (Invoice/Books), **Odoo**, **Ragic**, or **Chorus Pro** (AIFE — Ministère de l'Économie, mandatory for public-sector e-invoicing). These integrations are off by default and only exchange data once your cabinet configures and enables them.
 
@@ -172,6 +173,7 @@ En utilisant le Service, vous acceptez la collecte et l'utilisation des informat
 • **Stancer** : traitement des paiements de votre abonnement ArchiOffice (Stripe est intégré mais pas encore utilisé en production).
 • **Google (API Gemini)** : les fonctionnalités de rédaction assistée par IA (propositions, CCTP...) transmettent le texte concerné à l'API Gemini de Google pour traitement.
 • **Fournisseurs de messagerie** : envoi des e-mails transactionnels (SMTP), via notre messagerie de plateforme ou votre propre configuration SMTP.
+• **Sentry** : supervision des erreurs du Service, pour détecter et corriger les bugs. Les données techniques d'erreur peuvent inclure votre identifiant utilisateur et la route consultée ; les adresses e-mail et jetons d'accès sont filtrés avant transmission à Sentry.
 
 Par ailleurs, si votre cabinet active l'une des intégrations optionnelles suivantes (Réglages > Plugins), les données que vous synchronisez explicitement via cette intégration sont également partagées avec ce prestataire, dans le cadre de la relation propre de votre cabinet avec lui : **Zoho** (Invoice/Books), **Odoo**, **Ragic**, ou **Chorus Pro** (AIFE — Ministère de l'Économie, obligatoire pour la facturation électronique du secteur public). Ces intégrations sont désactivées par défaut et n'échangent des données qu'une fois configurées et activées par votre cabinet.
 

@@ -71,12 +71,18 @@ export function buildAgentTools(actionScopes: string[], webFetchEnabled = false)
     tools.push({
       name: 'delete_record',
       description:
-        "Supprime définitivement un enregistrement existant. Action IRRÉVERSIBLE : ne l'utilise que si l'utilisateur a demandé explicitement et sans ambiguïté la suppression de cet enregistrement précis dans le message en cours.",
+        "Supprime définitivement un enregistrement existant. Action IRRÉVERSIBLE : ne l'utilise que si l'utilisateur a demandé explicitement et sans ambiguïté la suppression de cet enregistrement précis dans le message en cours. " +
+        "Le système exige une confirmation en deux temps : le premier appel (confirm absent/false) ne supprime rien et renvoie needs_confirmation avec l'identité de l'enregistrement visé — présente-la à l'utilisateur et n'appelle à nouveau l'outil avec confirm: true qu'après son accord explicite sur CET enregistrement précis.",
       parametersJsonSchema: {
         type: 'object',
         properties: {
           resource: { type: 'string', enum: deletable, description: 'Type de ressource à supprimer' },
           id: { type: 'string', description: "Identifiant de l'enregistrement à supprimer" },
+          confirm: {
+            type: 'boolean',
+            description:
+              "Laisser vide/false lors du premier essai. Ne mettre à true que dans un appel ultérieur, après qu'un précédent appel a renvoyé needs_confirmation ET que l'utilisateur a explicitement confirmé vouloir supprimer cet enregistrement précis.",
+          },
         },
         required: ['resource', 'id'],
       },
@@ -261,6 +267,27 @@ export async function executeAgentAction(
     if (!resource.delete) return { response: { error: `Suppression non supportée pour "${resourceKey}".` } };
     const id = String(args.id || '');
     if (!id) return { response: { error: 'id est requis pour une suppression.' } };
+
+    if (args.confirm !== true) {
+      // Same two-step confirmation shape as create_record's duplicate check:
+      // the model must show the user what it's about to delete and get an
+      // explicit go-ahead before the DELETE actually fires.
+      let identity = id;
+      if (resource.list) {
+        const list = await fetchResourceList(baseUrl, authHeader, resource);
+        const match = list.find(r => String((r as any).id) === id);
+        if (match) identity = getRecordIdentity(resourceKey, resource, match) || id;
+      }
+      return {
+        response: {
+          needs_confirmation: true,
+          target: { id, identity },
+          instruction:
+            "Ne supprime PAS maintenant : présente cet enregistrement (identité ci-dessus) à l'utilisateur et demande sa confirmation explicite sur CET enregistrement précis. Ne rappelle delete_record avec confirm: true qu'après son accord.",
+        },
+      };
+    }
+
     method = 'DELETE';
     path = `${resource.basePath}/${encodeURIComponent(id)}`;
   } else {

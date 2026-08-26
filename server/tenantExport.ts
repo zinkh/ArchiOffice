@@ -43,7 +43,7 @@ const JUNCTION_EXPORT_TABLES: readonly { table: string; parentTable: string; par
 // store carelessly compared to the settings page itself.
 const REDACTED_SETTINGS_COLUMNS = new Set([
   'smtp_pass', 'seller_iban',
-  'zoho_client_secret', 'zoho_refresh_token',
+  'zoho_client_secret', 'zoho_refresh_token', 'zoho_books_refresh_token',
   'odoo_api_key', 'ragic_api_key',
   'chorus_pro_piste_client_secret', 'chorus_pro_technical_password',
   'superpdp_client_secret',
