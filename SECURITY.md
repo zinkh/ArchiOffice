@@ -60,18 +60,27 @@ une notification d'un sous-traitant (Supabase, Google, etc.).
 
 ## Sous-traitants et hébergement
 
-La liste des sous-traitants de données (Supabase, Google Gemini, Stancer,
-Sentry, et les intégrations optionnelles Zoho/Odoo/Ragic/Chorus&nbsp;Pro) est
-tenue à jour dans la Politique de confidentialité de l'application
-(`src/pages/PrivacyPolicy.tsx`, section « Partage des données ») — c'est la
-source de vérité, à garder synchronisée avec celle-ci plutôt que dupliquée.
+L'infrastructure (base de données, stockage de fichiers, authentification —
+Supabase) est hébergée **en Allemagne, au sein de l'Espace Économique
+Européen**. Ce choix évite un transfert hors UE pour la donnée de cabinet
+elle-même ; certains sous-traitants fonctionnels (notamment l'API Gemini de
+Google, pour la rédaction assistée par IA) peuvent en revanche traiter des
+données en dehors de l'EEE — voir la Politique de confidentialité.
 
-> **À compléter par l'équipe** : région d'hébergement effective (Supabase
-> project region, région de l'API Gemini utilisée) et référence des accords
-> de traitement des données (DPA) signés avec chaque sous-traitant. La
-> Politique de confidentialité affirme l'usage de Clauses Contractuelles
-> Types pour les transferts hors UE ; ce fichier ne peut pas se substituer
-> à la vérification que ces clauses sont bien signées et archivées.
+La liste complète des sous-traitants de données (Supabase, Google Gemini,
+Stancer, Sentry, et les intégrations optionnelles Zoho/Odoo/Ragic/Chorus&nbsp;Pro)
+est tenue à jour dans la Politique de confidentialité de l'application
+(`src/pages/PrivacyPolicy.tsx`, sections « Partage des données » et
+« Transferts Internationaux ») — c'est la source de vérité, à garder
+synchronisée avec celle-ci plutôt que dupliquée.
+
+> **À compléter par l'équipe** : référence des accords de traitement des
+> données (DPA) signés avec chaque sous-traitant, et de la région exacte de
+> l'API Gemini utilisée si elle doit être documentée plus précisément que
+> « hors UE ». La Politique de confidentialité affirme l'usage de Clauses
+> Contractuelles Types pour ces transferts ; ce fichier ne peut pas se
+> substituer à la vérification que ces clauses sont bien signées et
+> archivées.
 
 ## Mesures techniques en place
 
