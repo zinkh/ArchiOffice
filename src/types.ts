@@ -500,6 +500,9 @@ export interface Tender {
   surface?: number;
   construction_cost?: number;
   honoraires_percent?: number;
+  complexity_rate?: number;
+  base_fee_percent?: number;
+  miqcp_assessment?: string; // JSON string — MiqcpAssessment (Guide MIQCP complexity wizard)
   mandatory_visit?: boolean;
   visit_date?: string;
   withdrawal_deadline?: string;
@@ -694,6 +697,7 @@ export interface Proposal {
   part_interet?: number;
   specialties_list?: ProposalSpecialty[];
   fee_distribution?: string; // JSON string for reactgrid data
+  miqcp_assessment?: string; // JSON string — MiqcpAssessment (Guide MIQCP complexity wizard)
 
   // New XML fields
   project_code?: string;
@@ -1181,6 +1185,24 @@ export interface MafSummary {
   numeroAdherent?: string;
   intercalaires: Partial<Record<MafIntercalaire, MafSummaryIntercalaire>>;
   cotisationTotaleEstimee: number;
+}
+
+// ─── Guide MIQCP — Assistant de calcul de la complexité et du taux d'honoraires ──
+
+export interface MiqcpCriterionScore {
+  criterionId: string; // ex. 'contexte_1'
+  score: -2 | -1 | 0 | 1 | 2;
+}
+
+export interface MiqcpAssessment {
+  domaineCode: string;
+  ouvrageCode: string;
+  montantTravauxHT: number;
+  criteriaScores: MiqcpCriterionScore[];
+  tauxReference: number;
+  coefficientComplexite: number;
+  tauxApplicable: number;
+  computedAt: string;
 }
 
 export interface NoteHonoraires {

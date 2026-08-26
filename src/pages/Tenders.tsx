@@ -8,10 +8,11 @@ import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { TenderRssWatch } from '../components/TenderRssWatch';
-import type { Tender, Contact, Milestone } from '../types';
+import type { Tender, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
 
 export default function Tenders() {
   const { t } = useTranslation();
@@ -35,6 +36,8 @@ export default function Tenders() {
     surface: 0,
     construction_cost: 0,
     honoraires_percent: 0,
+    complexity_rate: undefined,
+    base_fee_percent: undefined,
     mandatory_visit: false,
     visit_date: '',
     withdrawal_deadline: ''
@@ -44,6 +47,33 @@ export default function Tenders() {
   const [filterType, setFilterType] = useState<string>('All');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
   const [activeTab, setActiveTab] = useState<'list' | 'watch'>('list');
+  const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
+
+  const tenderMiqcpAssessment: MiqcpAssessment | null = React.useMemo(() => {
+    if (!newTender.miqcp_assessment) return null;
+    try { return JSON.parse(newTender.miqcp_assessment); } catch { return null; }
+  }, [newTender.miqcp_assessment]);
+
+  const handleApplyTenderMiqcpAssessment = (result: { complexityRate: number; baseFeePercent: number; assessment: MiqcpAssessment }) => {
+    setNewTender(prev => ({
+      ...prev,
+      complexity_rate: result.complexityRate,
+      base_fee_percent: result.baseFeePercent,
+      miqcp_assessment: JSON.stringify(result.assessment),
+      construction_cost: result.assessment.montantTravauxHT,
+    }));
+    setIsMiqcpWizardOpen(false);
+  };
+
+  // Auto-calculate honoraires_percent when the MIQCP factors change
+  useEffect(() => {
+    if (newTender.complexity_rate && newTender.base_fee_percent) {
+      const calculated = Number((newTender.base_fee_percent * newTender.complexity_rate).toFixed(4));
+      if (Math.abs(calculated - (newTender.honoraires_percent || 0)) > 0.0001) {
+        setNewTender(prev => ({ ...prev, honoraires_percent: calculated }));
+      }
+    }
+  }, [newTender.complexity_rate, newTender.base_fee_percent]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -736,6 +766,23 @@ export default function Tenders() {
                       onChange={e => setNewTender({...newTender, honoraires_percent: Number(e.target.value)})}
                     />
                   </div>
+                  <div className="col-span-2 flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setIsMiqcpWizardOpen(true)}
+                      className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                    >
+                      {t('miqcp_wizard_open_btn')}
+                    </button>
+                    {tenderMiqcpAssessment && (
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                        {t('miqcp_wizard_summary', {
+                          cc: tenderMiqcpAssessment.coefficientComplexite.toFixed(2),
+                          taux: tenderMiqcpAssessment.tauxReference.toFixed(2),
+                        })}
+                      </span>
+                    )}
+                  </div>
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_submission_deadline_label')}</label>
                     <input
@@ -942,6 +989,15 @@ export default function Tenders() {
           </div>
         )}
       </AnimatePresence>
+
+      {isMiqcpWizardOpen && (
+        <MiqcpComplexityWizardModal
+          montantTravaux={newTender.construction_cost || 0}
+          initialAssessment={tenderMiqcpAssessment}
+          onApply={handleApplyTenderMiqcpAssessment}
+          onClose={() => setIsMiqcpWizardOpen(false)}
+        />
+      )}
 
       <ContactModal
         isOpen={isContactModalOpen}
