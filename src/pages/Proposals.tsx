@@ -5,7 +5,7 @@ import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconT
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
-import type { Proposal, Contact, Milestone } from '../types';
+import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -24,6 +24,8 @@ import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils'
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
+import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
+import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 
 import { saveAs } from 'file-saver';
 
@@ -164,6 +166,7 @@ export default function Proposals() {
   };
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
   const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
+  const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const { settings } = useSettings();
   const mafCost = useMafCost({
@@ -389,6 +392,34 @@ export default function Proposals() {
   const feeRatios = React.useMemo(() => calculateFeeRatios(newProposal.fee_distribution), [newProposal.fee_distribution]);
   const calculatedExePercent = (newProposal.base_fee_percent || 0) * feeRatios.exeRatio;
   const calculatedTotalPercent = (newProposal.base_fee_percent || 0) * feeRatios.totalRatio;
+
+  const miqcpAssessment: MiqcpAssessment | null = React.useMemo(() => {
+    if (!newProposal.miqcp_assessment) return null;
+    try { return JSON.parse(newProposal.miqcp_assessment); } catch { return null; }
+  }, [newProposal.miqcp_assessment]);
+
+  const handleApplyMiqcpAssessment = (result: { complexityRate: number; baseFeePercent: number; assessment: MiqcpAssessment }) => {
+    setNewProposal(prev => ({
+      ...prev,
+      complexity_rate: result.complexityRate,
+      base_fee_percent: result.baseFeePercent,
+      miqcp_assessment: JSON.stringify(result.assessment),
+      construction_cost: result.assessment.montantTravauxHT,
+    }));
+    setIsMiqcpWizardOpen(false);
+  };
+
+  const handleLoadMiqcpPhaseRepartition = () => {
+    const currentData = newProposal.fee_distribution ? JSON.parse(newProposal.fee_distribution) : { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+    const baseTotal = newProposal.amount || 0;
+    const precision = newProposal.decimal_precision ?? 2;
+    const missions = (currentData.missions || []).map((m: any) => {
+      const guidePct = MIQCP_PHASE_REPARTITION_GUIDE.find(p => p.id === m.id)?.pct;
+      if (guidePct === undefined) return m;
+      return { ...m, default_pct: guidePct, amount: Number((baseTotal * (guidePct / 100)).toFixed(precision)) };
+    });
+    setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify({ ...currentData, missions }) }));
+  };
 
   const vatAmount = (newProposal.amount || 0) * ((newProposal.vat_rate || 0) / 100);
   const totalTTC = (newProposal.amount || 0) + vatAmount;
@@ -940,6 +971,23 @@ export default function Proposals() {
                       Calcul par ratio
                     </button>
                   </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setIsMiqcpWizardOpen(true)}
+                      className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                    >
+                      {t('miqcp_wizard_open_btn')}
+                    </button>
+                    {miqcpAssessment && (
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                        {t('miqcp_wizard_summary', {
+                          cc: miqcpAssessment.coefficientComplexite.toFixed(2),
+                          taux: miqcpAssessment.tauxReference.toFixed(2),
+                        })}
+                      </span>
+                    )}
+                  </div>
                   {costMode === 'manual' ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <FormField label="Montant des travaux (€)" type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
@@ -1118,7 +1166,14 @@ export default function Proposals() {
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
-                      <button 
+                      <button
+                        type="button"
+                        onClick={handleLoadMiqcpPhaseRepartition}
+                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      >
+                        {t('miqcp_wizard_load_phase_repartition_btn')}
+                      </button>
+                      <button
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
@@ -1233,7 +1288,16 @@ export default function Proposals() {
         )}
       </AnimatePresence>
 
-      <ContactModal 
+      {isMiqcpWizardOpen && (
+        <MiqcpComplexityWizardModal
+          montantTravaux={newProposal.construction_cost || 0}
+          initialAssessment={miqcpAssessment}
+          onApply={handleApplyMiqcpAssessment}
+          onClose={() => setIsMiqcpWizardOpen(false)}
+        />
+      )}
+
+      <ContactModal
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {

@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS tenders (
   submission_deadline TEXT NOT NULL, status TEXT NOT NULL,
   value NUMERIC, notes TEXT, mandataire_id TEXT, type TEXT,
   surface NUMERIC, construction_cost NUMERIC, honoraires_percent NUMERIC,
+  complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
   mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
   withdrawal_deadline TEXT, archived INTEGER DEFAULT 0
 );
@@ -235,7 +236,8 @@ CREATE TABLE IF NOT EXISTS proposals (
   custom_client TEXT, fee_distribution TEXT, construction_cost_num NUMERIC,
   construction_cost NUMERIC DEFAULT 0, ratio_rehab NUMERIC DEFAULT 0, ratio_extension NUMERIC DEFAULT 0,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
-  comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER
+  comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER,
+  miqcp_assessment TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proposal_specialties (
