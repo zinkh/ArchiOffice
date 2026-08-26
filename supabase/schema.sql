@@ -733,8 +733,11 @@ CREATE POLICY "tenant_isolation" ON billing_events
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON custom_references
   USING (tenant_id = my_tenant_id());
+-- Cast both sides: some databases still have project_members.tenant_id as
+-- TEXT from the pre-schema.sql migration that created this table — see
+-- migrate_add_missing_rls.sql.
 CREATE POLICY "tenant_isolation" ON project_members
-  USING (tenant_id = my_tenant_id());
+  USING (tenant_id::text = my_tenant_id()::text);
 
 -- Activity Feed tables
 CREATE TABLE IF NOT EXISTS activities (

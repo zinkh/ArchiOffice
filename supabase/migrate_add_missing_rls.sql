@@ -18,6 +18,10 @@ DROP POLICY IF EXISTS "tenant_isolation" ON custom_references;
 CREATE POLICY "tenant_isolation" ON custom_references
   USING (tenant_id = my_tenant_id());
 
+-- project_members.tenant_id is TEXT on databases that ran the original
+-- migrate_add_project_members.sql (it predates schema.sql declaring this
+-- column UUID for fresh installs) — cast both sides so this policy works
+-- regardless of which type this database actually has.
 DROP POLICY IF EXISTS "tenant_isolation" ON project_members;
 CREATE POLICY "tenant_isolation" ON project_members
-  USING (tenant_id = my_tenant_id());
+  USING (tenant_id::text = my_tenant_id()::text);

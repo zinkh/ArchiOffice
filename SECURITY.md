@@ -60,12 +60,13 @@ une notification d'un sous-traitant (Supabase, Google, etc.).
 
 ## Sous-traitants et hébergement
 
-L'infrastructure (base de données, stockage de fichiers, authentification —
-Supabase) est hébergée **en Allemagne, au sein de l'Espace Économique
-Européen**. Ce choix évite un transfert hors UE pour la donnée de cabinet
-elle-même ; certains sous-traitants fonctionnels (notamment l'API Gemini de
-Google, pour la rédaction assistée par IA) peuvent en revanche traiter des
-données en dehors de l'EEE — voir la Politique de confidentialité.
+L'infrastructure est hébergée au sein de l'Espace Économique Européen :
+base de données, stockage de fichiers et authentification (Supabase) en
+**Suède**, serveur applicatif en **Allemagne**. Ce choix évite un transfert
+hors UE pour la donnée de cabinet elle-même ; certains sous-traitants
+fonctionnels (notamment l'API Gemini de Google, pour la rédaction assistée
+par IA) peuvent en revanche traiter des données en dehors de l'EEE — voir
+la Politique de confidentialité.
 
 La liste complète des sous-traitants de données (Supabase, Google Gemini,
 Stancer, Sentry, et les intégrations optionnelles Zoho/Odoo/Ragic/Chorus&nbsp;Pro)

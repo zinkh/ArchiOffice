@@ -21,7 +21,7 @@ ALTER TABLE admin_audit_log ADD COLUMN IF NOT EXISTS prev_hash TEXT;
 ALTER TABLE admin_audit_log ADD COLUMN IF NOT EXISTS row_hash TEXT;
 
 CREATE OR REPLACE FUNCTION admin_audit_log_chain_hash()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 DECLARE
   last_hash TEXT;
 BEGIN
@@ -54,7 +54,7 @@ CREATE TRIGGER admin_audit_log_chain_hash_trigger
   FOR EACH ROW EXECUTE FUNCTION admin_audit_log_chain_hash();
 
 CREATE OR REPLACE FUNCTION admin_audit_log_append_only()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   RAISE EXCEPTION 'admin_audit_log is append-only — % is not permitted', TG_OP;
 END;
@@ -71,7 +71,7 @@ CREATE TRIGGER admin_audit_log_append_only_trigger
 -- superuser edit bypassing the triggers above). An empty result set means
 -- the chain is intact. Run periodically, e.g. from a scheduled job.
 CREATE OR REPLACE FUNCTION verify_admin_audit_log_chain()
-RETURNS TABLE(id UUID, created_at TIMESTAMPTZ, expected_hash TEXT, stored_hash TEXT) LANGUAGE plpgsql AS $$
+RETURNS TABLE(id UUID, created_at TIMESTAMPTZ, expected_hash TEXT, stored_hash TEXT) LANGUAGE plpgsql SET search_path = public AS $$
 DECLARE
   r RECORD;
   running_prev TEXT := repeat('0', 64);
