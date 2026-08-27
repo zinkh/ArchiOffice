@@ -260,15 +260,30 @@ export function registerAgentRoutes(
 
       const rawText = result.text ?? '';
 
-      const { cleanText, spec } = parseArtifactFromText(rawText);
+      let { cleanText, spec } = parseArtifactFromText(rawText);
       // Gemini sometimes ends a function-calling turn (e.g. after a few
       // fetch_url/search_records reads) with no functionCalls left AND no
       // text — often because it read enough to conclude an action can't be
-      // completed as asked, but never says so. Left as-is the user gets only
-      // the raw ✅ tool-call log with nothing explaining what happened next,
-      // so a blank final turn always gets a fallback instead of trailing off.
+      // completed as asked, but never says why. A generic "something's
+      // missing, please clarify" fallback here just repeats itself verbatim
+      // when the user then asks "what's missing?" — so instead of guessing,
+      // ask the model directly to name the real blocker in its own words.
+      if (!cleanText.trim()) {
+        try {
+          const clarify = await withTimeout(chat.sendMessage({
+            message: "Tu n'as donné aucune réponse à l'utilisateur pour ce message. En 1 à 2 phrases, explique précisément ce qui t'empêche de terminer cette action (l'information exacte qui te manque, ou la raison du blocage) — sans appeler à nouveau d'outil, juste du texte.",
+          }));
+          inputTokens += (clarify as any).usageMetadata?.promptTokenCount ?? 0;
+          outputTokens += (clarify as any).usageMetadata?.candidatesTokenCount ?? 0;
+          const clarifyText = parseArtifactFromText(clarify.text ?? '').cleanText;
+          if (clarifyText.trim()) cleanText = clarifyText;
+        } catch {
+          // Network/timeout on the clarification round — fall through to the
+          // generic message below rather than failing the whole request.
+        }
+      }
       const finalText = cleanText.trim() || (actionSummaries.length > 0
-        ? "Je me suis arrêtée après ces étapes sans pouvoir conclure — il me manque probablement une information pour finaliser l'action. Pouvez-vous préciser votre demande ?"
+        ? "Je me suis arrêtée après ces étapes sans pouvoir conclure, et je n'ai pas réussi à préciser pourquoi. Pouvez-vous reformuler votre demande ?"
         : "Je n'ai pas pu produire de réponse. Pouvez-vous reformuler votre demande ?");
       const reply = actionSummaries.length > 0
         ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + finalText
