@@ -36,8 +36,13 @@ function ragicHeaders(apiKey: string) {
   };
 }
 
+// Not every Ragic account has a working custom subdomain (`account.ragic.com`)
+// — plenty are only ever reachable at the account-name path under the shared
+// domain, which is also Ragic's own documented, universal REST API base URL
+// (https://www.ragic.com/doc-api). Using it unconditionally avoids sync
+// failing with a DNS error (getaddrinfo ENOTFOUND) for those accounts.
 function ragicUrl(account: string, sheet: string, recordId?: string | number) {
-  const base = `https://${account}.ragic.com/${sheet}`;
+  const base = `https://www.ragic.com/${account}/${sheet}`;
   return recordId != null ? `${base}/${recordId}` : base;
 }
 

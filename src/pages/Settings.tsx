@@ -1415,7 +1415,7 @@ export default function Settings() {
         )}
         <div className="p-3 rounded-lg text-xs" style={{ background: '#e6fcf5', border: '1px solid #96f2d7', color: '#087f5b' }}>
           <p className="font-bold mb-1">Configuration Ragic</p>
-          <p>Créez un compte sur <strong>ragic.com</strong>, puis allez dans <strong>Profil → Clé API</strong> pour obtenir votre clé. Pour chaque feuille, copiez le chemin depuis l'URL : <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>moncompte.ragic.com/<strong>onglet/index</strong></code>.</p>
+          <p>Créez un compte sur <strong>ragic.com</strong>, puis allez dans <strong>Profil → Clé API</strong> pour obtenir votre clé. L'identifiant de compte est le segment qui suit <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>ragic.com/</code> dans votre URL Ragic, que vous y accédiez via <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>www.ragic.com/<strong>moncompte</strong></code> ou via un sous-domaine personnalisé <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}><strong>moncompte</strong>.ragic.com</code> — les deux partagent le même identifiant. Pour chaque feuille, copiez ensuite le chemin qui suit : <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}><strong>onglet/index</strong></code>.</p>
           <p className="mt-1">Les colonnes de vos feuilles Ragic doivent porter les mêmes noms que les champs ArchiOffice (ex. <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>first_name</code>, <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>last_name</code>, <code className="font-mono px-1 rounded" style={{ background: '#c3fae8' }}>email</code>…).</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1431,7 +1431,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Compte Ragic (sous-domaine)</label>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Identifiant de compte Ragic</label>
             <input
               className="w-full p-2 rounded-lg text-sm font-mono"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
@@ -1439,7 +1439,7 @@ export default function Settings() {
               value={(settings as any).ragic_account || ''}
               onChange={e => setSettings({ ...settings, ragic_account: e.target.value } as any)}
             />
-            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Sous-domaine de votre URL Ragic : <strong>moncabinet</strong>.ragic.com</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Le segment après <strong>ragic.com/</strong> dans votre URL Ragic (ex. <strong>moncabinet</strong> pour www.ragic.com/moncabinet) — pas un nom de domaine.</p>
           </div>
         </div>
         <div>
