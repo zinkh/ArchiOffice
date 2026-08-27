@@ -261,9 +261,18 @@ export function registerAgentRoutes(
       const rawText = result.text ?? '';
 
       const { cleanText, spec } = parseArtifactFromText(rawText);
+      // Gemini sometimes ends a function-calling turn (e.g. after a few
+      // fetch_url/search_records reads) with no functionCalls left AND no
+      // text — often because it read enough to conclude an action can't be
+      // completed as asked, but never says so. Left as-is the user gets only
+      // the raw ✅ tool-call log with nothing explaining what happened next,
+      // so a blank final turn always gets a fallback instead of trailing off.
+      const finalText = cleanText.trim() || (actionSummaries.length > 0
+        ? "Je me suis arrêtée après ces étapes sans pouvoir conclure — il me manque probablement une information pour finaliser l'action. Pouvez-vous préciser votre demande ?"
+        : "Je n'ai pas pu produire de réponse. Pouvez-vous reformuler votre demande ?");
       const reply = actionSummaries.length > 0
-        ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + cleanText
-        : cleanText;
+        ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + finalText
+        : finalText;
       const artifact = spec ? generateArtifact(spec) : undefined;
 
       let newBalance = balance;
