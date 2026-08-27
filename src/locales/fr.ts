@@ -931,6 +931,7 @@ export default {
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "Suggestions IA",
+      "agent_chat_dismiss_suggestions": "Masquer les suggestions",
       "ai_suggestions_empty": "Aucune alerte pour le moment, tout est sous contrôle.",
       "ai_draft_reminder_btn": "Rédiger un rappel avec l'IA",
       "ai_suggestion_overdue_milestone": "{{count}} jalon(s) en retard sur le projet « {{project}} ».",

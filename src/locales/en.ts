@@ -883,6 +883,7 @@ export default {
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "AI Suggestions",
+      "agent_chat_dismiss_suggestions": "Hide suggestions",
       "ai_suggestions_empty": "No alerts right now, everything's under control.",
       "ai_draft_reminder_btn": "Draft a reminder with AI",
       "ai_suggestion_overdue_milestone": "{{count}} overdue milestone(s) on project \"{{project}}\".",
