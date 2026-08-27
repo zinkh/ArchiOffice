@@ -240,6 +240,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [copilotSuggestions, setCopilotSuggestions] = useState<CopilotSuggestion[]>([]);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -285,6 +286,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     loadCopilotSuggestions();
   }, [loadCopilotSuggestions]);
+
+  // Dismissing the suggestions banner only hides it for the current viewing
+  // — reopening the panel later re-surfaces it if the underlying alerts
+  // (overdue milestones, unpaid invoices...) are still there.
+  useEffect(() => {
+    if (isOpen) setSuggestionsDismissed(false);
+  }, [isOpen]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -634,10 +642,19 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
             {/* Proactive suggestions — passive only: clicking prefills the
                 draft below, the user still has to review and send it. */}
-            {copilotSuggestions.length > 0 && (
+            {copilotSuggestions.length > 0 && !suggestionsDismissed && (
               <div className="border-b px-4 py-3 space-y-2 shrink-0" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>
-                  {t('dashboard_ai_suggestions')}
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>
+                    {t('dashboard_ai_suggestions')}
+                  </div>
+                  <button
+                    onClick={() => setSuggestionsDismissed(true)}
+                    className="p-0.5 rounded hover:bg-[var(--tblr-surface)] transition-colors"
+                    title={t('agent_chat_dismiss_suggestions') as string}
+                  >
+                    <IconX size={12} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
                 </div>
                 {copilotSuggestions.map(s => (
                   <div

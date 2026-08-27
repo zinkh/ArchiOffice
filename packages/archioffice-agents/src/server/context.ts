@@ -1,4 +1,6 @@
 import type { AgentContext } from '../types.js';
+import { PDFParse } from 'pdf-parse';
+import mammoth from 'mammoth';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -199,12 +201,42 @@ export async function buildAgentContext(
 
     const contentFetches = ((docs as any[]) || []).map(async (doc: any) => {
       try {
-        const res = await fetch(doc.file_url);
-        if (!res.ok) return;
-        const contentType = res.headers.get('content-type') ?? '';
-        // Only inject text-based content
-        if (!contentType.includes('text') && !contentType.includes('json') && !contentType.includes('csv') && !contentType.includes('xml')) return;
-        const text = await res.text();
+        const lowerName = String(doc.name || '').toLowerCase();
+        let text: string | null = null;
+
+        if (lowerName.endsWith('.pdf')) {
+          // CCTP, RC and other tender/contract documents are almost always
+          // PDFs — this used to be silently dropped by the content-type
+          // check below (application/pdf matches none of text/json/csv/xml),
+          // so an attached PDF's metadata showed up in the prompt but its
+          // content never did, and the agent would truthfully say it never
+          // received the document.
+          const res = await fetch(doc.file_url);
+          if (!res.ok) return;
+          const buffer = Buffer.from(await res.arrayBuffer());
+          const parser = new PDFParse({ data: buffer });
+          try {
+            text = (await parser.getText()).text;
+          } finally {
+            await parser.destroy();
+          }
+        } else if (lowerName.endsWith('.docx')) {
+          const res = await fetch(doc.file_url);
+          if (!res.ok) return;
+          const buffer = Buffer.from(await res.arrayBuffer());
+          text = (await mammoth.extractRawText({ buffer })).value;
+        } else {
+          const res = await fetch(doc.file_url);
+          if (!res.ok) return;
+          const contentType = res.headers.get('content-type') ?? '';
+          // Everything else without a dedicated extractor above (images,
+          // spreadsheets, legacy .doc...) — only inject text-based content,
+          // never binary bytes as if they were readable text.
+          if (!contentType.includes('text') && !contentType.includes('json') && !contentType.includes('csv') && !contentType.includes('xml')) return;
+          text = await res.text();
+        }
+
+        if (!text || !text.trim()) return; // e.g. a scanned PDF with no text layer
         ctx.documentContents.push({
           id: doc.id,
           name: doc.name,
