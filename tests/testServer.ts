@@ -22,6 +22,9 @@ export async function getTestApp() {
     appPromise = (async () => {
       process.env.SUPABASE_URL ||= 'https://fake.supabase.test';
       process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'fake-service-role-key';
+      // Needed by server/secretsCrypto.ts, used to encrypt IMAP passwords and
+      // (since the 2026-08 compliance pass) OAuth refresh tokens at rest.
+      process.env.MAIL_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString('base64');
       const mod = await import('../server');
       const { app } = await mod.createApp();
       return app;

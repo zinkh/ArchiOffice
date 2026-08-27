@@ -4,6 +4,17 @@
 // IA" — getTenantPlan/maybeRefreshMonthlyCredits/deductAiCredit stay in
 // server.ts (also consumed directly by the external @zinkh/archioffice-agents
 // package's registerAgentRoutes call) and are injected here the same way.
+//
+// 2026-08 compliance pass: confirmed via full-repo search that nothing in
+// src/ currently calls POST /api/ai/suggest-articles — this route is
+// exercised only by tests/phase7Batch25.test.ts. It's kept (rather than
+// removed) because it's correctly gated behind auth, aiGenerationLimiter and
+// AI-credit accounting, unlike the old unauthenticated /api-proxy/**
+// passthrough (removed, see proxy.json) which had the same "unused" problem
+// with none of those governance controls. Wire it into the CCTP editor UI
+// (src/components/pro/) before advertising it, and label whatever it
+// returns as AI-generated per the app's AI-content disclosure convention
+// (see server/routes/aiSuggestions.ts's response and the CCTP editor).
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
 import { aiGenerationLimiter } from '../rateLimit';

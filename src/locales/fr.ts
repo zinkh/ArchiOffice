@@ -863,6 +863,7 @@ export default {
       "agent_chat_expand": "Agrandir la conversation",
       "agent_chat_collapse": "Réduire la conversation",
       "agent_chat_empty": "Pas encore de messages. Dites bonjour !",
+      "agent_chat_ai_disclaimer": "Réponses et actions générées par IA — à vérifier avant tout usage contractuel.",
       "agent_chat_error": "Une erreur s'est produite. Veuillez réessayer.",
       "agent_chat_thinking": "En train de réfléchir…",
       "agent_chat_thinking_slow": "Toujours en cours de traitement…",

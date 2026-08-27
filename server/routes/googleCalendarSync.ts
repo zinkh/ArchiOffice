@@ -28,6 +28,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
+import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -80,7 +81,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        refresh_token: connection.refresh_token,
+        refresh_token: decryptSecretMaybe(connection.refresh_token),
         client_id: clientId,
         ...(clientSecret ? { client_secret: clientSecret } : {}),
         grant_type: 'refresh_token',
@@ -183,7 +184,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
       const existing = await getConnection(tenantId, userId);
       if (existing) {
         await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections').update({
-          refresh_token: tokenData.refresh_token,
+          refresh_token: encryptSecret(tokenData.refresh_token),
           access_token: tokenData.access_token,
           expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
           external_account_email: email,
@@ -194,7 +195,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
           id: crypto.randomUUID(),
           user_id: userId,
           provider: 'google',
-          refresh_token: tokenData.refresh_token,
+          refresh_token: encryptSecret(tokenData.refresh_token),
           access_token: tokenData.access_token,
           expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
           external_account_email: email,

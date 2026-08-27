@@ -29,6 +29,7 @@ import { fetchGmailFullMessage } from '../mailFullMessage';
 import { normalizeGmailLabels } from '../mailFolders';
 import { isInsufficientScopeError } from '../mailProviderErrors';
 import { mailAttachmentUpload, ATTACHMENT_MAX_FILE_BYTES } from '../mailAttachmentUpload';
+import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -72,7 +73,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        refresh_token: connection.refresh_token,
+        refresh_token: decryptSecretMaybe(connection.refresh_token),
         client_id: clientId,
         ...(clientSecret ? { client_secret: clientSecret } : {}),
         grant_type: 'refresh_token',
@@ -182,7 +183,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       accessTokenCache.delete(userId);
       const existing = await getConnection(tenantId, userId);
       const row = {
-        refresh_token: tokenData.refresh_token,
+        refresh_token: encryptSecret(tokenData.refresh_token),
         access_token: tokenData.access_token,
         expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
         external_account_email: email,

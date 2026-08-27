@@ -25,6 +25,16 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      # Fails the build on a new critical vulnerability so one doesn't reach
+      # main unnoticed. Kept at "critical" rather than "high": as of this
+      # writing there are 4 known high/moderate findings with no safe fix yet
+      # (nodemailer, quill/react-quill — fix requires a breaking major bump —
+      # and xlsx, which has none upstream at all) tracked via Dependabot
+      # instead of blocking every PR on them. Revisit the threshold once
+      # those are resolved or explicitly accepted in SECURITY.md.
+      - name: Dependency vulnerability scan
+        run: npm audit --audit-level=critical
+
       - name: Type check
         run: npm run lint
 

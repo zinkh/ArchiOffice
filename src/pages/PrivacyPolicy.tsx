@@ -51,11 +51,12 @@ By using the Service, you agree to the collection and use of information in acco
         heading: '6. Data Sharing',
         body: `We do not sell your personal data. We share it with the following sub-processors, each bound by a data processing agreement:
 
-• **Supabase**: database, file storage and authentication for the whole Service.
-• **Our hosting provider**: infrastructure hosting.
+• **Supabase**: database, file storage and authentication for the whole Service, hosted in Sweden (EU).
+• **Our hosting provider**: application server hosting, in Germany (EU).
 • **Stancer**: payment processing for your ArchiOffice subscription (Stripe is integrated but not yet in active use).
 • **Google (Gemini API)**: AI-assisted drafting features (proposals, CCTP...) send the relevant project text to Google's Gemini API for processing.
 • **Email providers**: transactional email delivery (SMTP), using either our platform mailer or your own SMTP configuration.
+• **Sentry**: error monitoring for the Service, so we can detect and fix bugs. Technical error data may include your user ID and the route you were using; we filter out emails and access tokens before they reach Sentry.
 
 In addition, if your cabinet chooses to enable one of the following optional integrations (Settings > Plugins), the data you explicitly sync through it is also shared with that provider, under your cabinet's own relationship with them: **Zoho** (Invoice/Books), **Odoo**, **Ragic**, or **Chorus Pro** (AIFE — Ministère de l'Économie, mandatory for public-sector e-invoicing). These integrations are off by default and only exchange data once your cabinet configures and enables them.
 
@@ -101,7 +102,7 @@ You can exercise the rights of access, portability and erasure yourself, immedia
       },
       {
         heading: '11. International Transfers',
-        body: `Your data may be processed in countries outside the European Economic Area. When this occurs, we ensure appropriate safeguards are in place, such as Standard Contractual Clauses approved by the European Commission.`,
+        body: `Your project data (database, file storage) is hosted by Supabase in Sweden, and our application server in Germany — both within the European Economic Area. Some sub-processors (e.g. Google's Gemini API, used for AI-assisted drafting) may still process data outside the EEA. When this occurs, we ensure appropriate safeguards are in place, such as Standard Contractual Clauses approved by the European Commission.`,
       },
       {
         heading: '12. Children\'s Privacy',
@@ -167,11 +168,12 @@ En utilisant le Service, vous acceptez la collecte et l'utilisation des informat
         heading: '6. Partage des Données',
         body: `Nous ne vendons pas vos données personnelles. Nous les partageons avec les sous-traitants suivants, chacun lié par un accord de traitement des données :
 
-• **Supabase** : base de données, stockage de fichiers et authentification pour l'ensemble du Service.
-• **Notre hébergeur** : hébergement de l'infrastructure.
+• **Supabase** : base de données, stockage de fichiers et authentification pour l'ensemble du Service, hébergés en Suède (UE).
+• **Notre hébergeur** : hébergement du serveur applicatif, en Allemagne (UE).
 • **Stancer** : traitement des paiements de votre abonnement ArchiOffice (Stripe est intégré mais pas encore utilisé en production).
 • **Google (API Gemini)** : les fonctionnalités de rédaction assistée par IA (propositions, CCTP...) transmettent le texte concerné à l'API Gemini de Google pour traitement.
 • **Fournisseurs de messagerie** : envoi des e-mails transactionnels (SMTP), via notre messagerie de plateforme ou votre propre configuration SMTP.
+• **Sentry** : supervision des erreurs du Service, pour détecter et corriger les bugs. Les données techniques d'erreur peuvent inclure votre identifiant utilisateur et la route consultée ; les adresses e-mail et jetons d'accès sont filtrés avant transmission à Sentry.
 
 Par ailleurs, si votre cabinet active l'une des intégrations optionnelles suivantes (Réglages > Plugins), les données que vous synchronisez explicitement via cette intégration sont également partagées avec ce prestataire, dans le cadre de la relation propre de votre cabinet avec lui : **Zoho** (Invoice/Books), **Odoo**, **Ragic**, ou **Chorus Pro** (AIFE — Ministère de l'Économie, obligatoire pour la facturation électronique du secteur public). Ces intégrations sont désactivées par défaut et n'échangent des données qu'une fois configurées et activées par votre cabinet.
 
@@ -217,7 +219,7 @@ Vous pouvez exercer vous-même, immédiatement, les droits d'accès, de portabil
       },
       {
         heading: '11. Transferts Internationaux',
-        body: `Vos données peuvent être traitées dans des pays situés en dehors de l'Espace Économique Européen. Dans ce cas, nous nous assurons que des garanties appropriées sont en place, telles que les Clauses Contractuelles Types approuvées par la Commission européenne.`,
+        body: `Les données de votre cabinet (base de données, stockage de fichiers) sont hébergées par Supabase en Suède, et notre serveur applicatif en Allemagne — les deux au sein de l'Espace Économique Européen. Certains sous-traitants (par exemple l'API Gemini de Google, utilisée pour la rédaction assistée par IA) peuvent néanmoins traiter des données en dehors de l'EEE. Dans ce cas, nous nous assurons que des garanties appropriées sont en place, telles que les Clauses Contractuelles Types approuvées par la Commission européenne.`,
       },
       {
         heading: '12. Données des Mineurs',

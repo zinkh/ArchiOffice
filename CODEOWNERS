@@ -1,0 +1,26 @@
+# Code review ownership. GitHub uses this to auto-request a reviewer and
+# (once "Require review from Code Owners" is turned on under Settings →
+# Branches → branch protection rules) to block merging without one — that
+# branch-protection setting has to be enabled in the GitHub repo itself,
+# it isn't something this file can turn on by existing.
+#
+# Everything defaults to the one current maintainer. As the team grows,
+# split this out by directory instead of one blanket owner.
+*                                   @zinkh
+
+# Security- and compliance-sensitive surfaces — schema/RLS, auth, crypto,
+# multi-tenant isolation, CI. A change here is exactly the kind of thing
+# the 2026-08 compliance audit flagged as needing mandatory review, not
+# just CI-green: get a second pair of eyes even while the team is small
+# enough that "second pair of eyes" means asking a contractor or a future
+# hire to look, not skipping it.
+/supabase/                         @zinkh
+/server/secretsCrypto.ts           @zinkh
+/server/ipcCrypto.ts               @zinkh
+/server/tenantScopedFrom.ts        @zinkh
+/server/tenantPurge.ts             @zinkh
+/server/tenantExport.ts            @zinkh
+/server/adminAudit.ts              @zinkh
+/server/superAdminAuth.ts          @zinkh
+/.github/                          @zinkh
+/packages/archioffice-agents/src/server/tools.ts   @zinkh

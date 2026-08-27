@@ -29,7 +29,11 @@
 ├── vite.config.ts       # Vite config (path alias @/*, HMR toggle)
 ├── tsconfig.json        # TypeScript config (ES2022, ESNext, react-jsx)
 ├── postcss.config.js
-├── proxy.json           # Routes /api-proxy/** → Google Generative Language API
+├── proxy.json           # Platform routing config (no active endpoints — the former
+│                         # unauthenticated /api-proxy/** passthrough to Google's
+│                         # Generative Language API was removed, 2026-08 compliance
+│                         # pass: nothing in src/ ever called it, and all Gemini
+│                         # calls already go through governed /api/ai/* endpoints)
 ├── Dockerfile
 ├── .env.example
 ├── supabase/

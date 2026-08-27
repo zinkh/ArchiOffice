@@ -32,6 +32,7 @@ import { fetchOutlookFullMessage } from '../mailFullMessage';
 import { normalizeOutlookFolders } from '../mailFolders';
 import { isInsufficientScopeError } from '../mailProviderErrors';
 import { mailAttachmentUpload, ATTACHMENT_MAX_FILE_BYTES } from '../mailAttachmentUpload';
+import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -74,11 +75,12 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
     if (!clientId || !clientSecret) throw new Error('AZURE_CLIENT_ID / AZURE_CLIENT_SECRET non configurés');
 
+    const currentRefreshToken = decryptSecretMaybe(connection.refresh_token);
     const resp = await fetch(`${AUTHORITY}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        refresh_token: connection.refresh_token,
+        refresh_token: currentRefreshToken,
         client_id: clientId,
         client_secret: clientSecret,
         grant_type: 'refresh_token',
@@ -89,10 +91,10 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
     if (!resp.ok || !data.access_token) throw new Error(data.error_description || data.error || 'Échec du rafraîchissement du token Microsoft');
     // Microsoft rotates refresh tokens on each use — persist the new one or
     // the connection stops working once the original expires/is revoked.
-    if (data.refresh_token && data.refresh_token !== connection.refresh_token) {
+    if (data.refresh_token && data.refresh_token !== currentRefreshToken) {
       connection.refresh_token = data.refresh_token;
       tenantScopedFrom(supabaseAdmin, connection.tenant_id, 'email_connections')
-        .update({ refresh_token: data.refresh_token }).eq('id', connection.id)
+        .update({ refresh_token: encryptSecret(data.refresh_token) }).eq('id', connection.id)
         .then(() => {}, (err: any) => console.error('[Outlook refresh_token persist]', err.message));
     }
     accessTokenCache.set(connection.user_id, { token: data.access_token, expiresAt: now + (data.expires_in || 3600) * 1000 });
@@ -201,7 +203,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
       accessTokenCache.delete(userId);
       const existing = await getConnection(tenantId, userId);
       const row = {
-        refresh_token: tokenData.refresh_token,
+        refresh_token: encryptSecret(tokenData.refresh_token),
         access_token: tokenData.access_token,
         expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
         external_account_email: email,

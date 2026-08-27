@@ -7,6 +7,7 @@ import { isOfflineBuild } from '../lib/authToken';
 import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
+import { useUser } from '../UserContext';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -323,6 +324,69 @@ export default function Login() {
   return <CloudLogin />;
 }
 
+function MfaChallengeForm({ onVerified, onCancel }: { onVerified: () => void; onCancel: () => Promise<void> }) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const { data: factors, error: factorsErr } = await supabase.auth.mfa.listFactors();
+      if (factorsErr) throw factorsErr;
+      const factor = factors?.totp?.[0];
+      if (!factor) throw new Error('Aucun facteur de double authentification trouvé.');
+      const { error: verifyErr } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: code.trim() });
+      if (verifyErr) throw verifyErr;
+      onVerified();
+    } catch (err: any) {
+      setError(err?.message || 'Code invalide. Réessayez.');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
+      <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="flex justify-center mb-6">
+          <ArchiOfficeLogo size={48} />
+        </div>
+        <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-1">Double authentification</h2>
+        <p className="text-sm text-center text-zinc-500 dark:text-zinc-400 mb-6">
+          Saisissez le code généré par votre application d'authentification.
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            maxLength={6}
+            autoFocus
+            className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none tracking-widest text-center font-mono text-lg"
+            placeholder="000000"
+            required
+          />
+          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading || code.trim().length < 6}
+            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+          >
+            {loading ? 'Vérification...' : 'Vérifier'}
+          </button>
+          <button type="button" onClick={() => void onCancel()} className="w-full text-sm text-zinc-500 hover:underline">
+            Se connecter avec un autre compte
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function CloudLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -332,6 +396,7 @@ function CloudLogin() {
   const [tenantBranding, setTenantBranding] = useState<{ name: string; logoUrl: string | null } | null>(null);
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { currentUser, mfaRequired } = useUser();
 
   useEffect(() => {
     const slug = getSubdomain();
@@ -341,6 +406,18 @@ function CloudLogin() {
       .then(data => { if (data) setTenantBranding({ name: data.name, logoUrl: data.logoUrl }); })
       .catch(() => {});
   }, []);
+
+  // currentUser only ever becomes non-null once UserContext's own AAL check
+  // (see UserContext.tsx's mfaRequired) has cleared — for a password sign-in
+  // with no MFA enrolled that happens almost immediately; for one that does,
+  // only after MfaChallengeForm below completes it. Either way, this one
+  // effect is the single place that leaves /login, so it also covers the
+  // Google OAuth redirect-back (which lands on "/", gets bounced here by
+  // ProtectedLayout while mfaRequired is true, and never calls handleSubmit
+  // at all) with the same code path as password sign-in.
+  useEffect(() => {
+    if (currentUser) navigate('/');
+  }, [currentUser, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -352,9 +429,12 @@ function CloudLogin() {
     if (authError) {
       setError(authError.message);
       setLoading(false);
-    } else {
-      navigate('/');
+      return;
     }
+    setLoading(false);
+    // Navigation (or the MFA challenge below) is driven reactively by
+    // UserContext once its auth-state listener has processed this sign-in —
+    // see the effect above.
   };
 
   const handleGoogleSignIn = async () => {
@@ -364,6 +444,12 @@ function CloudLogin() {
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
+        // Left as "/" (not e.g. "/login") deliberately — redirectTo has to
+        // match an allow-listed URL in the Supabase project's Auth
+        // settings, which this codebase doesn't control. A Google sign-in
+        // that still needs its TOTP challenge lands on "/" the same as
+        // before; ProtectedLayout's mfaRequired check (see its comment)
+        // sends it to /login instead of the public Landing page from there.
         redirectTo: `${window.location.origin}/`,
       },
     });
@@ -374,6 +460,18 @@ function CloudLogin() {
     }
     // Pas de navigate() ici — Supabase redirige vers Google puis revient sur l'app
   };
+
+  if (mfaRequired) {
+    return (
+      <MfaChallengeForm
+        // No-op: verifying flips UserContext's mfaRequired to false and
+        // populates currentUser (see its doc comment), which the effect
+        // above turns into the actual navigate('/').
+        onVerified={() => {}}
+        onCancel={async () => { await supabase.auth.signOut(); setPassword(''); }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
