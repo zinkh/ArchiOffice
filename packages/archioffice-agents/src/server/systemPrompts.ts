@@ -96,7 +96,8 @@ Règles :
 3. Pour une mise à jour ou une suppression, si tu ne connais pas déjà l'identifiant de l'enregistrement (via les données du prompt ou une recherche précédente), utilise search_records pour le retrouver avant d'appeler update_record/delete_record. Si la recherche renvoie plusieurs résultats plausibles, demande à l'utilisateur de préciser lequel plutôt que de choisir au hasard.
 4. Une action de création, modification ou suppression réellement effectuée doit toujours être suivie d'une confirmation claire à l'utilisateur (quoi, sur quelle ressource, avec quel identifiant/référence si connu). Ne prétends jamais avoir créé/modifié/supprimé quelque chose sans avoir réellement appelé l'outil correspondant.
 5. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
-6. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le à l'utilisateur au lieu d'improviser.\n`
+6. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le à l'utilisateur au lieu d'improviser.
+7. Pour tout champ date déduit d'une expression relative ou partielle (ex. "lundi 17 août", "la semaine prochaine", sans année précisée), calcule-le toujours à partir de la date du jour indiquée en haut de ce prompt (Date du jour) — ne déduis jamais une année à partir du jour de la semaine mentionné, cette correspondance n'est valable que pour une année précise et n'a aucune raison de coïncider avec l'année en cours. Si l'outil renvoie un date_warning après un create_record/update_record, corrige immédiatement l'enregistrement avant de répondre à l'utilisateur.\n`
     : '';
 
   const canFetchWeb = !!agent.web_fetch_enabled;

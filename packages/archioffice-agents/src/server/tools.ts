@@ -174,6 +174,26 @@ async function fetchResourceList(baseUrl: string, authHeader: string, resource: 
   }
 }
 
+// A meeting date more than ~13 months from "now" is virtually never what the
+// user actually asked for — in practice it's the model computing a weekday
+// (e.g. "lundi 17 août") against a year it remembers from training instead of
+// the real current year given in its own system prompt. This doesn't block
+// the write (a réunion de chantier logged well after the fact is legitimate),
+// it just hands the model a fact it can't rationalize away, so it corrects
+// itself instead of confidently declaring the record fixed.
+const SUSPICIOUS_DATE_DRIFT_DAYS = 400;
+
+function checkSuspiciousDate(resourceKey: string, record: Record<string, unknown>): { field: string; value: string; daysOff: number } | null {
+  if (resourceKey !== 'meetings') return null;
+  const raw = record.date;
+  if (typeof raw !== 'string' || !raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const daysOff = Math.round(Math.abs(parsed.getTime() - Date.now()) / 86_400_000);
+  if (daysOff <= SUSPICIOUS_DATE_DRIFT_DAYS) return null;
+  return { field: 'date', value: raw, daysOff };
+}
+
 export async function executeAgentAction(
   baseUrl: string,
   authHeader: string | undefined,
@@ -311,8 +331,38 @@ export async function executeAgentAction(
 
     const verb = name === 'create_record' ? 'créé' : name === 'update_record' ? 'modifié' : 'supprimé';
     const label = name === 'delete_record' ? String(args.id) : (body ? getRecordIdentity(resourceKey, resource, body) : '') || json?.id || '';
+
+    let savedRecord: Record<string, unknown> | undefined;
+    let dateWarning: { field: string; value: string; daysOff: number } | null = null;
+    if (name !== 'delete_record' && resource.list) {
+      // PUT handlers for several resources (e.g. /api/meetings/:id) only ever
+      // return {success: true}, not the row — so `json` can't be trusted to
+      // reflect what actually landed in the database. Re-read the record via
+      // the list endpoint so the model reports what was really saved, not
+      // just what it asked to save.
+      const recordId = name === 'update_record' ? String(args.id) : String(json?.id || '');
+      if (recordId) {
+        const list = await fetchResourceList(baseUrl, authHeader, resource);
+        savedRecord = list.find(r => String((r as any).id) === recordId);
+      }
+      dateWarning = checkSuspiciousDate(resourceKey, savedRecord || body || {});
+    }
+
     return {
-      response: { success: true, ...json },
+      response: {
+        success: true,
+        ...json,
+        ...(savedRecord ? { saved_record: savedRecord } : {}),
+        ...(dateWarning
+          ? {
+              date_warning:
+                `Attention : le champ "${dateWarning.field}" enregistré vaut "${dateWarning.value}", ` +
+                `soit environ ${dateWarning.daysOff} jours d'écart avec aujourd'hui. Recalcule cette date à partir de la date du jour ` +
+                `donnée dans tes instructions système (ne déduis jamais une année à partir du jour de la semaine) et corrige l'enregistrement ` +
+                `avec update_record si la date est erronée, avant de confirmer quoi que ce soit à l'utilisateur.`,
+            }
+          : {}),
+      },
       summary: `${resource.label} ${verb}${label ? ` : ${label}` : ''}`,
     };
   } catch (e: any) {
