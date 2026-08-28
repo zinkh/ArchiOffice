@@ -20,6 +20,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:agents": "tsx scripts/eval-agents.ts",
     "electron:build": "npm run build && npm run build:server && electron-builder"
   },
   "dependencies": {
