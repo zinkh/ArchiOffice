@@ -11,5 +11,6 @@ coverage/
 archimanager.db
 uploads/
 .offline-data/
+scripts/eval-agents-reports/
 vendor/
 .npmrc

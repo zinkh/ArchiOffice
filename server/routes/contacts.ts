@@ -30,7 +30,17 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const contact = req.body;
       const id = contact.id || crypto.randomUUID();
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...contact, id });
+      // first_name/last_name are NOT NULL columns, but a company-only contact
+      // (no named person) is a valid case the UI already supports — the web
+      // form always sends '' for these when left blank, but a caller that
+      // omits the keys entirely (e.g. the AI agent creating a company
+      // contact) would otherwise hit a not-null constraint violation.
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({
+        ...contact,
+        id,
+        first_name: contact.first_name ?? '',
+        last_name: contact.last_name ?? '',
+      });
       if (error) throw error;
       const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
