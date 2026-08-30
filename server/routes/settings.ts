@@ -41,6 +41,9 @@ const toSnake: Record<string, string> = {
   numPrefixFacture: 'num_prefix_facture',
   numPrefixHonoraires: 'num_prefix_honoraires',
   numPrefixAffaire: 'num_prefix_affaire',
+  numAffaireSepPrefix: 'num_affaire_sep_prefix',
+  numAffaireSepSeq: 'num_affaire_sep_seq',
+  numAffaireDigits: 'num_affaire_digits',
   onboardingCompletedAt: 'onboarding_completed_at',
   defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
   defaultLeaveDaysRtt: 'default_leave_days_rtt',
@@ -91,6 +94,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'zoho_client_id', 'zoho_client_secret', 'zoho_org_id', 'zoho_data_center', 'zoho_refresh_token',
         'zoho_books_org_id',
         'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
+        'num_affaire_sep_prefix', 'num_affaire_sep_seq', 'num_affaire_digits',
         'onboarding_completed_at',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
@@ -103,7 +107,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'architect_name', 'oa_number',
         'notification_archive_days',
       ]);
-      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt']);
+      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits']);
       const filteredData: any = Object.fromEntries(
         Object.entries(snakeData)
           .filter(([k]) => validCols.has(k))
