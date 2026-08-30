@@ -4,6 +4,47 @@ import mammoth from 'mammoth';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
+// Parses the bucket + object path back out of a stored getPublicUrl()-shaped
+// string (…/storage/v1/object/public/<bucket>/<path>) — duplicated in miniature
+// from server/storagePaths.ts's parseStorageRef() rather than imported, since
+// this package is a self-contained proprietary module (see its package.json)
+// and shouldn't reach into the root app's server/ directory.
+function parseStorageRef(fileUrl: string): { bucket: string; path: string } | null {
+  const marker = '/object/public/';
+  const idx = fileUrl.indexOf(marker);
+  if (idx === -1) return null;
+  const rest = fileUrl.slice(idx + marker.length);
+  const slash = rest.indexOf('/');
+  if (slash === -1) return null;
+  const bucket = rest.slice(0, slash);
+  const path = decodeURIComponent(rest.slice(slash + 1));
+  return bucket && path ? { bucket, path } : null;
+}
+
+// Reads a document's bytes for content extraction. Our own storage buckets
+// are private, so this goes through the service-role Storage client (which
+// bypasses that privacy, like a table query bypasses RLS) rather than a
+// plain fetch() against the stored reference URL, which would 401/403.
+// Falls back to a direct fetch for anything that isn't one of our own
+// storage refs (e.g. a document imported from an external link).
+async function readStorageObject(supabaseAdmin: any, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  const ref = parseStorageRef(fileUrl || '');
+  if (ref) {
+    const { data, error } = await supabaseAdmin.storage.from(ref.bucket).download(ref.path);
+    if (error || !data) return null;
+    const arrayBuffer = await data.arrayBuffer();
+    return { buffer: Buffer.from(arrayBuffer), contentType: data.type || '' };
+  }
+  try {
+    const res = await fetch(fileUrl);
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    return { buffer: Buffer.from(arrayBuffer), contentType: res.headers.get('content-type') ?? '' };
+  } catch {
+    return null;
+  }
+}
+
 // firm_knowledge is auto-injected on every message (unlike user-attached
 // documents), and the tenant is billed per token for it — keep these caps
 // tight relative to MAX_DOC_BYTES above.
@@ -202,8 +243,23 @@ export async function buildAgentContext(
     const contentFetches = ((docs as any[]) || []).map(async (doc: any) => {
       try {
         const lowerName = String(doc.name || '').toLowerCase();
-        let text: string | null = null;
 
+        // documents.file_url is stored as a getPublicUrl()-shaped string,
+        // but the "documents" bucket (like every other business-document
+        // bucket) is private — a plain fetch() against it 401/403s (see
+        // server/storagePaths.ts). That silently broke content extraction
+        // for every attached document, not just PDFs: the PDF/DOCX parsing
+        // added here never actually worked end-to-end in production because
+        // the byte fetch it was built on top of was already failing before
+        // it ever got to parse anything. The service-role client can read
+        // the object directly via Storage's download() API instead, which
+        // bypasses the bucket's privacy the same way a table query bypasses
+        // RLS — no signed URL needed.
+        const fetched = await readStorageObject(supabaseAdmin, doc.file_url);
+        if (!fetched) return;
+        const { buffer, contentType } = fetched;
+
+        let text: string | null = null;
         if (lowerName.endsWith('.pdf')) {
           // CCTP, RC and other tender/contract documents are almost always
           // PDFs — this used to be silently dropped by the content-type
@@ -211,9 +267,6 @@ export async function buildAgentContext(
           // so an attached PDF's metadata showed up in the prompt but its
           // content never did, and the agent would truthfully say it never
           // received the document.
-          const res = await fetch(doc.file_url);
-          if (!res.ok) return;
-          const buffer = Buffer.from(await res.arrayBuffer());
           const parser = new PDFParse({ data: buffer });
           try {
             text = (await parser.getText()).text;
@@ -221,19 +274,14 @@ export async function buildAgentContext(
             await parser.destroy();
           }
         } else if (lowerName.endsWith('.docx')) {
-          const res = await fetch(doc.file_url);
-          if (!res.ok) return;
-          const buffer = Buffer.from(await res.arrayBuffer());
           text = (await mammoth.extractRawText({ buffer })).value;
-        } else {
-          const res = await fetch(doc.file_url);
-          if (!res.ok) return;
-          const contentType = res.headers.get('content-type') ?? '';
+        } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
           // Everything else without a dedicated extractor above (images,
           // spreadsheets, legacy .doc...) — only inject text-based content,
           // never binary bytes as if they were readable text.
-          if (!contentType.includes('text') && !contentType.includes('json') && !contentType.includes('csv') && !contentType.includes('xml')) return;
-          text = await res.text();
+          text = buffer.toString('utf8');
+        } else {
+          return;
         }
 
         if (!text || !text.trim()) return; // e.g. a scanned PDF with no text layer
