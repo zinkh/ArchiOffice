@@ -475,6 +475,9 @@ CREATE TABLE IF NOT EXISTS settings (
   num_prefix_facture TEXT DEFAULT 'FAC',
   num_prefix_honoraires TEXT DEFAULT 'NH',
   num_prefix_affaire TEXT,
+  num_affaire_sep_prefix BOOLEAN,
+  num_affaire_sep_seq BOOLEAN,
+  num_affaire_digits SMALLINT,
   onboarding_completed_at TIMESTAMPTZ,
   architect_name TEXT, oa_number TEXT
 );

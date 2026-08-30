@@ -242,6 +242,9 @@ export default function Settings() {
     numPrefixFacture: 'FAC',
     numPrefixHonoraires: 'NH',
     numPrefixAffaire: '',
+    numAffaireSepPrefix: true,
+    numAffaireSepSeq: true,
+    numAffaireDigits: 3,
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -1726,6 +1729,7 @@ export default function Settings() {
               <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Numérotation des documents</h2>
               <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
                 Choisissez le préfixe pour chaque type de document. Le numéro généré aura la forme <strong>PRÉFIXE-ANNÉE-NNN</strong>.
+                Pour le numéro d'affaire, les tirets et le nombre de chiffres sont également personnalisables.
               </p>
             </div>
             {([
@@ -1736,56 +1740,122 @@ export default function Settings() {
             ] as const).map(({ label, key, presets }) => {
               const year = new Date().getFullYear();
               const prefix = settings[key] || presets[0];
-              // Le numéro d'affaire (project_code) suit son propre format
-              // PRÉFIXE-AA-NNN (année sur 2 chiffres, voir server/routes/projects.ts) —
-              // il sert aussi de base à la référence par affaire des factures
-              // d'acompte (ex: 26014-ACO-02, voir Invoices.tsx).
-              const preview = key === 'numPrefixAffaire'
-                ? (prefix ? `${prefix}-${String(year).slice(-2)}-001` : `${String(year).slice(-2)}001`)
+              const isAffaire = key === 'numPrefixAffaire';
+              // Le numéro d'affaire (project_code) a un format entièrement
+              // configurable (voir server/routes/projects.ts) : le tiret après le
+              // préfixe et le tiret avant le numéro sont chacun optionnels, et le
+              // numéro peut être complété sur 1 à 6 chiffres — d'où des variantes
+              // comme AFF-26-001, AFF-2601, 26-01 ou PRO2601. Tant que le tenant n'a
+              // pas explicitement choisi, on retombe sur l'ancien format : tirets
+              // partout si un préfixe est défini, sinon AAANNN sans tiret.
+              const sepPrefix = isAffaire && settings.numAffaireSepPrefix != null ? !!settings.numAffaireSepPrefix : true;
+              const sepSeq = isAffaire && settings.numAffaireSepSeq != null ? !!settings.numAffaireSepSeq : !!prefix;
+              const digits = isAffaire && Number.isInteger(settings.numAffaireDigits) && settings.numAffaireDigits >= 1 && settings.numAffaireDigits <= 6
+                ? settings.numAffaireDigits : 3;
+              const yy = String(year).slice(-2);
+              const seq = '1'.padStart(digits, '0');
+              const preview = isAffaire
+                ? `${prefix}${prefix && sepPrefix ? '-' : ''}${yy}${sepSeq ? '-' : ''}${seq}`
                 : `${prefix}-${year}-001`;
               return (
-                <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {presets.map(p => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => setSettings({ ...settings, [key]: p })}
-                          className="px-2.5 py-1 rounded text-xs font-bold transition-colors"
-                          style={settings[key] === p
-                            ? { background: 'var(--tblr-primary)', color: '#fff' }
-                            : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                <div key={key} className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {presets.map(p => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setSettings({ ...settings, [key]: p })}
+                            className="px-2.5 py-1 rounded text-xs font-bold transition-colors"
+                            style={settings[key] === p
+                              ? { background: 'var(--tblr-primary)', color: '#fff' }
+                              : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Préfixe personnalisé</label>
+                      <input
+                        className="w-full p-2 rounded-lg text-sm font-mono"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        placeholder="Ex: MON-PREFIX"
+                        value={settings[key]}
+                        onChange={e => setSettings({ ...settings, [key]: e.target.value })}
+                        maxLength={20}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Aperçu</label>
+                      <div className="p-2 rounded-lg text-sm font-mono font-bold" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                        {preview}
+                      </div>
+                    </div>
+                  </div>
+                  {isAffaire && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pl-0 md:pl-1">
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Tiret après le préfixe</label>
+                        <div className="flex gap-1.5">
+                          {[{ v: true, l: 'Tiret' }, { v: false, l: 'Aucun' }].map(({ v, l }) => (
+                            <button
+                              key={l}
+                              type="button"
+                              disabled={!prefix}
+                              onClick={() => setSettings({ ...settings, numAffaireSepPrefix: v })}
+                              className="px-2.5 py-1 rounded text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              style={sepPrefix === v
+                                ? { background: 'var(--tblr-primary)', color: '#fff' }
+                                : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                            >
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Tiret avant le numéro</label>
+                        <div className="flex gap-1.5">
+                          {[{ v: true, l: 'Tiret' }, { v: false, l: 'Aucun' }].map(({ v, l }) => (
+                            <button
+                              key={l}
+                              type="button"
+                              onClick={() => setSettings({ ...settings, numAffaireSepSeq: v })}
+                              className="px-2.5 py-1 rounded text-xs font-bold transition-colors"
+                              style={sepSeq === v
+                                ? { background: 'var(--tblr-primary)', color: '#fff' }
+                                : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                            >
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Chiffres du numéro</label>
+                        <select
+                          className="w-full p-2 rounded-lg text-sm font-mono"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={digits}
+                          onChange={e => setSettings({ ...settings, numAffaireDigits: parseInt(e.target.value, 10) })}
                         >
-                          {p}
-                        </button>
-                      ))}
+                          {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Préfixe personnalisé</label>
-                    <input
-                      className="w-full p-2 rounded-lg text-sm font-mono"
-                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                      placeholder="Ex: MON-PREFIX"
-                      value={settings[key]}
-                      onChange={e => setSettings({ ...settings, [key]: e.target.value })}
-                      maxLength={20}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Aperçu</label>
-                    <div className="p-2 rounded-lg text-sm font-mono font-bold" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
-                      {preview}
-                    </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
             {renderSaveButton('numbering', () => saveSection('numbering', {
               numPrefixDevis: settings.numPrefixDevis, numPrefixFacture: settings.numPrefixFacture,
               numPrefixHonoraires: settings.numPrefixHonoraires, numPrefixAffaire: settings.numPrefixAffaire,
+              numAffaireSepPrefix: settings.numAffaireSepPrefix, numAffaireSepSeq: settings.numAffaireSepSeq,
+              numAffaireDigits: settings.numAffaireDigits,
             }))}
           </div>
 
