@@ -1739,8 +1739,13 @@ export default function Settings() {
               { label: 'Numéro d\'affaire (projets)', key: 'numPrefixAffaire' as const, presets: ['AFF', 'PROJ', ''] },
             ] as const).map(({ label, key, presets }) => {
               const year = new Date().getFullYear();
-              const prefix = settings[key] || presets[0];
               const isAffaire = key === 'numPrefixAffaire';
+              // For the affaire row, an explicitly empty prefix (the ''
+              // preset, meaning "no prefix") must stay empty — falling back
+              // to presets[0] here would silently re-add "AFF" even after
+              // the user picked "no prefix". The other three doc types
+              // never have an empty preset, so the fallback is harmless there.
+              const prefix = isAffaire ? settings[key] : (settings[key] || presets[0]);
               // Le numéro d'affaire (project_code) a un format entièrement
               // configurable (voir server/routes/projects.ts) : le tiret après le
               // préfixe et le tiret avant le numéro sont chacun optionnels, et le
