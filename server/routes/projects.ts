@@ -182,7 +182,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       const { error: ue } = await supabaseAdmin.from('projects').update({
@@ -196,7 +196,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
       // Update related lists (delete + reinsert)
