@@ -192,15 +192,39 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
     }
   });
 
-  // GET /api/mail/imap/search?email=<adresse> — live search across INBOX
-  // and the Sent folder (if any), envelope metadata only, never persisted.
+  // GET /api/mail/imap/search?email=&from=&to=&subject=&q=&dateFrom=&dateTo=
+  //   &folder=&limit= — live search, envelope metadata only, never persisted.
+  // `email` alone (from OR to) is the original shape, still used by
+  // CorrespondenceTab.tsx, searching INBOX + Sent; every other param is
+  // additive for the Mailbox page's advanced search panel. When `folder` is
+  // given, search is scoped to just that one mailbox instead of the
+  // INBOX+Sent default (matching how /messages already takes a single
+  // `folder`). `q` maps to a body search — IMAP SEARCH has no single
+  // "subject or body" operator to combine with the other AND'd criteria
+  // below without also restructuring how they combine, so free text here
+  // only matches body content, not subject (use the `subject` field for
+  // that). There's also no hasAttachment param: IMAP SEARCH has no
+  // attachment-presence criterion without fetching and inspecting each
+  // message's BODYSTRUCTURE, which isn't worth the cost here.
   app.get('/api/mail/imap/search', withRequestTimeout, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
       if (!connection) return send(res, 400, { error: 'Messagerie IMAP non connectée.' });
-      const { email } = req.query as { email?: string };
-      if (!email) return send(res, 400, { error: 'email requis' });
+      const { email, from, to, subject, q, dateFrom, dateTo, folder } = req.query as Record<string, string | undefined>;
+      if (!email && !from && !to && !subject && !q && !dateFrom && !dateTo) {
+        return send(res, 400, { error: 'Au moins un critère de recherche est requis.' });
+      }
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit || SEARCH_LIMIT), 10) || SEARCH_LIMIT, 1), 50);
+
+      const criteria: Record<string, any> = {};
+      if (email) criteria.or = [{ from: email }, { to: email }];
+      if (from) criteria.from = from;
+      if (to) criteria.to = to;
+      if (subject) criteria.subject = subject;
+      if (q) criteria.body = q;
+      if (dateFrom) criteria.since = new Date(dateFrom);
+      if (dateTo) criteria.before = new Date(dateTo);
 
       const password = decryptSecret(connection.imap_password_encrypted);
       const client = new ImapFlow({
@@ -217,32 +241,37 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
         await withHardTimeout(client, (async () => {
           await client.connect();
 
-          const mailboxes = await client.list();
-          const sentBox = mailboxes.find(m => m.specialUse === '\\Sent');
-          const folders = ['INBOX', ...(sentBox ? [sentBox.path] : [])];
+          let folders: string[];
+          if (folder) {
+            folders = [folder];
+          } else {
+            const mailboxes = await client.list();
+            const sentBox = mailboxes.find(m => m.specialUse === '\\Sent');
+            folders = ['INBOX', ...(sentBox ? [sentBox.path] : [])];
+          }
 
-          for (const folder of folders) {
-            if (results.length >= SEARCH_LIMIT) break;
+          for (const f of folders) {
+            if (results.length >= limit) break;
             try {
-              await client.mailboxOpen(folder);
+              await client.mailboxOpen(f);
             } catch {
               continue; // folder may not exist / not selectable — skip it
             }
-            const uids = await client.search({ or: [{ from: email }, { to: email }] }, { uid: true });
+            const uids = await client.search(criteria, { uid: true });
             if (!uids || uids.length === 0) continue;
-            const recentUids = uids.slice(-SEARCH_LIMIT).reverse();
+            const recentUids = uids.slice(-limit).reverse();
             for await (const msg of client.fetch(recentUids, { envelope: true, uid: true }, { uid: true })) {
               const addr = (list?: { name?: string; address?: string }[]) =>
                 (list || []).map(a => a.address).filter(Boolean).join(', ');
               results.push({
                 uid: msg.uid,
-                folder,
+                folder: f,
                 subject: msg.envelope?.subject || '',
                 from: addr(msg.envelope?.from),
                 to: addr(msg.envelope?.to),
                 date: msg.envelope?.date || null,
               });
-              if (results.length >= SEARCH_LIMIT) break;
+              if (results.length >= limit) break;
             }
           }
         })());

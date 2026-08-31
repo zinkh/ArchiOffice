@@ -278,17 +278,45 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     return { messages: results.filter(Boolean), nextPageToken: listData.nextPageToken || null };
   }
 
-  // GET /api/gmail/search?email=<adresse> — live search, never persisted.
+  // GET /api/gmail/search?email=&from=&to=&subject=&q=&dateFrom=&dateTo=
+  //   &hasAttachment=&folderId=&limit= — live search, never persisted.
+  // `email` alone (from OR to) is the original shape, still used by
+  // CorrespondenceTab.tsx for "messages with this contact"; every other
+  // param is additive for the Mailbox page's advanced search panel and
+  // combines with `email` (and with each other) as an AND — Gmail's own
+  // search operators compose that way when space-joined into one `q`.
   app.get('/api/gmail/search', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
-      const { email } = req.query as { email?: string };
-      if (!email) return res.status(400).json({ error: 'email requis' });
+      const { email, from, to, subject, q, dateFrom, dateTo, hasAttachment, folderId } = req.query as Record<string, string | undefined>;
+      if (!email && !from && !to && !subject && !q && !dateFrom && !dateTo && !hasAttachment) {
+        return res.status(400).json({ error: 'Au moins un critère de recherche est requis.' });
+      }
+      const limit = Math.min(parseInt(String(req.query.limit || SEARCH_LIMIT), 10) || SEARCH_LIMIT, 50);
+
+      const parts: string[] = [];
+      if (email) parts.push(`(from:${email} OR to:${email})`);
+      if (from) parts.push(`from:${from}`);
+      if (to) parts.push(`to:${to}`);
+      // Gmail's subject: operator only matches a single word unless quoted —
+      // strip embedded quotes from user input so the wrapping pair here
+      // can't be broken out of.
+      if (subject) parts.push(`subject:"${subject.replace(/"/g, '')}"`);
+      // Gmail's after:/before: want YYYY/MM/DD; the date inputs on the
+      // frontend send YYYY-MM-DD.
+      if (dateFrom) parts.push(`after:${dateFrom.replace(/-/g, '/')}`);
+      if (dateTo) parts.push(`before:${dateTo.replace(/-/g, '/')}`);
+      if (hasAttachment === 'true') parts.push('has:attachment');
+      if (q) parts.push(q); // free-text terms need no operator — Gmail matches subject+body+etc.
 
       const accessToken = await getAccessToken(connection);
-      const { messages } = await fetchGmailMessages(accessToken, { q: `from:${email} OR to:${email}` }, SEARCH_LIMIT);
+      const { messages } = await fetchGmailMessages(
+        accessToken,
+        { q: parts.join(' '), labelIds: folderId ? [folderId] : undefined },
+        limit
+      );
       res.json(messages);
     } catch (error: any) {
       console.error('[GET /api/gmail/search]', error.message);
