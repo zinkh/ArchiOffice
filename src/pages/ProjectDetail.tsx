@@ -77,6 +77,7 @@ import { MafCostBadge } from '../components/MafCostBadge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
+import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 
 import { useTranslation } from 'react-i18next';
@@ -126,6 +127,19 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
 );
 
 const MISSION_PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR'];
+
+const PHASE_LABELS: Partial<Record<DocumentPhase, string>> = {
+  ESQ: 'Esquisse',
+  APS: 'Avant-Projet Sommaire',
+  APD: 'Avant-Projet Détaillé',
+  PC: 'Permis de Construire',
+  PRO: 'Projet',
+  DCE: 'Consultation entreprises',
+  ACT: 'Attribution des marchés',
+  VISA: "Visa d'exécution",
+  DET: 'Direction des travaux',
+  AOR: 'Assistance à réception',
+};
 
 // Maps ContratMOEMission ids (Contrats.tsx uses 'pro', Proposals.tsx's
 // fee_distribution uses 'projet' for the same phase — both are accepted here)
@@ -2773,32 +2787,23 @@ export default function ProjectDetail() {
 
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const primaryContrat = linkedContratsMoe[0];
-                          const includedPhases = primaryContrat
-                            ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
-                            : null;
-                          return MISSION_PHASES.filter(phase =>
-                            !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
-                          ).map(phase => {
-                            const isCurrent = phaseHistory.some(p => p.phase === phase && !p.exited_at);
-                            return (
-                              <button
-                                key={phase}
-                                type="button"
-                                onClick={() => handleSetPhase(phase)}
-                                className="px-3 py-1.5 rounded-full text-xs font-bold transition-colors"
-                                style={isCurrent
-                                  ? { background: 'var(--tblr-primary)', color: 'white' }
-                                  : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
-                              >
-                                {phase}
-                              </button>
-                            );
-                          });
-                        })()}
-                      </div>
+                      {(() => {
+                        const primaryContrat = linkedContratsMoe[0];
+                        const includedPhases = primaryContrat
+                          ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
+                          : null;
+                        const filteredPhases = MISSION_PHASES.filter(phase =>
+                          !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
+                        );
+                        const currentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+                        return (
+                          <PhaseStepper
+                            steps={filteredPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
+                            currentId={currentPhase}
+                            onSelect={id => handleSetPhase(id as DocumentPhase)}
+                          />
+                        );
+                      })()}
                       {phaseHistory.length > 0 && (
                         <div className="pt-3 border-t border-[var(--tblr-border)] space-y-1.5">
                           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_history')}</p>
