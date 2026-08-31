@@ -1,5 +1,12 @@
 import type { AgentContext } from '../types.js';
-import { PDFParse } from 'pdf-parse';
+// Pinned to the 1.x line deliberately: pdf-parse@2 depends on @napi-rs/canvas
+// (a Rust native binary, for its screenshot/image-rendering features, which
+// this file never uses) — that native module's runtime needs system
+// libraries (font rendering, etc.) that a minimal server image (this repo's
+// Dockerfile is node:22-slim) doesn't ship, so simply reading a PDF crashed
+// the whole Node process, not something a try/catch here can guard against.
+// 1.x is a pure-JS text-only extractor with zero native dependencies.
+import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
@@ -287,12 +294,7 @@ export async function buildAgentContext(
           // so an attached PDF's metadata showed up in the prompt but its
           // content never did, and the agent would truthfully say it never
           // received the document.
-          const parser = new PDFParse({ data: buffer });
-          try {
-            text = (await parser.getText()).text;
-          } finally {
-            await parser.destroy();
-          }
+          text = (await pdfParse(buffer)).text;
         } else if (lowerName.endsWith('.docx')) {
           text = (await mammoth.extractRawText({ buffer })).value;
         } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
