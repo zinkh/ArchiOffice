@@ -253,22 +253,58 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
     };
   }
 
-  // GET /api/outlook/search?email=<adresse> — live search, never persisted.
+  // GET /api/outlook/search?email=&from=&to=&subject=&q=&dateFrom=&dateTo=
+  //   &hasAttachment=&folderId=&limit= — live search, never persisted.
+  // `email` alone (from OR to) is the original shape, still used by
+  // CorrespondenceTab.tsx; every other param is additive for the Mailbox
+  // page's advanced search panel.
+  //
+  // Graph doesn't reliably support $filter and $orderby together with
+  // $search on mail messages, so free text (`q`) takes over the whole
+  // query: it's sent alone via $search (Graph orders those by relevance
+  // itself, no $orderby needed) rather than trying to combine it with the
+  // structured fields below. from/to use exact-address `eq` (matching the
+  // original `email` shape above) rather than `contains`, since Graph's
+  // advanced query support for `contains` on nested properties like
+  // `from/emailAddress/address` isn't reliably documented — subject is a
+  // plain top-level string property, where `contains` is well-supported.
   app.get('/api/outlook/search', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const connection = await getConnection(tenantId, req.user.id);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
-      const { email } = req.query as { email?: string };
-      if (!email) return res.status(400).json({ error: 'email requis' });
+      const { email, from, to, subject, q, dateFrom, dateTo, hasAttachment, folderId } = req.query as Record<string, string | undefined>;
+      if (!email && !from && !to && !subject && !q && !dateFrom && !dateTo && !hasAttachment) {
+        return res.status(400).json({ error: 'Au moins un critère de recherche est requis.' });
+      }
+      const limit = Math.min(parseInt(String(req.query.limit || SEARCH_LIMIT), 10) || SEARCH_LIMIT, 50);
 
       const accessToken = await getAccessToken(connection);
-      const escaped = email.replace(/'/g, "''");
-      const url = new URL(`${GRAPH_BASE}/me/messages`);
-      url.searchParams.set('$filter', `from/emailAddress/address eq '${escaped}' or toRecipients/any(r:r/emailAddress/address eq '${escaped}')`);
-      url.searchParams.set('$top', String(SEARCH_LIMIT));
+      const base = folderId
+        ? `${GRAPH_BASE}/me/mailFolders/${encodeURIComponent(folderId)}/messages`
+        : `${GRAPH_BASE}/me/messages`;
+      const url = new URL(base);
+      url.searchParams.set('$top', String(limit));
       url.searchParams.set('$select', MESSAGE_SELECT);
-      url.searchParams.set('$orderby', 'receivedDateTime desc');
+
+      if (q) {
+        url.searchParams.set('$search', `"${q.replace(/"/g, '')}"`);
+      } else {
+        const escape = (s: string) => s.replace(/'/g, "''");
+        const clauses: string[] = [];
+        if (email) {
+          const e = escape(email);
+          clauses.push(`(from/emailAddress/address eq '${e}' or toRecipients/any(r:r/emailAddress/address eq '${e}'))`);
+        }
+        if (from) clauses.push(`from/emailAddress/address eq '${escape(from)}'`);
+        if (to) clauses.push(`toRecipients/any(r:r/emailAddress/address eq '${escape(to)}')`);
+        if (subject) clauses.push(`contains(subject,'${escape(subject)}')`);
+        if (dateFrom) clauses.push(`receivedDateTime ge ${new Date(dateFrom).toISOString()}`);
+        if (dateTo) clauses.push(`receivedDateTime le ${new Date(dateTo).toISOString()}`);
+        if (hasAttachment === 'true') clauses.push('hasAttachments eq true');
+        url.searchParams.set('$filter', clauses.join(' and '));
+        url.searchParams.set('$orderby', 'receivedDateTime desc');
+      }
 
       const resp = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
       const data: any = await resp.json();

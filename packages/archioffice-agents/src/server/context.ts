@@ -4,6 +4,24 @@ import mammoth from 'mammoth';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
+// A slow Storage download or a large PDF/DOCX parse must never stall the
+// whole chat turn — before real content extraction existed here, this phase
+// was a handful of near-instant Supabase table queries, well inside the
+// client's 90s and the server's 55s (routes.ts) chat timeouts. Actual file
+// I/O + parsing can legitimately take longer, so each document gets its own
+// bounded budget and is skipped (like an unreadable document already is) if
+// it blows past it, rather than eating into the single Gemini call's own
+// timeout budget and surfacing as an opaque "Le service met trop de temps
+// à répondre" with no attached document ever having been the actual cause.
+const DOC_EXTRACTION_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('document extraction timed out')), ms)),
+  ]);
+}
+
 // Parses the bucket + object path back out of a stored getPublicUrl()-shaped
 // string (…/storage/v1/object/public/<bucket>/<path>) — duplicated in miniature
 // from server/storagePaths.ts's parseStorageRef() rather than imported, since
@@ -240,7 +258,7 @@ export async function buildAgentContext(
       .eq('tenant_id', tenantId)
       .in('id', attachedDocumentIds);
 
-    const contentFetches = ((docs as any[]) || []).map(async (doc: any) => {
+    const contentFetches = ((docs as any[]) || []).map((doc: any) => withTimeout((async () => {
       try {
         const lowerName = String(doc.name || '').toLowerCase();
 
@@ -293,7 +311,10 @@ export async function buildAgentContext(
       } catch {
         // skip unreadable documents silently
       }
-    });
+    })(), DOC_EXTRACTION_TIMEOUT_MS).catch(() => {
+      // Timed out (or any other rejection) — skip this document, same as an
+      // extraction error above.
+    }));
 
     await Promise.all(contentFetches);
   }

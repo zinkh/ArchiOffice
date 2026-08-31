@@ -6,7 +6,7 @@
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
 import { useMailConnections } from '../hooks/useMailConnections';
@@ -53,6 +53,15 @@ export default function Mailbox() {
   const [readTarget, setReadTarget] = useState<Message | null>(null);
   const [selectedFolders, setSelectedFolders] = useState<Partial<Record<MailProvider, string>>>({});
   const [composing, setComposing] = useState(false);
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchForm, setSearchForm] = useState({ q: '', from: '', to: '', subject: '', dateFrom: '', dateTo: '', hasAttachment: false });
+  const [searching, setSearching] = useState(false);
+  // true once a search has actually run — the message list then shows its
+  // results instead of the current folder, and pagination ("load more")
+  // is hidden since the search endpoints return a single capped batch.
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const hasSearchCriteria = Object.entries(searchForm).some(([k, v]) => (k === 'hasAttachment' ? v === true : String(v).trim() !== ''));
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -151,9 +160,89 @@ export default function Mailbox() {
 
   const selectFolder = (provider: MailProvider, folderId: string) => {
     setSelectedFolders(prev => ({ ...prev, [provider]: folderId }));
+    setIsSearchActive(false);
     if (provider === 'google') { setGmailPageToken(null); setGmailHasMore(true); }
     if (provider === 'microsoft') { setOutlookPageToken(null); setOutlookHasMore(true); }
     if (provider === 'infomaniak') { setImapLimit(PAGE_SIZE); setImapHasMore(true); }
+  };
+
+  // Advanced search — unlike loadMessages() above, each provider's /search
+  // endpoint returns one capped batch (no pageToken/nextPageToken), so
+  // results replace `messages` outright rather than appending, and "load
+  // more" is hidden for the duration (see the `hasMore` computation below).
+  const runSearch = useCallback(async () => {
+    if (!hasSearchCriteria) return;
+    setSearching(true);
+    setError(null);
+    try {
+      const base = new URLSearchParams();
+      if (searchForm.q.trim()) base.set('q', searchForm.q.trim());
+      if (searchForm.from.trim()) base.set('from', searchForm.from.trim());
+      if (searchForm.to.trim()) base.set('to', searchForm.to.trim());
+      if (searchForm.subject.trim()) base.set('subject', searchForm.subject.trim());
+      if (searchForm.dateFrom) base.set('dateFrom', searchForm.dateFrom);
+      if (searchForm.dateTo) base.set('dateTo', searchForm.dateTo);
+      if (searchForm.hasAttachment) base.set('hasAttachment', 'true');
+
+      const jobs: Promise<Message[]>[] = [];
+      if (gmailStatus.connected) {
+        const params = new URLSearchParams(base);
+        if (selectedFolders.google) params.set('folderId', selectedFolders.google);
+        jobs.push(
+          apiFetch<any[]>(`/api/gmail/search?${params.toString()}`).then(rows => rows.map(r => ({
+            provider: 'google' as const,
+            externalMessageId: r.id,
+            externalThreadId: r.threadId,
+            subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
+          })))
+        );
+      }
+      if (outlookStatus.connected) {
+        const params = new URLSearchParams(base);
+        if (selectedFolders.microsoft) params.set('folderId', selectedFolders.microsoft);
+        jobs.push(
+          apiFetch<any[]>(`/api/outlook/search?${params.toString()}`).then(rows => rows.map(r => ({
+            provider: 'microsoft' as const,
+            externalMessageId: r.id,
+            subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
+          })))
+        );
+      }
+      if (imapStatus.connected) {
+        const params = new URLSearchParams(base);
+        if (selectedFolders.infomaniak) params.set('folder', selectedFolders.infomaniak);
+        jobs.push(
+          apiFetch<any[]>(`/api/mail/imap/search?${params.toString()}`).then(rows => rows.map(r => ({
+            provider: 'infomaniak' as const,
+            externalMessageId: `${r.folder}:${r.uid}`,
+            subject: r.subject, from: r.from, to: r.to, date: r.date,
+          })))
+        );
+      }
+
+      const settled = await Promise.all(jobs);
+      const combined = settled.flat();
+      const seen = new Set<string>();
+      const deduped = combined.filter(m => {
+        const key = `${m.provider}-${m.externalMessageId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      deduped.sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0));
+      setMessages(deduped);
+      setIsSearchActive(true);
+    } catch (err: any) {
+      setError(err?.message || t('mailbox_search_error') as string);
+    } finally {
+      setSearching(false);
+    }
+  }, [searchForm, hasSearchCriteria, gmailStatus.connected, outlookStatus.connected, imapStatus.connected, selectedFolders, setError, t]);
+
+  const clearSearch = () => {
+    setIsSearchActive(false);
+    setSearchForm({ q: '', from: '', to: '', subject: '', dateFrom: '', dateTo: '', hasAttachment: false });
+    loadMessages({ append: false });
   };
 
   useEffect(() => {
@@ -177,7 +266,7 @@ export default function Mailbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFolders]);
 
-  const hasMore = (gmailStatus.connected && gmailHasMore) || (outlookStatus.connected && outlookHasMore) || (imapStatus.connected && imapHasMore);
+  const hasMore = !isSearchActive && ((gmailStatus.connected && gmailHasMore) || (outlookStatus.connected && outlookHasMore) || (imapStatus.connected && imapHasMore));
 
   const attach = async (localType: LocalType, localId: string) => {
     if (!attachTarget) return;
@@ -253,9 +342,101 @@ export default function Mailbox() {
             <button onClick={() => loadMessages({ append: false })} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
               {loading ? <IconLoader2 size={13} className="animate-spin" /> : <IconRefresh size={13} />} {t('correspondence_search')}
             </button>
+            <button
+              onClick={() => setSearchOpen(v => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
+              style={searchOpen
+                ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
+                : { border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              <IconSearch size={13} /> {t('mailbox_search_toggle')}
+            </button>
           </div>
         )}
       </div>
+
+      {anyConnected && searchOpen && (
+        <form
+          onSubmit={e => { e.preventDefault(); runSearch(); }}
+          className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 rounded-lg"
+          style={{ border: '1px solid var(--tblr-border)' }}
+        >
+          <input
+            placeholder={t('mailbox_search_query_placeholder') as string}
+            className="p-2 rounded-lg text-sm col-span-2 sm:col-span-3"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchForm.q}
+            onChange={e => setSearchForm(f => ({ ...f, q: e.target.value }))}
+          />
+          <input
+            placeholder={t('mailbox_search_from') as string}
+            className="p-2 rounded-lg text-sm"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchForm.from}
+            onChange={e => setSearchForm(f => ({ ...f, from: e.target.value }))}
+          />
+          <input
+            placeholder={t('mailbox_search_to') as string}
+            className="p-2 rounded-lg text-sm"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchForm.to}
+            onChange={e => setSearchForm(f => ({ ...f, to: e.target.value }))}
+          />
+          <input
+            placeholder={t('mailbox_search_subject') as string}
+            className="p-2 rounded-lg text-sm"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchForm.subject}
+            onChange={e => setSearchForm(f => ({ ...f, subject: e.target.value }))}
+          />
+          <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            {t('mailbox_search_date_from')}
+            <input
+              type="date"
+              className="p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              value={searchForm.dateFrom}
+              onChange={e => setSearchForm(f => ({ ...f, dateFrom: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            {t('mailbox_search_date_to')}
+            <input
+              type="date"
+              className="p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              value={searchForm.dateTo}
+              onChange={e => setSearchForm(f => ({ ...f, dateTo: e.target.value }))}
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--tblr-text)' }}>
+            <input
+              type="checkbox"
+              checked={searchForm.hasAttachment}
+              onChange={e => setSearchForm(f => ({ ...f, hasAttachment: e.target.checked }))}
+            />
+            {t('mailbox_search_has_attachment')}
+          </label>
+          <div className="col-span-2 sm:col-span-3 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={searching || !hasSearchCriteria}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
+              style={{ background: 'var(--tblr-primary)', color: 'white' }}
+            >
+              {searching && <IconLoader2 size={13} className="animate-spin" />} {t('mailbox_search_submit')}
+            </button>
+            {isSearchActive && (
+              <button type="button" onClick={clearSearch} className="text-xs hover:underline" style={{ color: 'var(--tblr-muted)' }}>
+                {t('mailbox_search_clear')}
+              </button>
+            )}
+          </div>
+          {!hasSearchCriteria && (
+            <p className="col-span-2 sm:col-span-3 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('mailbox_search_empty_criteria')}</p>
+          )}
+        </form>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {gmailStatus.connected ? (
@@ -383,8 +564,10 @@ export default function Mailbox() {
               </div>
             );
           })}
-          {messages.length === 0 && !loading && (
-            <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('correspondence_linked_empty')}</p>
+          {messages.length === 0 && !loading && !searching && (
+            <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+              {isSearchActive ? t('mailbox_search_results_empty') : t('correspondence_linked_empty')}
+            </p>
           )}
           {hasMore && messages.length > 0 && (
             <div className="flex justify-center pt-2">
