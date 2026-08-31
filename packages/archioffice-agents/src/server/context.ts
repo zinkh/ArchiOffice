@@ -258,7 +258,9 @@ export async function buildAgentContext(
       .eq('tenant_id', tenantId)
       .in('id', attachedDocumentIds);
 
-    const contentFetches = ((docs as any[]) || []).map((doc: any) => withTimeout((async () => {
+    const contentFetches = ((docs as any[]) || []).map((doc: any) => {
+      const docStart = Date.now();
+      return withTimeout((async () => {
       try {
         const lowerName = String(doc.name || '').toLowerCase();
 
@@ -308,13 +310,20 @@ export async function buildAgentContext(
           name: doc.name,
           content: text.slice(0, MAX_DOC_BYTES),
         });
-      } catch {
-        // skip unreadable documents silently
+        console.log(`[agent context] document "${doc.name}" extracted in ${Date.now() - docStart}ms (${text.length} chars)`);
+      } catch (e: any) {
+        // skip unreadable documents silently, but still log it — same
+        // reasoning as the timing logs in routes.ts: an extraction failure
+        // here was previously invisible, indistinguishable from "the
+        // document just has no useful content".
+        console.log(`[agent context] document "${doc.name}" extraction failed after ${Date.now() - docStart}ms: ${e?.message}`);
       }
     })(), DOC_EXTRACTION_TIMEOUT_MS).catch(() => {
       // Timed out (or any other rejection) — skip this document, same as an
       // extraction error above.
-    }));
+      console.log(`[agent context] document "${doc.name}" extraction timed out after ${Date.now() - docStart}ms (budget ${DOC_EXTRACTION_TIMEOUT_MS}ms)`);
+    });
+    });
 
     await Promise.all(contentFetches);
   }
