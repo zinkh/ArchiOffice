@@ -14,6 +14,36 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
+// Mirrors the `contacts` table columns in supabase/schema.sql. The web form
+// only ever sends these, so it never hits this — but the AI agent generates
+// its insert/update payload straight from a JSON schema (see AGENT_RESOURCES
+// in packages/archioffice-agents), and a field name it invents (e.g. a
+// plausible-looking "type" or "legal_form" for a company contact) would
+// otherwise reach Supabase verbatim: PostgREST rejects the whole write with
+// "column not found", which the agent then has no way to self-correct from.
+// Whitelisting silently drops anything unrecognized instead, same as a human
+// form implicitly does by only ever sending known fields.
+const CONTACT_COLUMNS = new Set([
+  'id', 'prefix', 'first_name', 'middle_name', 'last_name', 'suffix', 'nickname',
+  'company_name', 'job_title', 'department',
+  'email_work', 'email_home', 'email_other', 'email',
+  'phone_mobile', 'phone_work', 'phone_home', 'phone_main', 'phone_fax_work', 'phone_fax_home', 'phone_pager', 'phone_other', 'phone',
+  'address_work_street', 'address_work_city', 'address_work_state', 'address_work_zip', 'address_work_country',
+  'address_home_street', 'address_home_city', 'address_home_state', 'address_home_zip', 'address_home_country',
+  'address', 'zip', 'city', 'state', 'country',
+  'candidatures', 'affaires', 'logo', 'ca_amount', 'electronic_signature', 'contact_references', 'tags',
+  'category', 'notes', 'birthday', 'website', 'created_at', 'created_by',
+  'siret', 'vat_number', 'market_number', 'market_amount_base', 'market_amount_options', 'market_amount_avenants',
+]);
+
+function pickContactColumns(body: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const key of Object.keys(body || {})) {
+    if (CONTACT_COLUMNS.has(key)) out[key] = body[key];
+  }
+  return out;
+}
+
 export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   app.get("/api/contacts", async (req: any, res: any) => {
     try {
@@ -28,7 +58,7 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
     console.log("POST /api/contacts hit");
     try {
       const tenantId = await getTenantId(req.user.id);
-      const contact = req.body;
+      const contact = pickContactColumns(req.body);
       const id = contact.id || crypto.randomUUID();
       // first_name/last_name are NOT NULL columns, but a company-only contact
       // (no named person) is a valid case the UI already supports — the web
@@ -56,9 +86,10 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const contact = req.body;
-      // Strip computed/non-column fields before sending to Supabase
-      const { id: _id, tenant_id: _t, name: _name, ...updateData } = contact;
+      // pickContactColumns already strips computed/non-column fields (id,
+      // tenant_id, the derived `name`, and anything else not a real column).
+      const updateData = pickContactColumns(req.body);
+      delete updateData.id;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(updateData).eq('id', id);
       if (error) throw error;
       res.json({ success: true });
