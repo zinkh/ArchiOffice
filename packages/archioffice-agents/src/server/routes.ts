@@ -222,9 +222,15 @@ export function registerAgentRoutes(
         history: geminiHistory,
       });
       // Bounds how long a stuck/slow Gemini call can hold the request open —
-      // shorter than the client's own abort timeout so the client always gets
-      // this explicit message instead of a silent connection drop.
-      const AGENT_CHAT_TIMEOUT_MS = 55000;
+      // shorter than the client's own abort timeout (AgentChat.tsx, 130s) so
+      // the client always gets this explicit message instead of a silent
+      // connection drop. Was 55s, which cut off a plain "read this document"
+      // request (no tool calls, and the attached PDF itself parsed in well
+      // under a second — verified directly, so document size wasn't the
+      // cause here) — i.e. Gemini's own response time alone can exceed 55s
+      // on an ordinary request, not just on a large prompt or a multi-round
+      // tool-calling exchange. Widened for headroom against that.
+      const AGENT_CHAT_TIMEOUT_MS = 100000;
       const withTimeout = <T>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) =>
