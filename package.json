@@ -64,7 +64,7 @@
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "lucide-react": "^0.546.0",
+    "lucide-react": "^1.35.0",
     "mailparser": "^3.9.17",
     "mammoth": "^1.12.1",
     "maplibre-gl": "^5.19.0",
