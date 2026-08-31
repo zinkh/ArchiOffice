@@ -158,6 +158,13 @@ export function registerAgentRoutes(
 
   // POST /api/agents/:id/chat
   app.post('/api/agents/:id/chat', async (req: any, res: any) => {
+    // Neither Google's standard Gemini API (unlike Vertex AI) nor this app
+    // previously exposed per-request timing anywhere — a slow-but-successful
+    // call left no trace to diagnose after the fact, only a timeout left a
+    // (untimed) Sentry exception. These console.log lines are deliberately
+    // plain (not Sentry) so every call's timing is visible in server logs
+    // regardless of whether anything actually failed.
+    const chatRequestStart = Date.now();
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: agentId } = req.params;
@@ -195,7 +202,9 @@ export function registerAgentRoutes(
       const convId = (conv as any).id;
 
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
+      const contextStart = Date.now();
       const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, (agent as any).context_scopes || [], attachedDocumentIds);
+      console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
       const apiKey = process.env.GEMINI_API_KEY;
@@ -222,9 +231,15 @@ export function registerAgentRoutes(
         history: geminiHistory,
       });
       // Bounds how long a stuck/slow Gemini call can hold the request open —
-      // shorter than the client's own abort timeout so the client always gets
-      // this explicit message instead of a silent connection drop.
-      const AGENT_CHAT_TIMEOUT_MS = 55000;
+      // shorter than the client's own abort timeout (AgentChat.tsx, 130s) so
+      // the client always gets this explicit message instead of a silent
+      // connection drop. Was 55s, which cut off a plain "read this document"
+      // request (no tool calls, and the attached PDF itself parsed in well
+      // under a second — verified directly, so document size wasn't the
+      // cause here) — i.e. Gemini's own response time alone can exceed 55s
+      // on an ordinary request, not just on a large prompt or a multi-round
+      // tool-calling exchange. Widened for headroom against that.
+      const AGENT_CHAT_TIMEOUT_MS = 100000;
       const withTimeout = <T>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) =>
@@ -232,7 +247,26 @@ export function registerAgentRoutes(
         ),
       ]);
 
-      let result = await withTimeout(chat.sendMessage({ message }));
+      // Wraps every chat.sendMessage() call (initial, function-calling
+      // rounds, and the blank-turn clarification below) with timing so a
+      // slow-but-successful call is visible in logs, not just an eventual
+      // timeout — see the comment on chatRequestStart above.
+      let geminiCallCount = 0;
+      const timedSendMessage = async (payload: Parameters<typeof chat.sendMessage>[0]) => {
+        geminiCallCount++;
+        const callIndex = geminiCallCount;
+        const callStart = Date.now();
+        try {
+          const r = await withTimeout(chat.sendMessage(payload));
+          console.log(`[agent chat] gemini call #${callIndex} ok in ${Date.now() - callStart}ms conv=${convId} agent=${agentId}`);
+          return r;
+        } catch (e: any) {
+          console.log(`[agent chat] gemini call #${callIndex} failed after ${Date.now() - callStart}ms conv=${convId} agent=${agentId}: ${e?.code || e?.message}`);
+          throw e;
+        }
+      };
+
+      let result = await timedSendMessage({ message });
       let inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
       let outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
 
@@ -252,7 +286,7 @@ export function registerAgentRoutes(
             if (summary) actionSummaries.push(summary);
             responseParts.push({ functionResponse: { name: call.name, response } });
           }
-          result = await withTimeout(chat.sendMessage({ message: responseParts }));
+          result = await timedSendMessage({ message: responseParts });
           inputTokens  += (result as any).usageMetadata?.promptTokenCount ?? 0;
           outputTokens += (result as any).usageMetadata?.candidatesTokenCount ?? 0;
         }
@@ -270,9 +304,9 @@ export function registerAgentRoutes(
       // ask the model directly to name the real blocker in its own words.
       if (!cleanText.trim()) {
         try {
-          const clarify = await withTimeout(chat.sendMessage({
+          const clarify = await timedSendMessage({
             message: "Tu n'as donné aucune réponse à l'utilisateur pour ce message. En 1 à 2 phrases, explique précisément ce qui t'empêche de terminer cette action (l'information exacte qui te manque, ou la raison du blocage) — sans appeler à nouveau d'outil, juste du texte.",
-          }));
+          });
           inputTokens += (clarify as any).usageMetadata?.promptTokenCount ?? 0;
           outputTokens += (clarify as any).usageMetadata?.candidatesTokenCount ?? 0;
           const clarifyText = parseArtifactFromText(clarify.text ?? '').cleanText;
@@ -320,6 +354,8 @@ export function registerAgentRoutes(
 
       await supabaseAdmin.from('agent_conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId);
 
+      console.log(`[agent chat] done in ${Date.now() - chatRequestStart}ms conv=${convId} agent=${agentId} geminiCalls=${geminiCallCount} rounds=${round} tokens=${inputTokens + outputTokens}`);
+
       res.json({
         reply,
         tokens_used: inputTokens + outputTokens,
@@ -328,7 +364,7 @@ export function registerAgentRoutes(
         ...(artifact ? { artifact } : {}),
       });
     } catch (e: any) {
-      console.error('[agent chat error]', e.message);
+      console.error(`[agent chat error] ${e.message} (totalMs=${Date.now() - chatRequestStart})`);
       // Richer than captureConsoleIntegration's plain-string capture — tags
       // this by agent so failures for a specific agent are easy to isolate.
       Sentry.captureException(e, {

@@ -367,18 +367,17 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     abortReasonRef.current = null;
     // Safety net so a hung Gemini call (or dropped connection) doesn't leave
     // the user staring at the "thinking" indicator forever — the server's own
-    // per-call timeout (routes.ts's AGENT_CHAT_TIMEOUT_MS, 55s) is meant to
-    // fire first with an explicit message. But that budget only wraps each
-    // individual Gemini call: building the context (now including real
-    // document downloads/parsing) happens before it, and a multi-step
-    // function-calling exchange can chain several such calls — so the total
-    // request can legitimately run well past 55s. This backstop needs enough
-    // margin above that for those to still surface the server's own message
-    // instead of racing it.
+    // per-call timeout (routes.ts's AGENT_CHAT_TIMEOUT_MS, 100s) is meant to
+    // fire first with an explicit message. That budget wraps each individual
+    // Gemini call — a multi-round function-calling exchange chains several,
+    // so the total request can legitimately run well past 100s even with no
+    // single round anywhere near stuck. This backstop needs enough margin
+    // above that for those to still surface the server's own message instead
+    // of racing it.
     const hardTimeout = setTimeout(() => {
       abortReasonRef.current = 'timeout';
       controller.abort();
-    }, 90000);
+    }, 130000);
 
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
