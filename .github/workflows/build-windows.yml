@@ -88,7 +88,7 @@ jobs:
         run: npx electron-builder --win --x64 --publish never
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ArchiOffice-Windows-installer
           path: release/*.exe
