@@ -333,9 +333,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setEditingCell({ rowKey: rKey, field, value: String(currentValue) });
   };
 
-  const commitEdit = () => {
+  const commitEdit = (overrideValue?: string) => {
     if (!editingCell) return;
-    const { rowKey: rKey, field, value } = editingCell;
+    const { rowKey: rKey, field } = editingCell;
+    const value = overrideValue !== undefined ? overrideValue : editingCell.value;
 
     if (rKey.startsWith('ligne-')) {
       const parts = rKey.split('-');
@@ -577,10 +578,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       return (
         <CellInput
           value={editingCell.value}
-          onCommit={v => {
-            setEditingCell(prev => prev ? { ...prev, value: v } : null);
-            setTimeout(commitEdit, 0);
-          }}
+          onCommit={v => commitEdit(v)}
           className={className}
         />
       );
