@@ -7,6 +7,8 @@ import { fetchJson, apiFetch } from '../lib/api';
 import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
@@ -464,6 +466,8 @@ export default function Contacts() {
     return result;
   }, [contacts, searchQuery, filterCategory, sortConfig]);
 
+  const contactsPagination = usePagination(filteredAndSortedContacts);
+
   // Shared input style
   const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
@@ -589,7 +593,7 @@ export default function Contacts() {
         {/* Mobile accordion */}
         <div className="md:hidden">
           <MobileAccordionTable
-            data={filteredAndSortedContacts}
+            data={contactsPagination.pageItems}
             keyField="id"
             emptyText={searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}
             columns={[
@@ -655,7 +659,7 @@ export default function Contacts() {
               </tr>
             </thead>
             <tbody>
-              {filteredAndSortedContacts.map((contact) => (
+              {contactsPagination.pageItems.map((contact) => (
                 <tr key={contact.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <td className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-text)' }}>
                     <div>{contact.prefix}</div>
@@ -725,6 +729,15 @@ export default function Contacts() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={contactsPagination.currentPage}
+          totalPages={contactsPagination.totalPages}
+          totalItems={contactsPagination.totalItems}
+          pageSize={contactsPagination.pageSize}
+          onPageChange={contactsPagination.setPage}
+          className="border-t"
+          style={{ borderColor: 'var(--tblr-border)' }}
+        />
       </div>
 
       {/* Add/Edit Contact Modal */}

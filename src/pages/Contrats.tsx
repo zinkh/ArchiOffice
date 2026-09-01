@@ -13,6 +13,8 @@ import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { cn } from '../lib/utils';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -884,6 +886,8 @@ export default function Contrats() {
     return matchSearch && matchStatus && matchType;
   });
 
+  const contratsPagination = usePagination(filtered);
+
   const stats = {
     total: contrats.length,
     signes: contrats.filter(c => c.status === 'Signé').length,
@@ -971,7 +975,7 @@ export default function Contrats() {
         ) : (
           <div className="space-y-3">
             <AnimatePresence>
-              {filtered.map(contrat => (
+              {contratsPagination.pageItems.map(contrat => (
                 <motion.div
                   key={contrat.id}
                   layout
@@ -1058,6 +1062,15 @@ export default function Contrats() {
                 </motion.div>
               ))}
             </AnimatePresence>
+            <Pagination
+              currentPage={contratsPagination.currentPage}
+              totalPages={contratsPagination.totalPages}
+              totalItems={contratsPagination.totalItems}
+              pageSize={contratsPagination.pageSize}
+              onPageChange={contratsPagination.setPage}
+              className="rounded-lg"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            />
           </div>
         )}
       </div>

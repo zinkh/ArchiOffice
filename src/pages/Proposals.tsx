@@ -19,6 +19,8 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import { ProposalExportModal } from '../components/ProposalExportModal';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
 import { useMafCost } from '../hooks/useMafCost';
@@ -356,11 +358,13 @@ export default function Proposals() {
     window.location.href = `/api/proposals/${id}/export`;
   };
 
-  const filteredProposals = proposals.filter(p => 
+  const filteredProposals = proposals.filter(p =>
     p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.client_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.reference?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const proposalsPagination = usePagination(filteredProposals);
 
   const calculateFeeRatios = (feeDistribution: string | undefined) => {
     if (!feeDistribution) return { exeRatio: 1, totalRatio: 1 };
@@ -529,7 +533,7 @@ export default function Proposals() {
         {/* Mobile accordion */}
         <div className="md:hidden">
           <MobileAccordionTable
-            data={filteredProposals}
+            data={proposalsPagination.pageItems}
             keyField="id"
             emptyText={t('proposals_no_proposals')}
             columns={[
@@ -572,7 +576,7 @@ export default function Proposals() {
               </tr>
             </thead>
             <tbody>
-              {filteredProposals.map((proposal) => (
+              {proposalsPagination.pageItems.map((proposal) => (
                 <tr
                   key={proposal.id}
                   style={{ borderBottom: '1px solid var(--tblr-border)' }}
@@ -674,6 +678,15 @@ export default function Proposals() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={proposalsPagination.currentPage}
+          totalPages={proposalsPagination.totalPages}
+          totalItems={proposalsPagination.totalItems}
+          pageSize={proposalsPagination.pageSize}
+          onPageChange={proposalsPagination.setPage}
+          className="border-t"
+          style={{ borderColor: 'var(--tblr-border)' }}
+        />
       </div>
 
       <AnimatePresence>
