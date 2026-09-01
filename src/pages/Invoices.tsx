@@ -653,6 +653,7 @@ export default function Invoices() {
                   <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
+              { label: t('invoices_col_client'), render: inv => projects.find(p => p.id === inv.project_id)?.client || '---' },
               { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (

@@ -448,6 +448,7 @@ export default {
       "invoices_group_by_project": "Grouper par projet",
       "invoices_list_view": "Vue liste",
       "invoices_col_invoice_project": "Facture / Projet",
+      "invoices_col_client": "Client",
       "invoices_col_amount": "Montant",
       "invoices_col_due_date": "Date d'échéance",
       "invoices_col_status": "Statut",
