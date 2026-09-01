@@ -199,7 +199,7 @@ export function Sidebar() {
           <BrandLogo logoUrl={settings?.logoUrl} size={28} />
           <span>ArchiOffice</span>
         </Link>
-        {settings?.agencyName && (
+        {!settings?.logoUrl && settings?.agencyName && (
           <p
             className="mt-0.5 text-[11px] truncate pl-[36px]"
             style={{ color: 'var(--tblr-muted)' }}
