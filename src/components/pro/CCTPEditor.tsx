@@ -43,15 +43,15 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s;
   });
 
-  // ── Add CCTP-only items ───────────────────────────────────────────────────
+  // ── Add items (visible in DPGF by default; mark "CCTP uniquement" via the toggle) ──
   const addCCTPChapitre = (lotIdx: number) => {
     const lot = dpgf.lots[lotIdx];
     const newChap: Chapitre = {
       id: uid(),
       numero: `${lot.numero}.${lot.chapitres.length + 1}`,
-      titre: 'Nouveau chapitre CCTP',
+      titre: 'Nouveau chapitre',
       lignes: [],
-      cctpOnly: true,
+      cctpOnly: false,
       cctpDescription: '',
     };
     mutateDPGF(d => d.lots[lotIdx].chapitres.push(newChap));
@@ -64,13 +64,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     const newLigne: Ligne = {
       id: uid(),
       numero: `${chap.numero}.${chap.lignes.length + 1}`,
-      designation: 'Nouvel article CCTP',
+      designation: 'Nouvel article',
       unite: '',
       quantite: 0,
       prixUnitaire: 0,
       prixTotal: 0,
       type: 'ouvrage',
-      cctpOnly: true,
+      cctpOnly: false,
       cctpDescription: '',
       children: [],
     };
@@ -280,26 +280,26 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                               </div>
                             ))}
 
-                            {/* Add CCTP-only article under this chapter */}
+                            {/* Add a new article under this chapter (visible in DPGF by default) */}
                             <button
                               onClick={() => addCCTPLigne(li, ci)}
                               className="w-full flex items-center gap-1 pl-12 pr-2 py-0.5 text-[10px] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
                             >
                               <IconPlus size={10} />
-                              <span>Article CCTP</span>
+                              <span>Nouvel article</span>
                             </button>
                           </>
                         )}
                       </div>
                     ))}
 
-                    {/* Add CCTP-only chapter under this lot */}
+                    {/* Add a new chapter under this lot (visible in DPGF by default) */}
                     <button
                       onClick={() => addCCTPChapitre(li)}
                       className="w-full flex items-center gap-1 pl-6 pr-2 py-1 text-[10px] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
                     >
                       <IconPlus size={10} />
-                      <span>Chapitre CCTP</span>
+                      <span>Nouveau chapitre</span>
                     </button>
                   </>
                 )}

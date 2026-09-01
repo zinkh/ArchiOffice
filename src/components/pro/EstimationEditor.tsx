@@ -260,7 +260,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                   </span>
                   <span className="text-[#1e5090] font-mono shrink-0 ml-1">{formatCurrency(lot.sousTotal)}</span>
                 </button>
-                {expandedLots.has(lot.id) && lot.chapitres.map(chap => (
+                {expandedLots.has(lot.id) && lot.chapitres.filter(chap => !chap.cctpOnly).map(chap => (
                   <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
                     <span className="truncate">{chap.numero} {chap.titre}</span>
                   </div>
@@ -328,7 +328,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                     <td />
                   </tr>
 
-                  {expandedLots.has(lot.id) && lot.chapitres.map((chap, ci) => (
+                  {expandedLots.has(lot.id) && lot.chapitres.map((chap, ci) => chap.cctpOnly ? null : (
                     <React.Fragment key={chap.id}>
                       {/* Chapitre header */}
                       <tr
@@ -350,6 +350,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                       </tr>
 
                       {expandedChaps.has(chap.id) && chap.lignes.map((ligne, lgi) => {
+                        if (ligne.cctpOnly) return null;
                         const rowId = `ligne-${li}-${ci}-${lgi}`;
                         const ttc = ligne.prixTotal * (1 + dpgf.TVA / 100);
                         const margeVal = ligne.prixUnitaire > 0
