@@ -1430,38 +1430,30 @@ export default function ProjectDetail() {
         </div>
 
         <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center overflow-x-auto">
-          <div className="flex gap-0.5 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
-            {(() => {
-              const primaryContrat = linkedContratsMoe[0];
-              const includedPhases = primaryContrat
-                ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
-                : null;
-              const actualCurrentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
-              const displayedPhase = viewedPhase || actualCurrentPhase;
-              return MISSION_PHASES.filter(phase =>
-                !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
-              ).map(phase => {
-                const isDisplayed = phase === displayedPhase;
-                return (
-                  <button
-                    key={phase}
-                    type="button"
-                    // Pills only choose which phase's notes to view in the
-                    // INFOS overview — they never change the project's real
-                    // mission phase (that stays in "Modifier la fiche
-                    // complète" ▸ Phase de mission actuelle).
-                    onClick={() => { setViewedPhase(phase); setActiveTab('INFOS'); setShowFullEditor(false); }}
-                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap"
-                    style={isDisplayed
-                      ? { background: 'var(--tblr-primary)', color: '#fff' }
-                      : { color: 'var(--tblr-muted)' }}
-                  >
-                    {phase}
-                  </button>
-                );
-              });
-            })()}
-          </div>
+          {(() => {
+            const primaryContrat = linkedContratsMoe[0];
+            const includedPhases = primaryContrat
+              ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
+              : null;
+            const filteredPhases = MISSION_PHASES.filter(phase =>
+              !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
+            );
+            const actualCurrentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+            const displayedPhase = viewedPhase || actualCurrentPhase;
+            return (
+              <PhaseStepper
+                size="compact"
+                steps={filteredPhases.map(phase => ({ id: phase, label: phase }))}
+                currentId={actualCurrentPhase}
+                activeId={displayedPhase}
+                // Pills only choose which phase's notes to view in the
+                // INFOS overview — they never change the project's real
+                // mission phase (that stays in "Modifier la fiche
+                // complète" ▸ Phase de mission actuelle).
+                onSelect={id => { setViewedPhase(id as DocumentPhase); setActiveTab('INFOS'); setShowFullEditor(false); }}
+              />
+            );
+          })()}
         </div>
 
         <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
