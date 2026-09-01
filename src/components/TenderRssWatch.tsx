@@ -1,12 +1,14 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, FormEvent, ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   IconPlus, IconRss, IconTrash, IconEdit, IconX, IconRefresh, IconExternalLink,
-  IconCheck, IconEyeOff, IconAlertTriangle, IconFileText
+  IconCheck, IconEyeOff, IconAlertTriangle, IconFileText, IconMapPin, IconBuildingBank,
+  IconCurrencyEuro, IconCalendar, IconInbox
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
+import { formatCurrency } from '../lib/utils';
 import { MobileAccordionTable } from './MobileAccordionTable';
 import type { TenderRssSource, TenderRssMatch } from '../types';
 
@@ -21,6 +23,9 @@ export function TenderRssWatch() {
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const selectedMatch = matches.find(m => m.id === selectedMatchId) || null;
 
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<TenderRssSource | null>(null);
@@ -250,70 +255,122 @@ export function TenderRssWatch() {
         )}
       </div>
 
-      {/* Matches feed */}
-      <div
-        className="rounded-lg overflow-hidden"
-        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
-      >
-        <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-          <h3 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_matches_title')}</h3>
+      {/* Matches — master/detail */}
+      <div className="flex flex-col lg:flex-row items-start gap-6">
+        {/* Master list */}
+        <div
+          className="min-w-0 flex-1 rounded-lg overflow-hidden"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+        >
+          <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+            <h3 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_matches_title')}</h3>
+          </div>
+
+          {matches.length === 0 ? (
+            <div className="py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_no_matches')}</div>
+          ) : (
+            <div>
+              {matches.map(m => (
+                <div
+                  key={m.id}
+                  onClick={() => setSelectedMatchId(m.id)}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 cursor-pointer transition-colors"
+                  style={{
+                    borderBottom: '1px solid var(--tblr-border)',
+                    background: selectedMatchId === m.id ? 'var(--tblr-surface-2)' : undefined,
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {m.status === 'new' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                          {t('tender_rss_new')}
+                        </span>
+                      )}
+                      <p className="font-medium text-sm truncate" style={{ color: 'var(--tblr-text)' }}>{m.title}</p>
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
+                      {m.source_name || '---'}
+                      {m.pub_date ? ` · ${new Date(m.pub_date).toLocaleDateString('fr-FR')}` : ''}
+                      {m.ville_execution ? ` · ${m.ville_execution}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                    {m.link && (
+                      <a href={m.link} target="_blank" rel="noopener noreferrer" title={t('tender_rss_open_source')} style={{ color: 'var(--tblr-muted)' }}>
+                        <IconExternalLink size={16} />
+                      </a>
+                    )}
+                    {m.status !== 'dismissed' && m.status !== 'converted' && (
+                      <>
+                        {m.status === 'new' && (
+                          <button onClick={() => updateMatchStatus(m, 'read')} title={t('tender_rss_mark_read')} style={{ color: 'var(--tblr-muted)' }}>
+                            <IconCheck size={16} />
+                          </button>
+                        )}
+                        <button onClick={() => updateMatchStatus(m, 'dismissed')} title={t('tender_rss_dismiss')} style={{ color: 'var(--tblr-muted)' }}>
+                          <IconEyeOff size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleConvert(m)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
+                          style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                        >
+                          <IconFileText size={14} />
+                          {t('tender_rss_create_tender')}
+                        </button>
+                      </>
+                    )}
+                    {m.status === 'converted' && (
+                      <span className="text-xs font-medium" style={{ color: 'var(--tblr-success)' }}>{t('tender_rss_status_converted')}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {matches.length === 0 ? (
-          <div className="py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_no_matches')}</div>
-        ) : (
-          <div>
-            {matches.map(m => (
-              <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {m.status === 'new' && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
-                        {t('tender_rss_new')}
-                      </span>
-                    )}
-                    <p className="font-medium text-sm truncate" style={{ color: 'var(--tblr-text)' }}>{m.title}</p>
-                  </div>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
-                    {m.source_name || '---'}
-                    {m.pub_date ? ` · ${new Date(m.pub_date).toLocaleDateString('fr-FR')}` : ''}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {m.link && (
-                    <a href={m.link} target="_blank" rel="noopener noreferrer" title={t('tender_rss_open_source')} style={{ color: 'var(--tblr-muted)' }}>
-                      <IconExternalLink size={16} />
-                    </a>
-                  )}
-                  {m.status !== 'dismissed' && m.status !== 'converted' && (
-                    <>
-                      {m.status === 'new' && (
-                        <button onClick={() => updateMatchStatus(m, 'read')} title={t('tender_rss_mark_read')} style={{ color: 'var(--tblr-muted)' }}>
-                          <IconCheck size={16} />
-                        </button>
-                      )}
-                      <button onClick={() => updateMatchStatus(m, 'dismissed')} title={t('tender_rss_dismiss')} style={{ color: 'var(--tblr-muted)' }}>
-                        <IconEyeOff size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleConvert(m)}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
-                        style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                      >
-                        <IconFileText size={14} />
-                        {t('tender_rss_create_tender')}
-                      </button>
-                    </>
-                  )}
-                  {m.status === 'converted' && (
-                    <span className="text-xs font-medium" style={{ color: 'var(--tblr-success)' }}>{t('tender_rss_status_converted')}</span>
-                  )}
-                </div>
+        {/* Detail panel — large screens only */}
+        <div
+          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-2rem)] rounded-lg overflow-hidden"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+        >
+          {selectedMatch ? (
+            <>
+              <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+                <h3 className="font-semibold text-sm truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedMatch.title}</h3>
+                <button onClick={() => setSelectedMatchId(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={16} style={{ color: 'var(--tblr-muted)' }} /></button>
               </div>
-            ))}
-          </div>
-        )}
+              <div className="overflow-y-auto p-4 flex-1">
+                <MatchDetailContent match={selectedMatch} t={t} />
+              </div>
+              <MatchDetailActions match={selectedMatch} onMarkRead={updateMatchStatus} onDismiss={updateMatchStatus} onConvert={handleConvert} t={t} />
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-2 p-10 text-center flex-1" style={{ color: 'var(--tblr-muted)' }}>
+              <IconInbox size={28} className="opacity-40" />
+              <p className="text-sm">{t('tender_rss_select_hint')}</p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Detail — mobile/small-screen bottom sheet */}
+      {selectedMatch && (
+        <div className="lg:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+              <h3 className="font-semibold text-base truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedMatch.title}</h3>
+              <button onClick={() => setSelectedMatchId(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={18} style={{ color: 'var(--tblr-muted)' }} /></button>
+            </div>
+            <div className="overflow-y-auto p-5 flex-1">
+              <MatchDetailContent match={selectedMatch} t={t} />
+            </div>
+            <MatchDetailActions match={selectedMatch} onMarkRead={updateMatchStatus} onDismiss={updateMatchStatus} onConvert={handleConvert} t={t} />
+          </div>
+        </div>
+      )}
 
       {/* Source create/edit modal */}
       <AnimatePresence>
@@ -429,6 +486,109 @@ export function TenderRssWatch() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+type TFn = (key: string, opts?: Record<string, any>) => string;
+
+// ── Detail panel content — shared between the desktop sidebar and the mobile bottom sheet ──
+function MatchDetailContent({ match, t }: { match: TenderRssMatch; t: TFn }) {
+  const fields: { icon: ElementType; label: string; value: string | null }[] = [
+    { icon: IconMapPin, label: t('tender_rss_field_ville'), value: match.ville_execution ?? null },
+    { icon: IconBuildingBank, label: t('tender_rss_field_pouvoir_adjudicateur'), value: match.pouvoir_adjudicateur ?? null },
+    { icon: IconCurrencyEuro, label: t('tender_rss_field_montant'), value: match.montant_travaux ? formatCurrency(match.montant_travaux) : null },
+    { icon: IconCalendar, label: t('tender_rss_field_date_limite'), value: match.date_limite_reponse ? new Date(match.date_limite_reponse).toLocaleDateString('fr-FR') : null },
+  ].filter(f => f.value);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        {match.source_name || '---'}
+        {match.pub_date ? ` · ${new Date(match.pub_date).toLocaleDateString('fr-FR')}` : ''}
+      </p>
+
+      {fields.length > 0 && (
+        <div className="space-y-2.5 rounded-lg p-3" style={{ background: 'var(--tblr-surface-2)' }}>
+          {fields.map((f, i) => (
+            <div key={i} className="flex items-start gap-2.5">
+              <f.icon size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--tblr-muted)' }} />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{f.label}</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{f.value}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {match.description && (
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_description_label')}</p>
+          <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{match.description}</p>
+        </div>
+      )}
+
+      {match.link && (
+        <a
+          href={match.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-medium"
+          style={{ color: 'var(--tblr-primary)' }}
+        >
+          <IconExternalLink size={13} />
+          {t('tender_rss_open_source')}
+        </a>
+      )}
+    </div>
+  );
+}
+
+// ── Detail panel footer actions — shared between the desktop sidebar and the mobile bottom sheet ──
+function MatchDetailActions({
+  match, onMarkRead, onDismiss, onConvert, t,
+}: {
+  match: TenderRssMatch;
+  onMarkRead: (match: TenderRssMatch, status: 'read') => void;
+  onDismiss: (match: TenderRssMatch, status: 'dismissed') => void;
+  onConvert: (match: TenderRssMatch) => void;
+  t: TFn;
+}) {
+  if (match.status === 'converted') {
+    return (
+      <div className="flex items-center justify-center gap-2 px-4 py-3 border-t shrink-0 text-sm font-medium" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-success)' }}>
+        {t('tender_rss_status_converted')}
+      </div>
+    );
+  }
+  if (match.status === 'dismissed') return null;
+
+  return (
+    <div className="flex items-center justify-end gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
+      {match.status === 'new' && (
+        <button
+          onClick={() => onMarkRead(match, 'read')}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border transition-colors hover:bg-[var(--tblr-surface-2)]"
+          style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+        >
+          <IconCheck size={13} /> {t('tender_rss_mark_read')}
+        </button>
+      )}
+      <button
+        onClick={() => onDismiss(match, 'dismissed')}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+        style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-danger)' }}
+      >
+        <IconEyeOff size={13} /> {t('tender_rss_dismiss')}
+      </button>
+      <button
+        onClick={() => onConvert(match)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded font-medium"
+        style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+      >
+        <IconFileText size={13} /> {t('tender_rss_create_tender')}
+      </button>
     </div>
   );
 }

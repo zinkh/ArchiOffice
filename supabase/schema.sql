@@ -184,7 +184,8 @@ CREATE TABLE IF NOT EXISTS tenders (
   surface NUMERIC, construction_cost NUMERIC, honoraires_percent NUMERIC,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
   mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
-  withdrawal_deadline TEXT, archived INTEGER DEFAULT 0
+  withdrawal_deadline TEXT, archived INTEGER DEFAULT 0,
+  ville_execution TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tender_specialties (

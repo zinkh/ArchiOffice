@@ -42,7 +42,8 @@ export default function Tenders() {
     base_fee_percent: undefined,
     mandatory_visit: false,
     visit_date: '',
-    withdrawal_deadline: ''
+    withdrawal_deadline: '',
+    ville_execution: ''
   };
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
   const [filterStatus, setFilterStatus] = useState<string>('All');
@@ -244,6 +245,7 @@ export default function Tenders() {
     const XLSX = await import('xlsx');
     const rows = filteredTenders.map(t => ({
       'Titre': t.title,
+      'Ville d\'exécution': t.ville_execution || '',
       'Client': t.client || '',
       'Statut': t.status || '',
       'Type': t.type || '',
@@ -757,6 +759,15 @@ export default function Tenders() {
                       <option value="MAPA">MAPA</option>
                       <option value="Other">Other</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_ville_execution_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      value={newTender.ville_execution || ''}
+                      onChange={e => setNewTender({...newTender, ville_execution: e.target.value})}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_surface_m2_label')}</label>

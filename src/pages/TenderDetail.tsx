@@ -1,15 +1,16 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  IconArrowLeft, 
-  IconBuildingSkyscraper, 
-  IconUsers, 
-  IconCalendar, 
+import {
+  IconArrowLeft,
+  IconBuildingSkyscraper,
+  IconUsers,
+  IconCalendar,
   IconCurrencyEuro,
   IconPlus,
   IconTrash,
-  IconUserPlus
+  IconUserPlus,
+  IconMapPin
 } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { fetchJson } from '../lib/api';
@@ -199,6 +200,32 @@ export default function TenderDetail() {
             </div>
           </div>
         </div>
+        {tender.ville_execution && (
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/20 rounded-xl flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <IconMapPin size={24} />
+              </div>
+              <div>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_ville_execution')}</p>
+                <p className="text-xl font-bold text-zinc-900 dark:text-white">{tender.ville_execution}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        {!!tender.construction_cost && (
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-cyan-50 dark:bg-cyan-900/20 rounded-xl flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                <IconCurrencyEuro size={24} />
+              </div>
+              <div>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('tenders_detail_construction_cost')}</p>
+                <p className="text-xl font-bold text-zinc-900 dark:text-white">{formatCurrency(tender.construction_cost)}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Org Chart Section */}

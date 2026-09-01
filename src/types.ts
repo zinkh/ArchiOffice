@@ -509,6 +509,7 @@ export interface Tender {
   specialties_list?: TenderSpecialty[];
   milestones_list?: Milestone[];
   archived?: boolean;
+  ville_execution?: string;
 }
 
 export interface TenderRssSource {
@@ -532,6 +533,12 @@ export interface TenderRssMatch {
   pub_date?: string | null;
   status: 'new' | 'read' | 'dismissed' | 'converted';
   tender_id?: string | null;
+  // Best-effort BOAMP-style fields extracted from the description at ingest
+  // time (server/tenderFieldExtractor.ts) — absent when nothing was found.
+  ville_execution?: string | null;
+  pouvoir_adjudicateur?: string | null;
+  montant_travaux?: number | null;
+  date_limite_reponse?: string | null;
 }
 
 export interface Specification {
