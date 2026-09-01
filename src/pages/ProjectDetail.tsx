@@ -169,6 +169,10 @@ export default function ProjectDetail() {
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  // Guards the mission→milestone sync effect below: without it, that effect
+  // can run before fetchFullProject's milestones arrive, see an empty list,
+  // and recreate every included mission as a fresh duplicate milestone.
+  const [milestonesLoaded, setMilestonesLoaded] = useState(false);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
   const [visas, setVisas] = useState<Visa[]>([]);
@@ -301,6 +305,7 @@ export default function ProjectDetail() {
     // and the mission→milestone sync below both need this regardless of
     // whether the user has opened the HONOS tab yet.
     if (id) {
+      setLinkedContratsMoe([]);
       fetch('/api/contrats_moe')
         .then(r => r.json())
         .then((all: any[]) => setLinkedContratsMoe((all || []).filter((c: any) => c.project_id === id)))
@@ -313,8 +318,16 @@ export default function ProjectDetail() {
   // principle used for proposal milestones in Proposals.tsx's FeeDistributionGrid).
   useEffect(() => {
     if (!id) return;
+    // Wait for fetchFullProject's own milestones to have loaded — otherwise
+    // this effect sees an empty `milestones` list, believes none of the
+    // included missions exist yet, and recreates them as duplicates.
+    if (!milestonesLoaded) return;
     const primaryContrat = linkedContratsMoe[0];
-    if (!primaryContrat) return;
+    // linkedContratsMoe can still hold the previously viewed project's data
+    // for a moment after `id` changes (its own fetch effect hasn't resolved
+    // yet), so without this check a newly opened project would briefly
+    // inherit — and permanently persist — the previous project's milestones.
+    if (!primaryContrat || primaryContrat.project_id !== id) return;
     const includedMissions: any[] = (primaryContrat.missions_list || []).filter((m: any) => m.incluse);
     if (includedMissions.length === 0) return;
 
@@ -340,7 +353,7 @@ export default function ProjectDetail() {
           .catch(console.error);
       }
     });
-  }, [linkedContratsMoe, id]);
+  }, [linkedContratsMoe, id, milestonesLoaded]);
 
   useEffect(() => {
     if (activeTab === 'HONOS' && id) {
@@ -353,6 +366,7 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     if (id) {
+      setMilestonesLoaded(false);
       fetchFullProject();
       fetchCategories();
       fetchContacts();
@@ -462,6 +476,7 @@ export default function ProjectDetail() {
           is_chantier: isFlagTrue(data.project.is_chantier),
         });
         setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+        setMilestonesLoaded(true);
         setInvoices(data.invoices);
         setSpecifications(data.specifications);
         setOrdresDeService(data.ordres_de_service);
