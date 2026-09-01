@@ -106,8 +106,10 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
       const tenderId = crypto.randomUUID();
       const notes = [match.link, match.description].filter(Boolean).join('\n\n');
       const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({
-        id: tenderId, title: match.title, client: '',
-        submission_deadline: '', status: 'Draft', value: 0, notes, archived: false
+        id: tenderId, title: match.title, client: match.pouvoir_adjudicateur || '',
+        submission_deadline: match.date_limite_reponse || '', status: 'Draft', value: 0,
+        construction_cost: match.montant_travaux || null, ville_execution: match.ville_execution || null,
+        notes, archived: false
       });
       if (te) throw te;
 

@@ -15,6 +15,8 @@ import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { ProjectCardSkeletonGrid, ErrorState } from '../components/DataState';
 import { Link } from 'react-router-dom';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 export default function Projects() {
   const { t } = useTranslation();
@@ -180,6 +182,8 @@ export default function Projects() {
     }
     return 0;
   });
+
+  const projectsPagination = usePagination(filteredProjects);
 
   const requestSort = (key: keyof Project) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -653,7 +657,7 @@ export default function Projects() {
         <ProjectCardSkeletonGrid />
       ) : projectsError && projects.length === 0 ? null : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {filteredProjects.map((project, i) => (
+          {projectsPagination.pageItems.map((project, i) => (
             <motion.div
               key={project.id}
               initial={{ opacity: 0, scale: 0.97 }}
@@ -770,7 +774,7 @@ export default function Projects() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProjects.map((project) => (
+                {projectsPagination.pageItems.map((project) => (
                   <tr
                     key={project.id}
                     onClick={() => handleProjectClick(project)}
@@ -798,6 +802,16 @@ export default function Projects() {
           </div>
         </div>
       )}
+
+      <Pagination
+        currentPage={projectsPagination.currentPage}
+        totalPages={projectsPagination.totalPages}
+        totalItems={projectsPagination.totalItems}
+        pageSize={projectsPagination.pageSize}
+        onPageChange={projectsPagination.setPage}
+        className="rounded-lg"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+      />
 
       <AnimatePresence>
         {isModalOpen && selectedProject && (

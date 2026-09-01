@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import axios from 'axios';
 import Parser from 'rss-parser';
 import iconv from 'iconv-lite';
+import { extractTenderFields } from './tenderFieldExtractor';
 
 const DEFAULT_INTERVAL_MINUTES = 30;
 const FETCH_TIMEOUT_MS = 15000;
@@ -63,17 +64,25 @@ async function pollSource(supabaseAdmin: SupabaseClient, source: TenderRssSource
 
     const rows = (feed.items || [])
       .filter(item => matchesKeywords(`${item.title || ''} ${item.contentSnippet || item.content || ''}`, includeKeywords, excludeKeywords))
-      .map(item => ({
-        id: randomUUID(),
-        tenant_id: source.tenant_id,
-        source_id: source.id,
-        guid: item.guid || item.link || item.title || randomUUID(),
-        title: item.title || '(sans titre)',
-        link: item.link || null,
-        description: item.contentSnippet || item.content || null,
-        pub_date: item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : null),
-        status: 'new' as const,
-      }));
+      .map(item => {
+        const description = item.contentSnippet || item.content || null;
+        const extracted = extractTenderFields(description);
+        return {
+          id: randomUUID(),
+          tenant_id: source.tenant_id,
+          source_id: source.id,
+          guid: item.guid || item.link || item.title || randomUUID(),
+          title: item.title || '(sans titre)',
+          link: item.link || null,
+          description,
+          pub_date: item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : null),
+          status: 'new' as const,
+          ville_execution: extracted.ville_execution || null,
+          pouvoir_adjudicateur: extracted.pouvoir_adjudicateur || null,
+          montant_travaux: extracted.montant_travaux ?? null,
+          date_limite_reponse: extracted.date_limite_reponse || null,
+        };
+      });
 
     if (rows.length) {
       await supabaseAdmin.from('tender_rss_matches').upsert(rows, { onConflict: 'source_id,guid', ignoreDuplicates: true });

@@ -13,6 +13,8 @@ import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 export default function Tenders() {
   const { t } = useTranslation();
@@ -40,7 +42,8 @@ export default function Tenders() {
     base_fee_percent: undefined,
     mandatory_visit: false,
     visit_date: '',
-    withdrawal_deadline: ''
+    withdrawal_deadline: '',
+    ville_execution: ''
   };
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
   const [filterStatus, setFilterStatus] = useState<string>('All');
@@ -225,6 +228,9 @@ export default function Tenders() {
   const activeTenders = sortedTenders.filter(t => !t.archived);
   const archivedTenders = sortedTenders.filter(t => t.archived);
 
+  const activePagination = usePagination(activeTenders);
+  const archivedPagination = usePagination(archivedTenders);
+
   const handleOpenCreateModal = () => {
     setEditingTender(null);
     setNewTender(initialTenderState);
@@ -239,6 +245,7 @@ export default function Tenders() {
     const XLSX = await import('xlsx');
     const rows = filteredTenders.map(t => ({
       'Titre': t.title,
+      'Ville d\'exécution': t.ville_execution || '',
       'Client': t.client || '',
       'Statut': t.status || '',
       'Type': t.type || '',
@@ -380,7 +387,7 @@ export default function Tenders() {
         {/* Mobile accordion */}
         <div className="md:hidden">
           <MobileAccordionTable
-            data={activeTenders}
+            data={activePagination.pageItems}
             keyField="id"
             emptyText={t('tenders_no_active')}
             columns={[
@@ -427,7 +434,7 @@ export default function Tenders() {
               </tr>
             </thead>
             <tbody style={{ borderTop: '1px solid var(--tblr-border)' }}>
-              {activeTenders.map((tender) => (
+              {activePagination.pageItems.map((tender) => (
                 <tr
                   key={tender.id}
                   className="transition-colors"
@@ -548,6 +555,15 @@ export default function Tenders() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={activePagination.currentPage}
+          totalPages={activePagination.totalPages}
+          totalItems={activePagination.totalItems}
+          pageSize={activePagination.pageSize}
+          onPageChange={activePagination.setPage}
+          className="border-t"
+          style={{ borderColor: 'var(--tblr-border)' }}
+        />
       </div>
 
       {archivedTenders.length > 0 && (
@@ -573,7 +589,7 @@ export default function Tenders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {archivedTenders.map((tender) => (
+                  {archivedPagination.pageItems.map((tender) => (
                     <tr
                       key={tender.id}
                       className="transition-colors"
@@ -650,6 +666,15 @@ export default function Tenders() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={archivedPagination.currentPage}
+              totalPages={archivedPagination.totalPages}
+              totalItems={archivedPagination.totalItems}
+              pageSize={archivedPagination.pageSize}
+              onPageChange={archivedPagination.setPage}
+              className="border-t"
+              style={{ borderColor: 'var(--tblr-border)' }}
+            />
           </div>
         </div>
       )}
@@ -734,6 +759,15 @@ export default function Tenders() {
                       <option value="MAPA">MAPA</option>
                       <option value="Other">Other</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_ville_execution_label')}</label>
+                    <input
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      value={newTender.ville_execution || ''}
+                      onChange={e => setNewTender({...newTender, ville_execution: e.target.value})}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_surface_m2_label')}</label>

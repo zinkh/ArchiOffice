@@ -8,6 +8,8 @@ import type { Invoice, InvoicePhase, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
@@ -538,6 +540,13 @@ export default function Invoices() {
     return acc;
   }, {} as Record<string, { name: string; invoices: Invoice[] }>);
 
+  const groupedInvoicesEntries = Object.entries(groupedInvoices);
+
+  // Flat/mobile view paginates individual invoices; the grouped desktop
+  // view paginates by project (a group can be expanded/collapsed as a unit).
+  const invoicesPagination = usePagination(sortedInvoices);
+  const groupsPagination = usePagination(groupedInvoicesEntries);
+
   const SortIcon = ({ column }: { column: keyof Invoice | 'project_name' }) => {
     if (sortConfig?.key !== column) return <IconArrowsSort size={14} className="opacity-20 group-hover:opacity-50 transition-opacity" />;
     return sortConfig.direction === 'asc'
@@ -642,7 +651,7 @@ export default function Invoices() {
         {/* Mobile accordion */}
         <div className="md:hidden">
           <MobileAccordionTable
-            data={sortedInvoices}
+            data={invoicesPagination.pageItems}
             keyField="id"
             emptyText={t('invoices_no_invoices')}
             columns={[
@@ -666,6 +675,15 @@ export default function Invoices() {
                 {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
+          />
+          <Pagination
+            currentPage={invoicesPagination.currentPage}
+            totalPages={invoicesPagination.totalPages}
+            totalItems={invoicesPagination.totalItems}
+            pageSize={invoicesPagination.pageSize}
+            onPageChange={invoicesPagination.setPage}
+            className="border-t"
+            style={{ borderColor: 'var(--tblr-border)' }}
           />
         </div>
 
@@ -719,7 +737,7 @@ export default function Invoices() {
             </thead>
             <tbody>
               {isGroupedByProject ? (
-                Object.entries(groupedInvoices).map(([projectId, group]) => (
+                groupsPagination.pageItems.map(([projectId, group]) => (
                   <React.Fragment key={projectId}>
                     <tr
                       className="cursor-pointer transition-colors group/header"
@@ -866,7 +884,7 @@ export default function Invoices() {
                   </React.Fragment>
                 ))
               ) : (
-                sortedInvoices.map((invoice) => (
+                invoicesPagination.pageItems.map((invoice) => (
                   <tr key={invoice.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -1001,6 +1019,15 @@ export default function Invoices() {
               )}
             </tbody>
           </table>
+          <Pagination
+            currentPage={isGroupedByProject ? groupsPagination.currentPage : invoicesPagination.currentPage}
+            totalPages={isGroupedByProject ? groupsPagination.totalPages : invoicesPagination.totalPages}
+            totalItems={isGroupedByProject ? groupsPagination.totalItems : invoicesPagination.totalItems}
+            pageSize={isGroupedByProject ? groupsPagination.pageSize : invoicesPagination.pageSize}
+            onPageChange={isGroupedByProject ? groupsPagination.setPage : invoicesPagination.setPage}
+            className="border-t"
+            style={{ borderColor: 'var(--tblr-border)' }}
+          />
         </div>
       </div>
 

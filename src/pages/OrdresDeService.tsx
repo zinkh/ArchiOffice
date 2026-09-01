@@ -11,6 +11,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
+import { Pagination } from '../components/ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -316,6 +318,8 @@ export default function OrdresDeService() {
     return true;
   });
 
+  const osPagination = usePagination(filtered);
+
   // Stats
   const stats = {
     total: osList.length,
@@ -423,7 +427,7 @@ export default function OrdresDeService() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(os => {
+                {osPagination.pageItems.map(os => {
                   const project = projects.find(p => p.id === os.project_id);
                   return (
                     <tr key={os.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}
@@ -537,6 +541,15 @@ export default function OrdresDeService() {
                 })}
               </tbody>
             </table>
+            <Pagination
+              currentPage={osPagination.currentPage}
+              totalPages={osPagination.totalPages}
+              totalItems={osPagination.totalItems}
+              pageSize={osPagination.pageSize}
+              onPageChange={osPagination.setPage}
+              className="border-t"
+              style={{ borderColor: 'var(--tblr-border)' }}
+            />
           </div>
         )}
       </div>
