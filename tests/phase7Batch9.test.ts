@@ -156,6 +156,43 @@ describe('Tender RSS', () => {
     const matches = await request(app).get('/api/tender-rss-matches').set(authHeader(token));
     expect(matches.body.some((m: any) => m.id === 'match-b')).toBe(false);
   });
+
+  it('watches a match, then bulk-deletes matches scoped to the caller\'s tenant only', async () => {
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+    fakeSupabaseAdmin.seed('tender_rss_matches', [
+      { id: 'bd1', tenant_id: tenantA, title: 'À conserver', status: 'new' },
+      { id: 'bd2', tenant_id: tenantA, title: 'À supprimer 1', status: 'new' },
+      { id: 'bd3', tenant_id: tenantA, title: 'À supprimer 2', status: 'read' },
+    ]);
+    const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('tender_rss_matches', [{ id: 'bd-b', tenant_id: tenantB, title: 'SECRET-MATCH-B', status: 'new' }]);
+
+    // "Surveiller" — the status transition the RSS Watch tab's watch button
+    // relies on to move a match into the "Annonces sélectionnées" tab.
+    const watched = await request(app).put('/api/tender-rss-matches/bd1').set(authHeader(token)).send({ status: 'watched' });
+    expect(watched.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('tender_rss_matches').find(m => m.id === 'bd1')?.status).toBe('watched');
+
+    // A tenant A caller must never be able to bulk-delete tenant B's rows,
+    // even by explicitly naming their id.
+    const bulkDeleted = await request(app).post('/api/tender-rss-matches/bulk-delete').set(authHeader(token)).send({ ids: ['bd2', 'bd3', 'bd-b'] });
+    expect(bulkDeleted.status).toBe(200);
+    expect(bulkDeleted.body.count).toBe(3);
+
+    const remaining = fakeSupabaseAdmin.getTable('tender_rss_matches').map(m => m.id);
+    expect(remaining).toContain('bd1');
+    expect(remaining).not.toContain('bd2');
+    expect(remaining).not.toContain('bd3');
+    expect(remaining).toContain('bd-b');
+  });
+
+  it('rejects a bulk-delete request with no ids', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/tender-rss-matches/bulk-delete').set(authHeader(token)).send({ ids: [] });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('Milestones', () => {

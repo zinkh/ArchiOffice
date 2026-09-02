@@ -531,8 +531,11 @@ export interface TenderRssMatch {
   link?: string | null;
   description?: string | null;
   pub_date?: string | null;
-  status: 'new' | 'read' | 'dismissed' | 'converted';
+  // 'watched' = surveillée par l'utilisateur (onglet "Annonces sélectionnées"),
+  // seul état à partir duquel la conversion en appel d'offres est proposée.
+  status: 'new' | 'read' | 'dismissed' | 'watched' | 'converted';
   tender_id?: string | null;
+  created_at?: string;
   // Best-effort BOAMP-style fields extracted from the description at ingest
   // time (server/tenderFieldExtractor.ts) — absent when nothing was found.
   ville_execution?: string | null;

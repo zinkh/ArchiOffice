@@ -96,6 +96,19 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS match" }); }
   });
 
+  app.post("/api/tender-rss-matches/bulk-delete", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids requis" });
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_rss_matches').delete().in('id', ids);
+      if (error) throw error;
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Suppression de ${ids.length} annonce(s) de veille RSS`, '', '', 'tender_rss_match', 'Appels d\'offres');
+      res.json({ success: true, count: ids.length });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to bulk delete tender RSS matches: " + e.message }); }
+  });
+
   app.post("/api/tender-rss-matches/:id/convert", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
