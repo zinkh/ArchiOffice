@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, ElementType } from 'react';
+import { useState, useEffect, useRef, FormEvent, ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   IconPlus, IconRss, IconTrash, IconEdit, IconX, IconRefresh, IconExternalLink,
@@ -10,7 +10,11 @@ import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
 import { formatCurrency } from '../lib/utils';
 import { MobileAccordionTable } from './MobileAccordionTable';
+import { Pagination } from './ui/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import type { TenderRssSource, TenderRssMatch } from '../types';
+
+const DISMISS_UNDO_MS = 10000;
 
 const emptySourceForm = { name: '', url: '', enabled: true, includeKeywordsText: '', excludeKeywordsText: '' };
 
@@ -22,7 +26,8 @@ export function TenderRssWatch() {
   const [matches, setMatches] = useState<TenderRssMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error'; action?: { label: string; onClick: () => void } } | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const selectedMatch = matches.find(m => m.id === selectedMatchId) || null;
@@ -31,10 +36,19 @@ export function TenderRssWatch() {
   const [editingSource, setEditingSource] = useState<TenderRssSource | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [isSaving, setIsSaving] = useState(false);
+  const [pageSize, setPageSize] = useState(50);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+  const visibleMatches = matches.filter(m => m.status !== 'dismissed');
+  const matchesPagination = usePagination(visibleMatches, pageSize);
+
+  const showToast = (
+    message: string,
+    type: 'success' | 'error' = 'success',
+    opts?: { duration?: number; action?: { label: string; onClick: () => void } }
+  ) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, type, action: opts?.action });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), opts?.duration ?? 3500);
   };
 
   const fetchSources = () => fetchJson<TenderRssSource[]>('/api/tender-rss-sources').then(setSources);
@@ -117,9 +131,39 @@ export function TenderRssWatch() {
   };
 
   const updateMatchStatus = async (match: TenderRssMatch, status: 'read' | 'dismissed') => {
+    if (status === 'dismissed') {
+      await handleDismiss(match);
+      return;
+    }
     try {
       await apiFetch(`/api/tender-rss-matches/${match.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
       setMatches(prev => prev.map(m => m.id === match.id ? { ...m, status } : m));
+    } catch (err: any) {
+      showToast(err?.message || t('tender_rss_save_error'), 'error');
+    }
+  };
+
+  const handleDismiss = async (match: TenderRssMatch) => {
+    const previousStatus = match.status;
+    try {
+      await apiFetch(`/api/tender-rss-matches/${match.id}`, { method: 'PUT', body: JSON.stringify({ status: 'dismissed' }) });
+      setMatches(prev => prev.map(m => m.id === match.id ? { ...m, status: 'dismissed' } : m));
+      setSelectedMatchId(prev => prev === match.id ? null : prev);
+      showToast(t('tender_rss_dismissed_toast', { title: match.title }), 'success', {
+        duration: DISMISS_UNDO_MS,
+        action: { label: t('tender_rss_undo'), onClick: () => handleUndoDismiss(match, previousStatus) }
+      });
+    } catch (err: any) {
+      showToast(err?.message || t('tender_rss_save_error'), 'error');
+    }
+  };
+
+  const handleUndoDismiss = async (match: TenderRssMatch, previousStatus: TenderRssMatch['status']) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast(null);
+    try {
+      await apiFetch(`/api/tender-rss-matches/${match.id}`, { method: 'PUT', body: JSON.stringify({ status: previousStatus }) });
+      setMatches(prev => prev.map(m => m.id === match.id ? { ...m, status: previousStatus } : m));
     } catch (err: any) {
       showToast(err?.message || t('tender_rss_save_error'), 'error');
     }
@@ -262,15 +306,30 @@ export function TenderRssWatch() {
           className="min-w-0 flex-1 rounded-lg overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
-          <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             <h3 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_matches_title')}</h3>
+            {visibleMatches.length > 0 && (
+              <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                {t('tender_rss_page_size_label')}
+                <select
+                  value={pageSize}
+                  onChange={e => setPageSize(Number(e.target.value))}
+                  className="px-2 py-1 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                {t('tender_rss_page_size_suffix')}
+              </label>
+            )}
           </div>
 
-          {matches.length === 0 ? (
+          {visibleMatches.length === 0 ? (
             <div className="py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_no_matches')}</div>
           ) : (
             <div>
-              {matches.map(m => (
+              {matchesPagination.pageItems.map(m => (
                 <div
                   key={m.id}
                   onClick={() => setSelectedMatchId(m.id)}
@@ -327,6 +386,14 @@ export function TenderRssWatch() {
                   </div>
                 </div>
               ))}
+              <Pagination
+                currentPage={matchesPagination.currentPage}
+                totalPages={matchesPagination.totalPages}
+                totalItems={matchesPagination.totalItems}
+                pageSize={matchesPagination.pageSize}
+                onPageChange={matchesPagination.setPage}
+                style={{ borderTop: '1px solid var(--tblr-border)' }}
+              />
             </div>
           )}
         </div>
@@ -483,6 +550,14 @@ export function TenderRssWatch() {
           >
             {toast.type === 'error' ? <IconAlertTriangle size={16} /> : null}
             {toast.message}
+            {toast.action && (
+              <button
+                onClick={toast.action.onClick}
+                className="ml-1 underline underline-offset-2 font-semibold shrink-0"
+              >
+                {toast.action.label}
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

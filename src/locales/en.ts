@@ -580,6 +580,10 @@ export default {
       "tender_rss_field_montant": "Estimated works amount",
       "tender_rss_field_date_limite": "Submission deadline",
       "tender_rss_description_label": "Description",
+      "tender_rss_dismissed_toast": "Item \"{{title}}\" dismissed",
+      "tender_rss_undo": "Undo",
+      "tender_rss_page_size_label": "Show",
+      "tender_rss_page_size_suffix": "items",
 
       // Tender Detail
       "tenders_not_found": "Tender not found",

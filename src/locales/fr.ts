@@ -580,6 +580,10 @@ export default {
       "tender_rss_field_montant": "Montant des travaux",
       "tender_rss_field_date_limite": "Date limite de réponse",
       "tender_rss_description_label": "Description",
+      "tender_rss_dismissed_toast": "Annonce \"{{title}}\" ignorée",
+      "tender_rss_undo": "Annuler",
+      "tender_rss_page_size_label": "Afficher",
+      "tender_rss_page_size_suffix": "annonces",
 
       // Tender Detail
       "tenders_not_found": "Appel d'offres introuvable",
