@@ -6,6 +6,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { pollAllTenderRssSources, matchesKeywords } from '../tenderRssPoller';
 import { BOAMP_API_URL, fetchBoampRecords, normalizeBoampConfig, boampKeywordText, mapBoampRecord } from '../tenderBoampConnector';
+import { TED_API_URL, fetchTedNotices, normalizeTedConfig, tedKeywordText, mapTedNotice } from '../tenderTedConnector';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -14,19 +15,30 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
-type SourceType = 'rss' | 'boamp';
+type SourceType = 'rss' | 'boamp' | 'ted';
+type ConnectorType = Exclude<SourceType, 'rss'>;
 
 function parseSourceType(raw: unknown): SourceType {
-  return raw === 'boamp' ? 'boamp' : 'rss';
+  return raw === 'boamp' || raw === 'ted' ? raw : 'rss';
 }
 
-// Préférence par cabinet (Paramètres > Marketplace > BOAMP). Une colonne
-// absente (migration non appliquée) ou une ligne settings manquante vaut
-// « désactivé ».
-async function isBoampEnabled(supabaseAdmin: any, tenantId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.from('settings').select('tender_boamp_enabled').eq('tenant_id', tenantId).maybeSingle();
+const CONNECTORS: Record<ConnectorType, { column: 'tender_boamp_enabled' | 'tender_ted_enabled'; label: string; apiUrl: string }> = {
+  boamp: { column: 'tender_boamp_enabled', label: 'BOAMP', apiUrl: BOAMP_API_URL },
+  ted: { column: 'tender_ted_enabled', label: 'TED', apiUrl: TED_API_URL },
+};
+
+// Préférence par cabinet (Paramètres > Marketplace > BOAMP / TED). Une
+// colonne absente (migration non appliquée) ou une ligne settings manquante
+// vaut « désactivé ».
+async function isConnectorEnabled(supabaseAdmin: any, tenantId: string, connector: ConnectorType): Promise<boolean> {
+  const { column } = CONNECTORS[connector];
+  const { data, error } = await supabaseAdmin.from('settings').select(column).eq('tenant_id', tenantId).maybeSingle();
   if (error) return false;
-  return !!data?.tender_boamp_enabled;
+  return !!data?.[column];
+}
+
+function disabledMessage(connector: ConnectorType): string {
+  return `Le connecteur ${CONNECTORS[connector].label} est désactivé pour ce cabinet (Paramètres > Marketplace > ${CONNECTORS[connector].label})`;
 }
 
 /**
@@ -42,14 +54,15 @@ async function buildSourcePayload(supabaseAdmin: any, tenantId: string, body: an
   const include_keywords = Array.isArray(body?.include_keywords) ? body.include_keywords : [];
   const exclude_keywords = Array.isArray(body?.exclude_keywords) ? body.exclude_keywords : [];
 
-  if (source_type === 'boamp') {
-    if (!(await isBoampEnabled(supabaseAdmin, tenantId))) {
-      return { error: { status: 403, message: 'Le connecteur BOAMP est désactivé pour ce cabinet (Paramètres > Marketplace > BOAMP)' } };
+  if (source_type === 'boamp' || source_type === 'ted') {
+    if (!(await isConnectorEnabled(supabaseAdmin, tenantId, source_type))) {
+      return { error: { status: 403, message: disabledMessage(source_type) } };
     }
     return {
       payload: {
-        name, url: BOAMP_API_URL, source_type,
-        boamp_config: normalizeBoampConfig(body?.boamp_config),
+        name, url: CONNECTORS[source_type].apiUrl, source_type,
+        boamp_config: source_type === 'boamp' ? normalizeBoampConfig(body?.boamp_config) : {},
+        ted_config: source_type === 'ted' ? normalizeTedConfig(body?.ted_config) : {},
         include_keywords, exclude_keywords,
       },
     };
@@ -57,7 +70,44 @@ async function buildSourcePayload(supabaseAdmin: any, tenantId: string, body: an
 
   const url = typeof body?.url === 'string' ? body.url.trim() : '';
   if (!url) return { error: { status: 400, message: "L'URL du flux RSS est requise" } };
-  return { payload: { name, url, source_type, boamp_config: {}, include_keywords, exclude_keywords } };
+  return { payload: { name, url, source_type, boamp_config: {}, ted_config: {}, include_keywords, exclude_keywords } };
+}
+
+interface PreviewResult {
+  count: number;
+  api_total: number | null;
+  degraded: boolean;
+  jours_recents: number;
+  sample: { title: string; pouvoir_adjudicateur: string | null; date_limite_reponse: string | null; link: string | null }[];
+}
+
+// Aperçu des critères d'un connecteur avant enregistrement : interroge l'API
+// avec la configuration saisie (deux pages au plus) et renvoie le nombre
+// d'avis retenus après filtres locaux et mots-clés, plus un échantillon.
+async function previewConnector(connector: ConnectorType, tenantId: string, body: any): Promise<PreviewResult> {
+  const includeKeywords = Array.isArray(body?.include_keywords) ? body.include_keywords : [];
+  const excludeKeywords = Array.isArray(body?.exclude_keywords) ? body.exclude_keywords : [];
+  const previewSource = { id: 'preview', tenant_id: tenantId };
+
+  if (connector === 'boamp') {
+    const config = normalizeBoampConfig(body?.boamp_config);
+    const { records, apiTotal, degraded } = await fetchBoampRecords(config, { maxPages: 2 });
+    const kept = records.filter(r => matchesKeywords(boampKeywordText(r), includeKeywords, excludeKeywords));
+    const sample = kept.slice(0, 5).map(r => mapBoampRecord(r, previewSource));
+    return {
+      count: kept.length, api_total: apiTotal, degraded, jours_recents: config.jours_recents,
+      sample: sample.map(row => ({ title: row.title, pouvoir_adjudicateur: row.pouvoir_adjudicateur, date_limite_reponse: row.date_limite_reponse, link: row.link })),
+    };
+  }
+
+  const config = normalizeTedConfig(body?.ted_config);
+  const { notices, apiTotal, degraded } = await fetchTedNotices(config, { maxPages: 2 });
+  const kept = notices.filter(n => matchesKeywords(tedKeywordText(n), includeKeywords, excludeKeywords));
+  const sample = kept.slice(0, 5).map(n => mapTedNotice(n, previewSource));
+  return {
+    count: kept.length, api_total: apiTotal, degraded, jours_recents: config.jours_recents,
+    sample: sample.map(row => ({ title: row.title, pouvoir_adjudicateur: row.pouvoir_adjudicateur, date_limite_reponse: row.date_limite_reponse, link: row.link })),
+  };
 }
 
 export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
@@ -81,7 +131,8 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
       });
       if (error) throw error;
       const name = String(built.payload!.name);
-      const label = built.payload!.source_type === 'boamp' ? 'source BOAMP' : 'source de veille RSS';
+      const type = built.payload!.source_type as SourceType;
+      const label = type === 'rss' ? 'source de veille RSS' : `source ${CONNECTORS[type].label}`;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Ajout de la ${label} "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
       res.status(201).json({ id });
@@ -102,27 +153,17 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS source: " + e.message }); }
   });
 
-  // Aperçu des critères BOAMP avant enregistrement : interroge l'API avec la
-  // configuration saisie (une page) et renvoie le nombre d'avis retenus après
-  // filtres locaux et mots-clés, plus un échantillon.
-  app.post("/api/tender-rss-sources/boamp/preview", async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      if (!(await isBoampEnabled(supabaseAdmin, tenantId))) {
-        return res.status(403).json({ error: 'Le connecteur BOAMP est désactivé pour ce cabinet (Paramètres > Marketplace > BOAMP)' });
-      }
-      const config = normalizeBoampConfig(req.body?.boamp_config);
-      const includeKeywords = Array.isArray(req.body?.include_keywords) ? req.body.include_keywords : [];
-      const excludeKeywords = Array.isArray(req.body?.exclude_keywords) ? req.body.exclude_keywords : [];
-      const { records, apiTotal, degraded } = await fetchBoampRecords(config, { maxPages: 2 });
-      const kept = records.filter(r => matchesKeywords(boampKeywordText(r), includeKeywords, excludeKeywords));
-      const sample = kept.slice(0, 5).map(r => {
-        const row = mapBoampRecord(r, { id: 'preview', tenant_id: tenantId });
-        return { title: row.title, pouvoir_adjudicateur: row.pouvoir_adjudicateur, date_limite_reponse: row.date_limite_reponse, link: row.link };
-      });
-      res.json({ count: kept.length, api_total: apiTotal, degraded, jours_recents: config.jours_recents, sample });
-    } catch (e: any) { console.error(e); res.status(502).json({ error: e.message || "Échec du test de connexion BOAMP" }); }
-  });
+  for (const connector of Object.keys(CONNECTORS) as ConnectorType[]) {
+    app.post(`/api/tender-rss-sources/${connector}/preview`, async (req: any, res: any) => {
+      try {
+        const tenantId = await getTenantId(req.user.id);
+        if (!(await isConnectorEnabled(supabaseAdmin, tenantId, connector))) {
+          return res.status(403).json({ error: disabledMessage(connector) });
+        }
+        res.json(await previewConnector(connector, tenantId, req.body));
+      } catch (e: any) { console.error(e); res.status(502).json({ error: e.message || `Échec du test de connexion ${CONNECTORS[connector].label}` }); }
+    });
+  }
 
   app.delete("/api/tender-rss-sources/:id", async (req: any, res: any) => {
     try {

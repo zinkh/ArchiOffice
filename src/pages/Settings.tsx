@@ -199,6 +199,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-slate-700',
     iconLabel: 'BO',
   },
+  {
+    id: 'ted',
+    name: 'TED (API)',
+    vendor: 'Office des publications de l\'Union européenne',
+    description: "Ajoute l'API de recherche TED (Journal officiel de l'UE, supplément S) comme type de source dans la veille des appels d'offres : avis européens filtrés par pays, codes NUTS et codes CPV, sans clé d'API. Les doublons avec le BOAMP et les flux RSS sont écartés automatiquement.",
+    category: 'veille',
+    status: 'active',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-800',
+    iconLabel: 'TED',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -283,6 +294,7 @@ export default function Settings() {
     chorus_pro_sandbox: true,
     notificationArchiveDays: {} as Record<string, number>,
     tender_boamp_enabled: false,
+    tender_ted_enabled: false,
   });
 
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
@@ -1025,6 +1037,7 @@ export default function Settings() {
     if (id === 'superpdp') return !!(superpdpStatus?.connected);
     if (id === 'chorus_pro') return !!(chorusProStatus?.connected);
     if (id === 'boamp') return !!(settings as any).tender_boamp_enabled;
+    if (id === 'ted') return !!(settings as any).tender_ted_enabled;
     return false;
   };
 
@@ -1345,6 +1358,33 @@ export default function Settings() {
         </div>
         {renderSaveButton('boamp', () => saveSection('boamp', {
           tender_boamp_enabled: !!(settings as any).tender_boamp_enabled,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'ted') return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Activer le connecteur TED</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>Propose « TED (API) » comme type de source dans Appels d'offres › Veille RSS, et sonde les sources TED existantes</div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={!!(settings as any).tender_ted_enabled}
+              onChange={e => setSettings({ ...settings, tender_ted_enabled: e.target.checked } as any)}
+            />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+          </label>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>API de recherche TED</p>
+          <p>Avis publiés au Journal officiel de l'Union européenne (marchés au-dessus des seuils européens et concours de maîtrise d'œuvre), sans compte ni clé. Chaque source TED définit ses critères : pays de l'acheteur, codes NUTS du lieu d'exécution (FRF pour le Grand Est), codes CPV (préréglage architecture et maîtrise d'œuvre), avis de marché uniquement, fenêtre de publication et mots-clés. Un avis déjà détecté via le BOAMP ou un flux RSS n'est pas dupliqué.</p>
+        </div>
+        {renderSaveButton('ted', () => saveSection('ted', {
+          tender_ted_enabled: !!(settings as any).tender_ted_enabled,
         }))}
       </div>
     );

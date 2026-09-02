@@ -211,6 +211,29 @@ describe('Tender RSS', () => {
     expect(noUrl.status).toBe(400);
   });
 
+  it('only accepts TED sources once the connector is enabled, independently of BOAMP', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ id: `settings-${tenantId}`, tenant_id: tenantId, tender_boamp_enabled: true, tender_ted_enabled: false }]);
+    const body = { name: 'TED Grand Est', source_type: 'ted', ted_config: { pays: ['fra'], nuts: ['FRF'], cpv: ['712', '71300000'], jours_recents: 10 } };
+
+    const refused = await request(app).post('/api/tender-rss-sources').set(authHeader(token)).send(body);
+    expect(refused.status).toBe(403);
+    const preview = await request(app).post('/api/tender-rss-sources/ted/preview').set(authHeader(token)).send({ ted_config: body.ted_config });
+    expect(preview.status).toBe(403);
+
+    const settingsRow = fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)!;
+    settingsRow.tender_ted_enabled = true;
+
+    const created = await request(app).post('/api/tender-rss-sources').set(authHeader(token)).send(body);
+    expect(created.status).toBe(201);
+    const stored = fakeSupabaseAdmin.getTable('tender_rss_sources').find(s => s.id === created.body.id);
+    expect(stored?.source_type).toBe('ted');
+    expect(stored?.url).toContain('api.ted.europa.eu');
+    expect(stored?.ted_config).toEqual({ pays: ['FRA'], nuts: ['FRF'], cpv: ['71200000', '71300000'], avis_initiaux_seulement: true, jours_recents: 10 });
+    expect(stored?.boamp_config).toEqual({});
+  });
+
   it('rejects a bulk-delete request with no ids', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

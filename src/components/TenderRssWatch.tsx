@@ -20,6 +20,16 @@ const WATCH_UNDO_MS = 10000;
 
 const GRAND_EST_DEPARTEMENTS = ['08', '10', '51', '52', '54', '55', '57', '67', '68', '88'];
 const BOAMP_TYPES: BoampTypeMarche[] = ['TRAVAUX', 'SERVICES', 'FOURNITURES'];
+// NUTS 2 du Grand Est ; ses NUTS 3 (FRF11 Bas-Rhin, FRF31 Meurthe-et-Moselle...) commencent tous par FRF.
+const GRAND_EST_NUTS = 'FRF';
+// Miroir de TED_CPV_ARCHITECTURE (server/tenderTedConnector.ts) : services
+// d'architecture, d'ingénierie et d'urbanisme.
+const TED_CPV_ARCHITECTURE = [
+  '71200000', '71210000', '71220000', '71221000', '71222000', '71223000', '71230000', '71240000', '71250000',
+  '71300000', '71310000', '71400000', '71410000', '71420000',
+];
+
+type ConnectorType = Exclude<TenderSourceType, 'rss'>;
 
 const emptySourceForm = {
   name: '', url: '', enabled: true, includeKeywordsText: '', excludeKeywordsText: '',
@@ -28,17 +38,25 @@ const emptySourceForm = {
   boampTypesMarche: [] as BoampTypeMarche[],
   boampAvisInitiaux: true,
   boampJoursRecents: 7,
+  tedPaysText: 'FRA',
+  tedNutsText: '',
+  tedCpvText: '',
+  tedAvisInitiaux: true,
+  tedJoursRecents: 7,
 };
 
-interface BoampPreview {
+interface ConnectorPreview {
   count: number;
   jours_recents: number;
   degraded: boolean;
   sample: { title: string; pouvoir_adjudicateur: string | null; date_limite_reponse: string | null; link: string | null }[];
 }
 
-const parseDepartements = (text: string) =>
-  [...new Set(text.split(/[,;\s]+/).map(d => d.trim().toUpperCase()).filter(d => /^(\d{2,3}|2A|2B)$/.test(d)))];
+const splitCodes = (text: string) => [...new Set(text.split(/[,;\s]+/).map(d => d.trim().toUpperCase()).filter(Boolean))];
+const parseDepartements = (text: string) => splitCodes(text).filter(d => /^(\d{2,3}|2A|2B)$/.test(d));
+const parsePays = (text: string) => splitCodes(text).filter(p => /^[A-Z]{3}$/.test(p));
+const parseNuts = (text: string) => splitCodes(text).filter(n => /^[A-Z]{2}[A-Z0-9]{0,3}$/.test(n));
+const parseCpv = (text: string) => splitCodes(text).filter(c => /^\d{2,8}$/.test(c)).map(c => c.padEnd(8, '0'));
 
 function describeBoampConfig(source: TenderRssSource, t: TFn): string {
   const cfg = source.boamp_config || {};
@@ -49,10 +67,26 @@ function describeBoampConfig(source: TenderRssSource, t: TFn): string {
   return `${deps} · ${types} · ${t('tender_rss_boamp_criteria_days', { days: cfg.jours_recents ?? 7 })}`;
 }
 
+function describeTedConfig(source: TenderRssSource, t: TFn): string {
+  const cfg = source.ted_config || {};
+  const pays = cfg.pays?.length ? cfg.pays.join(', ') : t('tender_rss_ted_criteria_all_countries');
+  const nuts = cfg.nuts?.length ? `NUTS ${cfg.nuts.join(', ')}` : null;
+  const cpv = cfg.cpv?.length ? `CPV ${cfg.cpv.length > 3 ? `${cfg.cpv.slice(0, 3).join(', ')}…` : cfg.cpv.join(', ')}` : t('tender_rss_ted_criteria_all_cpv');
+  return [pays, nuts, cpv, t('tender_rss_boamp_criteria_days', { days: cfg.jours_recents ?? 7 })].filter(Boolean).join(' · ');
+}
+
+function describeSource(source: TenderRssSource, t: TFn): string {
+  if (source.source_type === 'boamp') return describeBoampConfig(source, t);
+  if (source.source_type === 'ted') return describeTedConfig(source, t);
+  return source.url;
+}
+
 export function TenderRssWatch() {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const boampEnabled = !!(settings as any)?.tender_boamp_enabled;
+  const tedEnabled = !!(settings as any)?.tender_ted_enabled;
+  const connectorEnabled: Record<ConnectorType, boolean> = { boamp: boampEnabled, ted: tedEnabled };
 
   const [sources, setSources] = useState<TenderRssSource[]>([]);
   const [matches, setMatches] = useState<TenderRssMatch[]>([]);
@@ -70,8 +104,8 @@ export function TenderRssWatch() {
   const [editingSource, setEditingSource] = useState<TenderRssSource | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [isSaving, setIsSaving] = useState(false);
-  const [boampPreview, setBoampPreview] = useState<BoampPreview | null>(null);
-  const [isTestingBoamp, setIsTestingBoamp] = useState(false);
+  const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null);
+  const [isTestingConnector, setIsTestingConnector] = useState(false);
   const [pageSize, setPageSize] = useState(50);
 
   // Only new/read items belong in the inbox — ignored, watched and
@@ -92,26 +126,33 @@ export function TenderRssWatch() {
   const handleOpenCreateSource = () => {
     setEditingSource(null);
     setSourceForm(emptySourceForm);
-    setBoampPreview(null);
+    setConnectorPreview(null);
     setIsSourceModalOpen(true);
   };
 
   const handleOpenEditSource = (source: TenderRssSource) => {
     setEditingSource(source);
     const cfg = source.boamp_config || {};
+    const ted = source.ted_config || {};
+    const sourceType: TenderSourceType = source.source_type === 'boamp' || source.source_type === 'ted' ? source.source_type : 'rss';
     setSourceForm({
       name: source.name,
-      url: source.source_type === 'boamp' ? '' : source.url,
+      url: sourceType === 'rss' ? source.url : '',
       enabled: source.enabled,
       includeKeywordsText: (source.include_keywords || []).join(', '),
       excludeKeywordsText: (source.exclude_keywords || []).join(', '),
-      sourceType: source.source_type === 'boamp' ? 'boamp' : 'rss',
+      sourceType,
       boampDepartementsText: (cfg.departements || []).join(', '),
       boampTypesMarche: cfg.types_marche || [],
       boampAvisInitiaux: cfg.avis_initiaux_seulement !== false,
       boampJoursRecents: cfg.jours_recents ?? 7,
+      tedPaysText: (ted.pays || (sourceType === 'ted' ? [] : ['FRA'])).join(', '),
+      tedNutsText: (ted.nuts || []).join(', '),
+      tedCpvText: (ted.cpv || []).join(', '),
+      tedAvisInitiaux: ted.avis_initiaux_seulement !== false,
+      tedJoursRecents: ted.jours_recents ?? 7,
     });
-    setBoampPreview(null);
+    setConnectorPreview(null);
     setIsSourceModalOpen(true);
   };
 
@@ -133,23 +174,32 @@ export function TenderRssWatch() {
     }));
   };
 
-  const handleTestBoamp = async () => {
-    setIsTestingBoamp(true);
-    setBoampPreview(null);
+  const buildTedConfig = () => ({
+    pays: parsePays(sourceForm.tedPaysText),
+    nuts: parseNuts(sourceForm.tedNutsText),
+    cpv: parseCpv(sourceForm.tedCpvText),
+    avis_initiaux_seulement: sourceForm.tedAvisInitiaux,
+    jours_recents: sourceForm.tedJoursRecents,
+  });
+
+  const handleTestConnector = async (connector: ConnectorType) => {
+    setIsTestingConnector(true);
+    setConnectorPreview(null);
     try {
-      const result = await apiFetch<BoampPreview>('/api/tender-rss-sources/boamp/preview', {
+      const result = await apiFetch<ConnectorPreview>(`/api/tender-rss-sources/${connector}/preview`, {
         method: 'POST',
         body: JSON.stringify({
-          boamp_config: buildBoampConfig(),
+          boamp_config: connector === 'boamp' ? buildBoampConfig() : undefined,
+          ted_config: connector === 'ted' ? buildTedConfig() : undefined,
           include_keywords: parseKeywords(sourceForm.includeKeywordsText),
           exclude_keywords: parseKeywords(sourceForm.excludeKeywordsText),
         }),
       });
-      setBoampPreview(result);
+      setConnectorPreview(result);
     } catch (err: any) {
-      showToast(err?.message || t('tender_rss_boamp_test_error'), 'error');
+      showToast(err?.message || t(`tender_rss_${connector}_test_error`), 'error');
     } finally {
-      setIsTestingBoamp(false);
+      setIsTestingConnector(false);
     }
   };
 
@@ -163,6 +213,7 @@ export function TenderRssWatch() {
         enabled: sourceForm.enabled,
         source_type: sourceForm.sourceType,
         boamp_config: sourceForm.sourceType === 'boamp' ? buildBoampConfig() : undefined,
+        ted_config: sourceForm.sourceType === 'ted' ? buildTedConfig() : undefined,
         include_keywords: parseKeywords(sourceForm.includeKeywordsText),
         exclude_keywords: parseKeywords(sourceForm.excludeKeywordsText)
       };
@@ -352,7 +403,7 @@ export function TenderRssWatch() {
                     <div>
                       <p className="font-medium text-sm">{s.name}</p>
                       <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>
-                        {s.source_type === 'boamp' ? `${t('tender_rss_source_type_boamp')} · ${describeBoampConfig(s, t)}` : s.url}
+                        {s.source_type === 'boamp' || s.source_type === 'ted' ? `${t(`tender_rss_source_type_${s.source_type}`)} · ${describeSource(s, t)}` : s.url}
                       </p>
                     </div>
                   )},
@@ -386,12 +437,12 @@ export function TenderRssWatch() {
                           className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
                           style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
                         >
-                          {s.source_type === 'boamp' ? 'BOAMP' : 'RSS'}
+                          {s.source_type === 'boamp' ? 'BOAMP' : s.source_type === 'ted' ? 'TED' : 'RSS'}
                         </span>
                         <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{s.name}</p>
                       </div>
                       <p className="text-xs truncate max-w-xs" style={{ color: 'var(--tblr-muted)' }}>
-                        {s.source_type === 'boamp' ? describeBoampConfig(s, t) : s.url}
+                        {describeSource(s, t)}
                       </p>
                       {s.last_error && (
                         <p className="text-xs flex items-center gap-1 mt-1" style={{ color: 'var(--tblr-danger)' }}>
@@ -627,15 +678,21 @@ export function TenderRssWatch() {
                     style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                     value={sourceForm.sourceType}
                     disabled={!!editingSource}
-                    onChange={e => { setSourceForm({ ...sourceForm, sourceType: e.target.value as TenderSourceType }); setBoampPreview(null); }}
+                    onChange={e => { setSourceForm({ ...sourceForm, sourceType: e.target.value as TenderSourceType }); setConnectorPreview(null); }}
                   >
                     <option value="rss">{t('tender_rss_source_type_rss')}</option>
                     {(boampEnabled || sourceForm.sourceType === 'boamp') && (
                       <option value="boamp">{t('tender_rss_source_type_boamp')}</option>
                     )}
+                    {(tedEnabled || sourceForm.sourceType === 'ted') && (
+                      <option value="ted">{t('tender_rss_source_type_ted')}</option>
+                    )}
                   </select>
                   {!boampEnabled && (
                     <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_disabled_hint')}</p>
+                  )}
+                  {!tedEnabled && (
+                    <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_disabled_hint')}</p>
                   )}
                 </div>
                 <div>
@@ -661,7 +718,7 @@ export function TenderRssWatch() {
                       onChange={e => setSourceForm({ ...sourceForm, url: e.target.value })}
                     />
                   </div>
-                ) : (
+                ) : sourceForm.sourceType === 'boamp' ? (
                   <div className="space-y-4 rounded-lg p-3" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
                     <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_intro')}</p>
                     <div>
@@ -720,19 +777,119 @@ export function TenderRssWatch() {
                     <div className="space-y-2">
                       <button
                         type="button"
-                        onClick={handleTestBoamp}
-                        disabled={isTestingBoamp || !boampEnabled}
+                        onClick={() => handleTestConnector('boamp')}
+                        disabled={isTestingConnector || !boampEnabled}
                         className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
                         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                       >
-                        <IconRefresh size={14} className={isTestingBoamp ? 'animate-spin' : ''} />
-                        {isTestingBoamp ? t('tender_rss_boamp_testing') : t('tender_rss_boamp_test')}
+                        <IconRefresh size={14} className={isTestingConnector ? 'animate-spin' : ''} />
+                        {isTestingConnector ? t('tender_rss_boamp_testing') : t('tender_rss_boamp_test')}
                       </button>
-                      {boampPreview && (
+                      {connectorPreview && (
                         <div className="text-xs space-y-1" style={{ color: 'var(--tblr-text)' }}>
-                          <p className="font-medium">{t('tender_rss_boamp_test_result', { count: boampPreview.count, days: boampPreview.jours_recents })}</p>
-                          {boampPreview.degraded && <p style={{ color: 'var(--tblr-warning)' }}>{t('tender_rss_boamp_test_degraded')}</p>}
-                          {boampPreview.sample.map((s, i) => (
+                          <p className="font-medium">{t('tender_rss_boamp_test_result', { count: connectorPreview.count, days: connectorPreview.jours_recents })}</p>
+                          {connectorPreview.degraded && <p style={{ color: 'var(--tblr-warning)' }}>{t('tender_rss_boamp_test_degraded')}</p>}
+                          {connectorPreview.sample.map((s, i) => (
+                            <p key={i} className="truncate" style={{ color: 'var(--tblr-muted)' }}>
+                              · {s.title}{s.pouvoir_adjudicateur ? ` — ${s.pouvoir_adjudicateur}` : ''}{s.date_limite_reponse ? ` (${new Date(s.date_limite_reponse).toLocaleDateString('fr-FR')})` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 rounded-lg p-3" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_intro')}</p>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_ted_pays')}</label>
+                      <input
+                        placeholder={t('tender_rss_ted_pays_placeholder')}
+                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        value={sourceForm.tedPaysText}
+                        onChange={e => setSourceForm({ ...sourceForm, tedPaysText: e.target.value })}
+                      />
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_pays_hint')}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_ted_nuts')}</label>
+                      <div className="flex gap-2">
+                        <input
+                          placeholder={t('tender_rss_ted_nuts_placeholder')}
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={sourceForm.tedNutsText}
+                          onChange={e => setSourceForm({ ...sourceForm, tedNutsText: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSourceForm({ ...sourceForm, tedNutsText: GRAND_EST_NUTS })}
+                          className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        >
+                          {t('tender_rss_boamp_preset_grand_est')}
+                        </button>
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_nuts_hint')}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_ted_cpv')}</label>
+                      <div className="flex gap-2">
+                        <input
+                          placeholder={t('tender_rss_ted_cpv_placeholder')}
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={sourceForm.tedCpvText}
+                          onChange={e => setSourceForm({ ...sourceForm, tedCpvText: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSourceForm({ ...sourceForm, tedCpvText: TED_CPV_ARCHITECTURE.join(', ') })}
+                          className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        >
+                          {t('tender_rss_ted_preset_cpv_archi')}
+                        </button>
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_cpv_hint')}</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                      <input
+                        type="checkbox"
+                        checked={sourceForm.tedAvisInitiaux}
+                        onChange={e => setSourceForm({ ...sourceForm, tedAvisInitiaux: e.target.checked })}
+                      />
+                      {t('tender_rss_ted_avis_initiaux')}
+                    </label>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_boamp_jours_recents')}</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        className="w-32 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        value={sourceForm.tedJoursRecents}
+                        onChange={e => setSourceForm({ ...sourceForm, tedJoursRecents: Math.min(90, Math.max(1, parseInt(e.target.value, 10) || 7)) })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestConnector('ted')}
+                        disabled={isTestingConnector || !tedEnabled}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      >
+                        <IconRefresh size={14} className={isTestingConnector ? 'animate-spin' : ''} />
+                        {isTestingConnector ? t('tender_rss_boamp_testing') : t('tender_rss_boamp_test')}
+                      </button>
+                      {connectorPreview && (
+                        <div className="text-xs space-y-1" style={{ color: 'var(--tblr-text)' }}>
+                          <p className="font-medium">{t('tender_rss_boamp_test_result', { count: connectorPreview.count, days: connectorPreview.jours_recents })}</p>
+                          {connectorPreview.degraded && <p style={{ color: 'var(--tblr-warning)' }}>{t('tender_rss_ted_test_degraded')}</p>}
+                          {connectorPreview.sample.map((s, i) => (
                             <p key={i} className="truncate" style={{ color: 'var(--tblr-muted)' }}>
                               · {s.title}{s.pouvoir_adjudicateur ? ` — ${s.pouvoir_adjudicateur}` : ''}{s.date_limite_reponse ? ` (${new Date(s.date_limite_reponse).toLocaleDateString('fr-FR')})` : ''}
                             </p>
