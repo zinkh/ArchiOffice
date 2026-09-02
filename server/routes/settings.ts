@@ -106,6 +106,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'default_leave_days_conges_payes', 'default_leave_days_rtt',
         'architect_name', 'oa_number',
         'notification_archive_days',
+        'tender_boamp_enabled', 'tender_ted_enabled',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits']);
       const filteredData: any = Object.fromEntries(

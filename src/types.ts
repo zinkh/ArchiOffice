@@ -512,6 +512,26 @@ export interface Tender {
   ville_execution?: string;
 }
 
+export type TenderSourceType = 'rss' | 'boamp' | 'ted';
+export type BoampTypeMarche = 'TRAVAUX' | 'SERVICES' | 'FOURNITURES';
+
+// Critères propres au connecteur BOAMP (server/tenderBoampConnector.ts).
+export interface BoampSourceConfig {
+  departements: string[];
+  types_marche: BoampTypeMarche[];
+  avis_initiaux_seulement: boolean;
+  jours_recents: number;
+}
+
+// Critères propres au connecteur TED (server/tenderTedConnector.ts).
+export interface TedSourceConfig {
+  pays: string[];
+  nuts: string[];
+  cpv: string[];
+  avis_initiaux_seulement: boolean;
+  jours_recents: number;
+}
+
 export interface TenderRssSource {
   id: string;
   name: string;
@@ -519,6 +539,11 @@ export interface TenderRssSource {
   enabled: boolean;
   include_keywords: string[];
   exclude_keywords: string[];
+  // 'rss' (défaut), 'boamp' ou 'ted' — chaque API n'est proposée que si son
+  // connecteur est activé dans Paramètres > Marketplace.
+  source_type?: TenderSourceType;
+  boamp_config?: Partial<BoampSourceConfig> | null;
+  ted_config?: Partial<TedSourceConfig> | null;
   last_polled_at?: string | null;
   last_error?: string | null;
 }
