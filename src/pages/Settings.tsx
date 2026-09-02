@@ -18,7 +18,7 @@ import type { ProjectCategory } from '../types';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
-type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication' | 'compliance';
+type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication' | 'compliance' | 'veille';
 type PluginStatus = 'active' | 'coming_soon';
 
 interface PluginDef {
@@ -188,6 +188,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconColor: 'text-indigo-700',
     iconLabel: 'CP',
   },
+  {
+    id: 'boamp',
+    name: 'BOAMP (API)',
+    vendor: 'DILA — Bulletin officiel des annonces des marchés publics',
+    description: "Ajoute l'API ouverte du BOAMP comme type de source dans la veille des appels d'offres : avis structurés (acheteur, département, type de marché, date limite), filtrés par départements et mots-clés, sans clé d'API.",
+    category: 'veille',
+    status: 'active',
+    iconBg: 'bg-slate-100',
+    iconColor: 'text-slate-700',
+    iconLabel: 'BO',
+  },
 ];
 
 const CATEGORIES: { id: PluginCategory; label: string }[] = [
@@ -197,6 +208,7 @@ const CATEGORIES: { id: PluginCategory; label: string }[] = [
   { id: 'storage', label: 'Stockage' },
   { id: 'crm', label: 'CRM' },
   { id: 'communication', label: 'Communication' },
+  { id: 'veille', label: 'Veille' },
 ];
 
 // Catégories d'activité du flux — tenu en phase avec CATEGORY_COLORS dans
@@ -270,6 +282,7 @@ export default function Settings() {
     chorus_pro_technical_password: '',
     chorus_pro_sandbox: true,
     notificationArchiveDays: {} as Record<string, number>,
+    tender_boamp_enabled: false,
   });
 
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
@@ -1011,6 +1024,7 @@ export default function Settings() {
     if (id === 'odoo') return !!(odooStatus?.connected);
     if (id === 'superpdp') return !!(superpdpStatus?.connected);
     if (id === 'chorus_pro') return !!(chorusProStatus?.connected);
+    if (id === 'boamp') return !!(settings as any).tender_boamp_enabled;
     return false;
   };
 
@@ -1304,6 +1318,33 @@ export default function Settings() {
           maf_numero_adherent: (settings as any).maf_numero_adherent,
           maf_taux_contrat_permil: (settings as any).maf_taux_contrat_permil,
           maf_declaration_year: (settings as any).maf_declaration_year,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'boamp') return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between p-3 rounded-lg border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Activer le connecteur BOAMP</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>Propose « BOAMP (API) » comme type de source dans Appels d'offres › Veille RSS, et sonde les sources BOAMP existantes</div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={!!(settings as any).tender_boamp_enabled}
+              onChange={e => setSettings({ ...settings, tender_boamp_enabled: e.target.checked } as any)}
+            />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+          </label>
+        </div>
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>API ouverte du BOAMP</p>
+          <p>Données publiques de la DILA, mises à jour plusieurs fois par jour, sans compte ni clé. Chaque source BOAMP définit ses critères : départements (par exemple ceux du Grand Est), types de marché, avis initiaux uniquement, fenêtre de parution et mots-clés. Les avis retenus rejoignent les annonces détectées, avec l'acheteur et la date limite déjà renseignés.</p>
+        </div>
+        {renderSaveButton('boamp', () => saveSection('boamp', {
+          tender_boamp_enabled: !!(settings as any).tender_boamp_enabled,
         }))}
       </div>
     );

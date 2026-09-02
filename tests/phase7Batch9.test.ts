@@ -187,6 +187,30 @@ describe('Tender RSS', () => {
     expect(remaining).toContain('bd-b');
   });
 
+  it('only accepts BOAMP sources once the connector is enabled in the tenant settings', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const body = { name: 'BOAMP Grand Est', source_type: 'boamp', boamp_config: { departements: ['54', '57'], types_marche: ['services'], jours_recents: 14 } };
+
+    const refused = await request(app).post('/api/tender-rss-sources').set(authHeader(token)).send(body);
+    expect(refused.status).toBe(403);
+    const preview = await request(app).post('/api/tender-rss-sources/boamp/preview').set(authHeader(token)).send({ boamp_config: body.boamp_config });
+    expect(preview.status).toBe(403);
+
+    fakeSupabaseAdmin.seed('settings', [{ id: `settings-${tenantId}`, tenant_id: tenantId, tender_boamp_enabled: true }]);
+
+    const created = await request(app).post('/api/tender-rss-sources').set(authHeader(token)).send(body);
+    expect(created.status).toBe(201);
+    const stored = fakeSupabaseAdmin.getTable('tender_rss_sources').find(s => s.id === created.body.id);
+    expect(stored?.source_type).toBe('boamp');
+    expect(stored?.url).toContain('opendatasoft.com');
+    expect(stored?.boamp_config).toEqual({ departements: ['54', '57'], types_marche: ['SERVICES'], avis_initiaux_seulement: true, jours_recents: 14 });
+
+    // An RSS source still needs its feed URL.
+    const noUrl = await request(app).post('/api/tender-rss-sources').set(authHeader(token)).send({ name: 'Sans URL' });
+    expect(noUrl.status).toBe(400);
+  });
+
   it('rejects a bulk-delete request with no ids', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

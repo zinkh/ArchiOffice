@@ -4,13 +4,60 @@
 // as a dependency, following the sanitizeFilename/fetchWithTimeout pattern.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
-import { pollAllTenderRssSources } from '../tenderRssPoller';
+import { pollAllTenderRssSources, matchesKeywords } from '../tenderRssPoller';
+import { BOAMP_API_URL, fetchBoampRecords, normalizeBoampConfig, boampKeywordText, mapBoampRecord } from '../tenderBoampConnector';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
+}
+
+type SourceType = 'rss' | 'boamp';
+
+function parseSourceType(raw: unknown): SourceType {
+  return raw === 'boamp' ? 'boamp' : 'rss';
+}
+
+// Préférence par cabinet (Paramètres > Marketplace > BOAMP). Une colonne
+// absente (migration non appliquée) ou une ligne settings manquante vaut
+// « désactivé ».
+async function isBoampEnabled(supabaseAdmin: any, tenantId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from('settings').select('tender_boamp_enabled').eq('tenant_id', tenantId).maybeSingle();
+  if (error) return false;
+  return !!data?.tender_boamp_enabled;
+}
+
+/**
+ * Valide et normalise le corps d'une source. Pour une source BOAMP, l'URL
+ * est imposée (endpoint de l'API) et les critères sont normalisés ; retourne
+ * une erreur 4xx à renvoyer telle quelle si la source est invalide.
+ */
+async function buildSourcePayload(supabaseAdmin: any, tenantId: string, body: any): Promise<{ payload?: Record<string, unknown>; error?: { status: number; message: string } }> {
+  const source_type = parseSourceType(body?.source_type);
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) return { error: { status: 400, message: 'Le nom de la source est requis' } };
+
+  const include_keywords = Array.isArray(body?.include_keywords) ? body.include_keywords : [];
+  const exclude_keywords = Array.isArray(body?.exclude_keywords) ? body.exclude_keywords : [];
+
+  if (source_type === 'boamp') {
+    if (!(await isBoampEnabled(supabaseAdmin, tenantId))) {
+      return { error: { status: 403, message: 'Le connecteur BOAMP est désactivé pour ce cabinet (Paramètres > Marketplace > BOAMP)' } };
+    }
+    return {
+      payload: {
+        name, url: BOAMP_API_URL, source_type,
+        boamp_config: normalizeBoampConfig(body?.boamp_config),
+        include_keywords, exclude_keywords,
+      },
+    };
+  }
+
+  const url = typeof body?.url === 'string' ? body.url.trim() : '';
+  if (!url) return { error: { status: 400, message: "L'URL du flux RSS est requise" } };
+  return { payload: { name, url, source_type, boamp_config: {}, include_keywords, exclude_keywords } };
 }
 
 export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
@@ -26,15 +73,17 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
   app.post("/api/tender-rss-sources", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
+      const built = await buildSourcePayload(supabaseAdmin, tenantId, req.body);
+      if (built.error) return res.status(built.error.status).json({ error: built.error.message });
       const id = crypto.randomUUID();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_rss_sources').insert({
-        id, name, url, enabled: enabled !== false,
-        include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
+        id, ...built.payload, enabled: req.body?.enabled !== false,
       });
       if (error) throw error;
+      const name = String(built.payload!.name);
+      const label = built.payload!.source_type === 'boamp' ? 'source BOAMP' : 'source de veille RSS';
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Ajout de la source de veille RSS "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
+      logActivity(tenantId, req.user.id, userName, `Ajout de la ${label} "${name}"`, name, id, 'tender_rss_source', 'Appels d\'offres');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender RSS source: " + e.message }); }
   });
@@ -43,13 +92,36 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, url, enabled, include_keywords, exclude_keywords } = req.body;
+      const built = await buildSourcePayload(supabaseAdmin, tenantId, req.body);
+      if (built.error) return res.status(built.error.status).json({ error: built.error.message });
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_rss_sources').update({
-        name, url, enabled: !!enabled, include_keywords: include_keywords || [], exclude_keywords: exclude_keywords || []
+        ...built.payload, enabled: !!req.body?.enabled,
       }).eq('id', id);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update tender RSS source: " + e.message }); }
+  });
+
+  // Aperçu des critères BOAMP avant enregistrement : interroge l'API avec la
+  // configuration saisie (une page) et renvoie le nombre d'avis retenus après
+  // filtres locaux et mots-clés, plus un échantillon.
+  app.post("/api/tender-rss-sources/boamp/preview", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await isBoampEnabled(supabaseAdmin, tenantId))) {
+        return res.status(403).json({ error: 'Le connecteur BOAMP est désactivé pour ce cabinet (Paramètres > Marketplace > BOAMP)' });
+      }
+      const config = normalizeBoampConfig(req.body?.boamp_config);
+      const includeKeywords = Array.isArray(req.body?.include_keywords) ? req.body.include_keywords : [];
+      const excludeKeywords = Array.isArray(req.body?.exclude_keywords) ? req.body.exclude_keywords : [];
+      const { records, apiTotal, degraded } = await fetchBoampRecords(config, { maxPages: 2 });
+      const kept = records.filter(r => matchesKeywords(boampKeywordText(r), includeKeywords, excludeKeywords));
+      const sample = kept.slice(0, 5).map(r => {
+        const row = mapBoampRecord(r, { id: 'preview', tenant_id: tenantId });
+        return { title: row.title, pouvoir_adjudicateur: row.pouvoir_adjudicateur, date_limite_reponse: row.date_limite_reponse, link: row.link };
+      });
+      res.json({ count: kept.length, api_total: apiTotal, degraded, jours_recents: config.jours_recents, sample });
+    } catch (e: any) { console.error(e); res.status(502).json({ error: e.message || "Échec du test de connexion BOAMP" }); }
   });
 
   app.delete("/api/tender-rss-sources/:id", async (req: any, res: any) => {

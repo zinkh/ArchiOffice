@@ -512,6 +512,17 @@ export interface Tender {
   ville_execution?: string;
 }
 
+export type TenderSourceType = 'rss' | 'boamp';
+export type BoampTypeMarche = 'TRAVAUX' | 'SERVICES' | 'FOURNITURES';
+
+// Critères propres au connecteur BOAMP (server/tenderBoampConnector.ts).
+export interface BoampSourceConfig {
+  departements: string[];
+  types_marche: BoampTypeMarche[];
+  avis_initiaux_seulement: boolean;
+  jours_recents: number;
+}
+
 export interface TenderRssSource {
   id: string;
   name: string;
@@ -519,6 +530,10 @@ export interface TenderRssSource {
   enabled: boolean;
   include_keywords: string[];
   exclude_keywords: string[];
+  // 'rss' (défaut) ou 'boamp' — l'API BOAMP n'est proposée que si le
+  // connecteur est activé dans Paramètres > Marketplace.
+  source_type?: TenderSourceType;
+  boamp_config?: Partial<BoampSourceConfig> | null;
   last_polled_at?: string | null;
   last_error?: string | null;
 }

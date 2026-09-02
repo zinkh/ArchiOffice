@@ -11,16 +11,48 @@ import { Pagination } from './ui/Pagination';
 import { Toast } from './ui/Toast';
 import { usePagination } from '../hooks/usePagination';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
+import { useSettings } from '../hooks/useSettings';
 import { MatchDetailContent, StatusBadge, type TFn } from './tenderRss/MatchDetailContent';
-import type { TenderRssSource, TenderRssMatch } from '../types';
+import type { TenderRssSource, TenderRssMatch, TenderSourceType, BoampTypeMarche } from '../types';
 
 const DISMISS_UNDO_MS = 10000;
 const WATCH_UNDO_MS = 10000;
 
-const emptySourceForm = { name: '', url: '', enabled: true, includeKeywordsText: '', excludeKeywordsText: '' };
+const GRAND_EST_DEPARTEMENTS = ['08', '10', '51', '52', '54', '55', '57', '67', '68', '88'];
+const BOAMP_TYPES: BoampTypeMarche[] = ['TRAVAUX', 'SERVICES', 'FOURNITURES'];
+
+const emptySourceForm = {
+  name: '', url: '', enabled: true, includeKeywordsText: '', excludeKeywordsText: '',
+  sourceType: 'rss' as TenderSourceType,
+  boampDepartementsText: '',
+  boampTypesMarche: [] as BoampTypeMarche[],
+  boampAvisInitiaux: true,
+  boampJoursRecents: 7,
+};
+
+interface BoampPreview {
+  count: number;
+  jours_recents: number;
+  degraded: boolean;
+  sample: { title: string; pouvoir_adjudicateur: string | null; date_limite_reponse: string | null; link: string | null }[];
+}
+
+const parseDepartements = (text: string) =>
+  [...new Set(text.split(/[,;\s]+/).map(d => d.trim().toUpperCase()).filter(d => /^(\d{2,3}|2A|2B)$/.test(d)))];
+
+function describeBoampConfig(source: TenderRssSource, t: TFn): string {
+  const cfg = source.boamp_config || {};
+  const deps = cfg.departements?.length ? cfg.departements.join(', ') : t('tender_rss_boamp_criteria_all_france');
+  const types = cfg.types_marche?.length
+    ? cfg.types_marche.map(ty => t(`tender_rss_boamp_type_${ty.toLowerCase()}`)).join(', ')
+    : t('tender_rss_boamp_criteria_all_types');
+  return `${deps} · ${types} · ${t('tender_rss_boamp_criteria_days', { days: cfg.jours_recents ?? 7 })}`;
+}
 
 export function TenderRssWatch() {
   const { t } = useTranslation();
+  const { settings } = useSettings();
+  const boampEnabled = !!(settings as any)?.tender_boamp_enabled;
 
   const [sources, setSources] = useState<TenderRssSource[]>([]);
   const [matches, setMatches] = useState<TenderRssMatch[]>([]);
@@ -38,6 +70,8 @@ export function TenderRssWatch() {
   const [editingSource, setEditingSource] = useState<TenderRssSource | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [isSaving, setIsSaving] = useState(false);
+  const [boampPreview, setBoampPreview] = useState<BoampPreview | null>(null);
+  const [isTestingBoamp, setIsTestingBoamp] = useState(false);
   const [pageSize, setPageSize] = useState(50);
 
   // Only new/read items belong in the inbox — ignored, watched and
@@ -58,22 +92,66 @@ export function TenderRssWatch() {
   const handleOpenCreateSource = () => {
     setEditingSource(null);
     setSourceForm(emptySourceForm);
+    setBoampPreview(null);
     setIsSourceModalOpen(true);
   };
 
   const handleOpenEditSource = (source: TenderRssSource) => {
     setEditingSource(source);
+    const cfg = source.boamp_config || {};
     setSourceForm({
       name: source.name,
-      url: source.url,
+      url: source.source_type === 'boamp' ? '' : source.url,
       enabled: source.enabled,
       includeKeywordsText: (source.include_keywords || []).join(', '),
-      excludeKeywordsText: (source.exclude_keywords || []).join(', ')
+      excludeKeywordsText: (source.exclude_keywords || []).join(', '),
+      sourceType: source.source_type === 'boamp' ? 'boamp' : 'rss',
+      boampDepartementsText: (cfg.departements || []).join(', '),
+      boampTypesMarche: cfg.types_marche || [],
+      boampAvisInitiaux: cfg.avis_initiaux_seulement !== false,
+      boampJoursRecents: cfg.jours_recents ?? 7,
     });
+    setBoampPreview(null);
     setIsSourceModalOpen(true);
   };
 
   const parseKeywords = (text: string) => text.split(',').map(k => k.trim()).filter(Boolean);
+
+  const buildBoampConfig = () => ({
+    departements: parseDepartements(sourceForm.boampDepartementsText),
+    types_marche: sourceForm.boampTypesMarche,
+    avis_initiaux_seulement: sourceForm.boampAvisInitiaux,
+    jours_recents: sourceForm.boampJoursRecents,
+  });
+
+  const toggleBoampType = (type: BoampTypeMarche) => {
+    setSourceForm(prev => ({
+      ...prev,
+      boampTypesMarche: prev.boampTypesMarche.includes(type)
+        ? prev.boampTypesMarche.filter(ty => ty !== type)
+        : [...prev.boampTypesMarche, type],
+    }));
+  };
+
+  const handleTestBoamp = async () => {
+    setIsTestingBoamp(true);
+    setBoampPreview(null);
+    try {
+      const result = await apiFetch<BoampPreview>('/api/tender-rss-sources/boamp/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          boamp_config: buildBoampConfig(),
+          include_keywords: parseKeywords(sourceForm.includeKeywordsText),
+          exclude_keywords: parseKeywords(sourceForm.excludeKeywordsText),
+        }),
+      });
+      setBoampPreview(result);
+    } catch (err: any) {
+      showToast(err?.message || t('tender_rss_boamp_test_error'), 'error');
+    } finally {
+      setIsTestingBoamp(false);
+    }
+  };
 
   const handleSaveSource = async (e: FormEvent) => {
     e.preventDefault();
@@ -83,6 +161,8 @@ export function TenderRssWatch() {
         name: sourceForm.name,
         url: sourceForm.url,
         enabled: sourceForm.enabled,
+        source_type: sourceForm.sourceType,
+        boamp_config: sourceForm.sourceType === 'boamp' ? buildBoampConfig() : undefined,
         include_keywords: parseKeywords(sourceForm.includeKeywordsText),
         exclude_keywords: parseKeywords(sourceForm.excludeKeywordsText)
       };
@@ -271,7 +351,9 @@ export function TenderRssWatch() {
                   { label: t('tender_rss_source_name'), primary: true, render: (s: TenderRssSource) => (
                     <div>
                       <p className="font-medium text-sm">{s.name}</p>
-                      <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>{s.url}</p>
+                      <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                        {s.source_type === 'boamp' ? `${t('tender_rss_source_type_boamp')} · ${describeBoampConfig(s, t)}` : s.url}
+                      </p>
                     </div>
                   )},
                   { label: t('tender_rss_status'), render: (s: TenderRssSource) => s.enabled ? t('tender_rss_enabled') : t('tender_rss_disabled') },
@@ -299,8 +381,18 @@ export function TenderRssWatch() {
                 {sources.map(s => (
                   <tr key={s.id} style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                     <td className="px-4 py-3">
-                      <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{s.name}</p>
-                      <p className="text-xs truncate max-w-xs" style={{ color: 'var(--tblr-muted)' }}>{s.url}</p>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
+                          style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+                        >
+                          {s.source_type === 'boamp' ? 'BOAMP' : 'RSS'}
+                        </span>
+                        <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{s.name}</p>
+                      </div>
+                      <p className="text-xs truncate max-w-xs" style={{ color: 'var(--tblr-muted)' }}>
+                        {s.source_type === 'boamp' ? describeBoampConfig(s, t) : s.url}
+                      </p>
                       {s.last_error && (
                         <p className="text-xs flex items-center gap-1 mt-1" style={{ color: 'var(--tblr-danger)' }}>
                           <IconAlertTriangle size={12} /> {s.last_error}
@@ -529,6 +621,24 @@ export function TenderRssWatch() {
               </div>
               <form onSubmit={handleSaveSource} className="p-6 space-y-4">
                 <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_source_type')}</label>
+                  <select
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={sourceForm.sourceType}
+                    disabled={!!editingSource}
+                    onChange={e => { setSourceForm({ ...sourceForm, sourceType: e.target.value as TenderSourceType }); setBoampPreview(null); }}
+                  >
+                    <option value="rss">{t('tender_rss_source_type_rss')}</option>
+                    {(boampEnabled || sourceForm.sourceType === 'boamp') && (
+                      <option value="boamp">{t('tender_rss_source_type_boamp')}</option>
+                    )}
+                  </select>
+                  {!boampEnabled && (
+                    <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_disabled_hint')}</p>
+                  )}
+                </div>
+                <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_source_name')}</label>
                   <input
                     required
@@ -538,18 +648,100 @@ export function TenderRssWatch() {
                     onChange={e => setSourceForm({ ...sourceForm, name: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_source_url')}</label>
-                  <input
-                    required
-                    type="url"
-                    placeholder="https://www.exemple.fr/flux-avis-marches.rss"
-                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                    value={sourceForm.url}
-                    onChange={e => setSourceForm({ ...sourceForm, url: e.target.value })}
-                  />
-                </div>
+                {sourceForm.sourceType === 'rss' ? (
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_source_url')}</label>
+                    <input
+                      required
+                      type="url"
+                      placeholder="https://www.exemple.fr/flux-avis-marches.rss"
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      value={sourceForm.url}
+                      onChange={e => setSourceForm({ ...sourceForm, url: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-4 rounded-lg p-3" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_intro')}</p>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_boamp_departements')}</label>
+                      <div className="flex gap-2">
+                        <input
+                          placeholder={t('tender_rss_boamp_departements_placeholder')}
+                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={sourceForm.boampDepartementsText}
+                          onChange={e => setSourceForm({ ...sourceForm, boampDepartementsText: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSourceForm({ ...sourceForm, boampDepartementsText: GRAND_EST_DEPARTEMENTS.join(', ') })}
+                          className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+                          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        >
+                          {t('tender_rss_boamp_preset_grand_est')}
+                        </button>
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_departements_hint')}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_boamp_types_marche')}</label>
+                      <div className="flex flex-wrap gap-4">
+                        {BOAMP_TYPES.map(type => (
+                          <label key={type} className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                            <input type="checkbox" checked={sourceForm.boampTypesMarche.includes(type)} onChange={() => toggleBoampType(type)} />
+                            {t(`tender_rss_boamp_type_${type.toLowerCase()}`)}
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_types_hint')}</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                      <input
+                        type="checkbox"
+                        checked={sourceForm.boampAvisInitiaux}
+                        onChange={e => setSourceForm({ ...sourceForm, boampAvisInitiaux: e.target.checked })}
+                      />
+                      {t('tender_rss_boamp_avis_initiaux')}
+                    </label>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_boamp_jours_recents')}</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        className="w-32 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                        value={sourceForm.boampJoursRecents}
+                        onChange={e => setSourceForm({ ...sourceForm, boampJoursRecents: Math.min(90, Math.max(1, parseInt(e.target.value, 10) || 7)) })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={handleTestBoamp}
+                        disabled={isTestingBoamp || !boampEnabled}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
+                        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      >
+                        <IconRefresh size={14} className={isTestingBoamp ? 'animate-spin' : ''} />
+                        {isTestingBoamp ? t('tender_rss_boamp_testing') : t('tender_rss_boamp_test')}
+                      </button>
+                      {boampPreview && (
+                        <div className="text-xs space-y-1" style={{ color: 'var(--tblr-text)' }}>
+                          <p className="font-medium">{t('tender_rss_boamp_test_result', { count: boampPreview.count, days: boampPreview.jours_recents })}</p>
+                          {boampPreview.degraded && <p style={{ color: 'var(--tblr-warning)' }}>{t('tender_rss_boamp_test_degraded')}</p>}
+                          {boampPreview.sample.map((s, i) => (
+                            <p key={i} className="truncate" style={{ color: 'var(--tblr-muted)' }}>
+                              · {s.title}{s.pouvoir_adjudicateur ? ` — ${s.pouvoir_adjudicateur}` : ''}{s.date_limite_reponse ? ` (${new Date(s.date_limite_reponse).toLocaleDateString('fr-FR')})` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_include_keywords_label')}</label>
                   <input
