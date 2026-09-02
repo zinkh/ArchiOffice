@@ -1,13 +1,14 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss } from '@tabler/icons-react';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { TenderRssWatch } from '../components/TenderRssWatch';
+import { TenderRssSelected } from '../components/TenderRssSelected';
 import type { Tender, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
@@ -49,7 +50,7 @@ export default function Tenders() {
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterType, setFilterType] = useState<string>('All');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
-  const [activeTab, setActiveTab] = useState<'list' | 'watch'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'selected' | 'watch'>('list');
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
 
   const tenderMiqcpAssessment: MiqcpAssessment | null = React.useMemo(() => {
@@ -310,6 +311,17 @@ export default function Tenders() {
           {t('tenders')}
         </button>
         <button
+          onClick={() => setActiveTab('selected')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'selected' ? 'var(--tblr-primary)' : 'transparent',
+            color: activeTab === 'selected' ? 'var(--tblr-primary)' : 'var(--tblr-muted)'
+          }}
+        >
+          <IconBookmark size={16} />
+          {t('tender_rss_selected_tab_label')}
+        </button>
+        <button
           onClick={() => setActiveTab('watch')}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
           style={{
@@ -321,6 +333,8 @@ export default function Tenders() {
           {t('tender_rss_tab_label')}
         </button>
       </div>
+
+      {activeTab === 'selected' && <TenderRssSelected />}
 
       {activeTab === 'watch' && <TenderRssWatch />}
 
