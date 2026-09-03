@@ -1,5 +1,11 @@
-import { AGENT_RESOURCES, type AgentResourceDef } from '../types.js';
+import { AGENT_RESOURCES, type AgentResourceDef, type AgentCapabilities } from '../types.js';
 import { fetchUrlSafely } from './webFetch.js';
+import { buildMailTools, executeMailTool, MAIL_TOOL_NAMES } from './mailTools.js';
+import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
+import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES } from './projectDocTools.js';
+import type { FunctionDeclarationLike } from './toolTypes.js';
+
+export type { FunctionDeclarationLike };
 
 // ── Gemini function-calling tools — gated per agent by action_scopes ────────
 // Rather than hand-writing bespoke Supabase-write logic per resource (which
@@ -11,15 +17,9 @@ import { fetchUrlSafely } from './webFetch.js';
 // An agent action therefore always behaves exactly like a human submitting
 // the same form — same validation, same activity log entries, same everything.
 
-export interface FunctionDeclarationLike {
-  name: string;
-  description: string;
-  parametersJsonSchema: Record<string, unknown>;
-}
-
-export function buildAgentTools(actionScopes: string[], webFetchEnabled = false): FunctionDeclarationLike[] {
+export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLike[] {
+  const { actionScopes } = caps;
   const authorized = AGENT_RESOURCES.filter(r => actionScopes.includes(r.key));
-  if (authorized.length === 0) return [];
 
   const creatable = authorized.filter(r => r.create).map(r => r.key);
   const updatable = authorized.filter(r => r.update).map(r => r.key);
@@ -107,7 +107,7 @@ export function buildAgentTools(actionScopes: string[], webFetchEnabled = false)
     });
   }
 
-  if (webFetchEnabled) {
+  if (caps.webFetch) {
     tools.push({
       name: 'fetch_url',
       description:
@@ -123,6 +123,10 @@ export function buildAgentTools(actionScopes: string[], webFetchEnabled = false)
       },
     });
   }
+
+  if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
+  if (caps.geo) tools.push(...buildGeoTools());
+  if (caps.docsRead) tools.push(...buildProjectDocTools());
 
   return tools;
 }
@@ -197,19 +201,19 @@ function checkSuspiciousDate(resourceKey: string, record: Record<string, unknown
 export async function executeAgentAction(
   baseUrl: string,
   authHeader: string | undefined,
-  actionScopes: string[],
-  webFetchEnabled: boolean,
+  caps: AgentCapabilities,
   call: AgentActionCall
 ): Promise<AgentActionResult> {
   const name = call.name;
   const args = call.args || {};
+  const actionScopes = caps.actionScopes;
 
   // fetch_url isn't a CRUD resource — dispatch it separately, before the
   // resource-lookup logic below, and re-check the flag here even though
   // buildAgentTools already omits the tool when disabled (defense in depth:
   // never trust that a function call name matches what was actually offered).
   if (name === 'fetch_url') {
-    if (!webFetchEnabled) return { response: { error: "L'accès web n'est pas activé pour cet agent." } };
+    if (!caps.webFetch) return { response: { error: "L'accès web n'est pas activé pour cet agent." } };
     const url = String(args.url || '');
     if (!url) return { response: { error: 'url est requis.' } };
     try {
@@ -221,6 +225,28 @@ export async function executeAgentAction(
     } catch (e: any) {
       return { response: { error: e?.message || 'Échec de la récupération de la page.' } };
     }
+  }
+
+  // Familles d'outils hors CRUD : messagerie, cartographie, CCTP/DPGF. Elles
+  // n'ont pas de `resource` et sont donc dispatchées avant la résolution de
+  // ressource ci-dessous. Le drapeau est revérifié dans chaque famille, même
+  // si buildAgentTools ne déclare pas l'outil quand la capacité est éteinte.
+  if (name && MAIL_TOOL_NAMES.includes(name)) {
+    if (!caps.mailRead) return { response: { error: "L'accès à la messagerie n'est pas activé pour cet agent." } };
+    if (!authHeader) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
+    return executeMailTool(baseUrl, authHeader, name, args, caps.mailSend);
+  }
+
+  if (name && GEO_TOOL_NAMES.includes(name)) {
+    if (!caps.geo) return { response: { error: "L'accès aux modules cartographiques n'est pas activé pour cet agent." } };
+    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeGeoTool(baseUrl, authHeader, name, args);
+  }
+
+  if (name && PROJECT_DOC_TOOL_NAMES.includes(name)) {
+    if (!caps.docsRead) return { response: { error: "La lecture du CCTP et du DPGF n'est pas activée pour cet agent." } };
+    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeProjectDocTool(baseUrl, authHeader, name, args);
   }
 
   const resourceKey = String(args.resource || '');

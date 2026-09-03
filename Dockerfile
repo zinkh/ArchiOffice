@@ -1,9 +1,14 @@
 FROM node:22-slim
 
+# poppler-utils fournit pdftoppm, utilisé par packages/archioffice-agents/src/
+# server/ocr.ts pour rendre en image les pages d'un PDF scanné avant
+# reconnaissance de caractères. Sans lui, l'OCR des PDF est simplement
+# désactivé (celui des images continue de fonctionner) et l'agent le signale.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

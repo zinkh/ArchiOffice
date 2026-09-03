@@ -1,8 +1,10 @@
 import * as Sentry from '@sentry/node';
 import type { AgentRow } from '../types.js';
+import { AGENT_DEFAULT_ACTION_SCOPES, capabilitiesFromAgent } from '../types.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
+import { loadAgencyIdentity } from './agencyIdentity.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
 import { resolveLlmProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
@@ -68,12 +70,46 @@ export function registerAgentRoutes(
         const { data: template, error: tErr } = await supabaseAdmin.from('agents').select('*').eq('id', from_template_id).is('tenant_id', null).single();
         if (tErr || !template) return res.status(404).json({ error: 'Template not found' });
         const t = template as any;
-        // Write permissions and web access are never inherited from a
-        // template — the tenant must opt in explicitly per activated agent.
-        agentData = { ...agentData, slug: t.slug, name: t.name, role_title: t.role_title, avatar_initials: t.avatar_initials, avatar_color: t.avatar_color, tone: t.tone, directives: t.directives, context_scopes: t.context_scopes, action_scopes: [], web_fetch_enabled: false, is_active: true, is_system_template: false };
+        // Le périmètre d'écriture du métier est hérité du template (colonne
+        // action_scopes, renseignée par supabase/migrate_add_agent_autonomy.sql,
+        // avec AGENT_DEFAULT_ACTION_SCOPES en secours si la base n'a pas encore
+        // été migrée) : un agent activé est immédiatement utile, et l'architecte
+        // retire ce qu'il ne veut pas depuis /agents/:id.
+        //
+        // L'accès web reste la seule capacité jamais héritée : contrairement
+        // aux écritures internes et à la messagerie de l'utilisateur lui-même,
+        // il ouvre l'agent sur des contenus arbitraires (SSRF, injection de
+        // prompt) et n'a aucun rapport avec le métier du template.
+        const templateActionScopes = (t.action_scopes && t.action_scopes.length > 0)
+          ? t.action_scopes
+          : (AGENT_DEFAULT_ACTION_SCOPES[t.slug] || []);
+        agentData = {
+          ...agentData,
+          slug: t.slug, name: t.name, role_title: t.role_title,
+          avatar_initials: t.avatar_initials, avatar_color: t.avatar_color,
+          tone: t.tone, directives: t.directives,
+          context_scopes: t.context_scopes,
+          action_scopes: templateActionScopes,
+          web_fetch_enabled: false,
+          mail_enabled: !!t.mail_enabled,
+          mail_send_enabled: false,
+          geo_enabled: !!t.geo_enabled,
+          docs_read_enabled: !!t.docs_read_enabled,
+          is_active: true, is_system_template: false,
+        };
       } else {
         if (!slug || !name || !role_title) return res.status(400).json({ error: 'slug, name, role_title required' });
-        agentData = { ...agentData, slug, name, role_title, avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4', tone, directives, context_scopes: context_scopes || [], action_scopes: action_scopes || [], web_fetch_enabled: false, system_prompt_override, is_active: true, is_system_template: false };
+        agentData = {
+          ...agentData,
+          slug, name, role_title,
+          avatar_initials: avatar_initials || 'AI', avatar_color: avatar_color || '#206bc4',
+          tone, directives,
+          context_scopes: context_scopes || [],
+          action_scopes: action_scopes || [],
+          web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
+          geo_enabled: false, docs_read_enabled: false,
+          system_prompt_override, is_active: true, is_system_template: false,
+        };
       }
 
       const { data, error } = await supabaseAdmin.from('agents').insert(agentData).select().single();
@@ -87,8 +123,25 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, web_fetch_enabled, system_prompt_override, is_active } = req.body;
-      const { data, error } = await supabaseAdmin.from('agents').update({ name, role_title, avatar_initials, avatar_color, tone, directives, context_scopes, action_scopes, web_fetch_enabled: !!web_fetch_enabled, system_prompt_override, is_active }).eq('id', id).eq('tenant_id', tenantId).select().single();
+      const {
+        name, role_title, avatar_initials, avatar_color, tone, directives,
+        context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
+        mail_send_enabled, geo_enabled, docs_read_enabled,
+        system_prompt_override, is_active,
+      } = req.body;
+      const { data, error } = await supabaseAdmin.from('agents').update({
+        name, role_title, avatar_initials, avatar_color, tone, directives,
+        context_scopes, action_scopes,
+        web_fetch_enabled: !!web_fetch_enabled,
+        mail_enabled: !!mail_enabled,
+        // L'envoi ne peut pas être activé sans la lecture : même invariant
+        // que capabilitiesFromAgent, appliqué ici pour qu'il soit vrai en
+        // base et pas seulement au moment de construire les outils.
+        mail_send_enabled: !!mail_enabled && !!mail_send_enabled,
+        geo_enabled: !!geo_enabled,
+        docs_read_enabled: !!docs_read_enabled,
+        system_prompt_override, is_active,
+      }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
       res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -218,9 +271,8 @@ export function registerAgentRoutes(
       // LlmNotConfiguredError, turned into a 503 by the catch block below.
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
-      const actionScopes: string[] = (agent as any).action_scopes || [];
-      const webFetchEnabled: boolean = !!(agent as any).web_fetch_enabled;
-      const tools = buildAgentTools(actionScopes, webFetchEnabled);
+      const caps = capabilitiesFromAgent(agent as AgentRow);
+      const tools = buildAgentTools(caps);
 
       // The full conversation, owned here rather than inside a vendor SDK's
       // stateful chat object: stored history, then the new user message, then
@@ -287,7 +339,7 @@ export function registerAgentRoutes(
           messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
           const results: LlmToolResult[] = [];
           for (const call of result.toolCalls) {
-            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, webFetchEnabled, call);
+            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, caps, call);
             if (summary) actionSummaries.push(summary);
             results.push({ id: call.id, name: call.name, response });
           }
@@ -346,7 +398,18 @@ export function registerAgentRoutes(
       const reply = actionSummaries.length > 0
         ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + finalText
         : finalText;
-      const artifact = spec ? generateArtifact(spec) : undefined;
+      // Le fichier porte l'en-tête et le pied de page du cabinet (voir
+      // agencyIdentity.ts). Un échec de fabrication ne doit pas emporter la
+      // réponse elle-même : l'utilisateur reçoit le texte, sans la pièce.
+      let artifact;
+      if (spec) {
+        try {
+          artifact = await generateArtifact(spec, await loadAgencyIdentity(supabaseAdmin, tenantId));
+        } catch (artifactErr: any) {
+          console.error(`[agent chat] artifact generation failed conv=${convId}: ${artifactErr?.message}`);
+          Sentry.captureException(artifactErr, { tags: { feature: 'agent-artifact', agent_id: agentId } });
+        }
+      }
 
       let newBalance = balance;
       let costCents = 0;

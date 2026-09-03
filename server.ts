@@ -85,6 +85,9 @@ import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
+import { startAgentAlerts } from "./server/agentAlerts";
+import { notifyTenantAdmins } from "./server/mailer";
+import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
 import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
@@ -756,13 +759,21 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     maybeRefreshMonthlyCredits,
     PLAN_AI_MONTHLY_CREDIT_CENTS,
     baseUrl: `http://127.0.0.1:${PORT}`,
   });
+  // Exécutions planifiées d'agents (lecture seule) et alertes métier : la
+  // partie autonome du système d'agents, celle qui n'attend pas qu'on lui
+  // pose la question.
+  registerAgentScheduleRoutes(app, supabaseAdmin, getTenantId, {
+    deductAiCredit,
+    notifyTenantAdmins,
+  });
+  registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
 
 
   // Must be registered after all routes but before the SPA fallback below —
@@ -820,7 +831,18 @@ export async function createApp() {
     });
   }
 
-  return { app, supabaseAdmin, ensureStorageBuckets, PORT };
+  // Le planificateur d'agents a besoin de deductAiCredit, défini dans cette
+  // portée : il est donc exposé sous forme de fonction de démarrage, appelée
+  // par startServer() une fois le serveur à l'écoute (comme les autres tâches
+  // de fond, qui ne doivent pas tourner avant que la boucle locale réponde).
+  const startAgentBackgroundJobs = () => {
+    startAgentAlerts(supabaseAdmin);
+    import('@zinkh/archioffice-agents/server')
+      .then(({ startAgentScheduler }) => startAgentScheduler(supabaseAdmin, { deductAiCredit, notifyTenantAdmins }))
+      .catch(e => console.error('[agentScheduler] démarrage impossible:', e.message));
+  };
+
+  return { app, supabaseAdmin, ensureStorageBuckets, PORT, startAgentBackgroundJobs };
 }
 
 // Thin wrapper kept separate from createApp() so Supertest (and anything else
@@ -828,7 +850,7 @@ export async function createApp() {
 // real port — see tests/testServer.ts. Production startup is unchanged: this
 // is still the only thing invoked at module load.
 async function startServer() {
-  const { app, supabaseAdmin, ensureStorageBuckets, PORT } = await createApp();
+  const { app, supabaseAdmin, ensureStorageBuckets, PORT, startAgentBackgroundJobs } = await createApp();
   // In offline (Electron) mode this server is the local Supabase gateway for
   // supabaseAdmin itself (server/offlineGateway.ts) — it has no reason to be
   // reachable from the LAN/Wi-Fi, so bind it to loopback only there. Docker/
@@ -860,6 +882,10 @@ async function startServer() {
     // Relance de paiement (dunning) — notice immédiate dans le webhook
     // Stancer, relance différée ici si toujours non résolu (server/dunning.ts).
     startDunning(supabaseAdmin);
+    // Alertes métier des agents (situations à signaler sans qu'on les
+    // demande : études sans contrat signé, facture échue, réserves non
+    // levées...) et exécutions planifiées d'agents.
+    startAgentBackgroundJobs();
   });
   // Node's http.Server defaults keepAliveTimeout to 5s, but the platform's
   // load balancer / reverse proxy in front of this container (DigitalOcean
