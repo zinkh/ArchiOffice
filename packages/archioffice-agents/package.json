@@ -7,6 +7,7 @@
   "type": "module",
   "exports": {
     "./server": "./src/server/index.ts",
+    "./server/llm": "./src/server/llm/index.ts",
     "./client": "./src/client/index.ts",
     ".": "./src/types.ts"
   },
@@ -15,6 +16,7 @@
     "access": "restricted"
   },
   "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.100.0",
     "@google/genai": ">=1.0.0",
     "@supabase/supabase-js": ">=2.0.0",
     "@sentry/node": ">=10.0.0",

@@ -96,7 +96,11 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | Yes | Google Gemini AI (proposals, CCTP generation) |
+| `GEMINI_API_KEY` | One AI key required | Google Gemini (the default provider) |
+| `ANTHROPIC_API_KEY` | Optional | Claude, when a tenant or the instance runs on Anthropic |
+| `MISTRAL_API_KEY` | Optional | Mistral (French, EU-hosted) |
+| `AI_PROVIDER` / `AI_MODEL` | Optional | Instance-wide provider/model default (`gemini` + `gemini-3-flash-preview` when unset) |
+| `AI_PRICE_MARKUP` | Optional | Operator margin over each model's real cost (default `1.3333`) |
 | `VITE_SUPABASE_URL` | Yes | Supabase URL (injected into frontend at build time) |
 | `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anon key (frontend) |
 | `SUPABASE_URL` | Yes (backend) | Supabase URL for server-side calls |
@@ -181,9 +185,29 @@ Shared interfaces live in `src/types.ts`. CCTP-specific types are in `src/types/
 | Excel | xlsx | Inline in pages |
 | XML (DPGF import) | fast-xml-parser | `src/lib/xmlHelper.ts` |
 
-### AI (Gemini)
+### AI (provider abstraction)
 
-AI features (proposal drafting, CCTP generation) call `@google/genai` from the backend (`server.ts`). The frontend never calls Gemini directly — it goes through `/api/gemini-*` endpoints.
+AI features (agent chat, CCTP generation) are called from the backend only — the frontend never talks to a model provider directly.
+
+All model calls go through the provider-neutral layer in `packages/archioffice-agents/src/server/llm/`:
+
+| File | Role |
+|---|---|
+| `llm/types.ts` | `LlmProvider`, `LlmMessage`, `LlmToolDef`, `LlmChatResult` — no vendor types |
+| `llm/gemini.ts` | Gemini adapter (`@google/genai`) |
+| `llm/anthropic.ts` | Claude adapter (`@anthropic-ai/sdk`) |
+| `llm/mistral.ts` | Mistral adapter (plain `fetch`, OpenAI-shaped endpoint) |
+| `llm/pricing.ts` | `MODEL_CATALOG` — each model's real cost, and `priceEurCents()` |
+| `llm/index.ts` | `resolveLlmProvider()` — the single place that picks provider, model and key |
+
+The two call sites are `packages/archioffice-agents/src/server/routes.ts` (agent chat, with the tool-calling loop) and `server/routes/aiSuggestions.ts` (CCTP articles). Neither imports a vendor SDK: add a provider by writing an adapter and registering it in `resolveLlmProvider()`, not by editing call sites.
+
+Conversation state is held by the caller, not by an SDK chat object, because every provider we target is stateless. Tool definitions are plain JSON Schema (`parametersJsonSchema`), which maps onto all three without rewriting. An assistant turn also carries an opaque `raw` field — the provider's own content blocks, replayed verbatim — which is what keeps Claude's thinking blocks and their signatures intact across a tool-calling round.
+
+**Two invariants worth keeping:**
+
+1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
+2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
 ### Maps
 

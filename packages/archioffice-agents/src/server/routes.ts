@@ -4,6 +4,7 @@ import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
+import { resolveLlmProvider, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
@@ -11,6 +12,9 @@ type DeductAiCreditFn = (params: {
   tenantId: string; userId: string;
   agentId: string | null; conversationId: string | null;
   endpointType: 'agent' | 'suggest_articles';
+  // Which model actually ran: the cost per token differs by an order of
+  // magnitude between them, so billing can't be computed without it.
+  provider: string; model: string;
   inputTokens: number; outputTokens: number;
 }) => Promise<{ newBalance: number; costCents: number }>;
 
@@ -207,36 +211,33 @@ export function registerAgentRoutes(
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) return res.status(503).json({ error: 'Gemini API key not configured' });
-
-      const { GoogleGenAI } = await import('@google/genai');
-      const genai = new GoogleGenAI({ apiKey });
-
-      const geminiHistory = ((history as any) || []).map((m: any) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      }));
+      // Which provider/model this call runs on is decided in llm/ — step 1
+      // still resolves Gemini from GEMINI_API_KEY, exactly as this route did
+      // inline before. A missing key throws LlmNotConfiguredError, turned
+      // into the same 503 as before by the catch block at the end.
+      const provider = resolveLlmProvider();
 
       const actionScopes: string[] = (agent as any).action_scopes || [];
       const webFetchEnabled: boolean = !!(agent as any).web_fetch_enabled;
       const tools = buildAgentTools(actionScopes, webFetchEnabled);
 
-      const chat = genai.chats.create({
-        model: 'gemini-3-flash-preview',
-        config: {
-          systemInstruction: systemPrompt,
-          ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools as any }] } : {}),
-        },
-        history: geminiHistory,
-      });
-      // Bounds how long a stuck/slow Gemini call can hold the request open —
+      // The full conversation, owned here rather than inside a vendor SDK's
+      // stateful chat object: stored history, then the new user message, then
+      // one assistant/tool pair per function-calling round below. Every
+      // provider we target is stateless, so this is the shape they all share.
+      const messages: LlmMessage[] = ((history as any) || []).map((m: any) => (
+        m.role === 'assistant'
+          ? { role: 'assistant' as const, content: m.content }
+          : { role: 'user' as const, content: m.content }
+      ));
+      messages.push({ role: 'user', content: message });
+      // Bounds how long a stuck/slow provider call can hold the request open —
       // shorter than the client's own abort timeout (AgentChat.tsx, 130s) so
       // the client always gets this explicit message instead of a silent
       // connection drop. Was 55s, which cut off a plain "read this document"
       // request (no tool calls, and the attached PDF itself parsed in well
       // under a second — verified directly, so document size wasn't the
-      // cause here) — i.e. Gemini's own response time alone can exceed 55s
+      // cause here) — i.e. the model's own response time alone can exceed 55s
       // on an ordinary request, not just on a large prompt or a multi-round
       // tool-calling exchange. Widened for headroom against that.
       const AGENT_CHAT_TIMEOUT_MS = 100000;
@@ -247,28 +248,30 @@ export function registerAgentRoutes(
         ),
       ]);
 
-      // Wraps every chat.sendMessage() call (initial, function-calling
-      // rounds, and the blank-turn clarification below) with timing so a
-      // slow-but-successful call is visible in logs, not just an eventual
-      // timeout — see the comment on chatRequestStart above.
-      let geminiCallCount = 0;
-      const timedSendMessage = async (payload: Parameters<typeof chat.sendMessage>[0]) => {
-        geminiCallCount++;
-        const callIndex = geminiCallCount;
+      // Wraps every provider call (initial, function-calling rounds, and the
+      // blank-turn clarification below) with timing so a slow-but-successful
+      // call is visible in logs, not just an eventual timeout — see the
+      // comment on chatRequestStart above. Reads `messages` at call time, so
+      // each round sends whatever the loop has appended since the last one.
+      let llmCallCount = 0;
+      const timedChat = async () => {
+        llmCallCount++;
+        const callIndex = llmCallCount;
         const callStart = Date.now();
+        const label = `${provider.id}/${provider.model}`;
         try {
-          const r = await withTimeout(chat.sendMessage(payload));
-          console.log(`[agent chat] gemini call #${callIndex} ok in ${Date.now() - callStart}ms conv=${convId} agent=${agentId}`);
+          const r = await withTimeout(provider.chat({ system: systemPrompt, messages, tools }));
+          console.log(`[agent chat] llm call #${callIndex} (${label}) ok in ${Date.now() - callStart}ms conv=${convId} agent=${agentId}`);
           return r;
         } catch (e: any) {
-          console.log(`[agent chat] gemini call #${callIndex} failed after ${Date.now() - callStart}ms conv=${convId} agent=${agentId}: ${e?.code || e?.message}`);
+          console.log(`[agent chat] llm call #${callIndex} (${label}) failed after ${Date.now() - callStart}ms conv=${convId} agent=${agentId}: ${e?.code || e?.message}`);
           throw e;
         }
       };
 
-      let result = await timedSendMessage({ message });
-      let inputTokens  = (result as any).usageMetadata?.promptTokenCount ?? 0;
-      let outputTokens = (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+      let result = await timedChat();
+      let inputTokens  = result.usage.inputTokens;
+      let outputTokens = result.usage.outputTokens;
 
       // Function-calling loop: the model may chain several tool calls (e.g.
       // create_contact then create_proposal with the returned id) before it
@@ -278,25 +281,27 @@ export function registerAgentRoutes(
       let round = 0;
       if (tools.length > 0 && billing?.baseUrl) {
         const authHeader = req.headers.authorization as string | undefined;
-        while (result.functionCalls && result.functionCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
+        while (result.toolCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
           round++;
-          const responseParts: { functionResponse: { name?: string; response: Record<string, unknown> } }[] = [];
-          for (const call of result.functionCalls) {
+          messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
+          const results: LlmToolResult[] = [];
+          for (const call of result.toolCalls) {
             const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, webFetchEnabled, call);
             if (summary) actionSummaries.push(summary);
-            responseParts.push({ functionResponse: { name: call.name, response } });
+            results.push({ id: call.id, name: call.name, response });
           }
-          result = await timedSendMessage({ message: responseParts });
-          inputTokens  += (result as any).usageMetadata?.promptTokenCount ?? 0;
-          outputTokens += (result as any).usageMetadata?.candidatesTokenCount ?? 0;
+          messages.push({ role: 'tool', results });
+          result = await timedChat();
+          inputTokens  += result.usage.inputTokens;
+          outputTokens += result.usage.outputTokens;
         }
       }
 
-      const rawText = result.text ?? '';
+      const rawText = result.text;
 
       let { cleanText, spec } = parseArtifactFromText(rawText);
       // Gemini sometimes ends a function-calling turn (e.g. after a few
-      // fetch_url/search_records reads) with no functionCalls left AND no
+      // fetch_url/search_records reads) with no tool calls left AND no
       // text — often because it read enough to conclude an action can't be
       // completed as asked, but never says why. A generic "something's
       // missing, please clarify" fallback here just repeats itself verbatim
@@ -304,12 +309,30 @@ export function registerAgentRoutes(
       // ask the model directly to name the real blocker in its own words.
       if (!cleanText.trim()) {
         try {
-          const clarify = await timedSendMessage({
-            message: "Tu n'as donné aucune réponse à l'utilisateur pour ce message. En 1 à 2 phrases, explique précisément ce qui t'empêche de terminer cette action (l'information exacte qui te manque, ou la raison du blocage) — sans appeler à nouveau d'outil, juste du texte.",
+          // Text only, deliberately without result.toolCalls: a call still
+          // pending here was never executed (the round cap cut the loop
+          // short), and replaying an unanswered call is rejected by
+          // providers that require a result for every one. `raw` is dropped
+          // in that same case — it carries those very calls among the
+          // provider's own blocks, so passing it would reintroduce exactly
+          // what omitting toolCalls avoids — and kept otherwise, so an
+          // ordinary blank turn's thinking blocks still round-trip. On that
+          // ordinary blank turn there is neither text nor calls, so this
+          // push is a no-op the adapters drop.
+          const hasPendingCalls = result.toolCalls.length > 0;
+          messages.push({
+            role: 'assistant',
+            content: result.text,
+            ...(hasPendingCalls ? {} : { raw: result.raw }),
           });
-          inputTokens += (clarify as any).usageMetadata?.promptTokenCount ?? 0;
-          outputTokens += (clarify as any).usageMetadata?.candidatesTokenCount ?? 0;
-          const clarifyText = parseArtifactFromText(clarify.text ?? '').cleanText;
+          messages.push({
+            role: 'user',
+            content: "Tu n'as donné aucune réponse à l'utilisateur pour ce message. En 1 à 2 phrases, explique précisément ce qui t'empêche de terminer cette action (l'information exacte qui te manque, ou la raison du blocage) — sans appeler à nouveau d'outil, juste du texte.",
+          });
+          const clarify = await timedChat();
+          inputTokens += clarify.usage.inputTokens;
+          outputTokens += clarify.usage.outputTokens;
+          const clarifyText = parseArtifactFromText(clarify.text).cleanText;
           if (clarifyText.trim()) cleanText = clarifyText;
         } catch {
           // Network/timeout on the clarification round — fall through to the
@@ -332,6 +355,7 @@ export function registerAgentRoutes(
           tenantId, userId: req.user.id,
           agentId, conversationId: convId,
           endpointType: 'agent',
+          provider: provider.id, model: provider.model,
           inputTokens, outputTokens,
         });
         newBalance = deducted.newBalance;
@@ -354,7 +378,7 @@ export function registerAgentRoutes(
 
       await supabaseAdmin.from('agent_conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId);
 
-      console.log(`[agent chat] done in ${Date.now() - chatRequestStart}ms conv=${convId} agent=${agentId} geminiCalls=${geminiCallCount} rounds=${round} tokens=${inputTokens + outputTokens}`);
+      console.log(`[agent chat] done in ${Date.now() - chatRequestStart}ms conv=${convId} agent=${agentId} llmCalls=${llmCallCount} rounds=${round} tokens=${inputTokens + outputTokens}`);
 
       res.json({
         reply,
@@ -364,6 +388,12 @@ export function registerAgentRoutes(
         ...(artifact ? { artifact } : {}),
       });
     } catch (e: any) {
+      // Kept ahead of the Sentry capture below so a missing/unusable API key
+      // stays the plain 503 it was when this check ran inline, rather than
+      // becoming a reported exception.
+      if (e instanceof LlmNotConfiguredError) {
+        return res.status(503).json({ error: e.message });
+      }
       console.error(`[agent chat error] ${e.message} (totalMs=${Date.now() - chatRequestStart})`);
       // Richer than captureConsoleIntegration's plain-string capture — tags
       // this by agent so failures for a specific agent are easy to isolate.
