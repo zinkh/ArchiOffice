@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconRobot, IconMessageCircle, IconPencil, IconPlus, IconCheck } from '@tabler/icons-react';
+import { IconRobot, IconMessageCircle, IconPencil, IconPlus, IconCheck, IconBell } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
 import { useUser } from '@/src/UserContext';
 import { useAgentChat } from './AgentChat.js';
@@ -157,6 +157,14 @@ export default function Agents() {
           </div>
           <p className="text-[13px]" style={{ color: 'var(--tblr-muted)' }}>{t('agents_page_subtitle')}</p>
         </div>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/agents/alertes"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px]"
+            style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
+          >
+            <IconBell size={14} /> {t('agent_alerts_title')}
+          </Link>
         {tokenBalance !== null && (
           <div
             className="flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px]"
@@ -166,6 +174,7 @@ export default function Agents() {
             <span>{(tokenBalance / 100).toFixed(2)} € de crédit IA disponible</span>
           </div>
         )}
+        </div>
       </div>
 
       {activateError && (

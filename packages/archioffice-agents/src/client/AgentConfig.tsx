@@ -41,6 +41,10 @@ export default function AgentConfig() {
   const [contextScopes, setContextScopes] = useState<AgentContextScope[]>([]);
   const [actionScopes, setActionScopes] = useState<AgentActionScope[]>([]);
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
+  const [mailEnabled, setMailEnabled] = useState(false);
+  const [mailSendEnabled, setMailSendEnabled] = useState(false);
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [docsReadEnabled, setDocsReadEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -58,6 +62,10 @@ export default function AgentConfig() {
         setContextScopes(found.context_scopes as AgentContextScope[]);
         setActionScopes((found.action_scopes ?? []) as AgentActionScope[]);
         setWebFetchEnabled(!!found.web_fetch_enabled);
+        setMailEnabled(!!found.mail_enabled);
+        setMailSendEnabled(!!found.mail_send_enabled);
+        setGeoEnabled(!!found.geo_enabled);
+        setDocsReadEnabled(!!found.docs_read_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -92,6 +100,10 @@ export default function AgentConfig() {
           context_scopes: contextScopes,
           action_scopes: actionScopes,
           web_fetch_enabled: webFetchEnabled,
+          mail_enabled: mailEnabled,
+          mail_send_enabled: mailEnabled && mailSendEnabled,
+          geo_enabled: geoEnabled,
+          docs_read_enabled: docsReadEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -244,6 +256,68 @@ export default function AgentConfig() {
             </label>
           ))}
         </div>
+      </section>
+
+      {/* Capacités hors CRUD : messagerie, cartographie, pièces de projet */}
+      <section className="p-5 rounded-xl border space-y-4" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+        <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_capabilities')}</h2>
+        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_capabilities_hint')}</p>
+
+        <div className="space-y-2">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={mailEnabled}
+              onChange={() => setMailEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_read')}</span>
+          </label>
+
+          {/* L'envoi est un second palier : sans lecture, il n'a pas de sens
+              et le serveur le refuserait de toute façon. */}
+          <label className={`flex items-center gap-3 pl-7 ${mailEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              disabled={!mailEnabled}
+              checked={mailEnabled && mailSendEnabled}
+              onChange={() => setMailSendEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: '#c92a2a' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_send')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={geoEnabled}
+              onChange={() => setGeoEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_geo')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={docsReadEnabled}
+              onChange={() => setDocsReadEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_read')}</span>
+          </label>
+        </div>
+
+        {mailEnabled && mailSendEnabled && (
+          <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
+            <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
+            <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_mail_send_warning')}</p>
+          </div>
+        )}
       </section>
 
       {/* Web access — high-risk capability, off by default */}

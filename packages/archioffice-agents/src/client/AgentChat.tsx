@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
@@ -45,6 +45,14 @@ function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
     excel: <IconFileSpreadsheet size={20} color="#217346" />,
     csv: <IconFileTypeCsv size={20} color="#217346" />,
     docx: <IconFileText size={20} color="#2b5797" />,
+    pdf: <IconFileTypePdf size={20} color="#b02a2a" />,
+  };
+
+  const typeLabels: Record<string, string> = {
+    excel: 'Fichier Excel',
+    csv: 'Fichier CSV',
+    docx: 'Document Word',
+    pdf: 'Document PDF',
   };
 
   const download = () => {
@@ -69,7 +77,7 @@ function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{artifact.filename}</div>
         <div className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
-          {artifact.type === 'excel' ? 'Fichier Excel' : artifact.type === 'csv' ? 'Fichier CSV' : 'Document Word'}
+          {typeLabels[artifact.type] ?? 'Document'}
         </div>
       </div>
       <IconDownload size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />

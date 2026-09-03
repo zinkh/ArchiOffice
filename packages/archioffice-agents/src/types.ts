@@ -73,6 +73,64 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
 ];
 
+// Périmètre d'écriture par défaut d'un métier, appliqué quand un cabinet
+// active un agent depuis un template. Il double la colonne action_scopes du
+// template lui-même (renseignée par supabase/migrate_add_agent_autonomy.sql) :
+// le template reste la source, cette table n'intervient que s'il arrive vide,
+// cas d'une base où la migration de backfill n'a pas encore tourné.
+export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves'],
+  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications'],
+  'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
+  'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
+  'responsable-hqe':     ['specifications', 'tasks'],
+  'ingenieur-thermique': ['specifications'],
+  'ingenieur-structure': ['specifications'],
+  'ingenieur-fluides':   ['specifications'],
+  'acousticien':         ['specifications'],
+  'paysagiste':          ['specifications', 'tasks'],
+  'urbaniste':           ['contacts', 'meetings', 'tasks', 'projects'],
+};
+
+// Capacités hors CRUD interne. Chacune a sa propre colonne plutôt qu'une
+// entrée dans action_scopes : le risque, la surface exposée et la personne
+// qui décide de l'activer ne sont pas les mêmes qu'une écriture en base.
+export interface AgentCapabilities {
+  actionScopes: string[];
+  /** fetch_url — récupération d'une page web publique. */
+  webFetch: boolean;
+  /** Lecture de la messagerie connectée (Gmail, Outlook ou IMAP). */
+  mailRead: boolean;
+  /** Envoi de mail. Palier distinct de la lecture, jamais implicite. */
+  mailSend: boolean;
+  /** Modules cartographiques : adresse, cadastre, PLU, risques, monuments. */
+  geo: boolean;
+  /** Lecture du CCTP et du DPGF d'un projet. */
+  docsRead: boolean;
+}
+
+export function capabilitiesFromAgent(agent: {
+  action_scopes?: string[] | null;
+  web_fetch_enabled?: boolean | null;
+  mail_enabled?: boolean | null;
+  mail_send_enabled?: boolean | null;
+  geo_enabled?: boolean | null;
+  docs_read_enabled?: boolean | null;
+}): AgentCapabilities {
+  return {
+    actionScopes: agent.action_scopes || [],
+    webFetch: !!agent.web_fetch_enabled,
+    mailRead: !!agent.mail_enabled,
+    // L'envoi suppose la lecture : un agent qui ne voit pas la boîte n'a
+    // aucun contexte pour écrire à quelqu'un en son nom.
+    mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
+    geo: !!agent.geo_enabled,
+    docsRead: !!agent.docs_read_enabled,
+  };
+}
+
 export interface Agent {
   id: string;
   tenant_id: string | null;
@@ -87,6 +145,10 @@ export interface Agent {
   context_scopes: AgentContextScope[];
   action_scopes: AgentActionScope[];
   web_fetch_enabled: boolean;
+  mail_enabled: boolean;
+  mail_send_enabled: boolean;
+  geo_enabled: boolean;
+  docs_read_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -113,7 +175,7 @@ export interface AgentMessage {
 }
 
 export interface AgentArtifact {
-  type: 'excel' | 'docx' | 'csv';
+  type: 'excel' | 'docx' | 'csv' | 'pdf';
   filename: string;
   data: string; // base64
   mimeType: string;
@@ -152,6 +214,10 @@ export interface AgentRow {
   context_scopes: string[];
   action_scopes: string[];
   web_fetch_enabled: boolean;
+  mail_enabled: boolean;
+  mail_send_enabled: boolean;
+  geo_enabled: boolean;
+  docs_read_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }

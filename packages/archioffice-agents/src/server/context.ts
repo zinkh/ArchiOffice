@@ -8,6 +8,7 @@ import type { AgentContext } from '../types.js';
 // 1.x is a pure-JS text-only extractor with zero native dependencies.
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS } from './ocr.js';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -21,6 +22,20 @@ const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 // timeout budget and surfacing as an opaque "Le service met trop de temps
 // à répondre" with no attached document ever having been the actual cause.
 const DOC_EXTRACTION_TIMEOUT_MS = 10_000;
+
+// L'OCR (ocr.ts) rend chaque page en image puis la reconnaît : c'est
+// nettement plus lent qu'une lecture de couche texte, et le budget ci-dessus
+// le rejetterait systématiquement. Les documents qui en ont besoin ont donc
+// leur propre enveloppe, appliquée à ce seul chemin.
+const OCR_EXTRACTION_TIMEOUT_MS = 60_000;
+
+// Un PDF ou une image PEUT demander un OCR ; on ne le sait qu'après avoir
+// tenté l'extraction, donc l'enveloppe de temps est choisie d'après le nom
+// avant de commencer.
+function isOcrLikely(fileName: string): boolean {
+  const lower = String(fileName || '').toLowerCase();
+  return lower.endsWith('.pdf') || OCR_IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -287,6 +302,7 @@ export async function buildAgentContext(
         const { buffer, contentType } = fetched;
 
         let text: string | null = null;
+        let ocrNote = '';
         if (lowerName.endsWith('.pdf')) {
           // CCTP, RC and other tender/contract documents are almost always
           // PDFs — this used to be silently dropped by the content-type
@@ -302,15 +318,39 @@ export async function buildAgentContext(
           // spreadsheets, legacy .doc...) — only inject text-based content,
           // never binary bytes as if they were readable text.
           text = buffer.toString('utf8');
-        } else {
+        } else if (!OCR_IMAGE_EXTENSIONS.some(ext => lowerName.endsWith(ext))) {
           return;
         }
 
-        if (!text || !text.trim()) return; // e.g. a scanned PDF with no text layer
+        // PDF scanné (aucune couche texte exploitable) ou image : dernier
+        // recours par reconnaissance de caractères. Le résultat remplace le
+        // texte vide, et si l'OCR n'est pas disponible sur ce serveur on
+        // injecte la raison plutôt que rien, pour que l'agent puisse le dire.
+        if (isOcrCandidate(lowerName, text)) {
+          const ocrStart = Date.now();
+          const ocr = await ocrDocument(lowerName, buffer).catch((e: any) => {
+            console.log(`[agent context] OCR failed for "${doc.name}": ${e?.message}`);
+            return null;
+          });
+          if (ocr?.text?.trim()) {
+            text = ocr.text;
+            ocrNote = `[Document sans couche texte : contenu reconstitué par OCR sur ${ocr.pages} page(s). Des erreurs de reconnaissance sont possibles.]\n\n`;
+            console.log(`[agent context] document "${doc.name}" OCR'd in ${Date.now() - ocrStart}ms (${ocr.pages} pages, ${ocr.text.length} chars)`);
+          } else if (ocr?.unavailableReason && !text?.trim()) {
+            ctx.documentContents.push({
+              id: doc.id,
+              name: doc.name,
+              content: `[Ce document ne contient pas de texte sélectionnable (document scanné) et n'a pas pu être lu : ${ocr.unavailableReason}. Dis-le explicitement à l'utilisateur et propose-lui de fournir une version texte.]`,
+            });
+            return;
+          }
+        }
+
+        if (!text || !text.trim()) return;
         ctx.documentContents.push({
           id: doc.id,
           name: doc.name,
-          content: text.slice(0, MAX_DOC_BYTES),
+          content: ocrNote + text.slice(0, MAX_DOC_BYTES),
         });
         console.log(`[agent context] document "${doc.name}" extracted in ${Date.now() - docStart}ms (${text.length} chars)`);
       } catch (e: any) {
@@ -320,10 +360,10 @@ export async function buildAgentContext(
         // document just has no useful content".
         console.log(`[agent context] document "${doc.name}" extraction failed after ${Date.now() - docStart}ms: ${e?.message}`);
       }
-    })(), DOC_EXTRACTION_TIMEOUT_MS).catch(() => {
+    })(), isOcrLikely(doc.name) ? OCR_EXTRACTION_TIMEOUT_MS : DOC_EXTRACTION_TIMEOUT_MS).catch(() => {
       // Timed out (or any other rejection) — skip this document, same as an
       // extraction error above.
-      console.log(`[agent context] document "${doc.name}" extraction timed out after ${Date.now() - docStart}ms (budget ${DOC_EXTRACTION_TIMEOUT_MS}ms)`);
+      console.log(`[agent context] document "${doc.name}" extraction timed out after ${Date.now() - docStart}ms`);
     });
     });
 

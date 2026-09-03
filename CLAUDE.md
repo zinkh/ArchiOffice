@@ -216,6 +216,55 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
+### Capacités et autonomie des agents
+
+Au-delà du chat et des écritures CRUD (`action_scopes`), un agent porte quatre
+capacités indépendantes, une colonne chacune sur `agents`, réglées par
+l'architecte depuis `/agents/:id/edit` :
+
+| Colonne | Outils exposés | Fichier |
+|---|---|---|
+| `web_fetch_enabled` | `fetch_url` | `server/webFetch.ts` |
+| `mail_enabled` / `mail_send_enabled` | `search_emails`, `list_emails`, `read_email`, `send_email` | `server/mailTools.ts` |
+| `geo_enabled` | `search_address`, `get_parcelle_cadastrale`, `get_zone_plu`, `get_risques`, `get_monuments_historiques` | `server/geoTools.ts` |
+| `docs_read_enabled` | `read_cctp`, `read_dpgf` | `server/projectDocTools.ts` |
+
+Comme les outils CRUD, tout passe par l'API REST de l'application en boucle
+locale avec le jeton de l'utilisateur : un agent n'a jamais plus de droits que
+la personne qui lui parle. `capabilitiesFromAgent()` (`src/types.ts`) est le
+seul endroit qui traduit les colonnes en capacités, et il impose l'invariant
+« pas d'envoi de mail sans lecture ».
+
+Deux mécanismes tournent sans qu'on leur pose de question :
+
+- **Alertes métier** — `server/agentAlerts.ts`. Un cycle (6 h par défaut) relit
+  l'état de chaque cabinet et crée une alerte par situation anormale (études
+  engagées sans contrat MOE signé, chantier sans OS, facture échue, réserves
+  non levées, devis sans réponse, échéance d'AO, contrat signé non facturé,
+  réunion sans compte rendu, tâches en retard). Chaque règle est activable et
+  a un seuil réglable (`agent_alert_rules`). Une alerte est dédupliquée par
+  `dedup_key` et refermée automatiquement quand sa cause disparaît.
+- **Exécutions planifiées** — `packages/archioffice-agents/src/server/scheduler.ts`.
+  Un agent exécute une consigne à cadence fixe et rend un compte rendu.
+  Volontairement **en lecture seule** : hors session il n'existe aucun jeton
+  utilisateur à transmettre à l'API interne, et fabriquer un jeton de service
+  contournerait les contrôles que les actions d'agent traversent justement.
+
+### OCR
+
+`packages/archioffice-agents/src/server/ocr.ts` rattrape les documents sans
+couche texte : `pdftoppm` (poppler-utils, installé par le Dockerfile) met les
+pages en image, `tesseract.js` les reconnaît. Si l'un des deux manque, le
+contenu injecté dit explicitement que le document est scanné et illisible,
+plutôt que de le laisser passer pour vide.
+
+### Documents produits par un agent
+
+`server/artifacts.ts` fabrique les fichiers demandés dans un bloc
+```` ```artifact ```` (docx, pdf, xlsx, csv). Tous portent la charte du cabinet
+lue dans `settings` par `server/agencyIdentity.ts` : logo et coordonnées en
+en-tête, adresse et SIRET en pied de page, pagination « P1|2 » en bas à droite.
+
 ### Maps
 
 - `MapLibreCadastre.tsx` — Cadastral parcels via IGN WMTS tiles
