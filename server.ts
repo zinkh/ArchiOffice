@@ -335,8 +335,12 @@ export async function createApp() {
   // truth shared with the pricing/usage display, instead of a duplicate map.
 
   // ─── AI Token Pricing ────────────────────────────────────────────────────────
-  // Recalibrated for the gemini-3-flash-preview migration (see server.ts's
-  // genai.models.generateContent call and archioffice-agents' chat route).
+  // Recalibrated for the gemini-3-flash-preview migration (the model these
+  // rates price is now set in the agents package's llm/gemini.ts, the single
+  // adapter both AI routes go through).
+  // NOTE: these two rates assume ONE model. They must become a per-model
+  // table before a second provider is selectable, or a call to a pricier
+  // model gets billed at Gemini Flash rates.
   // gemini-2.5-flash cost Google $0.30/M input; the old €0.40 default was a
   // ~1.333x markup on that. gemini-3-flash-preview costs $0.50/$3.00 per M
   // input/output — both prices below apply that same ~1.333x markup to the

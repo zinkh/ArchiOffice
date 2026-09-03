@@ -181,9 +181,21 @@ Shared interfaces live in `src/types.ts`. CCTP-specific types are in `src/types/
 | Excel | xlsx | Inline in pages |
 | XML (DPGF import) | fast-xml-parser | `src/lib/xmlHelper.ts` |
 
-### AI (Gemini)
+### AI (provider abstraction)
 
-AI features (proposal drafting, CCTP generation) call `@google/genai` from the backend (`server.ts`). The frontend never calls Gemini directly — it goes through `/api/gemini-*` endpoints.
+AI features (agent chat, CCTP generation) are called from the backend only — the frontend never talks to a model provider directly.
+
+All model calls go through the provider-neutral layer in `packages/archioffice-agents/src/server/llm/`:
+
+| File | Role |
+|---|---|
+| `llm/types.ts` | `LlmProvider`, `LlmMessage`, `LlmToolDef`, `LlmChatResult` — no vendor types |
+| `llm/gemini.ts` | The Gemini adapter (`@google/genai`), currently the only implementation |
+| `llm/index.ts` | `resolveLlmProvider()` — the single place that picks provider, model and key |
+
+The two call sites are `packages/archioffice-agents/src/server/routes.ts` (agent chat, with the tool-calling loop) and `server/routes/aiSuggestions.ts` (CCTP articles). Neither imports a vendor SDK: add a provider by writing an adapter and extending `resolveLlmProvider()`, not by editing call sites.
+
+Conversation state is held by the caller, not by an SDK chat object, because every provider we target is stateless. Tool definitions are plain JSON Schema (`parametersJsonSchema`), which maps onto Gemini, Anthropic and Mistral without rewriting.
 
 ### Maps
 
