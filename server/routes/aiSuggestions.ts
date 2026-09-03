@@ -39,9 +39,11 @@ export function registerAiSuggestionRoutes(app: Express, { supabaseAdmin, getTen
       // answers 503 rather than 402, exactly as it did when this route
       // instantiated GoogleGenAI itself. Imported dynamically, like the
       // Gemini SDK was here before, so the proprietary agents package is
-      // only loaded when an AI route actually runs.
-      const { resolveLlmProvider } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider();
+      // only loaded when an AI route actually runs. The platform setting
+      // chosen in /admin wins over AI_PROVIDER/AI_MODEL; its lookup is
+      // cached, so this is not a database round trip per call.
+      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       // Refresh monthly allowance if needed, then check balance
       const { plan } = await getTenantPlan(tenantId);

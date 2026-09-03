@@ -4,7 +4,7 @@ import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
-import { resolveLlmProvider, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
+import { resolveLlmProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
@@ -211,11 +211,12 @@ export function registerAgentRoutes(
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
-      // Which provider/model this call runs on is decided in llm/ — step 1
-      // still resolves Gemini from GEMINI_API_KEY, exactly as this route did
-      // inline before. A missing key throws LlmNotConfiguredError, turned
-      // into the same 503 as before by the catch block at the end.
-      const provider = resolveLlmProvider();
+      // Which provider/model this call runs on is decided in llm/: the
+      // platform setting picked in /admin when there is one, else
+      // AI_PROVIDER/AI_MODEL, else Gemini. The lookup is cached, so this is
+      // not a database round trip per call. A missing key throws
+      // LlmNotConfiguredError, turned into a 503 by the catch block below.
+      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       const actionScopes: string[] = (agent as any).action_scopes || [];
       const webFetchEnabled: boolean = !!(agent as any).web_fetch_enabled;

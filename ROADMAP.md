@@ -61,7 +61,7 @@ Model calls go through one provider-neutral layer, `packages/archioffice-agents/
 | Claude (Anthropic) | ✅ | Adapter + pricing in place; set `ANTHROPIC_API_KEY` and `AI_PROVIDER=anthropic` to run the instance on it. Not yet exercised against real tenant traffic. |
 | Mistral | ✅ | Same. French, EU-hosted — the relevant argument for tenants whose own clients impose GDPR or data-sovereignty constraints. |
 | Per-model pricing | ✅ | `llm/pricing.ts`. A model absent from `MODEL_CATALOG` is refused rather than billed at an invented rate; `AI_PRICE_MARKUP` is the single margin lever. |
-| Provider choice from the UI | ⏳ | Selection is instance-wide via `AI_PROVIDER` / `AI_MODEL`. No per-tenant or per-agent picker yet. |
+| Provider choice from the UI | ✅ | Platform operator picks the active provider **and a model per provider** in `/admin` (**Fournisseur IA**), stored in `platform_settings`, effective within ~30s with no restart. Each provider keeps its own model, so switching back restores the earlier choice instead of resetting to that provider's default. A provider with no API key configured can be pre-set but not activated. Still instance-wide: no per-tenant or per-agent picker. |
 | BYOK (tenants bringing their own API key) | ⏳ | Designed, not built — see below. |
 
 ### BYOK — planned
@@ -73,6 +73,7 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 - **Wiring**: `resolveLlmProvider()` already takes `{ provider, model, apiKey }` — the tenant lookup plugs in there, and no call site changes.
 - **Billing**: on a BYOK call, skip `deductAiCredit` and the prepaid `NO_TOKENS` gate, but still write the `agent_token_usage` row with `cost_eur_cents = 0`, so the tenant keeps its consumption visible without being charged. The `plan !== 'enterprise'` gate on agent chat is worth revisiting at the same time: BYOK is precisely what would let agents open up to lower plans at no cost risk to the operator.
 - **Open question**: tenant-wide only, or also per agent (`agents.provider` / `agents.model`)? Per-agent allows "Claude for drafting, Mistral for cheap classification" but doubles the config surface.
+- **Already in place**: `resolveLlmProvider()` takes `{ provider, model, apiKey }` and those win over everything else, and `platform_settings` shows the pattern for a stored selection. The per-tenant lookup slots in where `getPlatformAiConfig()` is called today — in `routes.ts` and `aiSuggestions.ts` — with the tenant's decrypted key as `apiKey`.
 - **Also required**: BYOK moves data processing to a provider the tenant picked, so the privacy policy (`src/pages/PrivacyPolicy.tsx`) and the subcontractor list need updating before it ships.
 
 ## Platform

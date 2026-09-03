@@ -12,7 +12,7 @@
 import { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
 import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
-import { isPricedModel } from './pricing.js';
+import { isPricedModel, MODEL_CATALOG } from './pricing.js';
 import { LlmNotConfiguredError, type LlmProvider } from './types.js';
 
 export interface ResolveLlmOptions {
@@ -57,8 +57,71 @@ const PROVIDERS: Record<string, ProviderDef> = {
 
 export const SUPPORTED_PROVIDERS = Object.keys(PROVIDERS);
 
+export interface ProviderAvailability {
+  provider: string;
+  label: string;
+  /** Environment variable holding this provider's key. */
+  envKey: string;
+  /** Whether that variable is set — a provider without a key cannot be
+   *  selected, so the admin UI greys it out instead of letting an operator
+   *  switch the instance onto a 503. */
+  configured: boolean;
+  defaultModel: string;
+  models: { model: string; label: string }[];
+}
+
+/** What the platform back-office needs to render a provider picker: every
+ *  supported provider, whether its key is present, and the models it can run.
+ *  Never returns a key or any part of one. */
+export function listProviderAvailability(): ProviderAvailability[] {
+  return Object.entries(PROVIDERS).map(([provider, def]) => ({
+    provider,
+    label: def.label,
+    envKey: def.envKey,
+    configured: !!process.env[def.envKey],
+    defaultModel: def.defaultModel,
+    models: Object.entries(MODEL_CATALOG[provider] || {}).map(([model, cost]) => ({
+      model,
+      label: cost.label,
+    })),
+  }));
+}
+
+export type LlmSelectionSource = 'override' | 'environment' | 'default';
+
+/**
+ * Which provider and model a call would run on, and where that came from.
+ * Resolves the pair from a single source rather than field by field: a
+ * provider chosen in one place and a model in another produce an invalid
+ * pair — an instance with AI_MODEL=gemini-3-flash-preview switched to
+ * Anthropic from the back-office would otherwise ask Claude for a Gemini
+ * model. So the first source that names either supplies both, and a source
+ * naming only a provider falls through to that provider's own default model.
+ *
+ * Does not check keys or the catalogue: it describes the selection so the
+ * admin UI can show it even when it is unusable. resolveLlmProvider() does
+ * the validating.
+ */
+export function describeLlmSelection(opts: ResolveLlmOptions = {}): {
+  provider: string;
+  model: string;
+  source: LlmSelectionSource;
+} {
+  const candidates: { provider?: string; model?: string; source: LlmSelectionSource }[] = [
+    { provider: opts.provider, model: opts.model, source: 'override' },
+    { provider: process.env.AI_PROVIDER, model: process.env.AI_MODEL, source: 'environment' },
+  ];
+  const chosen = candidates.find(c => c.provider || c.model);
+  const provider = chosen?.provider || 'gemini';
+  return {
+    provider,
+    model: chosen?.model || PROVIDERS[provider]?.defaultModel || '',
+    source: chosen?.source ?? 'default',
+  };
+}
+
 export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
-  const providerId = opts.provider || process.env.AI_PROVIDER || 'gemini';
+  const { provider: providerId, model } = describeLlmSelection(opts);
   const def = PROVIDERS[providerId];
   if (!def) {
     throw new LlmNotConfiguredError(
@@ -66,7 +129,6 @@ export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
     );
   }
 
-  const model = opts.model || process.env.AI_MODEL || def.defaultModel;
   if (!isPricedModel(providerId, model)) {
     throw new LlmNotConfiguredError(
       `Modèle IA inconnu ou non tarifé : ${providerId}/${model}. Ajoutez-le au catalogue avant de l'utiliser.`,
@@ -95,6 +157,13 @@ export {
   priceEurCents,
   type ModelCost,
 } from './pricing.js';
+export {
+  getPlatformAiConfig,
+  setPlatformAiConfig,
+  invalidatePlatformAiConfigCache,
+  parseStoredConfig,
+  type PlatformAiConfig,
+} from './config.js';
 export { LlmNotConfiguredError } from './types.js';
 export type {
   LlmChatParams,
