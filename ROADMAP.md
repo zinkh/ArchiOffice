@@ -10,7 +10,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 |---|---|---|
 | Projects, milestones, Gantt, Kanban, Calendar | ✅ | Full CRUD, in daily use. |
 | Tenders (*appels d'offres*) + RSS watch | ✅ | Includes RSS source polling and match → tender conversion. |
-| Proposals (*devis*) with AI-assisted drafting | ✅ | Gemini-backed suggestion endpoint, gated by per-tenant AI credits. |
+| Proposals (*devis*) with AI-assisted drafting | ✅ | Suggestion endpoint behind the provider-neutral LLM layer, gated by per-tenant AI credits. |
 | Contracts (*contrats MOE*) | ✅ | Co-traitants/sous-traitants, status workflow. |
 | CCTP (technical specifications) | 🟡 | Two parallel data models exist server-side (`/api/specifications` and the newer `/api/projects/:id/cctp` + `/api/cctps/:id`). Functionally usable, but treat this as still consolidating — don't build external integrations against both. |
 | DPGF (cost breakdown), XML import | ✅ | Import of existing DPGF XML files works. |
@@ -50,6 +50,30 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |
 | Microsoft Teams | ⏳ Planned — listed in Settings, no backend |
+
+## AI providers
+
+Model calls go through one provider-neutral layer, `packages/archioffice-agents/src/server/llm/` — see the AI section of [CLAUDE.md](CLAUDE.md) for how it fits together.
+
+| Area | Status | Notes |
+|---|---|---|
+| Gemini | ✅ | Default provider. `gemini-3-flash-preview`. |
+| Claude (Anthropic) | ✅ | Adapter + pricing in place; set `ANTHROPIC_API_KEY` and `AI_PROVIDER=anthropic` to run the instance on it. Not yet exercised against real tenant traffic. |
+| Mistral | ✅ | Same. French, EU-hosted — the relevant argument for tenants whose own clients impose GDPR or data-sovereignty constraints. |
+| Per-model pricing | ✅ | `llm/pricing.ts`. A model absent from `MODEL_CATALOG` is refused rather than billed at an invented rate; `AI_PRICE_MARKUP` is the single margin lever. |
+| Provider choice from the UI | ⏳ | Selection is instance-wide via `AI_PROVIDER` / `AI_MODEL`. No per-tenant or per-agent picker yet. |
+| BYOK (tenants bringing their own API key) | ⏳ | Designed, not built — see below. |
+
+### BYOK — planned
+
+The remaining step of the multi-provider work. Nothing is built yet; this records the design so it doesn't have to be re-derived.
+
+- **Storage**: a `tenant_ai_providers` table (`tenant_id`, `provider`, `api_key_encrypted`, `key_hint`, `default_model`, `is_active`), one row per provider so several can coexist. Encrypt with the existing `server/secretsCrypto.ts` (AES-256-GCM, `MAIL_ENCRYPTION_KEY`) — the same primitive already used for IMAP passwords and OAuth refresh tokens, no new crypto.
+- **Never echo a key back**: follow the `SECRET_COLS` pattern in `server/routes/settings.ts`; return a masked hint (`sk-ant-...4f2a`), never the key.
+- **Wiring**: `resolveLlmProvider()` already takes `{ provider, model, apiKey }` — the tenant lookup plugs in there, and no call site changes.
+- **Billing**: on a BYOK call, skip `deductAiCredit` and the prepaid `NO_TOKENS` gate, but still write the `agent_token_usage` row with `cost_eur_cents = 0`, so the tenant keeps its consumption visible without being charged. The `plan !== 'enterprise'` gate on agent chat is worth revisiting at the same time: BYOK is precisely what would let agents open up to lower plans at no cost risk to the operator.
+- **Open question**: tenant-wide only, or also per agent (`agents.provider` / `agents.model`)? Per-agent allows "Claude for drafting, Mistral for cheap classification" but doubles the config surface.
+- **Also required**: BYOK moves data processing to a provider the tenant picked, so the privacy policy (`src/pages/PrivacyPolicy.tsx`) and the subcontractor list need updating before it ships.
 
 ## Platform
 
