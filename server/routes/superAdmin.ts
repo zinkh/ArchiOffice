@@ -308,6 +308,68 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
 
   // ─── Platform admins (superadmin role management) ─────────────────────────
 
+  // ─── Fournisseur IA de la plateforme ────────────────────────────────────
+  // Le couple fournisseur/modèle se réglait uniquement par AI_PROVIDER /
+  // AI_MODEL, donc au prix d'un redémarrage. Ces deux routes le rendent
+  // modifiable à chaud. Les CLÉS d'API restent, elles, dans l'environnement
+  // et ne transitent jamais par ici : ce switch choisit parmi les
+  // fournisseurs déjà approvisionnés en clé, il n'en configure aucun.
+  app.get('/api/admin/ai-provider', requireSuperAdmin, async (_req: any, res: any) => {
+    try {
+      const { listProviderAvailability, describeLlmSelection, getPlatformAiConfig } =
+        await import('@zinkh/archioffice-agents/server/llm');
+      const stored = await getPlatformAiConfig(supabaseAdmin);
+      const selection = describeLlmSelection(stored);
+      res.json({
+        current: {
+          ...selection,
+          // describeLlmSelection ne connaît que « override » ; ici la source
+          // de cet override est connue : c'est platform_settings.
+          source: selection.source === 'override' ? 'database' : selection.source,
+        },
+        providers: listProviderAvailability(),
+      });
+    } catch (e: any) {
+      console.error('[GET /api/admin/ai-provider]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/admin/ai-provider', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { provider, model } = req.body ?? {};
+      if (typeof provider !== 'string' || typeof model !== 'string' || !provider || !model) {
+        return res.status(400).json({ error: 'provider et model sont requis' });
+      }
+
+      const { listProviderAvailability, setPlatformAiConfig } =
+        await import('@zinkh/archioffice-agents/server/llm');
+      const available = listProviderAvailability();
+
+      // Trois refus, dans cet ordre : un fournisseur inconnu, un fournisseur
+      // sans clé (basculer dessus mettrait toute l'IA en 503), un modèle hors
+      // catalogue (nous ne savons pas le facturer). Mieux vaut un 400 ici
+      // qu'une plateforme cassée par une faute de frappe.
+      const target = available.find(p => p.provider === provider);
+      if (!target) {
+        return res.status(400).json({ error: `Fournisseur inconnu : ${provider}` });
+      }
+      if (!target.configured) {
+        return res.status(400).json({
+          error: `Aucune clé API configurée pour ${target.label}. Renseignez ${target.envKey} avant de basculer dessus.`,
+        });
+      }
+      if (!target.models.some(m => m.model === model)) {
+        return res.status(400).json({ error: `Modèle inconnu pour ${target.label} : ${model}` });
+      }
+
+      await setPlatformAiConfig(supabaseAdmin, { provider, model }, req.user?.id);
+      await logAdminAction(supabaseAdmin, req.user, 'platform.ai_provider_changed', null, { provider, model });
+      res.json({ ok: true, provider, model });
+    } catch (e: any) {
+      console.error('[PUT /api/admin/ai-provider]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/admin/platform-admins', requireSuperAdmin, async (_req: any, res: any) => {
     try {
       const { data, error } = await supabaseAdmin.from('platform_admins').select('user_id, email, created_at').order('created_at', { ascending: true });

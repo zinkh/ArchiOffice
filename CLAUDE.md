@@ -99,7 +99,7 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `GEMINI_API_KEY` | One AI key required | Google Gemini (the default provider) |
 | `ANTHROPIC_API_KEY` | Optional | Claude, when a tenant or the instance runs on Anthropic |
 | `MISTRAL_API_KEY` | Optional | Mistral (French, EU-hosted) |
-| `AI_PROVIDER` / `AI_MODEL` | Optional | Instance-wide provider/model default (`gemini` + `gemini-3-flash-preview` when unset) |
+| `AI_PROVIDER` / `AI_MODEL` | Optional | Instance-wide provider/model default, overridable at runtime from `/admin` (`gemini` + `gemini-3-flash-preview` when unset) |
 | `AI_PRICE_MARKUP` | Optional | Operator margin over each model's real cost (default `1.3333`) |
 | `VITE_SUPABASE_URL` | Yes | Supabase URL (injected into frontend at build time) |
 | `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anon key (frontend) |
@@ -198,11 +198,18 @@ All model calls go through the provider-neutral layer in `packages/archioffice-a
 | `llm/anthropic.ts` | Claude adapter (`@anthropic-ai/sdk`) |
 | `llm/mistral.ts` | Mistral adapter (plain `fetch`, OpenAI-shaped endpoint) |
 | `llm/pricing.ts` | `MODEL_CATALOG` — each model's real cost, and `priceEurCents()` |
+| `llm/config.ts` | The provider/model chosen in the `/admin` back-office, cached, in `platform_settings` |
 | `llm/index.ts` | `resolveLlmProvider()` — the single place that picks provider, model and key |
 
 The two call sites are `packages/archioffice-agents/src/server/routes.ts` (agent chat, with the tool-calling loop) and `server/routes/aiSuggestions.ts` (CCTP articles). Neither imports a vendor SDK: add a provider by writing an adapter and registering it in `resolveLlmProvider()`, not by editing call sites.
 
 Conversation state is held by the caller, not by an SDK chat object, because every provider we target is stateless. Tool definitions are plain JSON Schema (`parametersJsonSchema`), which maps onto all three without rewriting. An assistant turn also carries an opaque `raw` field — the provider's own content blocks, replayed verbatim — which is what keeps Claude's thinking blocks and their signatures intact across a tool-calling round.
+
+**Selecting a provider.** Precedence, highest first: an explicit argument to `resolveLlmProvider()` (per-tenant BYOK, not built yet) → the `platform_settings.ai_provider` row set from the `/admin` back-office → `AI_PROVIDER`/`AI_MODEL` → Gemini. The stored setting outranks the environment on purpose, otherwise an instance that sets `AI_PROVIDER` could never be switched from the UI.
+
+`describeLlmSelection()` resolves the pair from **one** source rather than field by field: a provider from one place and a model from another produce an invalid pair (Claude asked for a Gemini model). A source naming only a provider falls through to that provider's own default model.
+
+API keys are never part of this. They stay in the environment, and `PUT /api/admin/ai-provider` refuses a provider whose key is missing rather than let an operator switch the platform onto a 503.
 
 **Two invariants worth keeping:**
 

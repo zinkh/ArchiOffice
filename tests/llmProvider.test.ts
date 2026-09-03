@@ -22,7 +22,7 @@ import { createGeminiProvider, DEFAULT_GEMINI_MODEL } from '../packages/archioff
 import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from '../packages/archioffice-agents/src/server/llm/anthropic';
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from '../packages/archioffice-agents/src/server/llm/mistral';
 import { priceEurCents, isPricedModel, listPricedModels } from '../packages/archioffice-agents/src/server/llm/pricing';
-import { resolveLlmProvider, LlmNotConfiguredError } from '../packages/archioffice-agents/src/server/llm/index';
+import { resolveLlmProvider, describeLlmSelection, LlmNotConfiguredError } from '../packages/archioffice-agents/src/server/llm/index';
 import type { LlmMessage, LlmToolDef } from '../packages/archioffice-agents/src/server/llm/types';
 
 function mockResponse(over: Record<string, any> = {}) {
@@ -534,5 +534,68 @@ describe('resolveLlmProvider — multi-provider', () => {
       expect(e.code).toBe('LLM_NOT_CONFIGURED');
       expect(e.message).toContain('MISTRAL_API_KEY');
     }
+  });
+});
+
+describe('describeLlmSelection — precedence', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env.AI_PROVIDER = saved.AI_PROVIDER;
+    process.env.AI_MODEL = saved.AI_MODEL;
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_MODEL;
+  });
+
+  it('falls back to Gemini when nothing is set anywhere', () => {
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_MODEL;
+    expect(describeLlmSelection()).toEqual({
+      provider: 'gemini',
+      model: DEFAULT_GEMINI_MODEL,
+      source: 'default',
+    });
+  });
+
+  it('reads the environment when no override is given', () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.AI_MODEL = 'mistral-small-latest';
+    expect(describeLlmSelection()).toEqual({
+      provider: 'mistral',
+      model: 'mistral-small-latest',
+      source: 'environment',
+    });
+  });
+
+  it('lets the override win over the environment — the point of the admin switch', () => {
+    process.env.AI_PROVIDER = 'gemini';
+    process.env.AI_MODEL = DEFAULT_GEMINI_MODEL;
+    expect(describeLlmSelection({ provider: 'anthropic', model: 'claude-sonnet-5' })).toEqual({
+      provider: 'anthropic',
+      model: 'claude-sonnet-5',
+      source: 'override',
+    });
+  });
+
+  it("never pairs one source's provider with another source's model", () => {
+    // The trap: an instance pinned to a Gemini model, switched to Anthropic
+    // from the back-office. Taking the provider from the override and the
+    // model from AI_MODEL would ask Claude for a Gemini model and fail on
+    // every call. The provider's own default is used instead.
+    process.env.AI_PROVIDER = 'gemini';
+    process.env.AI_MODEL = DEFAULT_GEMINI_MODEL;
+    expect(describeLlmSelection({ provider: 'anthropic' })).toEqual({
+      provider: 'anthropic',
+      model: DEFAULT_ANTHROPIC_MODEL,
+      source: 'override',
+    });
+  });
+
+  it('resolves that same pair into a runnable provider', () => {
+    process.env.AI_PROVIDER = 'gemini';
+    process.env.AI_MODEL = DEFAULT_GEMINI_MODEL;
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    const p = resolveLlmProvider({ provider: 'anthropic' });
+    expect(p.id).toBe('anthropic');
+    expect(p.model).toBe(DEFAULT_ANTHROPIC_MODEL);
   });
 });

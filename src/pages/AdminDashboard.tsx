@@ -6,7 +6,7 @@ import {
   IconUsers, IconBuildingSkyscraper, IconCreditCard,
   IconLoader2, IconRefresh, IconChevronDown, IconTrash,
   IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX, IconCoin,
-  IconCircleCheck, IconShieldLock, IconMessageCircle,
+  IconCircleCheck, IconShieldLock, IconMessageCircle, IconRobot,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -456,6 +456,163 @@ function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
 
 interface PlatformAdminRow { user_id: string; email: string; created_at: string }
 
+interface AiProviderRow {
+  provider: string;
+  label: string;
+  envKey: string;
+  configured: boolean;
+  defaultModel: string;
+  models: { model: string; label: string }[];
+}
+
+interface AiProviderState {
+  current: { provider: string; model: string; source: 'database' | 'environment' | 'default' };
+  providers: AiProviderRow[];
+}
+
+const AI_SOURCE_LABELS: Record<string, string> = {
+  database: 'choisi ici',
+  environment: 'défini par AI_PROVIDER / AI_MODEL',
+  default: 'valeur par défaut de l\'application',
+};
+
+function AiProviderPanel({ onClose }: { onClose: () => void }) {
+  const [state, setState] = useState<AiProviderState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch<AiProviderState>('/api/admin/ai-provider');
+      setState(data);
+      setProvider(data.current.provider);
+      setModel(data.current.model);
+    } catch (e: any) {
+      setError(e.message ?? 'Erreur de chargement');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const selected = state?.providers.find(p => p.provider === provider);
+
+  function handleProviderChange(next: string) {
+    setProvider(next);
+    // Le modèle appartient au fournisseur : le conserver en changeant de
+    // fournisseur produirait un couple que le serveur refuserait de toute
+    // façon. On repart donc sur son modèle par défaut.
+    const target = state?.providers.find(p => p.provider === next);
+    setModel(target?.defaultModel ?? '');
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await apiFetch('/api/admin/ai-provider', { method: 'PUT', body: JSON.stringify({ provider, model }) });
+      setSaved(true);
+      await load();
+    } catch (e: any) {
+      setError(e.message ?? 'Erreur lors de l\'enregistrement');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const dirty = !!state && (provider !== state.current.provider || model !== state.current.model);
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <IconRobot size={16} style={{ color: 'var(--tblr-primary)' }} />
+          <h2 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>Fournisseur IA</h2>
+        </div>
+        <button onClick={onClose} style={{ color: 'var(--tblr-muted)' }}><IconX size={16} /></button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        Modèle utilisé par les agents et la génération d'articles CCTP, pour tous les cabinets.
+        Prend effet en moins d'une minute, sans redémarrage. Les clés d'API restent, elles, dans
+        la configuration serveur : un fournisseur sans clé ne peut pas être sélectionné.
+      </p>
+
+      {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      {loading || !state ? (
+        <IconLoader2 size={18} className="animate-spin" style={{ color: 'var(--tblr-muted)' }} />
+      ) : (
+        <>
+          <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            Actuellement : <span className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{state.current.provider} / {state.current.model}</span>
+            {' '}({AI_SOURCE_LABELS[state.current.source] ?? state.current.source})
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <label className="flex-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Fournisseur
+              <select
+                value={provider}
+                onChange={e => handleProviderChange(e.target.value)}
+                className="mt-1 w-full text-sm rounded border px-3 py-1.5"
+                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+              >
+                {state.providers.map(p => (
+                  <option key={p.provider} value={p.provider} disabled={!p.configured}>
+                    {p.label}{p.configured ? '' : ` — clé manquante (${p.envKey})`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Modèle
+              <select
+                value={model}
+                onChange={e => { setModel(e.target.value); setSaved(false); }}
+                className="mt-1 w-full text-sm rounded border px-3 py-1.5"
+                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+              >
+                {(selected?.models ?? []).map(m => (
+                  <option key={m.model} value={m.model}>{m.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty || !selected?.configured}
+              className="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
+              style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: (saving || !dirty || !selected?.configured) ? 0.5 : 1 }}
+            >
+              {saving ? <IconLoader2 size={14} className="animate-spin" /> : <IconCircleCheck size={14} />}
+              Appliquer
+            </button>
+            {saved && !dirty && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">Enregistré</span>
+            )}
+          </div>
+
+          <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+            Le coût par échange varie fortement d'un modèle à l'autre. Un changement se répercute
+            immédiatement sur le crédit IA consommé par les cabinets, pas seulement sur la qualité
+            des réponses.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PlatformAdminsPanel({ onClose }: { onClose: () => void }) {
   const [admins, setAdmins] = useState<PlatformAdminRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -562,6 +719,7 @@ export default function AdminDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<TenantRow | null>(null);
   const [creditTarget, setCreditTarget] = useState<TenantRow | null>(null);
   const [showPlatformAdmins, setShowPlatformAdmins] = useState(false);
+  const [showAiProvider, setShowAiProvider] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -680,6 +838,14 @@ export default function AdminDashboard() {
             Super-administrateurs
           </button>
           <button
+            onClick={() => setShowAiProvider(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          >
+            <IconRobot size={14} />
+            Fournisseur IA
+          </button>
+          <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
@@ -706,6 +872,8 @@ export default function AdminDashboard() {
       )}
 
       {showPlatformAdmins && <PlatformAdminsPanel onClose={() => setShowPlatformAdmins(false)} />}
+
+      {showAiProvider && <AiProviderPanel onClose={() => setShowAiProvider(false)} />}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
