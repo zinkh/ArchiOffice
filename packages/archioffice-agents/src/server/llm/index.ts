@@ -161,6 +161,7 @@ export {
   getPlatformAiConfig,
   setPlatformAiConfig,
   invalidatePlatformAiConfigCache,
+  parseStoredConfig,
   type PlatformAiConfig,
 } from './config.js';
 export { LlmNotConfiguredError } from './types.js';

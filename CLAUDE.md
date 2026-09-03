@@ -198,7 +198,7 @@ All model calls go through the provider-neutral layer in `packages/archioffice-a
 | `llm/anthropic.ts` | Claude adapter (`@anthropic-ai/sdk`) |
 | `llm/mistral.ts` | Mistral adapter (plain `fetch`, OpenAI-shaped endpoint) |
 | `llm/pricing.ts` | `MODEL_CATALOG` — each model's real cost, and `priceEurCents()` |
-| `llm/config.ts` | The provider/model chosen in the `/admin` back-office, cached, in `platform_settings` |
+| `llm/config.ts` | The active provider and the model chosen per provider in `/admin`, cached, in `platform_settings` |
 | `llm/index.ts` | `resolveLlmProvider()` — the single place that picks provider, model and key |
 
 The two call sites are `packages/archioffice-agents/src/server/routes.ts` (agent chat, with the tool-calling loop) and `server/routes/aiSuggestions.ts` (CCTP articles). Neither imports a vendor SDK: add a provider by writing an adapter and registering it in `resolveLlmProvider()`, not by editing call sites.

@@ -320,6 +320,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         await import('@zinkh/archioffice-agents/server/llm');
       const stored = await getPlatformAiConfig(supabaseAdmin);
       const selection = describeLlmSelection(stored);
+      const providers = listProviderAvailability();
       res.json({
         current: {
           ...selection,
@@ -327,7 +328,14 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
           // de cet override est connue : c'est platform_settings.
           source: selection.source === 'override' ? 'database' : selection.source,
         },
-        providers: listProviderAvailability(),
+        // Le modèle retenu pour CHAQUE fournisseur, y compris ceux qui ne
+        // sont pas actifs : c'est ce qui permet de préconfigurer un
+        // fournisseur avant d'y basculer, et de retrouver son réglage en y
+        // revenant. Un fournisseur jamais réglé retombe sur son défaut.
+        models: Object.fromEntries(
+          providers.map(p => [p.provider, stored.models?.[p.provider] || p.defaultModel]),
+        ),
+        providers,
       });
     } catch (e: any) {
       console.error('[GET /api/admin/ai-provider]', e); res.status(500).json({ error: e.message });
@@ -336,35 +344,65 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
 
   app.put('/api/admin/ai-provider', requireSuperAdmin, async (req: any, res: any) => {
     try {
-      const { provider, model } = req.body ?? {};
-      if (typeof provider !== 'string' || typeof model !== 'string' || !provider || !model) {
-        return res.status(400).json({ error: 'provider et model sont requis' });
+      const { provider, model, models } = req.body ?? {};
+      if (typeof provider !== 'string' || !provider) {
+        return res.status(400).json({ error: 'provider est requis' });
       }
+      // `models` est la forme courante (un modèle par fournisseur) ; `model`
+      // seul reste accepté pour ne pas casser un appel écrit avant. Les deux
+      // sont facultatifs : ne changer que le fournisseur actif est le geste
+      // courant une fois les modèles réglés, et il doit reprendre celui déjà
+      // mémorisé pour ce fournisseur.
+      const requested: Record<string, unknown> =
+        models && typeof models === 'object' ? { ...models }
+        : typeof model === 'string' && model ? { [provider]: model }
+        : {};
 
-      const { listProviderAvailability, setPlatformAiConfig } =
+      const { listProviderAvailability, getPlatformAiConfig, setPlatformAiConfig } =
         await import('@zinkh/archioffice-agents/server/llm');
       const available = listProviderAvailability();
 
-      // Trois refus, dans cet ordre : un fournisseur inconnu, un fournisseur
-      // sans clé (basculer dessus mettrait toute l'IA en 503), un modèle hors
-      // catalogue (nous ne savons pas le facturer). Mieux vaut un 400 ici
-      // qu'une plateforme cassée par une faute de frappe.
+      // Trois refus, dans cet ordre : un fournisseur inconnu, un modèle hors
+      // catalogue (nous ne savons pas le facturer), et le fournisseur ACTIF
+      // sans clé (basculer dessus mettrait toute l'IA en 503). La clé n'est
+      // exigée que du fournisseur actif : préconfigurer le modèle d'un
+      // fournisseur avant de l'approvisionner en clé est légitime.
       const target = available.find(p => p.provider === provider);
       if (!target) {
         return res.status(400).json({ error: `Fournisseur inconnu : ${provider}` });
       }
+
+      const validated: Record<string, string> = {};
+      for (const [key, value] of Object.entries(requested)) {
+        const def = available.find(p => p.provider === key);
+        if (!def) {
+          return res.status(400).json({ error: `Fournisseur inconnu : ${key}` });
+        }
+        if (typeof value !== 'string' || !def.models.some(m => m.model === value)) {
+          return res.status(400).json({ error: `Modèle inconnu pour ${def.label} : ${String(value)}` });
+        }
+        validated[key] = value;
+      }
+
       if (!target.configured) {
         return res.status(400).json({
           error: `Aucune clé API configurée pour ${target.label}. Renseignez ${target.envKey} avant de basculer dessus.`,
         });
       }
-      if (!target.models.some(m => m.model === model)) {
-        return res.status(400).json({ error: `Modèle inconnu pour ${target.label} : ${model}` });
-      }
 
-      await setPlatformAiConfig(supabaseAdmin, { provider, model }, req.user?.id);
-      await logAdminAction(supabaseAdmin, req.user, 'platform.ai_provider_changed', null, { provider, model });
-      res.json({ ok: true, provider, model });
+      // Les réglages des fournisseurs absents de la requête sont conservés :
+      // un enregistrement partiel ne doit pas effacer un choix fait ailleurs.
+      // Et un fournisseur activé sans avoir jamais été réglé prend son modèle
+      // par défaut, plutôt que de faire échouer la bascule.
+      const stored = await getPlatformAiConfig(supabaseAdmin);
+      const merged = { ...(stored.models ?? {}), ...validated };
+      if (!merged[provider]) merged[provider] = target.defaultModel;
+
+      await setPlatformAiConfig(supabaseAdmin, { provider, models: merged }, req.user?.id);
+      await logAdminAction(supabaseAdmin, req.user, 'platform.ai_provider_changed', null, {
+        provider, model: merged[provider], models: merged,
+      });
+      res.json({ ok: true, provider, model: merged[provider], models: merged });
     } catch (e: any) {
       console.error('[PUT /api/admin/ai-provider]', e); res.status(500).json({ error: e.message });
     }

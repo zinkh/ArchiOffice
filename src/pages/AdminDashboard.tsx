@@ -467,13 +467,15 @@ interface AiProviderRow {
 
 interface AiProviderState {
   current: { provider: string; model: string; source: 'database' | 'environment' | 'default' };
+  /** Modèle retenu pour chaque fournisseur, actif ou non. */
+  models: Record<string, string>;
   providers: AiProviderRow[];
 }
 
 const AI_SOURCE_LABELS: Record<string, string> = {
   database: 'choisi ici',
   environment: 'défini par AI_PROVIDER / AI_MODEL',
-  default: 'valeur par défaut de l\'application',
+  default: "valeur par défaut de l'application",
 };
 
 function AiProviderPanel({ onClose }: { onClose: () => void }) {
@@ -483,7 +485,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
+  const [models, setModels] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -491,7 +493,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
       const data = await apiFetch<AiProviderState>('/api/admin/ai-provider');
       setState(data);
       setProvider(data.current.provider);
-      setModel(data.current.model);
+      setModels(data.models ?? {});
     } catch (e: any) {
       setError(e.message ?? 'Erreur de chargement');
     } finally {
@@ -501,34 +503,26 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const selected = state?.providers.find(p => p.provider === provider);
-
-  function handleProviderChange(next: string) {
-    setProvider(next);
-    // Le modèle appartient au fournisseur : le conserver en changeant de
-    // fournisseur produirait un couple que le serveur refuserait de toute
-    // façon. On repart donc sur son modèle par défaut.
-    const target = state?.providers.find(p => p.provider === next);
-    setModel(target?.defaultModel ?? '');
-    setSaved(false);
-  }
-
   async function handleSave() {
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      await apiFetch('/api/admin/ai-provider', { method: 'PUT', body: JSON.stringify({ provider, model }) });
+      await apiFetch('/api/admin/ai-provider', { method: 'PUT', body: JSON.stringify({ provider, models }) });
       setSaved(true);
       await load();
     } catch (e: any) {
-      setError(e.message ?? 'Erreur lors de l\'enregistrement');
+      setError(e.message ?? "Erreur lors de l'enregistrement");
     } finally {
       setSaving(false);
     }
   }
 
-  const dirty = !!state && (provider !== state.current.provider || model !== state.current.model);
+  const activeRow = state?.providers.find(p => p.provider === provider);
+  const dirty = !!state && (
+    provider !== state.current.provider ||
+    state.providers.some(p => models[p.provider] !== state.models?.[p.provider])
+  );
 
   return (
     <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
@@ -541,8 +535,9 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
       </div>
       <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
         Modèle utilisé par les agents et la génération d'articles CCTP, pour tous les cabinets.
-        Prend effet en moins d'une minute, sans redémarrage. Les clés d'API restent, elles, dans
-        la configuration serveur : un fournisseur sans clé ne peut pas être sélectionné.
+        Chaque fournisseur garde son propre modèle : vous pouvez les régler tous, puis basculer de
+        l'un à l'autre sans reconfigurer. Prend effet en moins d'une minute, sans redémarrage.
+        Les clés d'API restent dans la configuration serveur.
       </p>
 
       {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -556,43 +551,51 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
             {' '}({AI_SOURCE_LABELS[state.current.source] ?? state.current.source})
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2">
-            <label className="flex-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
-              Fournisseur
-              <select
-                value={provider}
-                onChange={e => handleProviderChange(e.target.value)}
-                className="mt-1 w-full text-sm rounded border px-3 py-1.5"
-                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
-              >
-                {state.providers.map(p => (
-                  <option key={p.provider} value={p.provider} disabled={!p.configured}>
-                    {p.label}{p.configured ? '' : ` — clé manquante (${p.envKey})`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
-              Modèle
-              <select
-                value={model}
-                onChange={e => { setModel(e.target.value); setSaved(false); }}
-                className="mt-1 w-full text-sm rounded border px-3 py-1.5"
-                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
-              >
-                {(selected?.models ?? []).map(m => (
-                  <option key={m.model} value={m.model}>{m.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+            {state.providers.map(p => (
+              <li key={p.provider} className="flex flex-col sm:flex-row sm:items-center gap-2 py-2.5">
+                <label className="flex items-center gap-2 sm:w-56 cursor-pointer" title={p.configured ? undefined : `Renseignez ${p.envKey} pour pouvoir activer ce fournisseur`}>
+                  <input
+                    type="radio"
+                    name="ai-active-provider"
+                    checked={provider === p.provider}
+                    disabled={!p.configured}
+                    onChange={() => { setProvider(p.provider); setSaved(false); }}
+                  />
+                  <span className="text-sm" style={{ color: p.configured ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>
+                    {p.label}
+                  </span>
+                </label>
+
+                {/* Le modèle se règle même sans clé : on prépare un fournisseur
+                    avant de l'approvisionner, le serveur n'exige la clé que du
+                    fournisseur activé. */}
+                <select
+                  value={models[p.provider] ?? p.defaultModel}
+                  onChange={e => { setModels(prev => ({ ...prev, [p.provider]: e.target.value })); setSaved(false); }}
+                  className="flex-1 text-sm rounded border px-3 py-1.5"
+                  style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+                >
+                  {p.models.map(m => (
+                    <option key={m.model} value={m.model}>{m.label}</option>
+                  ))}
+                </select>
+
+                {!p.configured && (
+                  <span className="text-[11px] sm:w-56" style={{ color: 'var(--tblr-muted)' }}>
+                    clé manquante ({p.envKey})
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
 
           <div className="flex items-center gap-3">
             <button
               onClick={handleSave}
-              disabled={saving || !dirty || !selected?.configured}
+              disabled={saving || !dirty || !activeRow?.configured}
               className="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
-              style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: (saving || !dirty || !selected?.configured) ? 0.5 : 1 }}
+              style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: (saving || !dirty || !activeRow?.configured) ? 0.5 : 1 }}
             >
               {saving ? <IconLoader2 size={14} className="animate-spin" /> : <IconCircleCheck size={14} />}
               Appliquer
