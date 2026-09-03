@@ -335,26 +335,17 @@ export async function createApp() {
   // truth shared with the pricing/usage display, instead of a duplicate map.
 
   // ─── AI Token Pricing ────────────────────────────────────────────────────────
-  // Recalibrated for the gemini-3-flash-preview migration (the model these
-  // rates price is now set in the agents package's llm/gemini.ts, the single
-  // adapter both AI routes go through).
-  // NOTE: these two rates assume ONE model. They must become a per-model
-  // table before a second provider is selectable, or a call to a pricier
-  // model gets billed at Gemini Flash rates.
-  // gemini-2.5-flash cost Google $0.30/M input; the old €0.40 default was a
-  // ~1.333x markup on that. gemini-3-flash-preview costs $0.50/$3.00 per M
-  // input/output — both prices below apply that same ~1.333x markup to the
-  // new cost (output used to run at a ~0.66x markup, i.e. below cost,
-  // subsidized by the input side; now deliberately unsubsidized, same factor
-  // on both).
-  const AI_PRICE_EUR_PER_M_INPUT  = parseFloat(process.env.AI_PRICE_INPUT_PER_M  || '0.67');
-  const AI_PRICE_EUR_PER_M_OUTPUT = parseFloat(process.env.AI_PRICE_OUTPUT_PER_M || '4.00');
-
-  function calcCostEurCents(inputTokens: number, outputTokens: number): number {
-    const cost = (inputTokens / 1_000_000) * AI_PRICE_EUR_PER_M_INPUT
-               + (outputTokens / 1_000_000) * AI_PRICE_EUR_PER_M_OUTPUT;
-    return Math.max(1, Math.ceil(cost * 100));
-  }
+  // Now per model, in the agents package's llm/pricing.ts. With several
+  // providers selectable, two flat rates would bill a Claude Opus call (10x
+  // Gemini Flash on input, ~8x on output) at Flash prices. So cost became a
+  // fact per model there, and margin one knob: AI_PRICE_MARKUP, whose 1.3333
+  // default reproduces the flat €0.67 / €4.00 rates this block used to hold,
+  // to the cent, for gemini-3-flash-preview.
+  //
+  // AI_PRICE_INPUT_PER_M / AI_PRICE_OUTPUT_PER_M are consequently no longer
+  // read: an instance that set them to move its margin should set
+  // AI_PRICE_MARKUP instead, which moves every model at once rather than the
+  // single model that pair was calibrated for.
 
   // Monthly AI credit included per plan (EUR cents). Topped up once per month.
   const PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number> = {
@@ -389,9 +380,13 @@ export async function createApp() {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
     endpointType: 'agent' | 'suggest_articles';
+    // Which model actually ran: per-token cost differs by an order of
+    // magnitude between them, so the charge can't be computed without it.
+    provider: string; model: string;
     inputTokens: number; outputTokens: number;
   }): Promise<{ newBalance: number; costCents: number }> {
-    const costCents = calcCostEurCents(params.inputTokens, params.outputTokens);
+    const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
+    const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens);
     await supabaseAdmin.rpc('deduct_ai_credits', { p_tenant_id: params.tenantId, p_amount_cents: costCents });
     const { data: t } = await supabaseAdmin.from('tenants')
       .select('ai_credit_balance_eur_cents').eq('id', params.tenantId).single();
@@ -402,6 +397,10 @@ export async function createApp() {
       tokens_used: params.inputTokens + params.outputTokens,
       input_tokens: params.inputTokens, output_tokens: params.outputTokens,
       cost_eur_cents: costCents, endpoint_type: params.endpointType,
+      // Recorded so a usage line can be read back together with the rate
+      // that produced it — without these two columns a €0.40 call and a
+      // €4.00 call are indistinguishable after the fact.
+      provider: params.provider, model: params.model,
     });
     return { newBalance, costCents };
   }

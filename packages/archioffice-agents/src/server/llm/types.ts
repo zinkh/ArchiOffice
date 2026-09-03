@@ -27,7 +27,19 @@ export interface LlmToolResult {
 
 export type LlmMessage =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: LlmToolCall[] }
+  | {
+      role: 'assistant';
+      content: string;
+      toolCalls?: LlmToolCall[];
+      /** The provider's own representation of this turn, echoed back
+       *  verbatim on the next call when the provider supplies one. It carries
+       *  what the neutral fields can't round-trip — Claude's thinking blocks
+       *  and their signatures above all, which the API expects to see
+       *  unchanged when a conversation continues on the same model. Opaque
+       *  here on purpose: only the adapter that produced it reads it, and
+       *  every other adapter ignores it. */
+      raw?: unknown;
+    }
   | { role: 'tool'; results: LlmToolResult[] };
 
 /** Same shape buildAgentTools() already produces (see tools.ts) — a plain
@@ -57,6 +69,9 @@ export interface LlmChatResult {
   text: string;
   toolCalls: LlmToolCall[];
   usage: LlmUsage;
+  /** Provider-specific payload for this turn, to be handed back on the
+   *  assistant message of the next call. See LlmMessage's `raw`. */
+  raw?: unknown;
 }
 
 export interface LlmProvider {

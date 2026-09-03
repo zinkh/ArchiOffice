@@ -12,6 +12,9 @@ type DeductAiCreditFn = (params: {
   tenantId: string; userId: string;
   agentId: string | null; conversationId: string | null;
   endpointType: 'agent' | 'suggest_articles';
+  // Which model actually ran: the cost per token differs by an order of
+  // magnitude between them, so billing can't be computed without it.
+  provider: string; model: string;
   inputTokens: number; outputTokens: number;
 }) => Promise<{ newBalance: number; costCents: number }>;
 
@@ -280,7 +283,7 @@ export function registerAgentRoutes(
         const authHeader = req.headers.authorization as string | undefined;
         while (result.toolCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
           round++;
-          messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls });
+          messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
           const results: LlmToolResult[] = [];
           for (const call of result.toolCalls) {
             const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, actionScopes, webFetchEnabled, call);
@@ -309,10 +312,19 @@ export function registerAgentRoutes(
           // Text only, deliberately without result.toolCalls: a call still
           // pending here was never executed (the round cap cut the loop
           // short), and replaying an unanswered call is rejected by
-          // providers that require a result for every call. On the ordinary
-          // blank turn there is neither text nor calls, so this push is a
-          // no-op the adapters drop.
-          messages.push({ role: 'assistant', content: result.text });
+          // providers that require a result for every one. `raw` is dropped
+          // in that same case — it carries those very calls among the
+          // provider's own blocks, so passing it would reintroduce exactly
+          // what omitting toolCalls avoids — and kept otherwise, so an
+          // ordinary blank turn's thinking blocks still round-trip. On that
+          // ordinary blank turn there is neither text nor calls, so this
+          // push is a no-op the adapters drop.
+          const hasPendingCalls = result.toolCalls.length > 0;
+          messages.push({
+            role: 'assistant',
+            content: result.text,
+            ...(hasPendingCalls ? {} : { raw: result.raw }),
+          });
           messages.push({
             role: 'user',
             content: "Tu n'as donné aucune réponse à l'utilisateur pour ce message. En 1 à 2 phrases, explique précisément ce qui t'empêche de terminer cette action (l'information exacte qui te manque, ou la raison du blocage) — sans appeler à nouveau d'outil, juste du texte.",
@@ -343,6 +355,7 @@ export function registerAgentRoutes(
           tenantId, userId: req.user.id,
           agentId, conversationId: convId,
           endpointType: 'agent',
+          provider: provider.id, model: provider.model,
           inputTokens, outputTokens,
         });
         newBalance = deducted.newBalance;

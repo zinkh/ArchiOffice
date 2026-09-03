@@ -16,6 +16,7 @@
     "access": "restricted"
   },
   "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.100.0",
     "@google/genai": ">=1.0.0",
     "@supabase/supabase-js": ">=2.0.0",
     "@sentry/node": ">=10.0.0",

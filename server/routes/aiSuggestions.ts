@@ -24,7 +24,7 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
   getTenantPlan: (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
   maybeRefreshMonthlyCredits: (tenantId: string, plan: string) => Promise<void>;
-  deductAiCredit: (params: { tenantId: string; userId: string; agentId: string | null; conversationId: string | null; endpointType: string; inputTokens: number; outputTokens: number }) => Promise<any>;
+  deductAiCredit: (params: { tenantId: string; userId: string; agentId: string | null; conversationId: string | null; endpointType: string; provider: string; model: string; inputTokens: number; outputTokens: number }) => Promise<any>;
 }
 
 export function registerAiSuggestionRoutes(app: Express, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit }: RouteDeps) {
@@ -77,6 +77,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide (sans markdown, sans explication
           tenantId, userId: req.user.id,
           agentId: null, conversationId: null,
           endpointType: 'suggest_articles',
+          provider: provider.id, model: provider.model,
           inputTokens, outputTokens,
         });
       }
