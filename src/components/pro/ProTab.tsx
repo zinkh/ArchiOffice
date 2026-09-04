@@ -8,6 +8,8 @@ import { DPGF, Ligne } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
 import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
+import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
+import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
   IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
@@ -133,6 +135,27 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     ].filter(Boolean).join('\n');
     if (window.confirm(lignes)) setDpgf(next);
   }, [bpu, dpgf, setDpgf]);
+
+  // Les exports portent la charte du cabinet : en-tête avec logo et
+  // coordonnées, pied de page adresse et SIRET, pagination « P1|2 ».
+  const { settings } = useSettings();
+
+  /**
+   * Un bordereau part chez les entreprises avec sa colonne « Réf. » : ce sont
+   * ces références qui permettront de rapprocher le fichier renvoyé. On les
+   * attribue donc avant d'exporter, et on les persiste.
+   */
+  const exporterBpu = useCallback(async (kind: 'pdf' | 'xlsx', colSet: string, vierge: boolean) => {
+    if (!bpu) return;
+    const avecRefs = assignerReferences(bpu);
+    if (avecRefs !== bpu) setBpu(avecRefs);
+    const mode = colSet === 'bpu' ? 'bpu' : 'dqe';
+    if (kind === 'xlsx') {
+      await exportBPUtoExcel(avecRefs, { mode, vierge, projectName });
+    } else {
+      await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
+    }
+  }, [bpu, setBpu, projectName, settings]);
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -393,6 +416,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                 onDragStart={ligne => setDraggedLigne(ligne)}
                 onInitFromDpgf={dpgf && dpgf.lots.length > 0 ? initBpuFromDpgf : undefined}
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
+                onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
+                onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
               />
             ) : null}
           </div>
