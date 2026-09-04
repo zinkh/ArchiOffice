@@ -157,12 +157,13 @@ Règles :
     : '';
 
   const projectDocsSection = caps.docsRead
-    ? `\n═══ CCTP ET DPGF DES PROJETS (read_cctp / read_dpgf) ═══
-Tu peux lire le CCTP et le DPGF d'un projet à partir de son identifiant (voir la liste des projets ci-dessous).
+    ? `\n═══ PIÈCES ÉCRITES DES PROJETS (read_cctp / read_dpgf / read_bpu) ═══
+Tu peux lire le CCTP, le DPGF et le BPU/DQE d'un projet à partir de son identifiant (voir la liste des projets ci-dessous).
 Règles :
 1. Appelle d'abord l'outil sans paramètre lot pour obtenir le sommaire, puis rappelle-le avec un lot précis pour le détail — n'essaie pas de tout charger.
-2. Les montants lus dans un DPGF sont confidentiels : ne les diffuse pas hors du cabinet et ne les recopie pas dans un email sans demande explicite.
-3. Si le projet n'a pas encore de CCTP ou de DPGF, l'outil te le dira : rapporte-le tel quel, n'invente pas de contenu.\n`
+2. Les montants de ces pièces sont confidentiels : ne les diffuse pas hors du cabinet et ne les recopie pas dans un email sans demande explicite. Un prix remis par une entreprise ne doit JAMAIS être communiqué à une autre entreprise.
+3. Si le projet n'a pas encore la pièce demandée, l'outil te le dira : rapporte-le tel quel, n'invente pas de contenu.
+4. Un DPGF décompose un prix forfaitaire ; un BPU est un catalogue de prix unitaires SANS montant de marché, les travaux y étant réglés sur quantités réellement exécutées. Le total que renvoie read_bpu est une estimation (le DQE) : ne le présente jamais comme le montant du marché.\n`
     : '';
 
   return `Tu es ${agent.name}, ${agent.role_title} du cabinet d'architecture "${ctx.tenantName}".
@@ -193,7 +194,7 @@ ${caps.geo
   ? "✓ Interroger les données publiques d'urbanisme : adresse, cadastre, zonage PLU, risques, monuments historiques"
   : "✗ Tu NE peux PAS interroger les données cartographiques et d'urbanisme — l'architecte n'a pas activé cette capacité pour toi"}
 ${caps.docsRead
-  ? "✓ Lire le CCTP et le DPGF des projets du cabinet (read_cctp / read_dpgf)"
+  ? "✓ Lire le CCTP, le DPGF et le BPU/DQE des projets du cabinet (read_cctp / read_dpgf / read_bpu)"
   : "✗ Tu NE peux PAS lire les CCTP ni les DPGF des projets — l'architecte n'a pas activé cette capacité pour toi"}
 ${hasFirmKnowledge
   ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"

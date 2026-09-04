@@ -35,7 +35,7 @@ const DOC_STATUT_CONFIG = {
   perime:   { label: 'Périmé',   bg: '#ffe3e3', color: '#d63939', icon: IconAlertTriangle },
 } as const;
 
-const DOC_TYPES = ['Plan', 'Note technique', 'CCTP', 'DPGF', 'Rapport', 'Contrat', 'OS', 'CR réunion', 'Devis', 'Autre'];
+const DOC_TYPES = ['Plan', 'Note technique', 'CCTP', 'DPGF', 'BPU', 'DQE', 'Rapport', 'Contrat', 'OS', 'CR réunion', 'Devis', 'Autre'];
 
 function StatutBadge({ statut }: { statut?: string }) {
   const s = DOC_STATUT_CONFIG[(statut as keyof typeof DOC_STATUT_CONFIG) || 'en_cours'];

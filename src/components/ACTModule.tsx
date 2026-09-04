@@ -15,7 +15,7 @@ import type { Contact, ProjectLot } from '../types';
 interface DCEDocument {
   id: string;
   nom: string;
-  type_doc: 'RC' | 'CCAP' | 'CCTP' | 'DPGF' | 'Plans' | 'Autre';
+  type_doc: 'RC' | 'CCAP' | 'CCTP' | 'DPGF' | 'BPU' | 'DQE' | 'Plans' | 'Autre';
   tous_lots: boolean;
   lots_ids: string[];
 }
@@ -109,7 +109,9 @@ const TYPE_DOC_LABELS: Record<string, string> = {
   RC: 'Règlement de la Consultation',
   CCAP: 'CCAP',
   CCTP: 'CCTP',
-  DPGF: 'DPGF / BPU',
+  DPGF: 'DPGF',
+  BPU: 'BPU — Bordereau de Prix Unitaires',
+  DQE: 'DQE — Détail Quantitatif Estimatif',
   Plans: 'Plans',
   Autre: 'Autre document',
 };

@@ -985,7 +985,7 @@ export default {
       "agent_config_mail_send": "Envoyer des emails au nom de l'utilisateur (confirmation obligatoire avant chaque envoi)",
       "agent_config_mail_send_warning": "Un email part à l'extérieur du cabinet et ne se rattrape pas. L'agent doit toujours présenter son brouillon et obtenir un accord explicite avant d'envoyer, mais la responsabilité du message reste celle du cabinet.",
       "agent_config_geo": "Interroger les données publiques d'urbanisme (adresse, cadastre, PLU, risques, monuments historiques)",
-      "agent_config_docs_read": "Lire le CCTP et le DPGF des projets",
+      "agent_config_docs_read": "Lire le CCTP, le DPGF et le BPU des projets",
       "agent_config_web_fetch": "Accès Internet (avancé)",
       "agent_config_web_fetch_warning": "Risque de sécurité : une fois activé, l'agent peut aller chercher lui-même le contenu de pages web publiques dont l'URL lui est donnée. Il pourrait être manipulé par le contenu d'une page malveillante pour agir de façon inattendue. N'activez cette option que pour des agents de confiance et un usage ponctuel.",
       "agent_config_web_fetch_toggle": "Autoriser cet agent à récupérer le contenu de pages web (fetch_url)",

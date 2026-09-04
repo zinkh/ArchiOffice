@@ -45,7 +45,7 @@ describe('périmètre des outils selon les capacités', () => {
     expect(toolNames({ geo_enabled: true })).toEqual(
       ['search_address', 'get_parcelle_cadastrale', 'get_zone_plu', 'get_risques', 'get_monuments_historiques']
     );
-    expect(toolNames({ docs_read_enabled: true })).toEqual(['read_cctp', 'read_dpgf']);
+    expect(toolNames({ docs_read_enabled: true })).toEqual(['read_cctp', 'read_dpgf', 'read_bpu']);
   });
 
   it('refuse un appel dont la capacité est éteinte, même si le modèle le tente', async () => {
