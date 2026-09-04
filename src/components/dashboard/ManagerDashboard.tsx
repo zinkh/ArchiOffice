@@ -23,6 +23,7 @@ import {
 import { fetchJson } from '../../lib/api';
 import { useUser } from '../../UserContext';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
+import MyTasksWidget from './MyTasksWidget';
 import type { Project, Milestone, Permit, Rfi, Reserve, GpaReserve, TeamMember } from '../../types';
 import {
   StatCard,
@@ -246,6 +247,8 @@ export default function ManagerDashboard() {
           </div>
         )}
       </SectionCard>
+
+      <MyTasksWidget />
     </div>
   );
 }

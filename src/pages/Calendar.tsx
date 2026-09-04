@@ -20,11 +20,12 @@ import {
 import { fr, enUS } from 'date-fns/locale';
 import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck, IconCalendar, IconPlus, IconBrandGoogle, IconRefresh, IconLoader2 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { Project, Milestone, Task } from '../types';
+import type { Project, Milestone, Task, TeamMember } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
 import TeamWeekSchedule from '../components/TeamWeekSchedule';
 import { CalendarEventModal, type CalendarEventInitial } from '../components/CalendarEventModal';
+import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
 
 interface CalEvent {
   id: string;
@@ -34,7 +35,7 @@ interface CalEvent {
   // but is reserved here so a future addition doesn't need to touch every
   // switch/condition on `ev.type` written for the milestone/task cases.
   type: 'milestone' | 'task' | 'google';
-  projectId?: string;
+  projectId?: string | null;
   projectName?: string;
   completed?: boolean;
   overdue?: boolean;
@@ -42,7 +43,7 @@ interface CalEvent {
 
 const PROJECT_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#d63939', '#0ca678', '#f59f00', '#4263eb'];
 
-export function colorForProject(projectId?: string): string {
+export function colorForProject(projectId?: string | null): string {
   if (!projectId) return '#6c7a91';
   let hash = 0;
   for (let i = 0; i < projectId.length; i++) hash = (hash * 31 + projectId.charCodeAt(i)) >>> 0;
@@ -66,6 +67,8 @@ export default function CalendarPage() {
   const [showMilestones, setShowMilestones] = useState(true);
   const [showTasks, setShowTasks] = useState(true);
   const [eventModal, setEventModal] = useState<CalendarEventInitial | null>(null);
+  const [taskModal, setTaskModal] = useState<TaskFormInitial | null>(null);
+  const [team, setTeam] = useState<TeamMember[]>([]);
   const [draggingEvent, setDraggingEvent] = useState<{ calId: string; type: 'milestone' | 'task'; originalDate: string } | null>(null);
   const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
   const [dragError, setDragError] = useState<string | null>(null);
@@ -78,14 +81,16 @@ export default function CalendarPage() {
     setLoading(true);
     setError(null);
     try {
-      const [projectsData, milestonesData, tasksData] = await Promise.all([
+      const [projectsData, milestonesData, tasksData, teamData] = await Promise.all([
         fetchJson('/api/projects'),
         fetchJson('/api/milestones'),
         fetchJson('/api/tasks'),
+        fetchJson('/api/team'),
       ]);
       setProjects(Array.isArray(projectsData) ? projectsData : []);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
       setTasks(Array.isArray(tasksData) ? tasksData : []);
+      setTeam(Array.isArray(teamData) ? teamData : []);
     } catch (err) {
       console.error('Failed to load calendar data:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -108,9 +113,14 @@ export default function CalendarPage() {
     setSelectedDay(picked);
   };
 
-  const openCreateEvent = (prefillDate?: Date) => {
+  const openCreateMilestone = (prefillDate?: Date) => {
     const dateStr = prefillDate ? format(prefillDate, 'yyyy-MM-dd') : undefined;
     setEventModal({ eventType: 'milestone', due_date: dateStr, start_date: dateStr, end_date: dateStr });
+  };
+
+  const openCreateTask = (prefillDate?: Date) => {
+    const dateStr = prefillDate ? format(prefillDate, 'yyyy-MM-dd') : new Date().toISOString().slice(0, 10);
+    setTaskModal({ start_date: dateStr, end_date: dateStr, due_date: dateStr });
   };
 
   const openEditEvent = (ev: CalEvent) => {
@@ -120,15 +130,18 @@ export default function CalendarPage() {
       if (!m) return;
       setEventModal({ eventType: 'milestone', id: m.id, project_id: m.project_id, title: m.title, due_date: m.due_date, completed: m.completed, duration_days: m.duration_days ?? null, dependencies: m.dependencies });
     } else {
+      // Les tâches passent par le formulaire de tâche partagé avec le Kanban,
+      // seul endroit qui expose description, priorité et assignation.
       const tsk = tasks.find(x => `t-${x.id}` === ev.id);
       if (!tsk) return;
-      setEventModal({ eventType: 'task', id: tsk.id, project_id: tsk.project_id, title: tsk.title, start_date: tsk.start_date, end_date: tsk.end_date, progress: tsk.progress, status: tsk.status || 'todo', dependencies: tsk.dependencies });
+      setTaskModal({ ...tsk });
     }
   };
 
   const closeEventModal = () => setEventModal(null);
   const handleEventSaved = () => { setEventModal(null); load(); };
   const handleEventDeleted = () => { setEventModal(null); load(); };
+  const afterTaskWrite = () => { setTaskModal(null); load(); };
 
   const handleDragStart = (ev: CalEvent) => {
     if (ev.type === 'google') return; // pulled external events aren't draggable — see Étape 4
@@ -294,7 +307,7 @@ export default function CalendarPage() {
       .filter(task => !!(task.due_date || task.end_date))
       .map(task => {
         const date = (task.due_date || task.end_date) as string;
-        const completed = task.completed ?? task.status === 'done';
+        const completed = task.status === 'done';
         return {
           id: `t-${task.id}`,
           date,
@@ -455,13 +468,22 @@ export default function CalendarPage() {
             </div>
           </div>
         )}
-        <button
-          onClick={() => openCreateEvent(view === 'month' ? selectedDay : undefined)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors shrink-0"
-          style={{ background: 'var(--tblr-primary)' }}
-        >
-          <IconPlus size={14} /> {t('calendar_add_event')}
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => openCreateMilestone(view === 'month' ? selectedDay : undefined)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
+            style={{ background: 'var(--tblr-primary)' }}
+          >
+            <IconPlus size={14} /> {t('calendar_type_milestone')}
+          </button>
+          <button
+            onClick={() => openCreateTask(view === 'month' ? selectedDay : undefined)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)' }}
+          >
+            <IconPlus size={14} /> {t('calendar_type_task')}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -705,7 +727,7 @@ export default function CalendarPage() {
                   }}
                 >
                   <button
-                    onClick={e => { e.stopPropagation(); openCreateEvent(day); }}
+                    onClick={e => { e.stopPropagation(); openCreateMilestone(day); }}
                     className="absolute top-1 right-1 w-4 h-4 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-primary)' }}
                     title={t('calendar_add_event') as string}
@@ -830,6 +852,19 @@ export default function CalendarPage() {
           onSaved={handleEventSaved}
           onDeleted={handleEventDeleted}
           onOpenProject={projectId => { setEventModal(null); navigate(`/projects/${projectId}`); }}
+        />
+      )}
+
+      {taskModal && (
+        <TaskFormModal
+          initial={taskModal}
+          projects={projects}
+          team={team}
+          allTasks={tasks}
+          onClose={() => setTaskModal(null)}
+          onSaved={afterTaskWrite}
+          onDeleted={afterTaskWrite}
+          onOpenProject={projectId => { setTaskModal(null); navigate(`/projects/${projectId}`); }}
         />
       )}
     </div>

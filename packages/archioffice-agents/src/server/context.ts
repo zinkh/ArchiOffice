@@ -210,7 +210,7 @@ export async function buildAgentContext(
   }
   if (scopes.includes('tasks')) {
     fetches.push(
-      supabaseAdmin.from('tasks').select('id, title, status, due_date, project_id')
+      supabaseAdmin.from('tasks').select('id, title, status, priority, assignee_id, due_date, end_date, project_id')
         .eq('tenant_id', tenantId).neq('status', 'done')
         .order('due_date', { ascending: true }).limit(20)
         .then((r: any) => {

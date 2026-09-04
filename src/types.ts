@@ -173,17 +173,30 @@ export interface LeaveBalanceAllEntry {
   balances: { leave_type: 'conges_payes' | 'rtt'; allocated_days: number; used_days: number; remaining_days: number }[];
 }
 
+export type { TaskStatus, TaskPriority } from './schemas/task.schema';
+import type { TaskStatus, TaskPriority } from './schemas/task.schema';
+
 export interface Task {
   id: string;
-  project_id: string;
+  // Nullable en base : une tâche interne au cabinet, ou créée par un agent
+  // sans rattachement, n'a pas de projet.
+  project_id: string | null;
   title: string;
+  description?: string | null;
   start_date: string;
   end_date: string;
+  due_date?: string | null;
   progress: number; // 0-100
+  // Colonne TEXT en base (JSON sérialisé) — GET /api/tasks la normalise en
+  // tableau avant de la rendre, voir server/routes/tasks.ts.
   dependencies: string[]; // Array of task IDs
-  status?: 'todo' | 'in_progress' | 'review' | 'done';
-  due_date?: string;
-  completed?: boolean;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assignee_id?: string | null;
+  created_at?: string;
+  created_by?: string | null;
+  // `completed` a été retiré : la colonne n'a jamais existé en base et le
+  // serveur la jetait à chaque écriture. Utiliser `status === 'done'`.
 }
 
 export interface ProjectCotraitant {

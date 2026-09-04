@@ -96,15 +96,20 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     required: ['title'],
     fields: 'title*, project_id, description, content' },
   { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true, list: true, identityField: 'title',
-    knownFields: ['title', 'start_date', 'end_date', 'project_id', 'status', 'description', 'due_date', 'progress'],
+    knownFields: ['title', 'description', 'start_date', 'end_date', 'due_date', 'project_id', 'status', 'priority', 'assignee_id', 'progress', 'dependencies'],
     required: ['title'],
-    enums: { status: ['todo', 'in_progress', 'review', 'done'] },
+    enums: { status: ['todo', 'in_progress', 'review', 'done'], priority: ['low', 'normal', 'high', 'urgent'] },
     // start_date et end_date sont NOT NULL en base : sans valeur, l'insertion
     // échoue avec une erreur Postgres que le modèle ne peut pas interpréter.
     // Une tâche créée aujourd'hui pour dans deux semaines est le défaut
     // raisonnable, et il est rapporté à l'utilisateur.
-    defaults: { status: 'todo', start_date: '@today', end_date: '@today+14' },
-    fields: 'title*, start_date (défaut : aujourd\'hui), end_date (défaut : dans 14 jours), project_id, status (todo/in_progress/review/done), description' },
+    //
+    // `description` était annoncée ici bien avant d'exister : ni la table ni
+    // POST /api/tasks ne la stockaient, le champ était donc silencieusement
+    // perdu. migrate_add_task_management.sql l'a ajoutée, avec priority et
+    // assignee_id.
+    defaults: { status: 'todo', priority: 'normal', start_date: '@today', end_date: '@today+14' },
+    fields: 'title*, description, start_date (défaut : aujourd\'hui), end_date (défaut : dans 14 jours), due_date, project_id (laisser vide pour une tâche interne au cabinet), status (todo/in_progress/review/done), priority (low/normal/high/urgent), assignee_id (identifiant d\'un membre de l\'équipe)' },
   { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'due_date', 'project_id', 'status'],
     required: ['title', 'due_date'],

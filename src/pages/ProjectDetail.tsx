@@ -37,6 +37,7 @@ import {
   IconReceipt,
   IconEdit,
   IconInfoCircle,
+  IconChecklist,
   IconReceipt2,
   IconFileDescription,
   IconUsersGroup,
@@ -80,6 +81,7 @@ import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
+import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 
 import { useTranslation } from 'react-i18next';
 
@@ -1497,6 +1499,9 @@ export default function ProjectDetail() {
           onChange={setActiveTab}
           tabs={([
             { id: 'INFOS', label: 'INFOS', icon: IconInfoCircle },
+            // Volontairement hors du filtre is_chantier ci-dessous : des
+            // tâches existent dès la phase études.
+            { id: 'TACHES', label: t('project_tasks_tab') as string, icon: IconChecklist },
             { id: 'HONOS', label: 'HONOS', icon: IconReceipt2 },
             { id: 'PRO', label: 'PRO', icon: IconFileDescription },
             { id: 'ACT', label: 'ACT', icon: IconUsersGroup },
@@ -2231,6 +2236,7 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} /></div>}
+            {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
