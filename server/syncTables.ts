@@ -19,8 +19,9 @@
 //     JUNCTION_TABLES below instead.
 
 export const SYNC_TABLES: readonly string[] = [
-  'act_data', 'articles_type', 'cctps', 'contact_categories', 'contacts',
-  'contrats_moe', 'custom_references', 'det_data', 'detail_situations',
+  'act_data', 'articles_type', 'bpu_data', 'cctps',
+  'contact_categories', 'contacts', 'contrats_moe',
+  'custom_references', 'det_data', 'detail_situations',
   'document_versions', 'documents', 'dpgf_items', 'dpgfs', 'invoice_items',
   'invoices', 'lignes_ouvrages', 'maf_project_data', 'marches_entreprises',
   'milestones', 'notes_honoraires', 'observations', 'ordres_de_service',
