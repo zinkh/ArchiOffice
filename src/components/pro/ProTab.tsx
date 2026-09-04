@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
@@ -9,6 +9,8 @@ import {
   IconFileDescription, IconTable, IconCalculator,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
+import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
+import { apiFetch } from '../../lib/api';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -32,62 +34,40 @@ const EMPTY_DPGF = (projectId: string): DPGF => ({
   totalTTC: 0,
 });
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── Accès au document DPGF ────────────────────────────────────────────────────
+// Références stables au niveau du module : passées telles quelles au hook, qui
+// les a dans les dépendances de ses effets.
 
-const lsKey = (id: string) => `archioffice_dpgf_${id}`;
+const dpgfLsKey = (projectId: string) => `archioffice_dpgf_${projectId}`;
 
-function lsSave(projectId: string, data: DPGF): void {
-  try { localStorage.setItem(lsKey(projectId), JSON.stringify(data)); } catch { /* quota */ }
-}
+const loadDPGF = (projectId: string) => loadProDoc<DPGF>(`/api/projects/${projectId}/dpgf`);
 
-function lsLoad(projectId: string): DPGF | null {
-  try {
-    const raw = localStorage.getItem(lsKey(projectId));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-async function fetchDPGF(projectId: string): Promise<DPGF | null> {
-  try {
-    const res = await fetch(`/api/projects/${projectId}/dpgf`);
-    if (res.ok) {
-      const data: DPGF = await res.json();
-      lsSave(projectId, data); // keep localStorage in sync
-      return data;
-    }
-  } catch { /* ignore */ }
-  // API unavailable — fall back to localStorage
-  return lsLoad(projectId);
-}
-
-async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
-  const res = await fetch(`/api/projects/${projectId}/dpgf`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('save failed');
-}
+const saveDPGF = async (projectId: string, data: DPGF): Promise<void> => {
+  await apiFetch(`/api/projects/${projectId}/dpgf`, { method: 'POST', body: JSON.stringify(data) });
+};
 
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
-  // Shared DPGF state — used by CCTP, DPGF, and ESTIMATION tabs
-  const [dpgf, setDpgf] = useState<DPGF | null>(null);
-  const [dpgfLoading, setDpgfLoading] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
+  const dpgfDoc = useAutosavedDoc<DPGF>({
+    key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
+  });
+  const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
 
-  // Tracks the JSON of the last persisted state to skip no-op saves
-  const lastSavedJson = useRef<string | null>(null);
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Split view state (DPGF / ESTIMATION)
+  // Vue divisée (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
   const [rightProjectId, setRightProjectId] = useState<string>(projectId);
-  const [rightDpgf, setRightDpgf] = useState<DPGF | null>(null);
-  const [rightLoading, setRightLoading] = useState(false);
+
+  // Le panneau droit passe par le même hook : il gagne au passage
+  // l'autosauvegarde qu'il n'avait pas, seul un bouton manuel le sauvegardait.
+  const rightDoc = useAutosavedDoc<DPGF>({
+    key: rightProjectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
+    enabled: splitView,
+  });
+  const { doc: rightDpgf, setDoc: setRightDpgf, loading: rightLoading, saveNow: handleRightSave } = rightDoc;
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -107,77 +87,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     window.addEventListener('afterprint', cleanup);
     return () => window.removeEventListener('afterprint', cleanup);
   }, []);
-
-  // ── Load DPGF ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    setDpgfLoading(true);
-    lastSavedJson.current = null;
-    fetchDPGF(projectId).then(data => {
-      const loaded = data ?? EMPTY_DPGF(projectId);
-      // Record the loaded state so auto-save doesn't fire immediately
-      lastSavedJson.current = JSON.stringify(loaded);
-      setDpgf(loaded);
-      setDpgfLoading(false);
-    });
-  }, [projectId]);
-
-  // Load right-panel DPGF when split view or project changes
-  useEffect(() => {
-    if (!splitView) return;
-    setRightLoading(true);
-    fetchDPGF(rightProjectId).then(data => {
-      setRightDpgf(data ?? EMPTY_DPGF(rightProjectId));
-      setRightLoading(false);
-    });
-  }, [splitView, rightProjectId]);
-
-  // ── Auto-save on change (debounced 2 s) + immediate localStorage backup ─────
-  useEffect(() => {
-    if (!dpgf) return;
-    const json = JSON.stringify(dpgf);
-    if (json === lastSavedJson.current) return; // nothing changed
-
-    // Write to localStorage immediately so nothing is lost on navigation
-    lsSave(projectId, dpgf);
-
-    // Debounce the API call
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      setSaveStatus('saving');
-      try {
-        await saveDPGFApi(projectId, dpgf);
-        lastSavedJson.current = json;
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      } catch {
-        setSaveStatus('error');
-      }
-    }, 2000);
-
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
-  }, [dpgf, projectId]);
-
-  // ── Manual save (ribbon button) ─────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!dpgf) return;
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    setSaveStatus('saving');
-    try {
-      await saveDPGFApi(projectId, dpgf);
-      lastSavedJson.current = JSON.stringify(dpgf);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-    }
-  }, [dpgf, projectId]);
-
-  const handleRightSave = useCallback(async () => {
-    if (!rightDpgf) return;
-    await saveDPGFApi(rightProjectId, rightDpgf);
-  }, [rightDpgf, rightProjectId]);
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
   const TABS: PillTabItem[] = [
