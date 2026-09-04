@@ -22,6 +22,10 @@ interface GeminiPart {
   text?: string;
   functionCall?: { name: string; args: Record<string, unknown> };
   functionResponse?: { name?: string; response: Record<string, unknown> };
+  /** Signature de raisonnement attachée par le modèle à ses propres parts.
+   *  Opaque, jamais fabriquée ici : elle n'existe que renvoyée telle quelle. */
+  thoughtSignature?: string;
+  thought?: boolean;
 }
 
 function toGeminiContents(messages: LlmMessage[]): { role: string; parts: GeminiPart[] }[] {
@@ -39,6 +43,19 @@ function toGeminiContents(messages: LlmMessage[]): { role: string; parts: Gemini
         role: 'user',
         parts: msg.results.map(r => ({ functionResponse: { name: r.name, response: r.response } })),
       });
+      continue;
+    }
+
+    // Les parts telles que le modèle les a produites, quand on les a — c'est
+    // ce qui préserve les signatures de raisonnement (thoughtSignature) que
+    // Gemini 3 attache à chaque functionCall et exige de retrouver intactes au
+    // tour suivant. Les reconstruire à partir du seul couple (nom, arguments)
+    // les perd, et l'API répond alors « Function call is missing a
+    // thought_signature in functionCall parts » dès le deuxième appel d'outil
+    // d'un même échange. Une signature ne peut pas être fabriquée : la seule
+    // façon de la fournir est de rejouer la part d'origine.
+    if (Array.isArray(msg.raw) && msg.raw.length > 0) {
+      contents.push({ role: 'model', parts: msg.raw as GeminiPart[] });
       continue;
     }
 
@@ -81,6 +98,12 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
         },
       });
 
+      // Conservées pour être rejouées à l'identique au tour suivant (voir
+      // toGeminiContents). `raw` reste opaque pour tout le reste du code :
+      // seul cet adaptateur sait le lire, et il ne vit que le temps d'une
+      // requête, jamais persisté ni transmis à un autre fournisseur.
+      const candidateParts = response.candidates?.[0]?.content?.parts;
+
       return {
         text: response.text ?? '',
         toolCalls: (response.functionCalls || []).map((c: any) => ({
@@ -91,6 +114,7 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
           inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
           outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
         },
+        ...(Array.isArray(candidateParts) && candidateParts.length > 0 ? { raw: candidateParts } : {}),
       };
     },
   };
