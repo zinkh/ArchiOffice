@@ -2,10 +2,10 @@
 // le périmètre d'outils selon les capacités, les règles d'alerte métier
 // (dont « études sans contrat signé »), le calcul de la prochaine exécution
 // planifiée, et la mise en page des documents produits.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildAgentTools, executeAgentAction } from '../packages/archioffice-agents/src/server/tools';
-import { capabilitiesFromAgent, AGENT_DEFAULT_ACTION_SCOPES } from '../packages/archioffice-agents/src/types';
+import { buildAgentTools, executeAgentAction, prepareRecord } from '../packages/archioffice-agents/src/server/tools';
+import { capabilitiesFromAgent, AGENT_DEFAULT_ACTION_SCOPES, AGENT_RESOURCES } from '../packages/archioffice-agents/src/types';
 import {
   ALERT_RULES_BY_CODE, effectiveSettings, evaluateSnapshot, type TenantSnapshot,
 } from '../server/agentAlerts';
@@ -335,5 +335,149 @@ describe('réponses cartographiques', () => {
   it('plafonne le nombre d\'entités renvoyées', () => {
     const cleaned = stripGeometry(Array.from({ length: 50 }, (_, i) => ({ id: i }))) as any[];
     expect(cleaned).toHaveLength(10);
+  });
+});
+
+// ── Écriture : ce que le modèle propose vs ce que l'API accepte ─────────────
+// Rejoue le scénario réel qui avait mis un agent en boucle : un devis envoyé
+// avec un schéma inventé de bout en bout (validity_period, phases, fees,
+// payment_terms) et un statut « draft » en minuscules. L'API répondait
+// « Validation error » sans nommer le champ, le message était réduit à cette
+// seule phrase avant d'atteindre le modèle, et celui-ci repartait sur des
+// variantes au hasard jusqu'à renvoyer l'utilisateur vers une saisie manuelle.
+describe('préparation des écritures', () => {
+  const proposals = AGENT_RESOURCES.find(r => r.key === 'proposals')!;
+  const tasks = AGENT_RESOURCES.find(r => r.key === 'tasks')!;
+
+  const INVENTED = {
+    client_id: '9e0b4805-abb8-4fe3-a7c1-9d0aa5bfe816',
+    title: 'Surélévation du showroom – Woippy',
+    description: "Mission de maîtrise d'œuvre pour la surélévation du showroom.",
+    status: 'draft',
+    validity_period: 30,
+    phases: [{ name: 'ESQ', duration: 0 }],
+    fees: 5000,
+    payment_terms: '30% à la signature',
+    start_date: '2026-10-01',
+    notes: 'Projet Algeco existant à Woippy.',
+  };
+
+  it('écarte les champs inventés et les nomme, au lieu de les envoyer à l\'API', () => {
+    const prepared = prepareRecord(proposals, INVENTED);
+    expect(prepared.ignoredFields.sort()).toEqual(['fees', 'payment_terms', 'phases', 'start_date', 'validity_period']);
+    expect(Object.keys(prepared.data).sort()).toEqual(['amount', 'client_id', 'description', 'notes', 'status', 'title']);
+  });
+
+  it('ramène un statut à sa casse canonique plutôt que de le faire rejeter', () => {
+    const prepared = prepareRecord(proposals, INVENTED);
+    expect(prepared.data.status).toBe('Draft');
+    expect(prepared.normalizedValues.status).toBe('Draft');
+  });
+
+  it('pose les valeurs par défaut manquantes et les rapporte', () => {
+    const prepared = prepareRecord(proposals, { title: 'Devis' });
+    expect(prepared.data).toMatchObject({ title: 'Devis', status: 'Draft', amount: 0 });
+    expect(prepared.appliedDefaults).toEqual({ status: 'Draft', amount: 0 });
+    expect(prepared.missingRequired).toEqual([]);
+  });
+
+  it('date les tâches par défaut, faute de quoi l\'insertion échouerait en base', () => {
+    const now = new Date('2026-06-01T09:00:00Z');
+    const prepared = prepareRecord(tasks, { title: 'Contacter le BET structure' }, { applyDefaults: true, now });
+    expect(prepared.data.start_date).toBe('2026-06-01');
+    expect(prepared.data.end_date).toBe('2026-06-15');
+    expect(prepared.data.status).toBe('todo');
+    expect(prepared.appliedDefaults).toHaveProperty('end_date', '2026-06-15');
+  });
+
+  it('ne pose aucun défaut sur une mise à jour, qui ne touche que ce qui est fourni', () => {
+    const prepared = prepareRecord(proposals, { description: 'Nouvelle description' }, { applyDefaults: false });
+    expect(prepared.data).toEqual({ description: 'Nouvelle description' });
+    expect(prepared.appliedDefaults).toEqual({});
+    expect(prepared.missingRequired).toEqual([]);
+  });
+
+  it('nomme les champs obligatoires manquants au lieu de laisser échouer l\'API', () => {
+    const prepared = prepareRecord(proposals, { description: 'Sans titre' });
+    expect(prepared.missingRequired).toEqual(['title']);
+  });
+
+  it('laisse passer une valeur hors vocabulaire plutôt que de la corriger au hasard', () => {
+    // « En cours » n'est pas un statut de devis : le corriger d'office
+    // choisirait à la place de l'utilisateur. L'API le rejettera, et son
+    // message nommera cette fois le champ.
+    const prepared = prepareRecord(proposals, { title: 'X', status: 'En cours' });
+    expect(prepared.data.status).toBe('En cours');
+    expect(prepared.normalizedValues).toEqual({});
+  });
+
+  it('déclare un vocabulaire cohérent avec les champs connus de chaque ressource', () => {
+    for (const resource of AGENT_RESOURCES) {
+      expect(resource.knownFields.length).toBeGreaterThan(0);
+      for (const field of resource.required || []) {
+        expect(resource.knownFields).toContain(field);
+      }
+      for (const field of Object.keys(resource.enums || {})) {
+        expect(resource.knownFields).toContain(field);
+      }
+      for (const field of Object.keys(resource.defaults || {})) {
+        expect(resource.knownFields).toContain(field);
+      }
+    }
+  });
+});
+
+describe('remontée des erreurs d\'écriture au modèle', () => {
+  const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['proposals'] });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("transmet le détail de la validation, pas seulement « Validation error »", async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      // Vérification anti-doublon (GET de la liste) puis POST refusé.
+      void url;
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: 'Validation error',
+          details: [{ path: 'status', message: "Invalid enum value. Expected 'Draft' | 'Sent' | 'Accepted' | 'Rejected'" }],
+        }),
+      } as any;
+    }));
+
+    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+      name: 'create_record',
+      args: { resource: 'proposals', data: { title: 'Surélévation', status: 'En cours' }, confirm: true },
+    });
+
+    expect(result.response.error).toBe('Validation error');
+    expect(result.response.details).toEqual([
+      "status : Invalid enum value. Expected 'Draft' | 'Sent' | 'Accepted' | 'Rejected'",
+    ]);
+    expect(result.response.champs_acceptes).toContain('title');
+    expect(result.response.valeurs_attendues).toMatchObject({ status: ['Draft', 'Sent', 'Accepted', 'Rejected'] });
+  });
+
+  it('rapporte les champs écartés et les défauts posés après une écriture réussie', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 201 : 200,
+      // Le GET de liste (anti-doublon et relecture) renvoie un tableau,
+      // le POST renvoie l'enregistrement créé.
+      json: async () => (init?.method === 'POST' ? { id: 'prop-1' } : []),
+    } as any)));
+
+    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+      name: 'create_record',
+      args: {
+        resource: 'proposals',
+        data: { title: 'Surélévation du showroom', fees: 5000, payment_terms: '30% à la signature' },
+      },
+    });
+
+    expect(result.response.success).toBe(true);
+    expect(result.response.champs_ignores).toEqual(['fees', 'payment_terms']);
+    expect(result.response.valeurs_par_defaut).toMatchObject({ status: 'Draft' });
   });
 });

@@ -216,6 +216,29 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
+### Écritures d'agent : schéma, défauts, erreurs
+
+`AGENT_RESOURCES` (`packages/archioffice-agents/src/types.ts`) porte, pour
+chaque ressource, quatre choses en plus de son libellé : `knownFields` (les
+colonnes réellement acceptées), `required`, `enums` (vocabulaire fermé) et
+`defaults`. `prepareRecord()` (`server/tools.ts`) s'en sert avant chaque
+écriture pour écarter les champs inconnus, normaliser la casse des valeurs à
+choix fermé et poser les défauts manquants — chaque intervention étant
+rapportée au modèle (`champs_ignores`, `valeurs_par_defaut`) pour qu'il la
+répercute à l'utilisateur.
+
+Sans cette couche, un modèle qui invente un schéma plausible
+(`validity_period`, `payment_terms`, `phases`) ou qui écrit `draft` au lieu de
+`Draft` recevait un « Validation error » sans nom de champ, parce que le
+tableau `details` de `validateBody()` était jeté avant d'atteindre le modèle.
+Il n'avait alors aucun moyen de se corriger et enchaînait les variantes au
+hasard. Le détail de l'erreur, les champs acceptés et le vocabulaire attendu
+lui reviennent désormais en entier.
+
+La posture correspondante est écrite dans le prompt (`systemPrompts.ts`) :
+l'agent exécute une demande explicite sans la faire valider, ne réclame jamais
+un champ facultatif, et rend compte de ses hypothèses **après** coup.
+
 ### Capacités et autonomie des agents
 
 Au-delà du chat et des écritures CRUD (`action_scopes`), un agent porte quatre

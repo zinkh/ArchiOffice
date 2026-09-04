@@ -34,12 +34,14 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
       description:
         "Crée un nouvel enregistrement dans une des ressources du cabinet auxquelles tu as accès en écriture. " +
         "Consulte la section SCHÉMA DES RESSOURCES AUTORISÉES du prompt système pour connaître les champs attendus par ressource (les champs suivis d'un * sont obligatoires). " +
+        "Appelle cet outil dès que la demande est claire, sans faire valider au préalable une liste de champs : les champs facultatifs non renseignés restent vides et les valeurs par défaut (statut, dates) sont posées automatiquement puis rapportées dans la réponse. " +
+        "N'envoie que des champs du schéma : tout champ inconnu est écarté avant l'écriture et te revient dans champs_ignores. " +
         "Le système vérifie automatiquement les doublons potentiels : si la réponse contient needs_confirmation, NE PAS créer sans confirmation explicite de l'utilisateur (voir la description du champ confirm).",
       parametersJsonSchema: {
         type: 'object',
         properties: {
           resource: { type: 'string', enum: creatable, description: 'Type de ressource à créer' },
-          data: { type: 'object', description: "Champs de l'enregistrement, selon le schéma de la ressource" },
+          data: { type: 'object', description: "Champs de l'enregistrement, uniquement ceux du schéma de la ressource. Laisse de côté ce que tu ne sais pas plutôt que de le demander." },
           confirm: {
             type: 'boolean',
             description:
@@ -141,6 +143,76 @@ export function describeAuthorizedResources(actionScopes: string[]): string {
       return `- ${r.label} (resource: "${r.key}") — actions autorisées : ${ops}${searchNote}. Champs : ${r.fields}`;
     })
     .join('\n');
+}
+
+// ── Mise en forme d'un enregistrement avant écriture ────────────────────────
+// Trois corrections appliquées à ce que le modèle propose, dans cet ordre :
+// les champs inconnus sont écartés, les valeurs à choix fermé sont ramenées à
+// leur casse canonique, et les champs manquants qui ont un défaut sont
+// remplis. Rien n'est silencieux : chaque intervention revient dans la réponse
+// de l'outil, à charge pour le modèle de la répercuter à l'utilisateur.
+//
+// Sans cela, une écriture partait avec un schéma inventé de bout en bout et
+// l'API répondait « Validation error » sans dire quel champ — le modèle n'avait
+// alors aucun moyen de se corriger et retentait indéfiniment des variantes.
+
+export interface PreparedRecord {
+  data: Record<string, unknown>;
+  ignoredFields: string[];
+  appliedDefaults: Record<string, unknown>;
+  normalizedValues: Record<string, string>;
+  missingRequired: string[];
+}
+
+function resolveDefault(value: string | number, now = new Date()): string | number {
+  if (typeof value !== 'string' || !value.startsWith('@today')) return value;
+  const offset = value === '@today' ? 0 : parseInt(value.slice('@today'.length), 10) || 0;
+  const date = new Date(now.getTime() + offset * 86_400_000);
+  return date.toISOString().slice(0, 10);
+}
+
+export function prepareRecord(
+  resource: AgentResourceDef,
+  input: Record<string, unknown>,
+  options: { applyDefaults: boolean; now?: Date } = { applyDefaults: true }
+): PreparedRecord {
+  const data: Record<string, unknown> = {};
+  const ignoredFields: string[] = [];
+  const normalizedValues: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!resource.knownFields.includes(key)) { ignoredFields.push(key); continue; }
+    const allowed = resource.enums?.[key];
+    if (allowed && typeof value === 'string') {
+      const canonical = allowed.find(v => v.toLowerCase() === value.toLowerCase().trim());
+      if (canonical) {
+        if (canonical !== value) normalizedValues[key] = canonical;
+        data[key] = canonical;
+        continue;
+      }
+      // Valeur hors vocabulaire : on la laisse passer plutôt que de la
+      // corriger au hasard, l'API la rejettera avec un message que le modèle
+      // recevra désormais en entier (voir le bloc d'erreur plus bas).
+    }
+    data[key] = value;
+  }
+
+  const appliedDefaults: Record<string, unknown> = {};
+  if (options.applyDefaults && resource.defaults) {
+    for (const [key, raw] of Object.entries(resource.defaults)) {
+      if (data[key] === undefined || data[key] === null || data[key] === '') {
+        const resolved = resolveDefault(raw, options.now);
+        data[key] = resolved;
+        appliedDefaults[key] = resolved;
+      }
+    }
+  }
+
+  const missingRequired = options.applyDefaults
+    ? (resource.required || []).filter(f => data[f] === undefined || data[f] === null || String(data[f]).trim() === '')
+    : [];
+
+  return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired };
 }
 
 export interface AgentActionCall {
@@ -276,10 +348,23 @@ export async function executeAgentAction(
   let method: 'POST' | 'PUT' | 'DELETE';
   let path = resource.basePath;
   let body: Record<string, unknown> | undefined;
+  let prepared: PreparedRecord | undefined;
 
   if (name === 'create_record') {
     if (!resource.create) return { response: { error: `Création non supportée pour "${resourceKey}".` } };
-    body = (args.data as Record<string, unknown>) || {};
+    prepared = prepareRecord(resource, (args.data as Record<string, unknown>) || {}, { applyDefaults: true });
+    if (prepared.missingRequired.length > 0) {
+      return {
+        response: {
+          error: `Champs obligatoires manquants pour "${resource.label}" : ${prepared.missingRequired.join(', ')}.`,
+          champs_acceptes: resource.knownFields,
+          instruction:
+            "Complète ces champs à partir de la demande de l'utilisateur et rappelle create_record. " +
+            "Ne pose une question que si l'un d'eux est réellement introuvable dans la conversation.",
+        },
+      };
+    }
+    body = prepared.data;
 
     const hasIdentity = resourceKey === 'contacts' || !!resource.identityField;
     const identity = getRecordIdentity(resourceKey, resource, body);
@@ -308,7 +393,10 @@ export async function executeAgentAction(
     if (!id) return { response: { error: 'id est requis pour une modification.' } };
     method = 'PUT';
     path = `${resource.basePath}/${encodeURIComponent(id)}`;
-    body = (args.data as Record<string, unknown>) || {};
+    // Pas de défauts sur une mise à jour : seuls les champs fournis changent,
+    // en poser d'autres écraserait des valeurs que l'utilisateur n'a pas visées.
+    prepared = prepareRecord(resource, (args.data as Record<string, unknown>) || {}, { applyDefaults: false });
+    body = prepared.data;
   } else if (name === 'delete_record') {
     if (!resource.delete) return { response: { error: `Suppression non supportée pour "${resourceKey}".` } };
     const id = String(args.id || '');
@@ -352,7 +440,26 @@ export async function executeAgentAction(
 
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { response: { error: json?.error || `Échec de l'opération (HTTP ${res.status}).` } };
+      // Le détail de l'échec doit revenir au modèle. L'API répond
+      // « Validation error » avec un tableau `details` qui nomme le champ
+      // fautif et la valeur attendue (server/routes/validateRequest.ts) ;
+      // ce tableau était jeté ici, si bien qu'un devis refusé pour un simple
+      // « draft » au lieu de « Draft » revenait comme un échec sans cause,
+      // et le modèle repartait en boucle sur des variantes au hasard.
+      const details = Array.isArray(json?.details)
+        ? json.details.map((d: any) => (d?.path ? `${d.path} : ${d.message}` : String(d?.message ?? d)))
+        : undefined;
+      return {
+        response: {
+          error: json?.error || `Échec de l'opération (HTTP ${res.status}).`,
+          ...(details?.length ? { details } : {}),
+          champs_acceptes: resource.knownFields,
+          ...(resource.enums ? { valeurs_attendues: resource.enums } : {}),
+          instruction:
+            "Corrige exactement ce que dit ce message et réessaie une fois. Ne redemande pas à l'utilisateur ce qu'il t'a déjà donné ; " +
+            "si l'échec persiste après cette correction, explique-lui précisément quel champ bloque plutôt que de proposer une saisie manuelle.",
+        },
+      };
     }
 
     const verb = name === 'create_record' ? 'créé' : name === 'update_record' ? 'modifié' : 'supprimé';
@@ -379,6 +486,23 @@ export async function executeAgentAction(
         success: true,
         ...json,
         ...(savedRecord ? { saved_record: savedRecord } : {}),
+        // Ce que la couche outil a corrigé d'elle-même. Le modèle doit le
+        // répercuter à l'utilisateur : un champ écarté est une information
+        // qu'il croyait avoir enregistrée.
+        ...(prepared?.ignoredFields.length
+          ? {
+              champs_ignores: prepared.ignoredFields,
+              champs_ignores_note:
+                `Ces champs n'existent pas sur « ${resource.label} » et n'ont pas été enregistrés. Dis-le à l'utilisateur en une phrase, ` +
+                `et propose de mettre l'information dans un champ existant (description ou notes) si elle compte.`,
+            }
+          : {}),
+        ...(prepared && Object.keys(prepared.appliedDefaults).length
+          ? {
+              valeurs_par_defaut: prepared.appliedDefaults,
+              valeurs_par_defaut_note: "Valeurs posées faute d'indication. Signale-les brièvement pour que l'utilisateur puisse les corriger.",
+            }
+          : {}),
         ...(dateWarning
           ? {
               date_warning:

@@ -27,10 +27,34 @@ export interface AgentResourceDef {
   identityField?: string;
   /** Human-readable field hint injected into the agent's system prompt. */
   fields: string;
+  /**
+   * Colonnes réellement acceptées. Un modèle qui ne connaît pas une ressource
+   * invente volontiers un schéma plausible (validity_period, payment_terms,
+   * phases...) : ces champs partaient jusqu'ici tels quels vers l'API, qui les
+   * rejetait avec une erreur que le modèle ne pouvait pas relier à un champ
+   * précis. Ils sont désormais écartés avant l'appel et rapportés, plutôt que
+   * de faire échouer toute l'écriture.
+   */
+  knownFields: string[];
+  /** Champs sans lesquels l'appel échouerait côté serveur. */
+  required?: string[];
+  /**
+   * Valeurs canoniques d'un champ à choix fermé. La casse est normalisée avant
+   * l'envoi : un modèle qui écrit « draft » là où l'API attend « Draft »
+   * respecte le vocabulaire documenté, il ne se trompe que de forme.
+   */
+  enums?: Record<string, string[]>;
+  /**
+   * Valeurs posées quand le champ est absent. '@today' et '@today+N' sont
+   * résolus à l'exécution en date ISO. Un défaut appliqué est toujours
+   * rapporté au modèle, pour qu'il le dise à l'utilisateur.
+   */
+  defaults?: Record<string, string | number>;
 }
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
   { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true, list: true,
+    knownFields: ['company_name', 'first_name', 'last_name', 'email', 'phone', 'category', 'address', 'city', 'zip', 'notes'],
     fields: 'company_name, first_name, last_name, email, phone, category, address, city, zip, notes. ' +
       "Un contact identifie soit une personne (first_name* + last_name*), soit une société/un bureau d'études (company_name* seul, sans personne nommée) — " +
       "l'un des deux est obligatoire, mais jamais les deux ensemble ne sont requis. Pour un contact 'entreprise' (bureau d'études, société), " +
@@ -38,38 +62,89 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
   // Delete only actually succeeds server-side while status is Draft — a
   // proposal that's already been sent can't be deleted, only rejected.
   { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: true, list: true, identityField: 'title',
-    fields: 'title*, client_id*, amount, status (Draft/Sent/Accepted/Rejected), description' },
+    knownFields: ['title', 'client_id', 'amount', 'status', 'description', 'notes', 'reference', 'vat_rate'],
+    required: ['title'],
+    enums: { status: ['Draft', 'Sent', 'Accepted', 'Rejected'] },
+    defaults: { status: 'Draft', amount: 0 },
+    fields: 'title*, client_id, amount, status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
-    fields: 'name*, client*, status*, client_id, budget, category, start_date, end_date, description, address' },
+    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address'],
+    required: ['name', 'client'],
+    enums: { status: ['Planning', 'In Progress', 'Completed', 'On Hold'] },
+    defaults: { status: 'Planning' },
+    fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address' },
   { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
+    knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],
+    required: ['name'],
+    enums: { status: ['Completed', 'In Progress', 'Planning'] },
+    defaults: { status: 'Completed' },
     fields: 'name*, client, category, end_date, surface, budget, status (Completed/In Progress/Planning), description, location, start_date, project_manager, construction_cost, remuneration, fee_rate, progression. ' +
       'À utiliser quand l\'utilisateur demande d\'ajouter une "référence" (réalisation passée pour la page Références, sans suivi de tâches/factures) — PAS la ressource "projects", réservée aux projets actifs suivis par le cabinet.' },
   { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true, list: true, identityField: 'title',
-    fields: 'title*, client*, submission_deadline*, status*, description, amount' },
+    knownFields: ['title', 'client', 'submission_deadline', 'status', 'description', 'notes', 'value', 'type', 'ville_execution'],
+    required: ['title', 'client', 'submission_deadline'],
+    enums: { status: ['Draft', 'Submitted', 'Won', 'Lost'] },
+    defaults: { status: 'Draft' },
+    fields: "title*, client*, submission_deadline*, status (Draft/Submitted/Won/Lost), description, notes, value, ville_execution" },
   { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false, list: true,
-    fields: 'status* (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date' },
+    knownFields: ['status', 'title', 'project_id', 'client_id', 'amount', 'due_date', 'issue_date', 'description'],
+    enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'] },
+    defaults: { status: 'Draft' },
+    fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
   { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['title', 'project_id', 'description', 'content'],
+    required: ['title'],
     fields: 'title*, project_id, description, content' },
   { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true, list: true, identityField: 'title',
-    fields: 'title*, start_date*, end_date*, project_id, status, description' },
+    knownFields: ['title', 'start_date', 'end_date', 'project_id', 'status', 'description', 'due_date', 'progress'],
+    required: ['title'],
+    enums: { status: ['todo', 'in_progress', 'review', 'done'] },
+    // start_date et end_date sont NOT NULL en base : sans valeur, l'insertion
+    // échoue avec une erreur Postgres que le modèle ne peut pas interpréter.
+    // Une tâche créée aujourd'hui pour dans deux semaines est le défaut
+    // raisonnable, et il est rapporté à l'utilisateur.
+    defaults: { status: 'todo', start_date: '@today', end_date: '@today+14' },
+    fields: 'title*, start_date (défaut : aujourd\'hui), end_date (défaut : dans 14 jours), project_id, status (todo/in_progress/review/done), description' },
   { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['title', 'due_date', 'project_id', 'status'],
+    required: ['title', 'due_date'],
     fields: 'title*, due_date*, project_id, status' },
   { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['title', 'date', 'type', 'project_id', 'proposal_id', 'tender_id', 'notes'],
+    required: ['title', 'date'],
+    enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
+    defaults: { type: 'projet' },
     fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes" },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
-    fields: 'client_id, project_id, type_contrat, type_moa, montant_honoraires, intitule_projet' },
+    knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
+    enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
+    defaults: { status: 'Brouillon' },
+    fields: 'intitule_projet, client_id, project_id, type_contrat, type_moa, montant_honoraires, status (Brouillon/Envoyé/Signé/Résilié), adresse_travaux, notes' },
   { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true, list: true, identityField: 'title',
-    fields: 'os_number*, title*, date*, project_id' },
+    knownFields: ['os_number', 'title', 'date', 'project_id', 'description', 'lot', 'entreprise', 'objet', 'type', 'status'],
+    required: ['os_number', 'title', 'date'],
+    fields: 'os_number*, title*, date*, project_id, description, lot, entreprise, objet' },
   { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['title', 'date', 'project_id'],
+    required: ['title', 'date'],
     fields: 'title*, date*, project_id' },
   { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true, list: true,
+    knownFields: ['date', 'type', 'project_id', 'has_reserves', 'reserves_count'],
+    required: ['date', 'type'],
     fields: 'date*, type*, project_id' },
   { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true, list: true, identityField: 'title',
-    fields: 'title*, project_id' },
+    knownFields: ['title', 'project_id', 'reception_id', 'batiment', 'local', 'status', 'lots', 'entreprises', 'due_date'],
+    required: ['title'],
+    defaults: { status: 'A faire' },
+    fields: 'title*, project_id, batiment, local, status, lots, entreprises, due_date' },
   // GET /api/marches-entreprises/:projectId is project-scoped, not a tenant-wide list.
   { key: 'marches_entreprises', label: 'Marchés entreprises', basePath: '/api/marches-entreprises', create: true, update: true, delete: true, list: false,
+    knownFields: ['project_id', 'entreprise_nom', 'lot_numero', 'lot_titre', 'montant_ht'],
+    required: ['project_id', 'entreprise_nom'],
     fields: 'project_id*, entreprise_nom*, lot_numero, lot_titre, montant_ht' },
   { key: 'notes_honoraires', label: "Notes d'honoraires", basePath: '/api/notes_honoraires', create: true, update: true, delete: true, list: true, identityField: 'objet',
+    knownFields: ['project_id', 'contrat_id', 'numero', 'date', 'objet', 'montant_ht', 'status', 'tva_rate'],
+    defaults: { status: 'Brouillon' },
     fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
 ];
 
