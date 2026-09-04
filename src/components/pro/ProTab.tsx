@@ -2,11 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
+import { BPUWorkspace } from './BPUWorkspace';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne } from '../../types/dpgf';
+import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
+import { EMPTY_BPU } from '../../types/bpu';
+import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
-  IconFileDescription, IconTable, IconCalculator,
+  IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -14,7 +18,7 @@ import { apiFetch } from '../../lib/api';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION';
+type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
 
 interface ProTabProps {
   projectId: string;
@@ -46,6 +50,19 @@ const saveDPGF = async (projectId: string, data: DPGF): Promise<void> => {
   await apiFetch(`/api/projects/${projectId}/dpgf`, { method: 'POST', body: JSON.stringify(data) });
 };
 
+// ── Accès au document BPU ─────────────────────────────────────────────────────
+// La route rend la ligne entière (document + offres reçues), pas seulement le
+// document : les offres vivent dans une colonne séparée pour que
+// l'autosauvegarde du document ne les efface pas après un import.
+
+const bpuLsKey = (projectId: string) => `archioffice_bpu_${projectId}`;
+
+const loadBpuRow = (projectId: string) => loadProDoc<BPURow>(`/api/projects/${projectId}/bpu`);
+
+const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
+  await apiFetch(`/api/projects/${projectId}/bpu`, { method: 'PUT', body: JSON.stringify({ document }) });
+};
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
@@ -68,6 +85,54 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     enabled: splitView,
   });
   const { doc: rightDpgf, setDoc: setRightDpgf, loading: rightLoading, saveNow: handleRightSave } = rightDoc;
+
+  // ── Document BPU ────────────────────────────────────────────────────────────
+  // Chargé seulement une fois l'un des onglets BPU ou DQE ouvert, et gardé
+  // actif ensuite : sans ce verrou, tout projet forfaitaire paierait un appel
+  // réseau inutile à chaque ouverture de l'espace PRO.
+  const [bpuTouched, setBpuTouched] = useState(false);
+  const [offres, setOffres] = useState<OffreBPU[]>([]);
+
+  const bpuDoc = useAutosavedDoc<BPU>({
+    key: projectId,
+    load: useCallback(async (id: string) => {
+      const row = await loadBpuRow(id);
+      // Les offres voyagent avec la ligne mais ne font pas partie du document
+      // que l'éditeur réécrit : on les met de côté ici.
+      setOffres(row?.offres ?? []);
+      return row?.document && Object.keys(row.document).length ? row.document : null;
+    }, []),
+    save: saveBpu, empty: EMPTY_BPU, lsKey: bpuLsKey,
+    enabled: bpuTouched,
+  });
+  const { doc: bpu, setDoc: setBpu, loading: bpuLoading, saveStatus: bpuSaveStatus, saveNow: handleBpuSave } = bpuDoc;
+
+  const isBpuTab = activeSubTab === 'BPU' || activeSubTab === 'DQE';
+  useEffect(() => { if (isBpuTab) setBpuTouched(true); }, [isBpuTab]);
+
+  // Initialise le bordereau depuis le DPGF, en préservant tout ce qui a déjà
+  // été saisi côté BPU — l'action doit pouvoir être relancée sans dégât.
+  const initBpuFromDpgf = useCallback(() => {
+    if (!dpgf) return;
+    setBpu(assignerReferences(dpgfToBpu(dpgf, bpu)));
+  }, [dpgf, bpu, setBpu]);
+
+  // Reverser un DQE dans le DPGF écrase des prix : on montre les écarts avant.
+  const pushBpuToDpgf = useCallback(() => {
+    if (!bpu || !dpgf) return;
+    const { dpgf: next, diff } = bpuToDpgf(bpu, dpgf);
+    const lignes = [
+      `${diff.modifies.length} prix unitaire(s) seront modifiés dans le DPGF.`,
+      diff.nonChiffres.length ? `${diff.nonChiffres.length} article(s) du DPGF ne sont pas chiffrés au bordereau et resteront inchangés.` : '',
+      diff.absentsDuDpgf.length ? `${diff.absentsDuDpgf.length} article(s) n'existent que dans le bordereau et ne seront pas ajoutés.` : '',
+      '',
+      ...diff.modifies.slice(0, 12).map(m => `  ${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
+      diff.modifies.length > 12 ? `  … et ${diff.modifies.length - 12} autre(s).` : '',
+      '',
+      'Confirmer le reversement ?',
+    ].filter(Boolean).join('\n');
+    if (window.confirm(lignes)) setDpgf(next);
+  }, [bpu, dpgf, setDpgf]);
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -93,25 +158,33 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
     { id: 'DPGF', label: 'DPGF', icon: IconTable },
     { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
+    { id: 'BPU', label: 'BPU', icon: IconListNumbers },
+    { id: 'DQE', label: 'DQE', icon: IconSum },
   ];
 
   const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
+
+  // Un seul indicateur, toujours celui du document à l'écran.
+  const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
+  const activeVersion = (isBpuTab ? bpu?.version : dpgf?.version) ?? '1.0';
 
   const PRINT_TITLES: Record<SubTab, string> = {
     CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
     DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
     ESTIMATION: 'Estimation Prévisionnelle',
+    BPU:        'BPU — Bordereau de Prix Unitaires',
+    DQE:        'DQE — Détail Quantitatif Estimatif',
   };
 
   return (
     <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
-      {dpgf && (
+      {(dpgf || bpu) && (
         <PrintPageDecorations
           title={PRINT_TITLES[activeSubTab]}
           subtitle={projectName}
-          reference={`v${dpgf.version}`}
+          reference={`v${activeVersion}`}
           projectUrl={`${window.location.origin}/projects/${projectId}`}
         />
       )}
@@ -123,8 +196,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
       >
         <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} />
 
-        {/* Tree toggle — only for DPGF / ESTIMATION */}
-        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION') && (
+        {/* Volet arbre — DPGF, ESTIMATION, BPU et DQE */}
+        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION' || isBpuTab) && (
           <button
             onClick={toggleTree}
             title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
@@ -141,9 +214,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
         {/* Save status + print + split — always visible on the right */}
         <div className="ml-auto flex items-center gap-2 px-3 no-print">
-          {saveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
-          {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
-          {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
+          {activeSaveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
+          {activeSaveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
+          {activeSaveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
 
           {/* Print button */}
           <button
@@ -298,6 +371,31 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
               </div>
             )}
           </>
+        )}
+
+        {/* BPU / DQE — un seul document, deux jeux de colonnes */}
+        {isBpuTab && (
+          <div className="flex-1 overflow-hidden">
+            {bpuLoading ? (
+              <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">
+                Chargement du {activeSubTab}…
+              </div>
+            ) : bpu ? (
+              <BPUWorkspace
+                bpu={bpu}
+                onChange={setBpu}
+                onSave={handleBpuSave}
+                mode={activeSubTab === 'BPU' ? 'bpu' : 'dqe'}
+                projectName={projectName}
+                offres={offres}
+                showTree={showTree}
+                onToggleTree={toggleTree}
+                onDragStart={ligne => setDraggedLigne(ligne)}
+                onInitFromDpgf={dpgf && dpgf.lots.length > 0 ? initBpuFromDpgf : undefined}
+                onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
+              />
+            ) : null}
+          </div>
         )}
       </div>
     </div>
