@@ -18,6 +18,7 @@ import {
   type FlatRow,
 } from './treeOps';
 import { montantEnLettres } from '../../lib/numberToFrenchWords';
+import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { formatCurrency } from '../../lib/utils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +38,8 @@ interface BPUWorkspaceProps {
   mode: 'bpu' | 'dqe';
   projectName?: string;
   offres?: OffreBPU[];
+  /** Lots du projet (project_lots), pour rattacher les lots du bordereau. */
+  projectLots?: { id: string; lot_number: string; lot_title: string }[];
   showTree?: boolean;
   onToggleTree?: () => void;
   onDragStart?: (ligne: BPULigne) => void;
@@ -103,7 +106,7 @@ function ventilation(bpu: BPU) {
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
-  bpu, onChange, onSave, mode, projectName, offres = [],
+  bpu, onChange, onSave, mode, projectName, offres = [], projectLots = [],
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
   onImportOffre, onExportPdf, onExportExcel, onPushToAct,
@@ -126,6 +129,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showMarche, setShowMarche] = useState(false);
   const [showTranches, setShowTranches] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  // Chapitre visé par une insertion depuis la bibliothèque.
+  const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const flatRows = useMemo<FlatRow<BPULot, BPUChapitre, BPULigne>[]>(
@@ -404,6 +410,28 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     onDropExternal?.(ligne);
   };
 
+  // ── Bibliothèque ────────────────────────────────────────────────────────────
+  const insererDepuisBibliotheque = (modeles: Omit<BPULigne, 'id'>[]) => {
+    if (!selectedChap) return;
+    const { lotIdx, chapIdx } = selectedChap;
+    // Les clés de ligne sont positionnelles : une insertion par programme
+    // pendant une édition validerait dans le mauvais article.
+    setEditingCell(null);
+    mutateLots(lots => {
+      const next = [...lots];
+      const lot = { ...next[lotIdx] };
+      const chap = { ...lot.chapitres[chapIdx] };
+      const base = chap.lignes.length;
+      chap.lignes = [...chap.lignes, ...modeles.map((m, i) => ({
+        ...m, id: newId(),
+        numero: m.numero || `${chap.numero}.${base + i + 1}`,
+      }))];
+      lot.chapitres = [...lot.chapitres.slice(0, chapIdx), chap, ...lot.chapitres.slice(chapIdx + 1)];
+      next[lotIdx] = recomputeLot(lot);
+      return next;
+    });
+  };
+
   // ── Tranches ────────────────────────────────────────────────────────────────
   const addTranche = () => {
     const t: Tranche = {
@@ -508,7 +536,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         {
           label: 'Prix du cabinet',
           actions: [
-            { id: 'openLib', label: 'Ouvrir', icon: <IconBuildingStore size={20} />, onClick: () => onOpenLibrary?.(), disabled: !onOpenLibrary },
+            { id: 'openLib', label: 'Ouvrir', icon: <IconBuildingStore size={20} />, onClick: () => { setShowLibrary(v => !v); onOpenLibrary?.(); }, active: showLibrary },
             {
               id: 'pushLib', label: `Envoyer${selectionCount ? ` (${selectionCount})` : ''}`,
               icon: <IconFileExport size={20} />,
@@ -732,6 +760,22 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         <div className="flex items-center gap-2">
                           <EditableCell rKey={rKey} field="titre" value={row.lot.titre} />
                           {t && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 text-zinc-700">{t.code}</span>}
+                          {projectLots.length > 0 && (
+                            <select
+                              value={row.lot.projectLotId ?? ''}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => mutateLots(lots => lots.map((l, i) =>
+                                i === row.lotIdx ? { ...l, projectLotId: e.target.value || undefined } : l))}
+                              title="Lot du projet correspondant — requis pour verser au comparatif ACT"
+                              className={`text-[10px] font-normal px-1 py-0.5 rounded border bg-white/70
+                                ${row.lot.projectLotId ? 'border-zinc-300 text-zinc-600' : 'border-amber-300 text-amber-700'}`}
+                            >
+                              <option value="">Lot du projet…</option>
+                              {projectLots.map(pl => (
+                                <option key={pl.id} value={pl.id}>{pl.lot_number} — {pl.lot_title}</option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       </td>
                       <td />
@@ -753,7 +797,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 if (row.kind === 'chapitre') {
                   return (
                     <tr key={rKey}
-                        className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 ${isDropTarget ? 'ring-1 ring-blue-400' : ''}`}
+                        onClick={() => setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! })}
+                        className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
+                          ${isDropTarget ? 'ring-1 ring-blue-400' : ''}
+                          ${showLibrary && selectedChap?.lotIdx === row.lotIdx && selectedChap?.chapIdx === row.chapIdx ? 'ring-1 ring-blue-500' : ''}`}
                         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropTarget(rKey); }}
                         onDragLeave={() => setDropTarget(null)}
                         onDrop={e => handleDrop(e, row)}>
@@ -937,6 +984,15 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             </div>
           )}
         </div>
+
+        {/* ── Bibliothèque de prix du cabinet ──────────────────────────────── */}
+        {showLibrary && (
+          <PriceLibraryPanel
+            onClose={() => setShowLibrary(false)}
+            onInsert={insererDepuisBibliotheque}
+            canInsert={!!selectedChap}
+          />
+        )}
       </div>
     </div>
   );

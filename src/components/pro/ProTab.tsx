@@ -159,6 +159,37 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     }
   }, [bpu, setBpu, projectName, settings]);
 
+  // Lots du projet, pour rattacher les lots du bordereau : c'est ce
+  // rattachement que le versement vers le comparatif ACT vient chercher.
+  const [projectLots, setProjectLots] = useState<{ id: string; lot_number: string; lot_title: string }[]>([]);
+  useEffect(() => {
+    if (!bpuTouched) return;
+    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
+      .then(rows => setProjectLots((rows ?? []).map(r => ({
+        id: r.id, lot_number: r.lot_number, lot_title: r.lot_title,
+      }))))
+      .catch(() => { /* le rattachement reste possible plus tard */ });
+  }, [projectId, bpuTouched]);
+
+  /** Envoie les articles sélectionnés vers la bibliothèque de prix du cabinet. */
+  const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
+    if (!lignes.length) return;
+    try {
+      const res = await apiFetch<{ created: number; updated: number }>('/api/price-library/bulk', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: lignes.map(l => ({
+            code: l.numero, designation: l.designation, unite: l.unite,
+            prix_unitaire: l.prixUnitaire, source: `projet:${projectId}`,
+          })),
+        }),
+      });
+      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour.`);
+    } catch (e: any) {
+      window.alert(`L'envoi vers la bibliothèque a échoué : ${e?.message ?? 'erreur inconnue'}`);
+    }
+  }, [projectId]);
+
   // ── Offres reçues des entreprises ───────────────────────────────────────────
   const [importOuvert, setImportOuvert] = useState(false);
 
@@ -469,6 +500,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                 onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
                 onImportOffre={() => setImportOuvert(true)}
                 onPushToAct={verserAuComparatifAct}
+                onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
+                onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
+                projectLots={projectLots}
               />
             ) : null}
           </div>
