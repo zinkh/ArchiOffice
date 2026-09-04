@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconMail, IconPhone, IconBrandLinkedin } from '@tabler/icons-react';
+import { IconMail, IconPhone, IconBrandLinkedin, IconUser, IconX } from '@tabler/icons-react';
 import type { Contact, ContactCategory } from '../types';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { CompanyAutocomplete } from './CompanyAutocomplete';
-import { frenchVatNumber, streetWithoutCity } from '../lib/siren';
+import { frenchVatNumber, parseDirectors, streetWithoutCity, type CompanyDirector } from '../lib/siren';
 
 /**
  * Corps commun des deux formulaires de contact : la fiche complète de la page
@@ -54,6 +54,9 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
   const { t } = useTranslation();
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [sameAddress, setSameAddress] = useState(() => homeMirrorsWork(contact));
+  // Dirigeants déclarés au greffe pour l'organisme sélectionné : proposés en
+  // un clic parce que le contact d'un cabinet est presque toujours l'un d'eux.
+  const [directors, setDirectors] = useState<CompanyDirector[]>([]);
 
   // Le formulaire est réutilisé pour un autre contact (édition depuis la liste)
   // sans être démonté : la case « adresse identique » doit refléter la fiche
@@ -61,6 +64,7 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
   useEffect(() => {
     setSameAddress(homeMirrorsWork(contact));
     setIsCreatingCategory(false);
+    setDirectors([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contact.id]);
 
@@ -76,9 +80,11 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
   };
 
   /**
-   * LinkedIn n'expose pas d'API publique permettant de lire une fiche : le
-   * bouton ouvre une recherche pré-remplie dans un nouvel onglet, à charge de
-   * l'utilisateur de recopier ce qu'il y trouve.
+   * Les API LinkedIn ouvertes aux développeurs (Verified on LinkedIn, Sign In
+   * with LinkedIn) ne rendent que le profil du membre qui se connecte lui-même
+   * et consent : aucune ne permet de retrouver un tiers à partir de son nom.
+   * Le lien ouvre donc une recherche pré-remplie dans un nouvel onglet, à
+   * charge de l'utilisateur de recopier ce qu'il y trouve.
    */
   const linkedInQuery = [contact.first_name, contact.last_name, contact.company_name]
     .map(v => (v || '').trim())
@@ -179,9 +185,12 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
               inputStyle={inputStyle}
               onChange={(value, details) => {
                 if (!details) {
+                  // Saisie libre : la liste de dirigeants ne correspond plus.
+                  setDirectors([]);
                   onChange({ company_name: value });
                   return;
                 }
+                setDirectors(parseDirectors(details.dirigeants));
                 // Un champ déjà renseigné à la main n'est pas écrasé par la
                 // fiche SIRENE : elle complète, elle ne corrige pas.
                 const zip = details.zipcode || '';
@@ -198,6 +207,33 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
             />
             <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_search_hint')}</p>
           </div>
+          {directors.length > 0 && (
+            <div className="md:col-span-3 rounded-lg p-3 space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider" style={labelStyle}>{t('contacts_directors_label')}</p>
+                <button type="button" onClick={() => setDirectors([])} style={labelStyle} title={t('contacts_directors_dismiss')}>
+                  <IconX size={14} />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {directors.map(d => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    disabled={d.isCompany}
+                    onClick={() => onChange({ first_name: d.firstName, last_name: d.lastName, job_title: d.role || contact.job_title || '' })}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-default"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    title={d.isCompany ? t('contacts_directors_company') : t('contacts_directors_hint')}
+                  >
+                    <IconUser size={13} style={labelStyle} />
+                    <span className="font-medium">{d.label}</span>
+                    {d.role && <span style={labelStyle}>{d.role}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="space-y-1">
             <label className={labelClass} style={labelStyle}>{t('contacts_job_title_label')}</label>
             <input
