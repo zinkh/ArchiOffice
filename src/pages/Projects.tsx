@@ -11,6 +11,7 @@ import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT, CONTACT_CATEGORY_ENTREPRISE, isEntrepriseContact } from '../lib/contactCategories';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { ProjectCardSkeletonGrid, ErrorState } from '../components/DataState';
@@ -29,6 +30,9 @@ export default function Projects() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  // Catégorie proposée au contact créé, selon le champ qui a ouvert le modal :
+  // sans elle le nouveau contact sortait aussitôt des listes filtrées.
+  const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_CLIENT);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
@@ -888,7 +892,7 @@ export default function Projects() {
                             setEditForm(prev => prev ? ({...prev, client: contact.company_name || `${contact.first_name} ${contact.last_name}`}) : null);
                           }
                         }}
-                        onAddNew={() => setIsContactModalOpen(true)}
+                        onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_CLIENT); setIsContactModalOpen(true); }}
                         addNewLabel="Add New Client"
                       />
                     ) : (
@@ -1182,7 +1186,7 @@ export default function Projects() {
                                       };
                                       setEditForm(prev => prev ? ({ ...prev, cotraitants_list: newList }) : null);
                                     }}
-                                    onAddNew={() => setIsContactModalOpen(true)}
+                                    onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
                                   />
                                 ) : (
                                   cot.contact_name || '---'
@@ -1386,7 +1390,7 @@ export default function Projects() {
                               <td className="px-3 py-2">
                                 {isEditing ? (
                                   <ContactAutocomplete 
-                                    contacts={contacts.filter(c => c.category?.toLowerCase().includes('entreprise'))}
+                                    contacts={contacts.filter(isEntrepriseContact)}
                                     value={lot.contact_id || ''}
                                     onChange={val => {
                                       const newList = [...(editForm?.lots_list || [])];
@@ -1398,7 +1402,7 @@ export default function Projects() {
                                       };
                                       setEditForm(prev => prev ? ({ ...prev, lots_list: newList }) : null);
                                     }}
-                                    onAddNew={() => setIsContactModalOpen(true)}
+                                    onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_ENTREPRISE); setIsContactModalOpen(true); }}
                                   />
                                 ) : (
                                   lot.contact_name || '---'
@@ -1611,6 +1615,7 @@ export default function Projects() {
 
       <ContactModal 
         isOpen={isContactModalOpen}
+        initialCategory={contactModalCategory}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
           fetchContacts();

@@ -61,6 +61,7 @@ import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import ACTModule from '../components/ACTModule';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategories';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
@@ -2261,7 +2262,7 @@ export default function ProjectDetail() {
                           />
                           <div className="flex flex-wrap items-center gap-4">
                             <ContactAutocomplete 
-                              contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                              contacts={contacts.filter(isClientContact)}
                               value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
                               onChange={id => {
                                 const contact = contacts.find(c => c.id === id);
@@ -4677,6 +4678,7 @@ export default function ProjectDetail() {
 
       <ContactModal
         isOpen={isContactModalOpen}
+        initialCategory={CONTACT_CATEGORY_CLIENT}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
           setContacts(prev => [...prev, newContact]);

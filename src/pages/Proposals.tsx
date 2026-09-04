@@ -11,6 +11,7 @@ import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBI
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT } from '../lib/contactCategories';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
@@ -1312,6 +1313,7 @@ export default function Proposals() {
 
       <ContactModal
         isOpen={isContactModalOpen}
+        initialCategory={contactModalContext?.type === 'specialty' ? CONTACT_CATEGORY_COTRAITANT : CONTACT_CATEGORY_CLIENT}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={(newContact) => {
           setContacts(prev => [...prev, newContact]);

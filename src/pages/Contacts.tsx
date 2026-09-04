@@ -43,6 +43,7 @@ export default function Contacts() {
   // Search, Filter, Sort State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'last_name', order: 'asc' });
 
   // Edit State
@@ -428,22 +429,38 @@ export default function Contacts() {
   const filteredAndSortedContacts = useMemo(() => {
     let result = [...contacts];
 
-    // Filter by search query
+    // Filter by search query. Every field is read defensively: the columns are
+    // nullable in Postgres (a contact created by the AI agent, or imported,
+    // routinely arrives with a null email or city) even though the TS type
+    // declares first_name/last_name/email/city as required strings — an
+    // unguarded .toLowerCase() on one of those nulls used to throw straight
+    // through this useMemo and blow up the whole page into the error boundary.
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
+      const matches = (v: unknown) => typeof v === 'string' && v.toLowerCase().includes(query);
       result = result.filter(c =>
-        c.first_name.toLowerCase().includes(query) ||
-        c.last_name.toLowerCase().includes(query) ||
-        c.company_name?.toLowerCase().includes(query) ||
-        c.email.toLowerCase().includes(query) ||
-        c.city.toLowerCase().includes(query) ||
-        c.prefix?.toLowerCase().includes(query)
+        matches(c.first_name) ||
+        matches(c.last_name) ||
+        matches(c.company_name) ||
+        matches(c.email) ||
+        matches(c.email_work) ||
+        matches(c.phone) ||
+        matches(c.phone_mobile) ||
+        matches(c.city) ||
+        matches(c.category) ||
+        matches(c.job_title) ||
+        matches(c.prefix)
       );
     }
 
     // Filter by category
     if (filterCategory) {
       result = result.filter(c => c.category === filterCategory);
+    }
+
+    // Filter by organisation
+    if (filterCompany) {
+      result = result.filter(c => (c.company_name || '') === filterCompany);
     }
 
     // Sort
@@ -464,7 +481,18 @@ export default function Contacts() {
     });
 
     return result;
-  }, [contacts, searchQuery, filterCategory, sortConfig]);
+  }, [contacts, searchQuery, filterCategory, filterCompany, sortConfig]);
+
+  // Les organismes ne sont pas une table : ils sont saisis librement sur chaque
+  // contact, la liste déroulante se déduit donc des contacts eux-mêmes.
+  const companyOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of contacts) {
+      const name = (c.company_name || '').trim();
+      if (name) names.add(name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [contacts]);
 
   const contactsPagination = usePagination(filteredAndSortedContacts);
 
@@ -586,6 +614,20 @@ export default function Contacts() {
               ))}
             </select>
           </div>
+          <div className="relative">
+            <IconBuilding className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+            <select
+              className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+              style={inputStyle}
+              value={filterCompany}
+              onChange={e => setFilterCompany(e.target.value)}
+            >
+              <option value="">{t('contacts_all_companies')}</option>
+              {companyOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -595,11 +637,11 @@ export default function Contacts() {
           <MobileAccordionTable
             data={contactsPagination.pageItems}
             keyField="id"
-            emptyText={searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}
+            emptyText={searchQuery || filterCategory || filterCompany ? t('contacts_no_contacts_filter') : t('no_contacts')}
             columns={[
               { label: 'Nom', primary: true, render: c => (
                 <div className="flex items-center gap-2">
-                  <span>{c.prefix} {c.last_name} {c.first_name}</span>
+                  <span>{[c.prefix, c.last_name, c.first_name].filter(Boolean).join(' ')}</span>
                   {isContactIncomplete(c) && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#fff3bf', color: '#e67700' }}>
                       <IconAlertTriangle size={9} /> À compléter
@@ -607,6 +649,7 @@ export default function Contacts() {
                   )}
                 </div>
               )},
+              { label: t('contacts_col_company'), render: c => c.company_name || '---' },
               { label: t('contacts_col_category'), render: c => c.category ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span> : '---' },
               { label: t('phone'), render: c => c.phone || '---' },
               { label: t('email'), render: c => c.email || '---' },
@@ -640,6 +683,12 @@ export default function Contacts() {
                   </div>
                 </th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')}</th>
+                <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('company_name')}>
+                  <div className="flex items-center gap-1">
+                    {t('contacts_col_company')}
+                    {sortConfig.field === 'company_name' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
+                  </div>
+                </th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_col_category')}</th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('phone')}</th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('email')}</th>
@@ -662,8 +711,7 @@ export default function Contacts() {
               {contactsPagination.pageItems.map((contact) => (
                 <tr key={contact.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <td className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-text)' }}>
-                    <div>{contact.prefix}</div>
-                    {contact.company_name && <div className="text-[10px] font-normal" style={{ color: 'var(--tblr-muted)' }}>{contact.company_name}</div>}
+                    {contact.prefix || '---'}
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     <div className="flex items-center gap-2">
@@ -677,6 +725,22 @@ export default function Contacts() {
                     </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.first_name}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
+                    {contact.company_name ? (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCompany(contact.company_name || '')}
+                        className="inline-flex items-center gap-1.5 text-left hover:underline"
+                        style={{ color: 'var(--tblr-text)' }}
+                        title={t('contacts_filter_by_company')}
+                      >
+                        <IconBuilding size={14} style={{ color: 'var(--tblr-muted)' }} />
+                        <span className="font-medium">{contact.company_name}</span>
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--tblr-muted)' }}>---</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     {contact.category && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
@@ -718,10 +782,10 @@ export default function Contacts() {
               ))}
               {filteredAndSortedContacts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
+                  <td colSpan={10} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconUser size={32} className="opacity-20" />
-                      <p>{searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
+                      <p>{searchQuery || filterCategory || filterCompany ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
                     </div>
                   </td>
                 </tr>

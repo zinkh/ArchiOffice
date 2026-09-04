@@ -7,6 +7,7 @@ import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT, isClientContact } from '../lib/contactCategories';
 import { TenderRssWatch } from '../components/TenderRssWatch';
 import { TenderRssSelected } from '../components/TenderRssSelected';
 import type { Tender, Contact, Milestone, MiqcpAssessment } from '../types';
@@ -24,6 +25,7 @@ export default function Tenders() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_CLIENT);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingTender, setEditingTender] = useState<Tender | null>(null);
@@ -735,7 +737,7 @@ export default function Tenders() {
                       <label className="block text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{t('tenders_awarding_entity_label')}</label>
                     </div>
                     <ContactAutocomplete
-                      contacts={contacts.filter(c => c.category === 'Client' || c.category === 'Maitre d\'ouvrage')}
+                      contacts={contacts.filter(isClientContact)}
                       value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === newTender.client)?.id || ''}
                       onChange={id => {
                         const contact = contacts.find(c => c.id === id);
@@ -743,7 +745,7 @@ export default function Tenders() {
                           setNewTender({...newTender, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                         }
                       }}
-                      onAddNew={() => setIsContactModalOpen(true)}
+                      onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_CLIENT); setIsContactModalOpen(true); }}
                       addNewLabel="Add New Client"
                     />
                   </div>
@@ -961,7 +963,7 @@ export default function Tenders() {
                             contacts={contacts}
                             value={spec.contact_id || ''}
                             onChange={val => updateSpecialty(idx, 'contact_id', val)}
-                            onAddNew={() => setIsContactModalOpen(true)}
+                            onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
                           />
                           <button
                             type="button"
@@ -1049,6 +1051,7 @@ export default function Tenders() {
 
       <ContactModal
         isOpen={isContactModalOpen}
+        initialCategory={contactModalCategory}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={() => {
           // Refetch contacts
