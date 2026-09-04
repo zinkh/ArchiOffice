@@ -9,6 +9,8 @@ import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
 import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
 import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
+import { BPUImportDialog } from './BPUImportDialog';
+import { bpuVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
@@ -156,6 +158,53 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
       await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
     }
   }, [bpu, setBpu, projectName, settings]);
+
+  // ── Offres reçues des entreprises ───────────────────────────────────────────
+  const [importOuvert, setImportOuvert] = useState(false);
+
+  /**
+   * Les offres vivent dans une colonne séparée du document et passent par leur
+   * propre endpoint : logées dans le document, elles seraient effacées par la
+   * première autosauvegarde suivant l'import.
+   */
+  const enregistrerOffre = useCallback(async (offre: any) => {
+    const saved = await apiFetch<OffreBPU>(`/api/projects/${projectId}/bpu/offres`, {
+      method: 'POST', body: JSON.stringify({ offre }),
+    });
+    setOffres(prev => [...prev, saved]);
+  }, [projectId]);
+
+  /**
+   * Verse le bordereau et les offres dans le comparatif détaillé du module ACT,
+   * qui sait déjà les comparer, les noter et en tirer un RAO. À la demande
+   * seulement : ce comparatif est éditable, une synchronisation automatique se
+   * battrait contre l'architecte.
+   */
+  const verserAuComparatifAct = useCallback(async () => {
+    if (!bpu) return;
+    const { comparatif, lotsNonRattaches } = bpuVersComparatif(bpu, offres);
+    if (lotsNonRattaches.length) {
+      const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
+      if (!window.confirm(
+        `Ces lots du bordereau ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
+      )) return;
+    }
+    if (!comparatif.length) {
+      window.alert("Aucun lot du bordereau n'est rattaché à un lot du projet : rien à verser.");
+      return;
+    }
+    try {
+      const act = await apiFetch<any>(`/api/projects/${projectId}/act`);
+      const consultation = { ...(act?.consultation ?? {}), comparatif };
+      await apiFetch(`/api/projects/${projectId}/act`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...(act ?? {}), consultation }),
+      });
+      window.alert(`Comparatif mis à jour : ${comparatif.length} lot(s) versé(s). Onglet ACT du projet.`);
+    } catch (e: any) {
+      window.alert(`Le versement a échoué : ${e?.message ?? 'erreur inconnue'}`);
+    }
+  }, [bpu, offres, projectId]);
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -418,11 +467,21 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
                 onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
                 onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
+                onImportOffre={() => setImportOuvert(true)}
+                onPushToAct={verserAuComparatifAct}
               />
             ) : null}
           </div>
         )}
       </div>
+
+      {importOuvert && bpu && (
+        <BPUImportDialog
+          bpu={bpu}
+          onClose={() => setImportOuvert(false)}
+          onConfirm={enregistrerOffre}
+        />
+      )}
     </div>
   );
 };
