@@ -386,7 +386,7 @@ export function ProjectOverview({
               type="text"
               className="w-full border rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
-              placeholder="Titre de la tâche"
+              placeholder="Titre du jalon"
               value={newMilestoneTitle}
               onChange={e => setNewMilestoneTitle(e.target.value)}
             />

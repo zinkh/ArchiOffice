@@ -370,7 +370,7 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
       selectAll(supabaseAdmin, 'invoices', tenantId, 'id, project_id, status, due_date, invoice_number, amount, total_amount'),
       selectAll(supabaseAdmin, 'proposals', tenantId, 'id, title, status, created_at, date_modification'),
       selectAll(supabaseAdmin, 'tenders', tenantId, 'id, title, status, submission_deadline, archived'),
-      selectAll(supabaseAdmin, 'tasks', tenantId, 'id, project_id, title, status, end_date, due_date'),
+      selectAll(supabaseAdmin, 'tasks', tenantId, 'id, project_id, title, status, end_date, due_date, assignee_id'),
       selectAll(supabaseAdmin, 'meetings', tenantId, 'id, title, date, notes'),
       selectAll(supabaseAdmin, 'ordres_de_service', tenantId, 'id, project_id, date'),
       selectAll(supabaseAdmin, 'reserves', tenantId, 'id, project_id, status, created_at, due_date'),

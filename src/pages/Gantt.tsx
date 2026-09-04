@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
-import * as d3 from 'd3';
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { addMonths, subMonths, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isWithinInterval } from 'date-fns';
 import { cn } from '../lib/utils';
 import type { Project, Milestone, Task } from '../types';
 import { useTranslation } from 'react-i18next';
-import TaskModal from '../components/TaskModal';
+import { apiFetch } from '../lib/api';
+import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
+import type { TeamMember } from '../types';
 
 export default function Gantt() {
   const { t } = useTranslation();
@@ -13,8 +14,8 @@ export default function Gantt() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [viewDate, setViewDate] = useState(new Date());
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [modal, setModal] = useState<TaskFormInitial | null>(null);
   const [taskCoords, setTaskCoords] = useState<Record<string, { x: number, y: number, w: number, h: number }>>({});
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dragStartX, setDragStartX] = useState(0);
@@ -49,47 +50,38 @@ export default function Gantt() {
       clearTimeout(timer);
       window.removeEventListener('resize', updateCoords);
     };
-  }, [tasks, projects, viewDate, isModalOpen]);
+  }, [tasks, projects, viewDate, modal]);
 
-  useEffect(() => {
-    fetch('/api/projects')
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-      .then(data => { if (Array.isArray(data)) setProjects(data); })
-      .catch(err => console.error(err));
-
-    fetch('/api/milestones')
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-      .then(data => { if (Array.isArray(data)) setMilestones(data); })
-      .catch(err => console.error(err));
-
-    fetch('/api/tasks')
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-      .then(data => { if (Array.isArray(data)) setTasks(data); })
-      .catch(err => console.error(err));
-  }, []);
-
-  const handleSaveTask = async (task: Task) => {
-    await fetch(`/api/tasks/${task.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(task)
-    });
-    setTasks(prev => prev.map(t => t.id === task.id ? task : t));
-    setIsModalOpen(false);
-  };
-
-  const handleProgressChange = async (task: Task, newProgress: number) => {
-    const updatedTask = { ...task, progress: newProgress };
-    setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
-    
+  // Extrait du useEffect pour être rappelable après chaque écriture du modal.
+  const load = useCallback(async () => {
     try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedTask)
-      });
+      const [projectsData, milestonesData, tasksData, teamData] = await Promise.all([
+        apiFetch('/api/projects'),
+        apiFetch('/api/milestones'),
+        apiFetch('/api/tasks'),
+        apiFetch('/api/team'),
+      ]);
+      if (Array.isArray(projectsData)) setProjects(projectsData);
+      if (Array.isArray(milestonesData)) setMilestones(milestonesData);
+      if (Array.isArray(tasksData)) setTasks(tasksData);
+      if (Array.isArray(teamData)) setTeam(teamData);
     } catch (err) {
       console.error(err);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Patch minimal : le PUT n'écrit plus que les champs envoyés, inutile donc
+  // de renvoyer la ligne entière (ce qui écrasait `dependencies` au passage).
+  const handleProgressChange = async (task: Task, newProgress: number) => {
+    const original = task;
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, progress: newProgress } : t));
+    try {
+      await apiFetch(`/api/tasks/${task.id}`, { method: 'PUT', body: JSON.stringify({ progress: newProgress }) });
+    } catch (err) {
+      console.error(err);
+      setTasks(prev => prev.map(t => t.id === task.id ? original : t));
     }
   };
 
@@ -130,10 +122,9 @@ export default function Gantt() {
     setDraggingTask(null);
 
     try {
-      await fetch(`/api/tasks/${draggingTask.id}`, {
+      await apiFetch(`/api/tasks/${draggingTask.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedTask),
+        body: JSON.stringify({ start_date: updatedTask.start_date, end_date: updatedTask.end_date }),
       });
     } catch (err) {
       console.error('Failed to update task dates:', err);
@@ -369,7 +360,7 @@ export default function Gantt() {
                                   "absolute top-1/2 -translate-y-1/2 h-5 rounded-full bg-purple-200 dark:bg-purple-900/40 shadow-sm flex items-center overflow-hidden cursor-grab active:cursor-grabbing group",
                                   getConflictingTaskIds.has(task.id) && "ring-2 ring-orange-400 ring-offset-1"
                                 )}
-                                onClick={() => { setSelectedTask(task); setIsModalOpen(true); }}
+                                onClick={() => setModal({ ...task })}
                                 style={{
                                   left: `${Math.max(0, (taskStart.getTime() - startOfMonth(viewDate).getTime()) / (endOfMonth(viewDate).getTime() - startOfMonth(viewDate).getTime()) * 100)}%`,
                                   width: `${Math.min(100, (taskEnd.getTime() - taskStart.getTime()) / (endOfMonth(viewDate).getTime() - startOfMonth(viewDate).getTime()) * 100)}%`
@@ -412,13 +403,15 @@ export default function Gantt() {
           </div>
         </div>
       </div>
-      {selectedTask && (
-        <TaskModal 
-          task={selectedTask} 
+      {modal && (
+        <TaskFormModal
+          initial={modal}
+          projects={projects}
+          team={team}
           allTasks={tasks}
-          isOpen={isModalOpen} 
-          onClose={() => setIsModalOpen(false)} 
-          onSave={handleSaveTask} 
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); load(); }}
+          onDeleted={() => { setModal(null); load(); }}
         />
       )}
     </div>

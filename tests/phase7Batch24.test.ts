@@ -58,6 +58,96 @@ describe('Tasks', () => {
     await request(app).put('/api/tasks/task-b').set(authHeader(token)).send({ progress: 100 });
     expect(fakeSupabaseAdmin.getTable('tasks').find(t => t.id === 'task-b')?.progress).toBe(0);
   });
+
+  // PUT /api/tasks/:id used to write every column on every call, defaulting
+  // an omitted `dependencies` to [] — so a partial patch silently wiped it,
+  // which is exactly why Calendar.tsx and the event modal had to round-trip
+  // the whole record by hand. This is the test that would have caught it.
+  it('applies a partial update without clearing the fields it was not given', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const created = await request(app).post('/api/tasks').set(authHeader(token)).send({
+      project_id: 'p1', title: 'Terrassement', start_date: '2026-01-01', end_date: '2026-01-05',
+      description: 'Coordonner le BE structure', dependencies: ['a', 'b'], priority: 'high', assignee_id: 'u1',
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    // La réponse rend la ligne complète, dependencies normalisée en tableau.
+    expect(created.body.dependencies).toEqual(['a', 'b']);
+
+    const updated = await request(app).put(`/api/tasks/${id}`).set(authHeader(token)).send({ progress: 60 });
+    expect(updated.status).toBe(200);
+
+    const row = fakeSupabaseAdmin.getTable('tasks').find(t => t.id === id)!;
+    expect(row.progress).toBe(60);
+    expect(row.title).toBe('Terrassement');
+    expect(row.description).toBe('Coordonner le BE structure');
+    expect(row.dependencies).toBe('["a","b"]');
+    expect(row.priority).toBe('high');
+    expect(row.assignee_id).toBe('u1');
+  });
+
+  // `dependencies` is a TEXT column holding serialized JSON, but every
+  // consumer (Gantt's dependency arrows, the task modal's checkboxes) treats
+  // it as string[] — reading back the raw "[]" string made `.map` throw.
+  it('always reads dependencies back as an array, whatever the column holds', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tasks', [
+      { id: 'dep-json', tenant_id: tenantId, title: 'Avec deps', dependencies: '["x"]' },
+      { id: 'dep-null', tenant_id: tenantId, title: 'Sans deps', dependencies: null },
+      { id: 'dep-junk', tenant_id: tenantId, title: 'Illisible', dependencies: 'pas du json' },
+    ]);
+
+    const listed = await request(app).get('/api/tasks').set(authHeader(token));
+    const byId = new Map(listed.body.map((t: any) => [t.id, t.dependencies]));
+    expect(byId.get('dep-json')).toEqual(['x']);
+    expect(byId.get('dep-null')).toEqual([]);
+    expect(byId.get('dep-junk')).toEqual([]);
+  });
+
+  it('rejects a task with no dates and an unknown status', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const noDates = await request(app).post('/api/tasks').set(authHeader(token)).send({ title: 'Sans dates' });
+    expect(noDates.status).toBe(400);
+
+    const created = await request(app).post('/api/tasks').set(authHeader(token))
+      .send({ title: 'Valide', start_date: '2026-01-01', end_date: '2026-01-02' });
+    const badStatus = await request(app).put(`/api/tasks/${created.body.id}`).set(authHeader(token)).send({ status: 'wat' });
+    expect(badStatus.status).toBe(400);
+  });
+
+  it('filters the task list by project, status and assignee', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tasks', [
+      { id: 'f1', tenant_id: tenantId, title: 'A', project_id: 'pA', status: 'todo', assignee_id: 'u1' },
+      { id: 'f2', tenant_id: tenantId, title: 'B', project_id: 'pB', status: 'done', assignee_id: 'u2' },
+      { id: 'f3', tenant_id: tenantId, title: 'C', project_id: null, status: 'todo', assignee_id: null },
+    ]);
+    const ids = async (qs: string) =>
+      (await request(app).get(`/api/tasks?${qs}`).set(authHeader(token))).body.map((t: any) => t.id).sort();
+
+    expect(await ids('project_id=pA')).toEqual(['f1']);
+    // `project_id=none` is what surfaces the tasks agents create with no
+    // project — previously invisible outside the Kanban board.
+    expect(await ids('project_id=none')).toEqual(['f3']);
+    expect(await ids('status=done')).toEqual(['f2']);
+    expect(await ids('assignee_id=u1')).toEqual(['f1']);
+  });
+
+  it('never lets a filtered list reach across tenants', async () => {
+    const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('tasks', [{ id: 'task-other', tenant_id: tenantB, title: 'Secret', project_id: 'shared' }]);
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+
+    const listed = await request(app).get('/api/tasks?project_id=shared').set(authHeader(token));
+    expect(listed.body.some((t: any) => t.id === 'task-other')).toBe(false);
+  });
 });
 
 describe('Send email', () => {

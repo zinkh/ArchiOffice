@@ -22,6 +22,7 @@ import {
 import { fetchJson } from '../../lib/api';
 import { useUser } from '../../UserContext';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
+import MyTasksWidget from './MyTasksWidget';
 import type { Project, Milestone, Permit, Rfi, Reserve, GpaReserve } from '../../types';
 import {
   StatCard,
@@ -237,6 +238,8 @@ export default function ResponsibleDashboard() {
           </div>
         )}
       </SectionCard>
+
+      <MyTasksWidget />
     </div>
   );
 }

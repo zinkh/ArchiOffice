@@ -309,8 +309,23 @@ CREATE TABLE IF NOT EXISTS tasks (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-  progress INTEGER DEFAULT 0, dependencies TEXT, status TEXT DEFAULT 'todo', due_date TEXT
+  progress INTEGER DEFAULT 0,
+  -- JSON serialisé (["id1","id2"]), pas un tableau Postgres : le type est
+  -- partagé avec milestones.dependencies et rejoué verbatim par le sync
+  -- desktop. GET /api/tasks le normalise en string[] avant de le rendre.
+  dependencies TEXT,
+  status TEXT DEFAULT 'todo', due_date TEXT,
+  description TEXT,
+  -- TEXT sans FK, comme project_members.user_id et time_entries.user_id.
+  assignee_id TEXT,
+  priority TEXT DEFAULT 'normal',
+  created_at TIMESTAMPTZ DEFAULT NOW(), created_by TEXT,
+  CONSTRAINT tasks_status_check   CHECK (status   IS NULL OR status   IN ('todo','in_progress','review','done')),
+  CONSTRAINT tasks_priority_check CHECK (priority IS NULL OR priority IN ('low','normal','high','urgent'))
 );
+CREATE INDEX IF NOT EXISTS idx_tasks_tenant_project  ON tasks(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_tenant_assignee ON tasks(tenant_id, assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_tenant_status   ON tasks(tenant_id, status);
 
 CREATE TABLE IF NOT EXISTS specifications (
   id TEXT PRIMARY KEY,

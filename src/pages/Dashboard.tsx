@@ -22,6 +22,7 @@ import { computeCopilotSuggestions, formatCopilotSuggestion } from '../lib/copil
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
+import MyTasksWidget from '../components/dashboard/MyTasksWidget';
 import { ErrorState, StatCardSkeletonGrid, ListSkeleton } from '../components/DataState';
 import { useAgentChat } from '@zinkh/archioffice-agents/client';
 import {
@@ -469,6 +470,8 @@ function AdminDashboardView() {
           </div>
         )}
       </SectionCard>
+
+      <MyTasksWidget />
 
       {/* Recent projects */}
       <SectionCard
