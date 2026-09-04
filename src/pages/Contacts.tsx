@@ -1,11 +1,13 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
-import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson, apiFetch } from '../lib/api';
 import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import { ContactFormFields } from '../components/ContactFormFields';
+import { ensureContactCategory } from '../lib/contactCategories';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -172,6 +174,10 @@ export default function Contacts() {
     try {
       const url = isEditing ? `/api/contacts/${editingId}` : '/api/contacts';
       const method = isEditing ? 'PUT' : 'POST';
+
+      // Une catégorie créée au vol depuis le formulaire doit exister comme
+      // catégorie du cabinet, sinon elle n'apparaît dans aucun filtre.
+      if (await ensureContactCategory(contact.category, categories)) fetchCategories();
 
       await apiFetch(url, { method, body: JSON.stringify(contact) });
 
@@ -829,305 +835,11 @@ export default function Contacts() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-8">
-              {/* Identité Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_identity')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_prefix_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.prefix || ''}
-                      onChange={e => setNewContact({...newContact, prefix: e.target.value})}
-                      placeholder={t('contacts_prefix_placeholder')}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')} {!newContact.company_name?.trim() && '*'}</label>
-                    <input
-                      required={!newContact.company_name?.trim()}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.first_name || ''}
-                      onChange={e => setNewContact({...newContact, first_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_middle_name_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.middle_name || ''}
-                      onChange={e => setNewContact({...newContact, middle_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('last_name')} {!newContact.company_name?.trim() && '*'}</label>
-                    <input
-                      required={!newContact.company_name?.trim()}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.last_name || ''}
-                      onChange={e => setNewContact({...newContact, last_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_suffix_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.suffix || ''}
-                      onChange={e => setNewContact({...newContact, suffix: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_nickname_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.nickname || ''}
-                      onChange={e => setNewContact({...newContact, nickname: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Organisation Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_organisation')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_name_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.company_name || ''}
-                      onChange={e => setNewContact({...newContact, company_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_job_title_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.job_title || ''}
-                      onChange={e => setNewContact({...newContact, job_title: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_department_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.department || ''}
-                      onChange={e => setNewContact({...newContact, department: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Coordonnées Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_contact_info')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_emails_label')}</h5>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          type="email"
-                          placeholder={t('contacts_email_work_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.email_work || ''}
-                          onChange={e => setNewContact({...newContact, email_work: e.target.value})}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          type="email"
-                          placeholder={t('contacts_email_personal_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.email_home || ''}
-                          onChange={e => setNewContact({...newContact, email_home: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_phones_label')}</h5>
-                    <div className="grid grid-cols-1 gap-2">
-                      <div className="flex items-center gap-2">
-                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          placeholder={t('contacts_phone_mobile_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.phone_mobile || ''}
-                          onChange={e => setNewContact({...newContact, phone_mobile: e.target.value})}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          placeholder={t('contacts_phone_work_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.phone_work || ''}
-                          onChange={e => setNewContact({...newContact, phone_work: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Adresses Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_addresses')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_work_label')}</h5>
-                    <input
-                      placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.address_work_street || ''}
-                      onChange={e => setNewContact({...newContact, address_work_street: e.target.value})}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_work_zip || ''}
-                        onChange={e => setNewContact({...newContact, address_work_zip: e.target.value})}
-                      />
-                      <input
-                        placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_work_city || ''}
-                        onChange={e => setNewContact({...newContact, address_work_city: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_home_label')}</h5>
-                    <input
-                      placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.address_home_street || ''}
-                      onChange={e => setNewContact({...newContact, address_home_street: e.target.value})}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_home_zip || ''}
-                        onChange={e => setNewContact({...newContact, address_home_zip: e.target.value})}
-                      />
-                      <input
-                        placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_home_city || ''}
-                        onChange={e => setNewContact({...newContact, address_home_city: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Autres Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_other')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_category_label')}</label>
-                      <select
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.category || ''}
-                        onChange={e => setNewContact({...newContact, category: e.target.value})}
-                      >
-                        <option value="">{t('contacts_select_category')}</option>
-                        {categories.map(cat => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_tags_label')}</label>
-                      <input
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.tags || ''}
-                        onChange={e => setNewContact({...newContact, tags: e.target.value})}
-                        placeholder={t('contacts_tags_placeholder')}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_notes_label')}</label>
-                      <textarea
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
-                        style={inputStyle}
-                        value={newContact.notes || ''}
-                        onChange={e => setNewContact({...newContact, notes: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_siret_label')}</label>
-                        <input
-                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.siret || ''}
-                          onChange={e => setNewContact({...newContact, siret: e.target.value})}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_vat_label')}</label>
-                        <input
-                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.vat_number || ''}
-                          onChange={e => setNewContact({...newContact, vat_number: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_annual_turnover_label')}</label>
-                      <input
-                        type="number"
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.ca_amount ?? ''}
-                        onChange={e => setNewContact({...newContact, ca_amount: Number(e.target.value)})}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_birthday_label')}</label>
-                      <input
-                        type="date"
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.birthday || ''}
-                        onChange={e => setNewContact({...newContact, birthday: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ContactFormFields
+                contact={newContact}
+                categories={categories}
+                onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                 <div className="space-y-2">

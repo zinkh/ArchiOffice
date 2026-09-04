@@ -52,3 +52,24 @@ export function isEntrepriseContact(c: CategorizedContact): boolean {
   const n = normalizeCategory(c.category);
   return isUncategorized(c) || n.includes('entreprise');
 }
+
+/**
+ * Crée la catégorie si le cabinet ne l'a pas encore, pour qu'elle apparaisse
+ * dans les filtres de la page Contacts. Un échec (doublon créé entre-temps
+ * dans un autre onglet) ne doit jamais empêcher l'enregistrement du contact.
+ */
+export async function ensureContactCategory(name: string | undefined, existing: { name: string }[]): Promise<boolean> {
+  const clean = (name || '').trim();
+  if (!clean || existing.some(c => sameCategory(c.name, clean))) return false;
+  try {
+    const { apiFetch } = await import('./api');
+    await apiFetch('/api/contact-categories', {
+      method: 'POST',
+      body: JSON.stringify({ id: crypto.randomUUID(), name: clean }),
+    });
+    return true;
+  } catch (err) {
+    console.error('Failed to create contact category:', err);
+    return false;
+  }
+}
