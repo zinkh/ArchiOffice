@@ -12,6 +12,7 @@ import type { ContratMOE, ContratMOEMission, ContratCotraitant, ContratSousTrait
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT } from '../lib/contactCategories';
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -776,6 +777,7 @@ function ContratModal({
       {showContactModal && (
         <ContactModal
           isOpen={showContactModal}
+          initialCategory={CONTACT_CATEGORY_CLIENT}
           onClose={() => setShowContactModal(false)}
           onSuccess={(c) => {
             set('client_id', c.id);

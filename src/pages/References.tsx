@@ -36,6 +36,7 @@ import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { loadImageAsDataUrl } from '../lib/imageUtils';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { CONTACT_CATEGORY_CLIENT } from '../lib/contactCategories';
 
 // ── Unified reference type ─────────────────────────────────────────────────
 
@@ -438,6 +439,7 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
 
       <ContactModal
         isOpen={isContactModalOpen}
+        initialCategory={CONTACT_CATEGORY_CLIENT}
         onClose={() => setIsContactModalOpen(false)}
         onSuccess={async (contact) => {
           await onContactCreated();

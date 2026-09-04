@@ -1,11 +1,13 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
-import { IconPlus, IconSearch, IconUser, IconPhone, IconMail, IconMapPin, IconBuilding, IconTag, IconCalendar, IconSignature, IconSettings, IconTrash, IconWorld, IconBriefcase, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson, apiFetch } from '../lib/api';
 import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
+import { ContactFormFields } from '../components/ContactFormFields';
+import { ensureContactCategory } from '../lib/contactCategories';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -43,6 +45,7 @@ export default function Contacts() {
   // Search, Filter, Sort State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'last_name', order: 'asc' });
 
   // Edit State
@@ -171,6 +174,10 @@ export default function Contacts() {
     try {
       const url = isEditing ? `/api/contacts/${editingId}` : '/api/contacts';
       const method = isEditing ? 'PUT' : 'POST';
+
+      // Une catégorie créée au vol depuis le formulaire doit exister comme
+      // catégorie du cabinet, sinon elle n'apparaît dans aucun filtre.
+      if (await ensureContactCategory(contact.category, categories)) fetchCategories();
 
       await apiFetch(url, { method, body: JSON.stringify(contact) });
 
@@ -428,22 +435,38 @@ export default function Contacts() {
   const filteredAndSortedContacts = useMemo(() => {
     let result = [...contacts];
 
-    // Filter by search query
+    // Filter by search query. Every field is read defensively: the columns are
+    // nullable in Postgres (a contact created by the AI agent, or imported,
+    // routinely arrives with a null email or city) even though the TS type
+    // declares first_name/last_name/email/city as required strings — an
+    // unguarded .toLowerCase() on one of those nulls used to throw straight
+    // through this useMemo and blow up the whole page into the error boundary.
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
+      const matches = (v: unknown) => typeof v === 'string' && v.toLowerCase().includes(query);
       result = result.filter(c =>
-        c.first_name.toLowerCase().includes(query) ||
-        c.last_name.toLowerCase().includes(query) ||
-        c.company_name?.toLowerCase().includes(query) ||
-        c.email.toLowerCase().includes(query) ||
-        c.city.toLowerCase().includes(query) ||
-        c.prefix?.toLowerCase().includes(query)
+        matches(c.first_name) ||
+        matches(c.last_name) ||
+        matches(c.company_name) ||
+        matches(c.email) ||
+        matches(c.email_work) ||
+        matches(c.phone) ||
+        matches(c.phone_mobile) ||
+        matches(c.city) ||
+        matches(c.category) ||
+        matches(c.job_title) ||
+        matches(c.prefix)
       );
     }
 
     // Filter by category
     if (filterCategory) {
       result = result.filter(c => c.category === filterCategory);
+    }
+
+    // Filter by organisation
+    if (filterCompany) {
+      result = result.filter(c => (c.company_name || '') === filterCompany);
     }
 
     // Sort
@@ -464,7 +487,18 @@ export default function Contacts() {
     });
 
     return result;
-  }, [contacts, searchQuery, filterCategory, sortConfig]);
+  }, [contacts, searchQuery, filterCategory, filterCompany, sortConfig]);
+
+  // Les organismes ne sont pas une table : ils sont saisis librement sur chaque
+  // contact, la liste déroulante se déduit donc des contacts eux-mêmes.
+  const companyOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of contacts) {
+      const name = (c.company_name || '').trim();
+      if (name) names.add(name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [contacts]);
 
   const contactsPagination = usePagination(filteredAndSortedContacts);
 
@@ -586,6 +620,20 @@ export default function Contacts() {
               ))}
             </select>
           </div>
+          <div className="relative">
+            <IconBuilding className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+            <select
+              className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+              style={inputStyle}
+              value={filterCompany}
+              onChange={e => setFilterCompany(e.target.value)}
+            >
+              <option value="">{t('contacts_all_companies')}</option>
+              {companyOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -595,11 +643,11 @@ export default function Contacts() {
           <MobileAccordionTable
             data={contactsPagination.pageItems}
             keyField="id"
-            emptyText={searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}
+            emptyText={searchQuery || filterCategory || filterCompany ? t('contacts_no_contacts_filter') : t('no_contacts')}
             columns={[
               { label: 'Nom', primary: true, render: c => (
                 <div className="flex items-center gap-2">
-                  <span>{c.prefix} {c.last_name} {c.first_name}</span>
+                  <span>{[c.prefix, c.last_name, c.first_name].filter(Boolean).join(' ')}</span>
                   {isContactIncomplete(c) && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#fff3bf', color: '#e67700' }}>
                       <IconAlertTriangle size={9} /> À compléter
@@ -607,6 +655,7 @@ export default function Contacts() {
                   )}
                 </div>
               )},
+              { label: t('contacts_col_company'), render: c => c.company_name || '---' },
               { label: t('contacts_col_category'), render: c => c.category ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span> : '---' },
               { label: t('phone'), render: c => c.phone || '---' },
               { label: t('email'), render: c => c.email || '---' },
@@ -640,6 +689,12 @@ export default function Contacts() {
                   </div>
                 </th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')}</th>
+                <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('company_name')}>
+                  <div className="flex items-center gap-1">
+                    {t('contacts_col_company')}
+                    {sortConfig.field === 'company_name' && (sortConfig.order === 'asc' ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />)}
+                  </div>
+                </th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_col_category')}</th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('phone')}</th>
                 <th className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('email')}</th>
@@ -662,8 +717,7 @@ export default function Contacts() {
               {contactsPagination.pageItems.map((contact) => (
                 <tr key={contact.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <td className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-text)' }}>
-                    <div>{contact.prefix}</div>
-                    {contact.company_name && <div className="text-[10px] font-normal" style={{ color: 'var(--tblr-muted)' }}>{contact.company_name}</div>}
+                    {contact.prefix || '---'}
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     <div className="flex items-center gap-2">
@@ -677,6 +731,22 @@ export default function Contacts() {
                     </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.first_name}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
+                    {contact.company_name ? (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCompany(contact.company_name || '')}
+                        className="inline-flex items-center gap-1.5 text-left hover:underline"
+                        style={{ color: 'var(--tblr-text)' }}
+                        title={t('contacts_filter_by_company')}
+                      >
+                        <IconBuilding size={14} style={{ color: 'var(--tblr-muted)' }} />
+                        <span className="font-medium">{contact.company_name}</span>
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--tblr-muted)' }}>---</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
                     {contact.category && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
@@ -718,10 +788,10 @@ export default function Contacts() {
               ))}
               {filteredAndSortedContacts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
+                  <td colSpan={10} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconUser size={32} className="opacity-20" />
-                      <p>{searchQuery || filterCategory ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
+                      <p>{searchQuery || filterCategory || filterCompany ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
                     </div>
                   </td>
                 </tr>
@@ -765,305 +835,11 @@ export default function Contacts() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-8">
-              {/* Identité Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_identity')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_prefix_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.prefix || ''}
-                      onChange={e => setNewContact({...newContact, prefix: e.target.value})}
-                      placeholder={t('contacts_prefix_placeholder')}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('first_name')} {!newContact.company_name?.trim() && '*'}</label>
-                    <input
-                      required={!newContact.company_name?.trim()}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.first_name || ''}
-                      onChange={e => setNewContact({...newContact, first_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_middle_name_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.middle_name || ''}
-                      onChange={e => setNewContact({...newContact, middle_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('last_name')} {!newContact.company_name?.trim() && '*'}</label>
-                    <input
-                      required={!newContact.company_name?.trim()}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.last_name || ''}
-                      onChange={e => setNewContact({...newContact, last_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_suffix_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.suffix || ''}
-                      onChange={e => setNewContact({...newContact, suffix: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_nickname_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.nickname || ''}
-                      onChange={e => setNewContact({...newContact, nickname: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Organisation Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_organisation')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_name_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.company_name || ''}
-                      onChange={e => setNewContact({...newContact, company_name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_job_title_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.job_title || ''}
-                      onChange={e => setNewContact({...newContact, job_title: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_department_label')}</label>
-                    <input
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.department || ''}
-                      onChange={e => setNewContact({...newContact, department: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Coordonnées Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_contact_info')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_emails_label')}</h5>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          type="email"
-                          placeholder={t('contacts_email_work_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.email_work || ''}
-                          onChange={e => setNewContact({...newContact, email_work: e.target.value})}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <IconMail size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          type="email"
-                          placeholder={t('contacts_email_personal_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.email_home || ''}
-                          onChange={e => setNewContact({...newContact, email_home: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_phones_label')}</h5>
-                    <div className="grid grid-cols-1 gap-2">
-                      <div className="flex items-center gap-2">
-                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          placeholder={t('contacts_phone_mobile_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.phone_mobile || ''}
-                          onChange={e => setNewContact({...newContact, phone_mobile: e.target.value})}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <IconPhone size={16} style={{ color: 'var(--tblr-muted)' }} />
-                        <input
-                          placeholder={t('contacts_phone_work_placeholder')}
-                          className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.phone_work || ''}
-                          onChange={e => setNewContact({...newContact, phone_work: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Adresses Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_addresses')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_work_label')}</h5>
-                    <input
-                      placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.address_work_street || ''}
-                      onChange={e => setNewContact({...newContact, address_work_street: e.target.value})}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_work_zip || ''}
-                        onChange={e => setNewContact({...newContact, address_work_zip: e.target.value})}
-                      />
-                      <input
-                        placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_work_city || ''}
-                        onChange={e => setNewContact({...newContact, address_work_city: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <h5 className="text-[10px] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_address_home_label')}</h5>
-                    <input
-                      placeholder={t('contacts_street_placeholder')}
-                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                      style={inputStyle}
-                      value={newContact.address_home_street || ''}
-                      onChange={e => setNewContact({...newContact, address_home_street: e.target.value})}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        placeholder={t('contacts_postal_code_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_home_zip || ''}
-                        onChange={e => setNewContact({...newContact, address_home_zip: e.target.value})}
-                      />
-                      <input
-                        placeholder={t('contacts_city_placeholder')}
-                        className="px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.address_home_city || ''}
-                        onChange={e => setNewContact({...newContact, address_home_city: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Autres Section */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('contacts_section_other')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_category_label')}</label>
-                      <select
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.category || ''}
-                        onChange={e => setNewContact({...newContact, category: e.target.value})}
-                      >
-                        <option value="">{t('contacts_select_category')}</option>
-                        {categories.map(cat => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_tags_label')}</label>
-                      <input
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.tags || ''}
-                        onChange={e => setNewContact({...newContact, tags: e.target.value})}
-                        placeholder={t('contacts_tags_placeholder')}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_notes_label')}</label>
-                      <textarea
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
-                        style={inputStyle}
-                        value={newContact.notes || ''}
-                        onChange={e => setNewContact({...newContact, notes: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_siret_label')}</label>
-                        <input
-                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.siret || ''}
-                          onChange={e => setNewContact({...newContact, siret: e.target.value})}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_vat_label')}</label>
-                        <input
-                          className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                          style={inputStyle}
-                          value={newContact.vat_number || ''}
-                          onChange={e => setNewContact({...newContact, vat_number: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_annual_turnover_label')}</label>
-                      <input
-                        type="number"
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.ca_amount ?? ''}
-                        onChange={e => setNewContact({...newContact, ca_amount: Number(e.target.value)})}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_birthday_label')}</label>
-                      <input
-                        type="date"
-                        className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                        style={inputStyle}
-                        value={newContact.birthday || ''}
-                        onChange={e => setNewContact({...newContact, birthday: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ContactFormFields
+                contact={newContact}
+                categories={categories}
+                onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                 <div className="space-y-2">

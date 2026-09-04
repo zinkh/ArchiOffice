@@ -16,6 +16,9 @@ interface AddressAutocompleteProps {
   placeholder?: string;
   required?: boolean;
   id?: string;
+  /** Style du champ, pour s'aligner sur le formulaire hôte (variables Tabler). */
+  inputStyle?: React.CSSProperties;
+  disabled?: boolean;
 }
 
 interface AddressFeature {
@@ -41,7 +44,7 @@ interface AddressFeature {
   };
 }
 
-export function AddressAutocomplete({ label, value, onChange, onSelect, placeholder, required, id }: AddressAutocompleteProps) {
+export function AddressAutocomplete({ label, value, onChange, onSelect, placeholder, required, id, inputStyle, disabled }: AddressAutocompleteProps) {
   const [query, setQuery] = useState(value);
   const [isUserTyping, setIsUserTyping] = useState(false);
   const [suggestions, setSuggestions] = useState<AddressFeature[]>([]);
@@ -173,7 +176,9 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
         <input
           id={id}
           type="text"
-          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-9"
+          className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm text-zinc-900 dark:text-white pl-9 disabled:opacity-60"
+          style={inputStyle}
+          disabled={disabled}
           value={query || ''}
           onChange={handleInputChange}
           onFocus={() => setShowSuggestions(true)}

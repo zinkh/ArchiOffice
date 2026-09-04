@@ -1,24 +1,57 @@
-import React, { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { IconMail, IconPhone, IconAlertTriangle } from '@tabler/icons-react';
-import type { Contact } from '../types';
-import { apiFetch } from '../lib/api';
+import { IconAlertTriangle } from '@tabler/icons-react';
+import type { Contact, ContactCategory } from '../types';
+import { apiFetch, fetchJson } from '../lib/api';
+import { ContactFormFields } from './ContactFormFields';
+import { ensureContactCategory, resolveCategoryName } from '../lib/contactCategories';
 
 interface ContactModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (contact: Contact) => void;
+  /**
+   * Catégorie pré-sélectionnée, d'après le champ depuis lequel le modal a été
+   * ouvert (client d'un projet, entreprise d'un lot, cotraitant...). Sans elle
+   * le contact partait sans catégorie et disparaissait aussitôt des listes
+   * filtrées par catégorie — y compris de celle qui venait de le créer.
+   */
   initialCategory?: string;
 }
 
 export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: ContactModalProps) {
   const { t } = useTranslation();
-  const [newContact, setNewContact] = useState<Partial<Contact>>({
-    category: initialCategory || ''
-  });
+  const [newContact, setNewContact] = useState<Partial<Contact>>({ category: initialCategory || '' });
+  const [categories, setCategories] = useState<ContactCategory[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Le composant reste monté entre deux ouvertures dans toutes les pages qui
+  // l'utilisent : sans cette remise à zéro, le formulaire garderait la saisie
+  // précédente et surtout la catégorie du champ précédent.
+  useEffect(() => {
+    if (!isOpen) return;
+    setError(null);
+    setNewContact({ category: initialCategory || '' });
+    let cancelled = false;
+    fetchJson<ContactCategory[]>('/api/contact-categories')
+      .then(data => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? data : [];
+        setCategories(list);
+        // Une catégorie déjà présente chez le cabinet est réutilisée telle
+        // quelle (accents et casse compris) plutôt que dupliquée. Seul ce
+        // champ est réécrit : la saisie faite pendant le chargement reste.
+        setNewContact(prev => (
+          prev.category === (initialCategory || '')
+            ? { ...prev, category: resolveCategoryName(initialCategory, list) }
+            : prev
+        ));
+      })
+      .catch(err => console.error('Failed to fetch contact categories:', err));
+    return () => { cancelled = true; };
+  }, [isOpen, initialCategory]);
 
   const defaultContact: Contact = {
     id: '',
@@ -68,7 +101,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     electronic_signature: '',
     contact_references: '',
     tags: '',
-    category: initialCategory || '',
+    category: '',
     notes: '',
     birthday: '',
     website: '',
@@ -83,6 +116,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
 
     const contactData = {
       ...newContact,
+      category: (newContact.category || '').trim(),
       id: `c${Date.now()}-${Math.random()}`,
       created_at: new Date().toISOString(),
       created_by: 'Current User',
@@ -106,6 +140,11 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     };
 
     try {
+      // Une catégorie saisie ici (ou proposée par le champ appelant) qui
+      // n'existe pas encore est créée, sinon elle n'apparaîtrait dans aucun
+      // filtre de la page Contacts.
+      await ensureContactCategory(contact.category, categories);
+
       await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(contact) });
       onSuccess(contact);
       onClose();
@@ -122,18 +161,19 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
       >
-        <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-          <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+        <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+          <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
             {t('add_contact')}
           </h3>
-          <button 
-            onClick={onClose} 
-            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+          <button
+            onClick={onClose}
+            style={{ color: 'var(--tblr-muted)' }}
           >
             ✕
           </button>
@@ -145,143 +185,26 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
           </div>
         )}
         <form onSubmit={handleSubmit} className="p-6 space-y-8">
-          {/* Identité Section */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Identité</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Prefix</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.prefix || ''}
-                  onChange={e => setNewContact({...newContact, prefix: e.target.value})}
-                  placeholder="M., Mme, Dr..."
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('first_name')} {!newContact.company_name?.trim() && '*'}</label>
-                <input
-                  required={!newContact.company_name?.trim()}
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.first_name || ''}
-                  onChange={e => setNewContact({...newContact, first_name: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Middle Name</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.middle_name || ''}
-                  onChange={e => setNewContact({...newContact, middle_name: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t('last_name')} {!newContact.company_name?.trim() && '*'}</label>
-                <input
-                  required={!newContact.company_name?.trim()}
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.last_name || ''}
-                  onChange={e => setNewContact({...newContact, last_name: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Suffix</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.suffix || ''}
-                  onChange={e => setNewContact({...newContact, suffix: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Nickname</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.nickname || ''}
-                  onChange={e => setNewContact({...newContact, nickname: e.target.value})}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Organisation Section */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Organisation</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Organisme</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.company_name || ''}
-                  onChange={e => setNewContact({...newContact, company_name: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Fonction</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.job_title || ''}
-                  onChange={e => setNewContact({...newContact, job_title: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Service</label>
-                <input 
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                  value={newContact.department || ''}
-                  onChange={e => setNewContact({...newContact, department: e.target.value})}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Coordonnées Section */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-700 pb-2">Coordonnées</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Emails</h5>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <IconMail size={16} className="text-zinc-400" />
-                    <input 
-                      type="email"
-                      placeholder="Travail"
-                      className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                      value={newContact.email_work || ''}
-                      onChange={e => setNewContact({...newContact, email_work: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <h5 className="text-[10px] font-bold text-zinc-400 uppercase">Téléphones</h5>
-                <div className="grid grid-cols-1 gap-2">
-                  <div className="flex items-center gap-2">
-                    <IconPhone size={16} className="text-zinc-400" />
-                    <input 
-                      placeholder="Mobile"
-                      className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 text-zinc-900 dark:text-white"
-                      value={newContact.phone_mobile || ''}
-                      onChange={e => setNewContact({...newContact, phone_mobile: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ContactFormFields
+            contact={newContact}
+            categories={categories}
+            onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+          />
 
           <div className="flex justify-end gap-4 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-lg font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              className="px-6 py-2 rounded-lg font-medium transition-colors"
+              style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
             >
               {t('cancel')}
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
               {isSubmitting ? '...' : t('save')}
             </button>
