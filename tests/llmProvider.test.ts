@@ -85,6 +85,44 @@ describe('Gemini adapter — request mapping', () => {
     ]);
   });
 
+  it("rejoue les parts d'origine du modèle, avec leur signature de raisonnement", async () => {
+    // Gemini 3 attache un thoughtSignature à chaque functionCall et exige de
+    // le retrouver intact au tour suivant. Reconstruire l'appel à partir du
+    // seul couple (nom, arguments) le perd, et l'API répond alors 400
+    // « Function call is missing a thought_signature in functionCall parts »
+    // dès le deuxième appel d'outil d'un même échange.
+    const rawParts = [
+      { text: 'Je vérifie.' },
+      { functionCall: { name: 'search_records', args: { resource: 'contacts', query: 'Boublenza' } }, thoughtSignature: 'sig-abc123' },
+    ];
+    const messages: LlmMessage[] = [
+      { role: 'user', content: 'Crée le devis pour Boublenza' },
+      {
+        role: 'assistant',
+        content: 'Je vérifie.',
+        toolCalls: [{ name: 'search_records', args: { resource: 'contacts', query: 'Boublenza' } }],
+        raw: rawParts,
+      },
+      { role: 'tool', results: [{ name: 'search_records', response: { count: 0, matches: [] } }] },
+    ];
+    await provider().chat({ messages });
+
+    expect(generateContent.mock.calls[0][0].contents[1]).toEqual({ role: 'model', parts: rawParts });
+  });
+
+  it('reconstruit le tour du modèle quand aucune part d\'origine n\'est disponible', async () => {
+    // Chemin de repli : une conversation reprise depuis l'historique stocké
+    // ne porte que du texte, sans parts ni signature — elle doit continuer à
+    // fonctionner.
+    const messages: LlmMessage[] = [
+      { role: 'user', content: 'Et ensuite ?' },
+      { role: 'assistant', content: 'Voici la suite.', raw: [] },
+    ];
+    await provider().chat({ messages });
+
+    expect(generateContent.mock.calls[0][0].contents[1]).toEqual({ role: 'model', parts: [{ text: 'Voici la suite.' }] });
+  });
+
   it('keeps text and tool calls together on a single model turn', async () => {
     const messages: LlmMessage[] = [
       { role: 'user', content: 'Vérifie puis crée' },
@@ -152,6 +190,20 @@ describe('Gemini adapter — response mapping', () => {
     expect(result.text).toBe('Voici vos projets.');
     expect(result.toolCalls).toEqual([{ name: 'search_records', args: { resource: 'projects', query: 'école' } }]);
     expect(result.usage).toEqual({ inputTokens: 1200, outputTokens: 340 });
+  });
+
+  it("remonte les parts d'origine du modèle pour qu'elles puissent être rejouées", async () => {
+    const parts = [
+      { functionCall: { name: 'create_record', args: { resource: 'proposals' } }, thoughtSignature: 'sig-xyz' },
+    ];
+    mockResponse({
+      text: '',
+      functionCalls: [{ name: 'create_record', args: { resource: 'proposals' } }],
+      candidates: [{ content: { parts } }],
+    });
+
+    const result = await provider().chat({ messages: [{ role: 'user', content: 'x' }] });
+    expect(result.raw).toEqual(parts);
   });
 
   it('normalizes a blank turn to empty text, no tool calls and zeroed usage', async () => {

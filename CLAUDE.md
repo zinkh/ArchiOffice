@@ -203,7 +203,7 @@ All model calls go through the provider-neutral layer in `packages/archioffice-a
 
 The two call sites are `packages/archioffice-agents/src/server/routes.ts` (agent chat, with the tool-calling loop) and `server/routes/aiSuggestions.ts` (CCTP articles). Neither imports a vendor SDK: add a provider by writing an adapter and registering it in `resolveLlmProvider()`, not by editing call sites.
 
-Conversation state is held by the caller, not by an SDK chat object, because every provider we target is stateless. Tool definitions are plain JSON Schema (`parametersJsonSchema`), which maps onto all three without rewriting. An assistant turn also carries an opaque `raw` field — the provider's own content blocks, replayed verbatim — which is what keeps Claude's thinking blocks and their signatures intact across a tool-calling round.
+Conversation state is held by the caller, not by an SDK chat object, because every provider we target is stateless. Tool definitions are plain JSON Schema (`parametersJsonSchema`), which maps onto all three without rewriting. An assistant turn also carries an opaque `raw` field — the provider's own content blocks, replayed verbatim — and les deux fournisseurs qui signent leur raisonnement en dépendent : les blocs de pensée de Claude et leurs signatures, et les `thoughtSignature` que Gemini 3 attache à chaque `functionCall` et exige de retrouver intacts au tour suivant. Reconstruire un appel d'outil à partir du seul couple (nom, arguments) perd cette signature, et Gemini répond alors 400 `Function call is missing a thought_signature` dès le deuxième appel d'un même échange.
 
 **Selecting a provider.** Precedence, highest first: an explicit argument to `resolveLlmProvider()` (per-tenant BYOK, not built yet) → the `platform_settings.ai_provider` row set from the `/admin` back-office → `AI_PROVIDER`/`AI_MODEL` → Gemini. The stored setting outranks the environment on purpose, otherwise an instance that sets `AI_PROVIDER` could never be switched from the UI.
 
@@ -215,6 +215,29 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
+
+### Écritures d'agent : schéma, défauts, erreurs
+
+`AGENT_RESOURCES` (`packages/archioffice-agents/src/types.ts`) porte, pour
+chaque ressource, quatre choses en plus de son libellé : `knownFields` (les
+colonnes réellement acceptées), `required`, `enums` (vocabulaire fermé) et
+`defaults`. `prepareRecord()` (`server/tools.ts`) s'en sert avant chaque
+écriture pour écarter les champs inconnus, normaliser la casse des valeurs à
+choix fermé et poser les défauts manquants — chaque intervention étant
+rapportée au modèle (`champs_ignores`, `valeurs_par_defaut`) pour qu'il la
+répercute à l'utilisateur.
+
+Sans cette couche, un modèle qui invente un schéma plausible
+(`validity_period`, `payment_terms`, `phases`) ou qui écrit `draft` au lieu de
+`Draft` recevait un « Validation error » sans nom de champ, parce que le
+tableau `details` de `validateBody()` était jeté avant d'atteindre le modèle.
+Il n'avait alors aucun moyen de se corriger et enchaînait les variantes au
+hasard. Le détail de l'erreur, les champs acceptés et le vocabulaire attendu
+lui reviennent désormais en entier.
+
+La posture correspondante est écrite dans le prompt (`systemPrompts.ts`) :
+l'agent exécute une demande explicite sans la faire valider, ne réclame jamais
+un champ facultatif, et rend compte de ses hypothèses **après** coup.
 
 ### Capacités et autonomie des agents
 
