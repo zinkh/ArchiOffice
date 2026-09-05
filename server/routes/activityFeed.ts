@@ -12,6 +12,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
+import { notifyUsers } from '../push';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -50,6 +51,17 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
       }));
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'mentions').insert(rows);
       if (error) console.error('[mentions] insert failed:', error);
+      // Après l'enregistrement, pas avant : la mention doit exister dans le
+      // fil même si la notification système échoue. Être cité nommément est le
+      // seul événement du flux qui sonne hors application sans passer par une
+      // règle d'alerte — c'est là que l'attente d'une réponse est la plus forte.
+      await notifyUsers(supabaseAdmin, tenantId, mentionedIds, {
+        title: `${authorName} vous a mentionné`,
+        body: content.slice(0, 200),
+        url: '/notifications',
+        category: 'Messages',
+        tag: `mention:${postId}`,
+      });
     } catch (e) {
       console.error('[mentions] unexpected error:', e);
     }

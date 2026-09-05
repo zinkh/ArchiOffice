@@ -126,6 +126,14 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/POST /api/conversations`, `GET/POST /api/conversations/:id/messages` (file upload), `POST /api/conversations/:id/read`, `GET /api/messages/unread-count`, `POST/DELETE /api/conversations/:id/participants(/:userId)`.
 - `POST /api/send-email` — outbound email via the tenant's configured SMTP.
 
+### Push notifications
+- `GET /api/push/config` — `{ configured, publicKey }`. The VAPID public key the browser needs to subscribe; `configured: false` on an instance with no VAPID keys, in which case Web Push is off and nothing else here fails.
+- `POST /api/push/subscribe` — body is a `PushSubscription` (`{ endpoint, keys: { p256dh, auth } }`). Idempotent on `endpoint`; rejects a non-`https` endpoint with `400`.
+- `POST /api/push/unsubscribe` — `{ endpoint }`, scoped to the caller's own subscriptions.
+- `GET/PUT /api/push/preferences` — per-user, not per-tenant: `{ muted: string[] }` lists the activity categories this person has silenced. `GET` also returns `devices` (subscription count) and `configured`.
+- `POST /api/push/test` — sends a test notification to the caller.
+- `GET /api/notifications/pending` — the desktop client's pull channel (Electron has no push service). Returns up to 10 undelivered notifications from the last 24 h **and marks them delivered in the same call**, so a caller that drops the response drops those notifications; the durable record stays in `/api/feed`.
+
 ### Settings
 - `GET/PUT /api/settings`.
 - `POST /api/upload/logo`, `POST /api/upload/avatar` (file uploads).

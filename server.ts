@@ -25,6 +25,7 @@ import { registerContratsMoeRoutes } from "./server/routes/contratsMoe";
 import { registerNotesHonorairesRoutes } from "./server/routes/notesHonoraires";
 import { registerProfileRoutes } from "./server/routes/profile";
 import { registerActivityFeedRoutes } from "./server/routes/activityFeed";
+import { registerPushRoutes } from "./server/routes/push";
 import { registerMessagingRoutes } from "./server/routes/messaging";
 import { registerContactSyncRoutes } from "./server/routes/contactSync";
 import { registerGeoProxyRoutes } from "./server/routes/geoProxy";
@@ -696,6 +697,7 @@ export async function createApp() {
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext });
+  registerPushRoutes(app, { supabaseAdmin, getTenantId });
   registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);

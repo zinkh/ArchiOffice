@@ -16,6 +16,7 @@ import {
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
+import { useNotificationBridge } from './hooks/useNotificationBridge';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -680,6 +681,12 @@ function ProtectedLayout() {
   const { settings } = useSettings();
   const { t } = useTranslation();
   const location = useLocation();
+
+  // Notifications système (Web Push dans la PWA, relevé natif dans le client
+  // Electron). Ici plutôt que dans App() : les hooks du routeur n'existent
+  // qu'à l'intérieur du Router, et il n'y a rien à relever tant que personne
+  // n'est authentifié.
+  useNotificationBridge(!!currentUser);
 
   if (isLoading) {
     return (

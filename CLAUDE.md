@@ -108,6 +108,8 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `APP_URL` | Yes | Deployed app base URL |
 | `SMTP_HOST/PORT/USER/PASS` | Optional | Email via Nodemailer |
 | `GEORISQUES_TOKEN` | Optional | French geological risk API |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional | Web Push (PWA notifications). Generate once per instance with `node scripts/generate-vapid-keys.mjs`; unset means Web Push is off and nothing else breaks |
+| `VAPID_SUBJECT` | Optional | Contact address the push service uses to reach the operator (`mailto:` or `https:`). Falls back to `APP_URL` |
 | `PORT` | Optional | Server port (default 8080 in Docker) |
 | `DISABLE_HMR` | Optional | Set `true` to disable Vite HMR |
 
@@ -287,6 +289,44 @@ plutôt que de le laisser passer pour vide.
 ```` ```artifact ```` (docx, pdf, xlsx, csv). Tous portent la charte du cabinet
 lue dans `settings` par `server/agencyIdentity.ts` : logo et coordonnées en
 en-tête, adresse et SIRET en pied de page, pagination « P1|2 » en bas à droite.
+
+### Notifications système (PWA et poste de travail)
+
+Le flux d'activité ne prévient personne quand l'application est fermée, et le
+mail (`server/mailer.ts`) arrive avec la latence d'une boîte de réception. Le
+canal « système » comble cet écart. Une seule source, deux transports, parce
+qu'aucun des deux ne couvre tous les postes :
+
+| | Web Push | File `notification_outbox` |
+|---|---|---|
+| Cible | PWA installée (navigateur, iOS 16.4+ depuis l'écran d'accueil) | Client Electron |
+| Sens | Le serveur pousse | Le client relève, toutes les 60 s |
+| Fichiers | `public/push-sw.js`, `src/lib/push.ts` | `electron/{main,preload}.cjs`, `src/lib/desktopNotifications.ts` |
+
+`notifyUsers()` (`server/push.ts`) est le point d'entrée unique : il écrit une
+ligne par destinataire dans `notification_outbox`, puis tente le Web Push
+par-dessus. L'écriture est inconditionnelle, l'envoi est un meilleur effort —
+une instance sans clés VAPID garde donc les notifications du poste de travail
+et le flux en application, elle perd seulement le canal navigateur.
+
+Deux points à ne pas contourner :
+
+1. **Chromium embarqué dans Electron n'est enregistré auprès d'aucun service de
+   push.** FCM et consorts sont liés à un navigateur, pas à une application :
+   le Web Push ne peut pas fonctionner dans le client de bureau, d'où le
+   relevé périodique. Ce n'est pas un contournement provisoire.
+2. **Le service worker est généré par Workbox (`generateSW`).** Les
+   gestionnaires `push`/`notificationclick` vivent donc dans un fichier
+   statique importé en tête (`workbox.importScripts` dans `vite.config.ts`),
+   et non dans un service worker écrit à la main : passer en `injectManifest`
+   reviendrait à reprendre la précache et le cycle de mise à jour dont dépend
+   `src/components/UpdateBanner.tsx`.
+
+Producteurs branchés : `server/agentAlerts.ts` (toute alerte créée, quelle que
+soit la préférence d'envoi de mail de la règle) et les mentions `@` de
+`server/routes/activityFeed.ts`. Le filtrage propre au canal est personnel et
+non par cabinet : `profiles.notification_prefs` (`{ muted: [catégories] }`),
+réglé depuis `src/components/PushNotificationsCard.tsx`.
 
 ### Maps
 

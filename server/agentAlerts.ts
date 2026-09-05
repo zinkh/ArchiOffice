@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyTenantAdmins } from './mailer';
+import { notifyTenantAdminsPush } from './push';
 
 const DEFAULT_CHECK_INTERVAL_HOURS = 6;
 
@@ -487,6 +488,19 @@ export async function runAlertCycleForTenant(supabaseAdmin: SupabaseClient, tena
     if (error) continue;
     created++;
     await publishActivity(supabaseAdmin, tenantId, alert).catch(() => {});
+    // La notification système part pour toute alerte créée, indépendamment de
+    // notify_email : couper le mail d'une règle veut dire « pas dans ma boîte
+    // de réception », pas « ne me préviens jamais ». Le filtrage propre à ce
+    // canal est la préférence par personne (profiles.notification_prefs).
+    await notifyTenantAdminsPush(supabaseAdmin, tenantId, {
+      title: alert.title,
+      body: alert.message,
+      url: '/notifications',
+      category: 'Alertes IA',
+      // Une alerte déjà affichée et non lue est remplacée par sa version la
+      // plus récente au lieu d'empiler un doublon.
+      tag: `alert:${alert.dedupKey}`,
+    });
     if (alert.notifyEmail) {
       await notifyTenantAdmins(
         supabaseAdmin,
