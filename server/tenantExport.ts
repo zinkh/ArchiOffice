@@ -26,7 +26,12 @@ const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   'document_diffusions', 'document_templates',
   'feed_posts', 'feed_comments', 'feed_likes',
   'gpa_reserves', 'join_requests', 'leave_balances', 'leave_requests',
-  'meeting_attendees', 'meeting_photos', 'meetings', 'mentions', 'permits',
+  'meeting_attendees', 'meeting_photos', 'meetings', 'mentions',
+  // L'historique des notifications système, au même titre que le flux
+  // d'activité. push_subscriptions, en revanche, reste hors export : ce sont
+  // des identifiants de transport propres à un navigateur (endpoint + clés de
+  // chiffrement), pas du contenu produit par le cabinet.
+  'notification_outbox', 'permits',
   'profile_education', 'profile_experience', 'project_phase_history', 'rfis',
 ]));
 

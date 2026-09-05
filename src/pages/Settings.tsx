@@ -15,6 +15,7 @@ import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
+import { PushNotificationsCard } from '../components/PushNotificationsCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -2066,6 +2067,9 @@ export default function Settings() {
               ))}
             </div>
           </div>
+
+          {/* ── Notifications système (Web Push / client de bureau) ── */}
+          <PushNotificationsCard />
 
           {/* ── Archivage automatique des notifications ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>

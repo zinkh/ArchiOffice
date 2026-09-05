@@ -1,4 +1,4 @@
-const { app, BrowserWindow, safeStorage } = require('electron');
+const { app, BrowserWindow, safeStorage, ipcMain, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -11,6 +11,12 @@ const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 // title bar and the default userData path (%APPDATA%\react-example\...), so
 // this must be set explicitly, before anything calls app.getPath('userData').
 app.setName('ArchiOffice Client');
+
+// Sans identifiant AppUserModelID explicite, Windows n'attribue les
+// notifications système à aucune application installée et les avale
+// silencieusement (elles n'apparaissent ni en bulle ni dans le centre de
+// notifications). Doit valoir exactement l'appId d'electron-builder.yml.
+if (process.platform === 'win32') app.setAppUserModelId('com.archioffice.desktop');
 
 const PORT = process.env.PORT || '3130';
 const HEALTH_URL = `http://127.0.0.1:${PORT}/api/health`;
@@ -166,6 +172,48 @@ async function startServer() {
   log('Serveur applicatif prêt.');
 }
 
+// ── Notifications système ───────────────────────────────────────────────────
+// Le Web Push de la PWA ne fonctionne pas ici (voir electron/preload.cjs) :
+// c'est le renderer qui interroge /api/notifications/pending et demande
+// l'affichage par ce canal. Le processus principal ne fait donc que traduire
+// une charge utile en notification native — il ne décide de rien.
+function registerNotificationIpc() {
+  ipcMain.handle('desktop:notify', (_event, payload) => {
+    if (!Notification.isSupported()) return false;
+    const title = String(payload?.title || 'ArchiOffice').slice(0, 120);
+    const body = String(payload?.body || '').slice(0, 400);
+    // La route est rejouée telle quelle dans la fenêtre : on n'accepte qu'un
+    // chemin relatif, jamais une URL absolue qui ferait sortir l'application
+    // de son propre serveur local.
+    const rawUrl = typeof payload?.url === 'string' ? payload.url : '/notifications';
+    const url = rawUrl.startsWith('/') && !rawUrl.startsWith('//') ? rawUrl : '/notifications';
+
+    const notification = new Notification({ title, body });
+    notification.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('desktop:notification-click', url);
+    });
+    notification.show();
+    return true;
+  });
+
+  ipcMain.handle('desktop:badge', (_event, count) => {
+    const value = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
+    // macOS et Linux (Unity) seulement : sur Windows la pastille passe par une
+    // icône de superposition qu'il faudrait dessiner, hors sujet ici. L'appel
+    // est simplement sans effet ailleurs.
+    try {
+      app.setBadgeCount(value);
+    } catch {
+      /* environnement de bureau sans pastille */
+    }
+    return true;
+  });
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -207,6 +255,7 @@ let serverStartPromise = null;
 app.whenReady().then(() => {
   initLogging();
   log('ArchiOffice démarre — journal :', logFilePath);
+  registerNotificationIpc();
   serverStartPromise = startServer().catch((err) => {
     log('Échec du démarrage :', err);
     throw err;

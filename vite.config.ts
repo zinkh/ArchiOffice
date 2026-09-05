@@ -67,6 +67,17 @@ export default defineConfig(({mode}) => {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           // Cache app shell and static assets only
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // Web Push handlers, prepended to the generated sw.js. generateSW
+          // owns the whole file, so this is the only way to add listeners
+          // without switching to injectManifest — which would mean owning the
+          // precache and update lifecycle by hand, the very thing
+          // src/components/UpdateBanner.tsx relies on Workbox for.
+          importScripts: ['/push-sw.js'],
+          // ...and keep it out of the precache: a script the SW imports at
+          // startup must be fetched fresh on activation, not served from a
+          // revision-stamped precache entry that Workbox would then also try
+          // to version independently of the SW itself.
+          globIgnores: ['**/push-sw.js'],
           // Exclude all API routes from service worker interception entirely.
           // Using NetworkOnly would still intercept the request and emit a
           // "no-response" SW error when the network fails; no registered route
