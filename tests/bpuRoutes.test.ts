@@ -12,6 +12,16 @@ beforeAll(async () => {
   app = await getTestApp();
 });
 
+/**
+ * Récupère une ligne semée, en échouant avec un message utile si elle a
+ * disparu — plutôt qu'un « ! » qui masquerait la cause derrière un TypeError.
+ */
+function ligne(table: string, predicate: (r: any) => boolean): any {
+  const found = fakeSupabaseAdmin.getTable(table).find(predicate);
+  if (!found) throw new Error(`Aucune ligne de ${table} ne correspond`);
+  return found;
+}
+
 const documentType = (titre = 'BPU') => ({
   id: 'new', projectId: 'p1', titre, version: '1.0',
   dateCreation: '2026-01-01', statut: 'draft',
@@ -63,7 +73,7 @@ describe('BPU — document', () => {
     await request(app).put('/api/projects/p9/bpu')
       .set(authHeader(token)).send({ document: documentType('v2') });
 
-    const row = fakeSupabaseAdmin.getTable('bpu_data').find(r => r.id === 'row1');
+    const row = ligne('bpu_data', r => r.id === 'row1');
     expect(row.document.titre).toBe('v2');
     // C'est la raison d'être des deux colonnes : la sauvegarde du document
     // ne doit pas emporter une offre importée entre-temps.
@@ -86,7 +96,7 @@ describe('BPU — document', () => {
     await request(app).put('/api/projects/p-b/bpu')
       .set(authHeader(token)).send({ document: documentType('Piraté') });
 
-    const rowB = fakeSupabaseAdmin.getTable('bpu_data').find(r => r.id === 'row-b');
+    const rowB = ligne('bpu_data', r => r.id === 'row-b');
     expect(rowB.document.titre).toBe('SECRET-BPU-B');
   });
 });
@@ -136,7 +146,7 @@ describe('BPU — offres reçues', () => {
   it('ne laisse pas un cabinet toucher aux offres d’un autre', async () => {
     const tenantB = makeTenant();
     seedBpu(tenantB, 'p-secret');
-    fakeSupabaseAdmin.getTable('bpu_data').find(r => r.project_id === 'p-secret').offres = [
+    ligne('bpu_data', r => r.project_id === 'p-secret').offres = [
       { id: 'o-secret', entrepriseNom: 'Concurrent', prix: { a1: 999 } },
     ];
 
@@ -145,7 +155,7 @@ describe('BPU — offres reçues', () => {
     expect(res.body).toEqual([]);
 
     await request(app).delete('/api/projects/p-secret/bpu/offres/o-secret').set(authHeader(token));
-    expect(fakeSupabaseAdmin.getTable('bpu_data').find(r => r.project_id === 'p-secret').offres).toHaveLength(1);
+    expect(ligne('bpu_data', r => r.project_id === 'p-secret').offres).toHaveLength(1);
   });
 });
 
@@ -176,7 +186,7 @@ describe('Bibliothèque de prix', () => {
 
     const rows = fakeSupabaseAdmin.getTable('articles_type').filter(r => r.tenant_id === tenantId);
     expect(rows).toHaveLength(3);
-    const beton = rows.find(r => r.designation === 'Béton de propreté');
+    const beton = ligne('articles_type', r => r.tenant_id === tenantId && r.designation === 'Béton de propreté');
     expect(beton.prix_unitaire).toBe(118);
     expect(beton.usage_count).toBe(2);
   });
