@@ -11,94 +11,15 @@ import { DPGF, Lot, Chapitre, Ligne } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
 import { formatCurrency } from '../../lib/utils';
 
-// ── uid helper ───────────────────────────────────────────────────────────────
-let _uid = 0;
-const uid = () => `id_${Date.now()}_${_uid++}`;
-
-// ── Formula evaluator (supports basic arithmetic) ────────────────────────────
-function evalFormula(raw: string): number {
-  if (!raw.startsWith('=')) return parseFloat(raw) || 0;
-  try {
-    const expr = raw.slice(1).replace(/[^0-9+\-*/.() ]/g, '');
-    // eslint-disable-next-line no-new-func
-    const result = Function('"use strict"; return (' + expr + ')')();
-    return typeof result === 'number' && isFinite(result) ? result : 0;
-  } catch {
-    return 0;
-  }
-}
-
-// Maximum depth: 0=lot, 1=chapitre, 2=article, 3=sous-article, 4=sous-sous-article
-const MAX_ARTICLE_DEPTH = 4;
-
-// ── Recursive helpers ─────────────────────────────────────────────────────────
-function mutateLigneAtPath(lignes: Ligne[], path: number[], fn: (l: Ligne) => Ligne): Ligne[] {
-  const [idx, ...rest] = path;
-  const newLignes = [...lignes];
-  if (rest.length === 0) {
-    newLignes[idx] = fn({ ...newLignes[idx] });
-  } else {
-    const parent = { ...newLignes[idx] };
-    parent.children = mutateLigneAtPath(parent.children || [], rest, fn);
-    newLignes[idx] = parent;
-  }
-  return newLignes;
-}
-
-function deleteLigneAtPath(lignes: Ligne[], path: number[]): Ligne[] {
-  const [idx, ...rest] = path;
-  if (rest.length === 0) {
-    return lignes.filter((_, i) => i !== idx);
-  }
-  const newLignes = [...lignes];
-  const parent = { ...newLignes[idx] };
-  parent.children = deleteLigneAtPath(parent.children || [], rest);
-  newLignes[idx] = parent;
-  return newLignes;
-}
-
-function addChildToLigneAtPath(lignes: Ligne[], path: number[], newChild: Ligne): Ligne[] {
-  const [idx, ...rest] = path;
-  const newLignes = [...lignes];
-  if (rest.length === 0) {
-    const parent = { ...newLignes[idx] };
-    parent.children = [...(parent.children || []), newChild];
-    newLignes[idx] = parent;
-  } else {
-    const parent = { ...newLignes[idx] };
-    parent.children = addChildToLigneAtPath(parent.children || [], rest, newChild);
-    newLignes[idx] = parent;
-  }
-  return newLignes;
-}
-
-function sumLigne(ligne: Ligne): number {
-  if (ligne.children && ligne.children.length > 0) {
-    return ligne.children.reduce((s, c) => s + sumLigne(c), 0);
-  }
-  return ligne.prixTotal;
-}
-
-function collectLigneIdsWithChildren(lignes: Ligne[], set: Set<string>) {
-  lignes.forEach(l => {
-    if (l.children && l.children.length > 0) {
-      set.add(l.id);
-      collectLigneIdsWithChildren(l.children, set);
-    }
-  });
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface FlatRow {
-  kind: 'lot' | 'chapitre' | 'ligne';
-  lotIdx: number;
-  chapIdx?: number;
-  lignePath?: number[];
-  lot: Lot;
-  chapitre?: Chapitre;
-  ligne?: Ligne;
-  depth: number;
-}
+// Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
+// désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
+import {
+  uid, evalFormula, MAX_ARTICLE_DEPTH,
+  mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
+  collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
+  buildFlatRows, rowKey as rowKeyOf, parseRowKey,
+  type FlatRow,
+} from './treeOps';
 
 interface EditingCell {
   rowKey: string;
@@ -145,34 +66,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const tableRef = useRef<HTMLDivElement>(null);
 
   // ── Derived flat rows ────────────────────────────────────────────────────────
-  const flatRows: FlatRow[] = [];
-  dpgf.lots.forEach((lot, li) => {
-    flatRows.push({ kind: 'lot', depth: 0, lotIdx: li, lot });
-    if (expandedLots.has(lot.id)) {
-      lot.chapitres.forEach((chap, ci) => {
-        if (chap.cctpOnly) return;
-        flatRows.push({ kind: 'chapitre', depth: 1, lotIdx: li, chapIdx: ci, lot, chapitre: chap });
-        if (expandedChaps.has(chap.id)) {
-          const pushLignes = (lignes: Ligne[], pathPrefix: number[], depth: number) => {
-            lignes.forEach((ligne, lgi) => {
-              if (ligne.cctpOnly) return;
-              const lignePath = [...pathPrefix, lgi];
-              flatRows.push({ kind: 'ligne', depth, lotIdx: li, chapIdx: ci, lignePath, lot, chapitre: chap, ligne });
-              if (ligne.children && ligne.children.length > 0 && expandedLignes.has(ligne.id) && depth < MAX_ARTICLE_DEPTH) {
-                pushLignes(ligne.children, lignePath, depth + 1);
-              }
-            });
-          };
-          pushLignes(chap.lignes, [], 2);
-        }
-      });
-    }
-  });
+  const flatRows: FlatRow<Lot, Chapitre, Ligne>[] =
+    buildFlatRows(dpgf.lots, { expandedLots, expandedChaps, expandedLignes });
 
-  const rowKey = (r: FlatRow) =>
-    r.kind === 'lot' ? `lot-${r.lotIdx}`
-    : r.kind === 'chapitre' ? `chap-${r.lotIdx}-${r.chapIdx}`
-    : `ligne-${r.lotIdx}-${r.chapIdx}-${r.lignePath!.join('-')}`;
+  const rowKey = rowKeyOf;
 
   // ── Mutate helpers ───────────────────────────────────────────────────────────
   const mutateLots = useCallback((fn: (lots: Lot[]) => Lot[]) => {
@@ -181,12 +78,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     onChange({ ...dpgf, lots: newLots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
   }, [dpgf, onChange]);
 
-  const recomputeLot = (lot: Lot): Lot => {
-    const sousTotal = lot.chapitres.reduce(
-      (s, c) => s + c.lignes.reduce((ls, l) => ls + sumLigne(l), 0), 0
-    );
-    return { ...lot, sousTotal };
-  };
+  const recomputeLot = recomputeLotOp<Lot>;
 
   // ── Tree toggle ───────────────────────────────────────────────────────────────
   const toggleLot = (id: string) => setExpandedLots(prev => {
@@ -338,11 +230,11 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const { rowKey: rKey, field } = editingCell;
     const value = overrideValue !== undefined ? overrideValue : editingCell.value;
 
-    if (rKey.startsWith('ligne-')) {
-      const parts = rKey.split('-');
-      const li = parseInt(parts[1]);
-      const ci = parseInt(parts[2]);
-      const lignePath = parts.slice(3).map(Number);
+    const parsed = parseRowKey(rKey);
+    if (!parsed) { setEditingCell(null); return; }
+
+    if (parsed.kind === 'ligne') {
+      const { lotIdx: li, chapIdx: ci, lignePath } = parsed;
       mutateLots(lots => {
         const newLots = [...lots];
         const lot = { ...newLots[li] };
@@ -368,8 +260,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         newLots[li] = recomputeLot(lot);
         return newLots;
       });
-    } else if (rKey.startsWith('chap-')) {
-      const [, li, ci] = rKey.split('-').map(Number);
+    } else if (parsed.kind === 'chapitre') {
+      const { lotIdx: li, chapIdx: ci } = parsed;
       mutateLots(lots => {
         const newLots = [...lots];
         const lot = { ...newLots[li] };
@@ -378,8 +270,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         newLots[li] = lot;
         return newLots;
       });
-    } else if (rKey.startsWith('lot-')) {
-      const [, li] = rKey.split('-').map(Number);
+    } else if (parsed.kind === 'lot') {
+      const { lotIdx: li } = parsed;
       mutateLots(lots => {
         const newLots = [...lots];
         newLots[li] = { ...newLots[li], [field === 'titre' ? 'titre' : field]: value };

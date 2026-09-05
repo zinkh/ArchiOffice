@@ -9,7 +9,7 @@ import { useSettings } from '../hooks/useSettings';
 import type { DocumentTemplate, DocumentTemplateVariable, Project } from '../types';
 import { fillTemplate, missingRequiredVariables, exportTemplatePdf, exportTemplateDocx, downloadPdfBlob, downloadDocxBlob } from '../lib/templateExport';
 
-const CATEGORIES: DocumentTemplate['category'][] = ['Contrat MOE', 'CCTP', 'DPGF', 'Candidature', 'Courrier', 'OS', 'Autre'];
+const CATEGORIES: DocumentTemplate['category'][] = ['Contrat MOE', 'CCTP', 'DPGF', 'BPU', 'DQE', 'Candidature', 'Courrier', 'OS', 'Autre'];
 
 const emptyForm = (): Partial<DocumentTemplate> => ({
   name: '', category: 'Autre', description: '', content: '', variables: [],

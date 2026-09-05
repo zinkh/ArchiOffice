@@ -21,18 +21,25 @@ function flattenDPGF(lots: Lot[]): Array<{
     rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot' });
     for (const chap of lot.chapitres) {
       rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre' });
-      for (const ligne of chap.lignes) {
-        rows.push({
-          depth: 2,
-          numero: ligne.numero,
-          designation: ligne.designation,
-          unite: ligne.unite,
-          quantite: ligne.quantite > 0 ? fmt(ligne.quantite) : '',
-          prixUnitaire: ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
-          prixTotal: ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
-          type: ligne.type,
-        });
-      }
+      // Descend dans les sous-articles : la version précédente s'arrêtait au
+      // premier niveau et faisait disparaître silencieusement tout ce qui se
+      // trouvait en dessous de chaque export PDF ou Excel.
+      const walk = (lignes: Ligne[], depth: number) => {
+        for (const ligne of lignes) {
+          rows.push({
+            depth,
+            numero: ligne.numero,
+            designation: ligne.designation,
+            unite: ligne.unite,
+            quantite: ligne.quantite > 0 ? fmt(ligne.quantite) : '',
+            prixUnitaire: ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
+            prixTotal: ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
+            type: ligne.type,
+          });
+          if (ligne.children?.length) walk(ligne.children, depth + 1);
+        }
+      };
+      walk(chap.lignes, 2);
     }
   }
   return rows;

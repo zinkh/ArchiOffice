@@ -129,6 +129,86 @@ export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unk
   };
 }
 
+const TYPE_MARCHE_LABELS: Record<string, string> = {
+  bons_de_commande: 'marché à bons de commande',
+  prix_unitaires: 'marché à prix unitaires',
+  mixte: 'marché mixte',
+};
+
+/**
+ * Résume un BPU. La note d'en-tête n'est pas décorative : sans elle, un modèle
+ * présente volontiers le total du DQE comme « le montant du marché », alors
+ * qu'un bordereau de prix unitaires n'a pas de montant — les travaux se règlent
+ * sur quantités réellement exécutées. C'est l'erreur métier que la
+ * fonctionnalité existe pour éviter.
+ */
+function summarizeBpu(bpu: any, wantedLot?: string): Record<string, unknown> {
+  const marche = bpu?.marche ?? {};
+  const lots: any[] = Array.isArray(bpu?.lots) ? bpu.lots : [];
+
+  let nbArticles = 0;
+  const compter = (lignes: any[]) => {
+    for (const l of lignes ?? []) {
+      if (Array.isArray(l.children) && l.children.length) compter(l.children);
+      else nbArticles++;
+    }
+  };
+  for (const lot of lots) for (const chap of lot.chapitres ?? []) compter(chap.lignes);
+
+  const entete = {
+    titre: bpu?.titre, version: bpu?.version, statut: bpu?.statut,
+    type_marche: TYPE_MARCHE_LABELS[marche.typeMarche] ?? marche.typeMarche,
+    objet: marche.objet || undefined,
+    montant_mini_ht: marche.montantMiniHT,
+    montant_maxi_ht: marche.montantMaxiHT,
+    duree_mois: marche.dureeInitialeMois,
+    nb_reconductions: marche.nbReconductions,
+    nb_lots: lots.length,
+    nb_articles: nbArticles,
+    nb_tranches: (bpu?.tranches ?? []).length,
+    montant_estimatif_dqe_ht: bpu?.totalHT,
+    note:
+      "Un BPU est un catalogue de prix unitaires : le montant indiqué est une ESTIMATION (le DQE), " +
+      "pas le montant du marché. Les travaux sont réglés sur quantités réellement exécutées.",
+  };
+
+  if (!wantedLot) {
+    return {
+      ...entete,
+      tranches: (bpu?.tranches ?? []).map((t: any) => ({ code: t.code, libelle: t.libelle, type: t.type })),
+      lots: lots.map(l => ({ numero: l.numero, titre: l.titre, montant_estimatif_ht: l.sousTotal })),
+      note_navigation: "Rappelle cet outil avec le paramètre lot pour obtenir les articles d'un lot.",
+    };
+  }
+
+  const lot = lots.find(l => matchesLot(l, wantedLot));
+  if (!lot) return { ...entete, erreur: `Aucun lot ne correspond à « ${wantedLot} ».` };
+
+  const articles: Record<string, unknown>[] = [];
+  const walk = (lignes: any[]) => {
+    for (const l of lignes ?? []) {
+      if (articles.length >= MAX_LIGNES_PER_LOT) return;
+      if (Array.isArray(l.children) && l.children.length) { walk(l.children); continue; }
+      articles.push({
+        numero: l.numero,
+        designation: String(l.designation ?? '').slice(0, MAX_ARTICLE_CHARS),
+        unite: l.unite,
+        prix_unitaire_ht: l.prixUnitaire,
+        quantite_estimative: l.quantite || undefined,
+        nature: l.nature && l.nature !== 'base' ? l.nature : undefined,
+      });
+    }
+  };
+  for (const chap of lot.chapitres ?? []) walk(chap.lignes);
+
+  return {
+    ...entete,
+    lot: { numero: lot.numero, titre: lot.titre, montant_estimatif_ht: lot.sousTotal },
+    articles,
+    tronque: articles.length >= MAX_LIGNES_PER_LOT || undefined,
+  };
+}
+
 export function buildProjectDocTools(): FunctionDeclarationLike[] {
   const params = {
     type: 'object',
@@ -152,6 +232,14 @@ export function buildProjectDocTools(): FunctionDeclarationLike[] {
         "Lit le DPGF (décomposition du prix global et forfaitaire) d'un projet. Sans paramètre lot, renvoie les totaux et les sous-totaux par lot ; avec un lot, renvoie ses lignes chiffrées.",
       parametersJsonSchema: params,
     },
+    {
+      name: 'read_bpu',
+      description:
+        "Lit le BPU (bordereau de prix unitaires) et le DQE d'un projet, pour les marchés à prix unitaires ou à bons de commande. " +
+        "Sans paramètre lot, renvoie le cadre du marché et la liste des lots ; avec un lot, renvoie ses articles et leurs prix unitaires. " +
+        "Le montant indiqué est une estimation (DQE), jamais le montant du marché.",
+      parametersJsonSchema: params,
+    },
   ];
 }
 
@@ -165,10 +253,13 @@ export async function executeProjectDocTool(
   if (!projectId) return { response: { error: 'project_id est requis.' } };
   const lot = args.lot ? String(args.lot) : undefined;
 
-  const kind = name === 'read_cctp' ? 'cctp' : 'dpgf';
+  const kind = KIND_BY_TOOL[name];
+  if (!kind) return { response: { error: `Outil inconnu : ${name}.` } };
   const { status, data } = await getJson(baseUrl, `/api/projects/${encodeURIComponent(projectId)}/${kind}`, authHeader);
 
-  if (status === 404) {
+  // Le CCTP et le DPGF répondent 404 quand ils n'existent pas ; la route du BPU
+  // répond 200 avec null. Les deux veulent la même réponse à l'utilisateur.
+  if (status === 404 || (status === 200 && !data)) {
     return {
       response: {
         error: `Aucun ${kind.toUpperCase()} n'existe encore pour ce projet — dis-le à l'utilisateur au lieu de supposer son contenu.`,
@@ -179,11 +270,19 @@ export async function executeProjectDocTool(
     return { response: { error: data?.error || `Lecture du ${kind.toUpperCase()} impossible.` } };
   }
 
-  const summary = kind === 'cctp' ? summarizeCctp(data, lot) : summarizeDpgf(data, lot);
+  // La route du BPU rend la ligne entière (document + offres), pas le document.
+  const payload = kind === 'bpu' ? (data.document ?? data) : data;
+  const summary = kind === 'cctp' ? summarizeCctp(payload, lot)
+    : kind === 'bpu' ? summarizeBpu(payload, lot)
+    : summarizeDpgf(payload, lot);
   return {
     response: summary,
     summary: `${kind.toUpperCase()} consulté${lot ? ` (lot ${lot})` : ''}`,
   };
 }
 
-export const PROJECT_DOC_TOOL_NAMES = ['read_cctp', 'read_dpgf'];
+const KIND_BY_TOOL: Record<string, 'cctp' | 'dpgf' | 'bpu'> = {
+  read_cctp: 'cctp', read_dpgf: 'dpgf', read_bpu: 'bpu',
+};
+
+export const PROJECT_DOC_TOOL_NAMES = Object.keys(KIND_BY_TOOL);

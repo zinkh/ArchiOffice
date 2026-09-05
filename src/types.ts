@@ -75,7 +75,7 @@ export interface DocumentTemplateVariable {
 export interface DocumentTemplate {
   id: string;
   name: string;
-  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'Candidature' | 'Courrier' | 'OS' | 'Autre';
+  category: 'Contrat MOE' | 'CCTP' | 'DPGF' | 'BPU' | 'DQE' | 'Candidature' | 'Courrier' | 'OS' | 'Autre';
   description?: string;
   content: string;
   variables: DocumentTemplateVariable[];

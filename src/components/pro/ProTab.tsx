@@ -1,18 +1,28 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
+import { BPUWorkspace } from './BPUWorkspace';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne } from '../../types/dpgf';
+import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
+import { EMPTY_BPU } from '../../types/bpu';
+import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
+import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
+import { BPUImportDialog } from './BPUImportDialog';
+import { bpuVersComparatif } from '../../lib/bpuToAct';
+import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
-  IconFileDescription, IconTable, IconCalculator,
+  IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
+import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
+import { apiFetch } from '../../lib/api';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION';
+type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
 
 interface ProTabProps {
   projectId: string;
@@ -32,62 +42,200 @@ const EMPTY_DPGF = (projectId: string): DPGF => ({
   totalTTC: 0,
 });
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── Accès au document DPGF ────────────────────────────────────────────────────
+// Références stables au niveau du module : passées telles quelles au hook, qui
+// les a dans les dépendances de ses effets.
 
-const lsKey = (id: string) => `archioffice_dpgf_${id}`;
+const dpgfLsKey = (projectId: string) => `archioffice_dpgf_${projectId}`;
 
-function lsSave(projectId: string, data: DPGF): void {
-  try { localStorage.setItem(lsKey(projectId), JSON.stringify(data)); } catch { /* quota */ }
-}
+const loadDPGF = (projectId: string) => loadProDoc<DPGF>(`/api/projects/${projectId}/dpgf`);
 
-function lsLoad(projectId: string): DPGF | null {
-  try {
-    const raw = localStorage.getItem(lsKey(projectId));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
+const saveDPGF = async (projectId: string, data: DPGF): Promise<void> => {
+  await apiFetch(`/api/projects/${projectId}/dpgf`, { method: 'POST', body: JSON.stringify(data) });
+};
 
-async function fetchDPGF(projectId: string): Promise<DPGF | null> {
-  try {
-    const res = await fetch(`/api/projects/${projectId}/dpgf`);
-    if (res.ok) {
-      const data: DPGF = await res.json();
-      lsSave(projectId, data); // keep localStorage in sync
-      return data;
-    }
-  } catch { /* ignore */ }
-  // API unavailable — fall back to localStorage
-  return lsLoad(projectId);
-}
+// ── Accès au document BPU ─────────────────────────────────────────────────────
+// La route rend la ligne entière (document + offres reçues), pas seulement le
+// document : les offres vivent dans une colonne séparée pour que
+// l'autosauvegarde du document ne les efface pas après un import.
 
-async function saveDPGFApi(projectId: string, data: DPGF): Promise<void> {
-  const res = await fetch(`/api/projects/${projectId}/dpgf`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('save failed');
-}
+const bpuLsKey = (projectId: string) => `archioffice_bpu_${projectId}`;
+
+const loadBpuRow = (projectId: string) => loadProDoc<BPURow>(`/api/projects/${projectId}/bpu`);
+
+const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
+  await apiFetch(`/api/projects/${projectId}/bpu`, { method: 'PUT', body: JSON.stringify({ document }) });
+};
 
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
-  // Shared DPGF state — used by CCTP, DPGF, and ESTIMATION tabs
-  const [dpgf, setDpgf] = useState<DPGF | null>(null);
-  const [dpgfLoading, setDpgfLoading] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
+  const dpgfDoc = useAutosavedDoc<DPGF>({
+    key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
+  });
+  const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
 
-  // Tracks the JSON of the last persisted state to skip no-op saves
-  const lastSavedJson = useRef<string | null>(null);
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Split view state (DPGF / ESTIMATION)
+  // Vue divisée (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
   const [rightProjectId, setRightProjectId] = useState<string>(projectId);
-  const [rightDpgf, setRightDpgf] = useState<DPGF | null>(null);
-  const [rightLoading, setRightLoading] = useState(false);
+
+  // Le panneau droit passe par le même hook : il gagne au passage
+  // l'autosauvegarde qu'il n'avait pas, seul un bouton manuel le sauvegardait.
+  const rightDoc = useAutosavedDoc<DPGF>({
+    key: rightProjectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
+    enabled: splitView,
+  });
+  const { doc: rightDpgf, setDoc: setRightDpgf, loading: rightLoading, saveNow: handleRightSave } = rightDoc;
+
+  // ── Document BPU ────────────────────────────────────────────────────────────
+  // Chargé seulement une fois l'un des onglets BPU ou DQE ouvert, et gardé
+  // actif ensuite : sans ce verrou, tout projet forfaitaire paierait un appel
+  // réseau inutile à chaque ouverture de l'espace PRO.
+  const [bpuTouched, setBpuTouched] = useState(false);
+  const [offres, setOffres] = useState<OffreBPU[]>([]);
+
+  const bpuDoc = useAutosavedDoc<BPU>({
+    key: projectId,
+    load: useCallback(async (id: string) => {
+      const row = await loadBpuRow(id);
+      // Les offres voyagent avec la ligne mais ne font pas partie du document
+      // que l'éditeur réécrit : on les met de côté ici.
+      setOffres(row?.offres ?? []);
+      return row?.document && Object.keys(row.document).length ? row.document : null;
+    }, []),
+    save: saveBpu, empty: EMPTY_BPU, lsKey: bpuLsKey,
+    enabled: bpuTouched,
+  });
+  const { doc: bpu, setDoc: setBpu, loading: bpuLoading, saveStatus: bpuSaveStatus, saveNow: handleBpuSave } = bpuDoc;
+
+  const isBpuTab = activeSubTab === 'BPU' || activeSubTab === 'DQE';
+  useEffect(() => { if (isBpuTab) setBpuTouched(true); }, [isBpuTab]);
+
+  // Initialise le bordereau depuis le DPGF, en préservant tout ce qui a déjà
+  // été saisi côté BPU — l'action doit pouvoir être relancée sans dégât.
+  const initBpuFromDpgf = useCallback(() => {
+    if (!dpgf) return;
+    setBpu(assignerReferences(dpgfToBpu(dpgf, bpu)));
+  }, [dpgf, bpu, setBpu]);
+
+  // Reverser un DQE dans le DPGF écrase des prix : on montre les écarts avant.
+  const pushBpuToDpgf = useCallback(() => {
+    if (!bpu || !dpgf) return;
+    const { dpgf: next, diff } = bpuToDpgf(bpu, dpgf);
+    const lignes = [
+      `${diff.modifies.length} prix unitaire(s) seront modifiés dans le DPGF.`,
+      diff.nonChiffres.length ? `${diff.nonChiffres.length} article(s) du DPGF ne sont pas chiffrés au bordereau et resteront inchangés.` : '',
+      diff.absentsDuDpgf.length ? `${diff.absentsDuDpgf.length} article(s) n'existent que dans le bordereau et ne seront pas ajoutés.` : '',
+      '',
+      ...diff.modifies.slice(0, 12).map(m => `  ${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
+      diff.modifies.length > 12 ? `  … et ${diff.modifies.length - 12} autre(s).` : '',
+      '',
+      'Confirmer le reversement ?',
+    ].filter(Boolean).join('\n');
+    if (window.confirm(lignes)) setDpgf(next);
+  }, [bpu, dpgf, setDpgf]);
+
+  // Les exports portent la charte du cabinet : en-tête avec logo et
+  // coordonnées, pied de page adresse et SIRET, pagination « P1|2 ».
+  const { settings } = useSettings();
+
+  /**
+   * Un bordereau part chez les entreprises avec sa colonne « Réf. » : ce sont
+   * ces références qui permettront de rapprocher le fichier renvoyé. On les
+   * attribue donc avant d'exporter, et on les persiste.
+   */
+  const exporterBpu = useCallback(async (kind: 'pdf' | 'xlsx', colSet: string, vierge: boolean) => {
+    if (!bpu) return;
+    const avecRefs = assignerReferences(bpu);
+    if (avecRefs !== bpu) setBpu(avecRefs);
+    const mode = colSet === 'bpu' ? 'bpu' : 'dqe';
+    if (kind === 'xlsx') {
+      await exportBPUtoExcel(avecRefs, { mode, vierge, projectName });
+    } else {
+      await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
+    }
+  }, [bpu, setBpu, projectName, settings]);
+
+  // Lots du projet, pour rattacher les lots du bordereau : c'est ce
+  // rattachement que le versement vers le comparatif ACT vient chercher.
+  const [projectLots, setProjectLots] = useState<{ id: string; lot_number: string; lot_title: string }[]>([]);
+  useEffect(() => {
+    if (!bpuTouched) return;
+    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
+      .then(rows => setProjectLots((rows ?? []).map(r => ({
+        id: r.id, lot_number: r.lot_number, lot_title: r.lot_title,
+      }))))
+      .catch(() => { /* le rattachement reste possible plus tard */ });
+  }, [projectId, bpuTouched]);
+
+  /** Envoie les articles sélectionnés vers la bibliothèque de prix du cabinet. */
+  const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
+    if (!lignes.length) return;
+    try {
+      const res = await apiFetch<{ created: number; updated: number }>('/api/price-library/bulk', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: lignes.map(l => ({
+            code: l.numero, designation: l.designation, unite: l.unite,
+            prix_unitaire: l.prixUnitaire, source: `projet:${projectId}`,
+          })),
+        }),
+      });
+      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour.`);
+    } catch (e: any) {
+      window.alert(`L'envoi vers la bibliothèque a échoué : ${e?.message ?? 'erreur inconnue'}`);
+    }
+  }, [projectId]);
+
+  // ── Offres reçues des entreprises ───────────────────────────────────────────
+  const [importOuvert, setImportOuvert] = useState(false);
+
+  /**
+   * Les offres vivent dans une colonne séparée du document et passent par leur
+   * propre endpoint : logées dans le document, elles seraient effacées par la
+   * première autosauvegarde suivant l'import.
+   */
+  const enregistrerOffre = useCallback(async (offre: any) => {
+    const saved = await apiFetch<OffreBPU>(`/api/projects/${projectId}/bpu/offres`, {
+      method: 'POST', body: JSON.stringify({ offre }),
+    });
+    setOffres(prev => [...prev, saved]);
+  }, [projectId]);
+
+  /**
+   * Verse le bordereau et les offres dans le comparatif détaillé du module ACT,
+   * qui sait déjà les comparer, les noter et en tirer un RAO. À la demande
+   * seulement : ce comparatif est éditable, une synchronisation automatique se
+   * battrait contre l'architecte.
+   */
+  const verserAuComparatifAct = useCallback(async () => {
+    if (!bpu) return;
+    const { comparatif, lotsNonRattaches } = bpuVersComparatif(bpu, offres);
+    if (lotsNonRattaches.length) {
+      const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
+      if (!window.confirm(
+        `Ces lots du bordereau ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
+      )) return;
+    }
+    if (!comparatif.length) {
+      window.alert("Aucun lot du bordereau n'est rattaché à un lot du projet : rien à verser.");
+      return;
+    }
+    try {
+      const act = await apiFetch<any>(`/api/projects/${projectId}/act`);
+      const consultation = { ...(act?.consultation ?? {}), comparatif };
+      await apiFetch(`/api/projects/${projectId}/act`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...(act ?? {}), consultation }),
+      });
+      window.alert(`Comparatif mis à jour : ${comparatif.length} lot(s) versé(s). Onglet ACT du projet.`);
+    } catch (e: any) {
+      window.alert(`Le versement a échoué : ${e?.message ?? 'erreur inconnue'}`);
+    }
+  }, [bpu, offres, projectId]);
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -108,101 +256,38 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     return () => window.removeEventListener('afterprint', cleanup);
   }, []);
 
-  // ── Load DPGF ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    setDpgfLoading(true);
-    lastSavedJson.current = null;
-    fetchDPGF(projectId).then(data => {
-      const loaded = data ?? EMPTY_DPGF(projectId);
-      // Record the loaded state so auto-save doesn't fire immediately
-      lastSavedJson.current = JSON.stringify(loaded);
-      setDpgf(loaded);
-      setDpgfLoading(false);
-    });
-  }, [projectId]);
-
-  // Load right-panel DPGF when split view or project changes
-  useEffect(() => {
-    if (!splitView) return;
-    setRightLoading(true);
-    fetchDPGF(rightProjectId).then(data => {
-      setRightDpgf(data ?? EMPTY_DPGF(rightProjectId));
-      setRightLoading(false);
-    });
-  }, [splitView, rightProjectId]);
-
-  // ── Auto-save on change (debounced 2 s) + immediate localStorage backup ─────
-  useEffect(() => {
-    if (!dpgf) return;
-    const json = JSON.stringify(dpgf);
-    if (json === lastSavedJson.current) return; // nothing changed
-
-    // Write to localStorage immediately so nothing is lost on navigation
-    lsSave(projectId, dpgf);
-
-    // Debounce the API call
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      setSaveStatus('saving');
-      try {
-        await saveDPGFApi(projectId, dpgf);
-        lastSavedJson.current = json;
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      } catch {
-        setSaveStatus('error');
-      }
-    }, 2000);
-
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
-  }, [dpgf, projectId]);
-
-  // ── Manual save (ribbon button) ─────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!dpgf) return;
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    setSaveStatus('saving');
-    try {
-      await saveDPGFApi(projectId, dpgf);
-      lastSavedJson.current = JSON.stringify(dpgf);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-    }
-  }, [dpgf, projectId]);
-
-  const handleRightSave = useCallback(async () => {
-    if (!rightDpgf) return;
-    await saveDPGFApi(rightProjectId, rightDpgf);
-  }, [rightDpgf, rightProjectId]);
-
   // ── Tab labels ───────────────────────────────────────────────────────────────
   const TABS: PillTabItem[] = [
     { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
     { id: 'DPGF', label: 'DPGF', icon: IconTable },
     { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
+    { id: 'BPU', label: 'BPU', icon: IconListNumbers },
+    { id: 'DQE', label: 'DQE', icon: IconSum },
   ];
 
   const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
+
+  // Un seul indicateur, toujours celui du document à l'écran.
+  const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
+  const activeVersion = (isBpuTab ? bpu?.version : dpgf?.version) ?? '1.0';
 
   const PRINT_TITLES: Record<SubTab, string> = {
     CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
     DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
     ESTIMATION: 'Estimation Prévisionnelle',
+    BPU:        'BPU — Bordereau de Prix Unitaires',
+    DQE:        'DQE — Détail Quantitatif Estimatif',
   };
 
   return (
     <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
-      {dpgf && (
+      {(dpgf || bpu) && (
         <PrintPageDecorations
           title={PRINT_TITLES[activeSubTab]}
           subtitle={projectName}
-          reference={`v${dpgf.version}`}
+          reference={`v${activeVersion}`}
           projectUrl={`${window.location.origin}/projects/${projectId}`}
         />
       )}
@@ -214,8 +299,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
       >
         <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} />
 
-        {/* Tree toggle — only for DPGF / ESTIMATION */}
-        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION') && (
+        {/* Volet arbre — DPGF, ESTIMATION, BPU et DQE */}
+        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION' || isBpuTab) && (
           <button
             onClick={toggleTree}
             title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
@@ -232,9 +317,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
         {/* Save status + print + split — always visible on the right */}
         <div className="ml-auto flex items-center gap-2 px-3 no-print">
-          {saveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
-          {saveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
-          {saveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
+          {activeSaveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
+          {activeSaveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
+          {activeSaveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
 
           {/* Print button */}
           <button
@@ -390,7 +475,47 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
             )}
           </>
         )}
+
+        {/* BPU / DQE — un seul document, deux jeux de colonnes */}
+        {isBpuTab && (
+          <div className="flex-1 overflow-hidden">
+            {bpuLoading ? (
+              <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">
+                Chargement du {activeSubTab}…
+              </div>
+            ) : bpu ? (
+              <BPUWorkspace
+                bpu={bpu}
+                onChange={setBpu}
+                onSave={handleBpuSave}
+                mode={activeSubTab === 'BPU' ? 'bpu' : 'dqe'}
+                projectName={projectName}
+                offres={offres}
+                showTree={showTree}
+                onToggleTree={toggleTree}
+                onDragStart={ligne => setDraggedLigne(ligne)}
+                onInitFromDpgf={dpgf && dpgf.lots.length > 0 ? initBpuFromDpgf : undefined}
+                onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
+                onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
+                onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
+                onImportOffre={() => setImportOuvert(true)}
+                onPushToAct={verserAuComparatifAct}
+                onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
+                onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
+                projectLots={projectLots}
+              />
+            ) : null}
+          </div>
+        )}
       </div>
+
+      {importOuvert && bpu && (
+        <BPUImportDialog
+          bpu={bpu}
+          onClose={() => setImportOuvert(false)}
+          onConfirm={enregistrerOffre}
+        />
+      )}
     </div>
   );
 };

@@ -6,6 +6,7 @@ import {
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
+import { evalFormula } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { formatCurrency } from '../../lib/utils';
 
@@ -25,17 +26,10 @@ interface EstimationEditorProps {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+// evalFormula était dupliqué verbatim depuis DPGFWorkspace ; il vit désormais
+// dans treeOps.ts, partagé par les trois ateliers.
 let _uid = 0;
 const uid = () => `est_${Date.now()}_${_uid++}`;
-
-function evalFormula(raw: string): number {
-  if (!raw.startsWith('=')) return parseFloat(raw) || 0;
-  try {
-    const expr = raw.slice(1).replace(/[^0-9+\-*/.() ]/g, '');
-    // eslint-disable-next-line no-new-func
-    return Function('"use strict"; return (' + expr + ')')() as number;
-  } catch { return 0; }
-}
 
 function recomputeDPGF(dpgf: DPGF): DPGF {
   const newLots = dpgf.lots.map(lot => {
