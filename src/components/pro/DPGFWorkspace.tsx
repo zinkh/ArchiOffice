@@ -4,12 +4,14 @@ import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush,
-  IconX,
+  IconX, IconBuildingStore,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
 import { formatCurrency } from '../../lib/utils';
+import { PriceLibraryPanel } from './PriceLibraryPanel';
+import type { ArticleBibliotheque } from '../../types/library';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
@@ -63,6 +65,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [clipboard, setClipboard] = useState<Ligne | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
+  // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
+  const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   // ── Derived flat rows ────────────────────────────────────────────────────────
@@ -158,6 +164,41 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       return newLots;
     });
     setEditingCell({ rowKey: `ligne-${lotIdx}-${chapIdx}-${newLigneIdx}`, field: 'designation', value: 'Nouvel article' });
+  };
+
+  // ── Bibliothèque d'ouvrages ─────────────────────────────────────────────────
+  // Un article de la bibliothèque devient ici une ligne de DPGF : quantité à 0,
+  // que le maître d'œuvre renseigne, et `articleTypeId` conservé — c'est par ce
+  // fil que le prix remontera vers la bibliothèque quand une offre arrivera.
+  const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]) => {
+    if (!selectedChap) return;
+    const { lotIdx, chapIdx } = selectedChap;
+    // Les clés de ligne sont positionnelles : une insertion par programme
+    // pendant une édition validerait dans le mauvais article.
+    setEditingCell(null);
+    mutateLots(lots => {
+      const next = [...lots];
+      const lot = { ...next[lotIdx] };
+      const chap = { ...lot.chapitres[chapIdx] };
+      const base = chap.lignes.length;
+      chap.lignes = [...chap.lignes, ...articles.map((a, i) => ({
+        id: uid(),
+        numero: a.code || `${chap.numero}.${base + i + 1}`,
+        designation: a.designation,
+        unite: a.unite || 'u',
+        quantite: 0,
+        prixUnitaire: Number(a.prix_unitaire) || 0,
+        prixTotal: 0,
+        type: 'ouvrage' as const,
+        children: [],
+        articleTypeId: a.id,
+        // La description technique de l'article amorce le CCTP du même coup.
+        cctpDescription: a.description ?? undefined,
+      }))];
+      lot.chapitres = [...lot.chapitres.slice(0, chapIdx), chap, ...lot.chapitres.slice(chapIdx + 1)];
+      next[lotIdx] = recomputeLot(lot);
+      return next;
+    });
   };
 
   const addSubLigne = (lotIdx: number, chapIdx: number, parentLignePath: number[]) => {
@@ -396,6 +437,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           ],
         },
         {
+          label: 'Bibliothèque',
+          actions: [
+            {
+              id: 'openLib', label: 'Bibliothèque', icon: <IconBuildingStore size={20} />,
+              onClick: () => setShowLibrary(v => !v), active: showLibrary,
+            },
+          ],
+        },
+        {
           label: 'Document',
           actions: [
             { id: 'save', label: 'Enregistrer', icon: <IconDeviceFloppy size={20} />, onClick: onSave },
@@ -590,10 +640,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 }
 
                 if (row.kind === 'chapitre') {
+                  const chapVise = showLibrary
+                    && selectedChap?.lotIdx === row.lotIdx && selectedChap?.chapIdx === row.chapIdx;
                   return (
                     <tr
                       key={rKey}
-                      className={`border-b border-zinc-200 dark:border-zinc-700 ${isDropTarget ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-[#edf1f7] dark:bg-zinc-800/40'}`}
+                      className={`border-b border-zinc-200 dark:border-zinc-700 ${isDropTarget ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-[#edf1f7] dark:bg-zinc-800/40'} ${chapVise ? 'ring-1 ring-blue-500' : ''}`}
+                      onClick={() => setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! })}
                       onDragOver={e => handleDragOver(e, rKey)}
                       onDrop={e => handleDrop(e, row)}
                       onDragLeave={() => setDropTarget(null)}
@@ -651,7 +704,22 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <EditableCell rKey={rKey} field="numero" value={l.numero} className="text-xs" />
                     </td>
                     <td className="px-2 py-0.5">
-                      <EditableCell rKey={rKey} field="designation" value={l.designation} />
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <EditableCell rKey={rKey} field="designation" value={l.designation} />
+                        </div>
+                        {/* Repère de provenance : cet article vient de la
+                            bibliothèque du cabinet, c'est aussi lui qui permettra
+                            au prix d'une offre d'y remonter. */}
+                        {l.articleTypeId && (
+                          <span
+                            title="Article issu de la bibliothèque d’ouvrages"
+                            className="shrink-0 text-[9px] font-bold px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                          >
+                            BIB
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-0.5 text-center">
                       <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" />
@@ -710,6 +778,16 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* ── Bibliothèque d'ouvrages du cabinet ────────────────────────────── */}
+        {showLibrary && (
+          <PriceLibraryPanel
+            onClose={() => setShowLibrary(false)}
+            onInsert={insererDepuisBibliotheque}
+            canInsert={!!selectedChap}
+            hintCible="Sélectionnez d’abord un chapitre dans le DPGF"
+          />
+        )}
       </div>
     </div>
   );

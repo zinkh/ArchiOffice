@@ -7,6 +7,15 @@ export interface Ligne {
   prixUnitaire: number;
   prixTotal: number;
   articleCctpId?: string;
+  /**
+   * Provenance : articles_type.id, quand l'article vient de la bibliothèque
+   * d'ouvrages. Porté ici et non sur le seul BPULigne parce que c'est ce fil
+   * qui referme la boucle des prix : sans lui, un bordereau chiffré renvoyé
+   * par une entreprise ne se rattache à aucun article de la bibliothèque et
+   * son prix ne peut pas y remonter. Il sert aussi à signaler dans le DPGF et
+   * le CCTP les articles issus du fonds du cabinet.
+   */
+  articleTypeId?: string;
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
   cctpOnly?: boolean;

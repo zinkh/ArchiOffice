@@ -175,7 +175,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
     if (!lignes.length) return;
     try {
-      const res = await apiFetch<{ created: number; updated: number }>('/api/price-library/bulk', {
+      const res = await apiFetch<{ created: number; updated: number; prixRemontes?: number }>('/api/price-library/bulk', {
         method: 'POST',
         body: JSON.stringify({
           items: lignes.map(l => ({
@@ -184,7 +184,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           })),
         }),
       });
-      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour.`);
+      const historique = res.prixRemontes
+        ? `, ${res.prixRemontes} prix enregistré(s) dans l’historique`
+        : '';
+      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour${historique}.`);
     } catch (e: any) {
       window.alert(`L'envoi vers la bibliothèque a échoué : ${e?.message ?? 'erreur inconnue'}`);
     }
@@ -199,10 +202,19 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
    * première autosauvegarde suivant l'import.
    */
   const enregistrerOffre = useCallback(async (offre: any) => {
-    const saved = await apiFetch<OffreBPU>(`/api/projects/${projectId}/bpu/offres`, {
-      method: 'POST', body: JSON.stringify({ offre }),
-    });
+    const saved = await apiFetch<OffreBPU & { prixRemontes?: number }>(
+      `/api/projects/${projectId}/bpu/offres`,
+      { method: 'POST', body: JSON.stringify({ offre }) },
+    );
     setOffres(prev => [...prev, saved]);
+    // Le serveur verse au passage les prix de l'offre dans la bibliothèque,
+    // pour les articles qui en viennent. On le dit, sinon l'enrichissement se
+    // fait dans le dos de l'architecte et il ne pensera pas à aller le lire.
+    if (saved.prixRemontes) {
+      window.alert(
+        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+      );
+    }
   }, [projectId]);
 
   /**

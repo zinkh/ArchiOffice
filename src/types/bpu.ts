@@ -39,8 +39,8 @@ export interface BPULigne extends Ligne {
   nature?: NatureArticle;
   /** Surcharge la tranche héritée du chapitre puis du lot. */
   trancheId?: string;
-  /** Provenance : articles_type.id, quand l'article vient de la bibliothèque. */
-  articleTypeId?: string;
+  // `articleTypeId` (provenance bibliothèque) est désormais porté par Ligne :
+  // le DPGF et le CCTP en ont besoin autant que le BPU.
   /** Quantités mini/maxi d'un marché à bons de commande. */
   qteMini?: number;
   qteMaxi?: number;

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown,
-  IconLayoutSidebar, IconDeviceFloppy, IconTag,
+  IconLayoutSidebar, IconDeviceFloppy, IconTag, IconBuildingStore,
 } from '@tabler/icons-react';
 import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
+import { PriceLibraryPanel } from './PriceLibraryPanel';
+import type { ArticleBibliotheque } from '../../types/library';
 
 interface CCTPEditorProps {
   dpgf: DPGF;
@@ -28,6 +30,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
   );
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  // Chapitre visé par une insertion : celui sélectionné, ou celui de
+  // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
+  const chapitreVise = selection && selection.kind !== 'lot'
+    ? { lotIdx: selection.lotIdx, chapIdx: selection.chapIdx }
+    : null;
 
   // ── Mutation helper ───────────────────────────────────────────────────────
   const mutateDPGF = (fn: (d: DPGF) => void) => {
@@ -77,6 +85,35 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     mutateDPGF(d => d.lots[lotIdx].chapitres[chapIdx].lignes.push(newLigne));
     setExpandedChaps(prev => new Set([...prev, chap.id]));
     setSelection({ kind: 'ligne', lotIdx, chapIdx, ligneIdx: chap.lignes.length });
+  };
+
+  // ── Bibliothèque d'ouvrages ───────────────────────────────────────────────
+  // La description technique de l'article de bibliothèque devient le texte du
+  // CCTP : c'est précisément ce qu'on vient y chercher. La désignation, l'unité
+  // et le prix suivent, pour que le même article serve aussi au DPGF sans
+  // ressaisie, et `articleTypeId` garde le lien vers la bibliothèque.
+  const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]) => {
+    if (!chapitreVise) return;
+    const { lotIdx, chapIdx } = chapitreVise;
+    const chap = dpgf.lots[lotIdx].chapitres[chapIdx];
+    const base = chap.lignes.length;
+    const nouvelles: Ligne[] = articles.map((a, i) => ({
+      id: uid(),
+      numero: a.code || `${chap.numero}.${base + i + 1}`,
+      designation: a.designation,
+      unite: a.unite || '',
+      quantite: 0,
+      prixUnitaire: Number(a.prix_unitaire) || 0,
+      prixTotal: 0,
+      type: 'ouvrage',
+      cctpOnly: false,
+      cctpDescription: a.description ?? '',
+      children: [],
+      articleTypeId: a.id,
+    }));
+    mutateDPGF(d => { d.lots[lotIdx].chapitres[chapIdx].lignes.push(...nouvelles); });
+    setExpandedChaps(prev => new Set([...prev, chap.id]));
+    setSelection({ kind: 'ligne', lotIdx, chapIdx, ligneIdx: base });
   };
 
   // ── Delete CCTP-only items ────────────────────────────────────────────────
@@ -171,7 +208,19 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 uppercase tracking-wide">
           CCTP — Cahier des Clauses Techniques Particulières
         </span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setShowLibrary(v => !v)}
+            title="Bibliothèque d’ouvrages"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
+              showLibrary
+                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
+                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
+            }`}
+          >
+            <IconBuildingStore size={14} />
+            Bibliothèque
+          </button>
           <button
             onClick={onSave}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors"
@@ -263,6 +312,16 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                               >
                                 <span className="font-medium text-zinc-400 text-[10px] mr-1 shrink-0">{ligne.numero}</span>
                                 <span className="truncate text-[11px] flex-1">{ligne.designation}</span>
+                                {/* Repère de provenance : article issu de la
+                                    bibliothèque d'ouvrages du cabinet. */}
+                                {ligne.articleTypeId && (
+                                  <span
+                                    title="Article issu de la bibliothèque d’ouvrages"
+                                    className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded font-bold"
+                                  >
+                                    BIB
+                                  </span>
+                                )}
                                 {ligne.cctpOnly && (
                                   <span className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
                                     CCTP
@@ -409,6 +468,16 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
             </div>
           )}
         </div>
+
+        {/* ── Bibliothèque d'ouvrages du cabinet ────────────────────────────── */}
+        {showLibrary && (
+          <PriceLibraryPanel
+            onClose={() => setShowLibrary(false)}
+            onInsert={insererDepuisBibliotheque}
+            canInsert={!!chapitreVise}
+            hintCible="Sélectionnez d’abord un chapitre ou un article dans l’arbre"
+          />
+        )}
       </div>
     </div>
   );
