@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
-import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload } from '@tabler/icons-react';
+import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
@@ -18,6 +18,61 @@ import { ProjectCardSkeletonGrid, ErrorState } from '../components/DataState';
 import { Link } from 'react-router-dom';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+
+type SortType = 'text' | 'number' | 'date';
+
+// Critères de classement proposés en mode vignette. Les colonnes du mode
+// tableau trient sur les mêmes clés, via le même comparateur.
+const PROJECT_SORT_OPTIONS: { key: keyof Project; labelKey: string; type: SortType }[] = [
+  { key: 'name', labelKey: 'projects_col_name', type: 'text' },
+  { key: 'project_code', labelKey: 'projects_col_code', type: 'text' },
+  { key: 'client', labelKey: 'projects_col_client', type: 'text' },
+  { key: 'status', labelKey: 'status', type: 'text' },
+  { key: 'category', labelKey: 'projects_filter_domain', type: 'text' },
+  { key: 'project_manager', labelKey: 'projects_col_manager', type: 'text' },
+  { key: 'budget', labelKey: 'budget', type: 'number' },
+  { key: 'construction_cost', labelKey: 'projects_col_construction_cost', type: 'number' },
+  { key: 'remuneration', labelKey: 'projects_col_remuneration', type: 'number' },
+  { key: 'surface', labelKey: 'projects_col_surface', type: 'number' },
+  { key: 'progression', labelKey: 'projects_col_progression', type: 'number' },
+  { key: 'start_date', labelKey: 'projects_sort_start_date', type: 'date' },
+  { key: 'end_date', labelKey: 'deadline', type: 'date' },
+];
+
+const PROJECT_SORT_TYPES = new Map<keyof Project, SortType>(
+  PROJECT_SORT_OPTIONS.map(option => [option.key, option.type]),
+);
+
+/**
+ * Compare deux projets sur une clé. Le type du champ décide de la
+ * comparaison : `localeCompare` en français pour le texte (sinon « Étude »
+ * passait après « Zone » et les codes 10 avant 9), soustraction numérique
+ * pour les montants et les surfaces (que `<` comparait lettre à lettre
+ * dès qu'ils arrivaient en chaîne), horodatage pour les dates.
+ *
+ * Une valeur absente n'est pas une valeur basse : un projet sans budget
+ * descend en fin de liste dans les deux sens de tri, il ne devient pas le
+ * moins cher.
+ */
+function compareProjects(a: Project, b: Project, key: keyof Project, direction: 'asc' | 'desc') {
+  const aValue = a[key];
+  const bValue = b[key];
+  const aEmpty = aValue === undefined || aValue === null || aValue === '';
+  const bEmpty = bValue === undefined || bValue === null || bValue === '';
+  if (aEmpty || bEmpty) return aEmpty && bEmpty ? 0 : aEmpty ? 1 : -1;
+
+  const type = PROJECT_SORT_TYPES.get(key) ?? 'text';
+  let result: number;
+  if (type === 'number') {
+    result = Number(aValue) - Number(bValue);
+  } else if (type === 'date') {
+    result = new Date(String(aValue)).getTime() - new Date(String(bValue)).getTime();
+  } else {
+    result = String(aValue).localeCompare(String(bValue), 'fr', { numeric: true, sensitivity: 'base' });
+  }
+  if (Number.isNaN(result)) return 0;
+  return direction === 'asc' ? result : -result;
+}
 
 export default function Projects() {
   const { t } = useTranslation();
@@ -170,31 +225,33 @@ export default function Projects() {
     const matchesCategory = filterCategory === 'All' || project.category === filterCategory;
     const matchesProjectManager = filterProjectManager === 'All' || project.project_manager === filterProjectManager;
     return matchesSearch && matchesStatus && matchesCategory && matchesProjectManager;
-  }).sort((a, b) => {
-    if (!sortConfig) return 0;
-    const { key, direction } = sortConfig;
-    const aValue = a[key];
-    const bValue = b[key];
-
-    if (aValue === undefined || bValue === undefined) return 0;
-
-    if (aValue < bValue) {
-      return direction === 'asc' ? -1 : 1;
-    }
-    if (aValue > bValue) {
-      return direction === 'asc' ? 1 : -1;
-    }
-    return 0;
-  });
+  }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : 0));
 
   const projectsPagination = usePagination(filteredProjects);
+
+  // Un changement de tri garde le même nombre de projets, donc la pagination
+  // ne se réinitialise pas d'elle-même : sans ça, trier depuis la page 3
+  // laissait l'utilisateur au milieu du nouveau classement.
+  const applySort = (config: { key: keyof Project; direction: 'asc' | 'desc' } | null) => {
+    setSortConfig(config);
+    projectsPagination.setPage(1);
+  };
 
   const requestSort = (key: keyof Project) => {
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
       direction = 'desc';
     }
-    setSortConfig({ key, direction });
+    applySort({ key, direction });
+  };
+
+  const changeSortKey = (key: string) => {
+    applySort(key ? { key: key as keyof Project, direction: sortConfig?.direction ?? 'asc' } : null);
+  };
+
+  const toggleSortDirection = () => {
+    if (!sortConfig) return;
+    applySort({ ...sortConfig, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
   };
 
   const getSortIcon = (key: keyof Project) => {
@@ -651,6 +708,43 @@ export default function Projects() {
             {filterProjectManager === 'All' ? t('projects_filter_manager') : filterProjectManager}
           </button>
         </div>
+
+        {/* Le mode tableau se trie par ses en-têtes de colonne ; en mode
+            vignette, ce sélecteur est le seul accès au classement. */}
+        {viewMode === 'grid' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <label
+              htmlFor="projects-sort"
+              className="flex items-center gap-1.5 text-sm font-medium whitespace-nowrap"
+              style={{ color: 'var(--tblr-muted)' }}
+            >
+              <IconArrowsSort size={16} />
+              {t('projects_sort_by')}
+            </label>
+            <select
+              id="projects-sort"
+              value={sortConfig?.key ?? ''}
+              onChange={(e) => changeSortKey(e.target.value)}
+              className="px-3 py-2 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              <option value="">{t('projects_sort_default')}</option>
+              {PROJECT_SORT_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>{t(option.labelKey)}</option>
+              ))}
+            </select>
+            <button
+              onClick={toggleSortDirection}
+              disabled={!sortConfig}
+              title={sortConfig?.direction === 'desc' ? t('projects_sort_desc') : t('projects_sort_asc')}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
+            >
+              {sortConfig?.direction === 'desc' ? <IconSortDescending size={16} /> : <IconSortAscending size={16} />}
+              {sortConfig?.direction === 'desc' ? t('projects_sort_desc') : t('projects_sort_asc')}
+            </button>
+          </div>
+        )}
       </div>
 
       {projectsError && projects.length === 0 && (

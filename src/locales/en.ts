@@ -320,6 +320,11 @@ export default {
       "projects_filter_status": "Status",
       "projects_filter_domain": "Domain",
       "projects_filter_manager": "Manager",
+      "projects_sort_by": "Sort by",
+      "projects_sort_default": "Default order",
+      "projects_sort_asc": "Ascending",
+      "projects_sort_desc": "Descending",
+      "projects_sort_start_date": "Start date",
 
       // Works library
       "library_subtitle": "{{count}} item(s) · FFB trade nomenclature",

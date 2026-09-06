@@ -322,6 +322,11 @@ export default {
       "projects_filter_status": "Statut",
       "projects_filter_domain": "Domaine",
       "projects_filter_manager": "Responsable",
+      "projects_sort_by": "Trier par",
+      "projects_sort_default": "Ordre par défaut",
+      "projects_sort_asc": "Croissant",
+      "projects_sort_desc": "Décroissant",
+      "projects_sort_start_date": "Date de début",
 
       // Bibliothèque d'ouvrages
       "library_subtitle": "{{count}} article(s) · nomenclature FFB",
