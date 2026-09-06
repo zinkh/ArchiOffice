@@ -5,7 +5,7 @@ import { cn } from '../lib/utils';
 import {
   IconLayoutDashboard,
   IconBriefcase,
-  IconFileText,
+  IconBooks,
   IconUsers,
   IconChartBar,
   IconClipboardCheck,
@@ -49,7 +49,7 @@ export const NAV_ITEMS = [
   { name: 'proposals',      path: '/proposals',      icon: IconFileSpreadsheet },
   { name: 'invoices',       path: '/invoices',       icon: IconFileInvoice },
   { name: 'tenders',        path: '/tenders',        icon: IconClipboardCheck },
-  { name: 'specifications', path: '/specifications', icon: IconFileText },
+  { name: 'specifications', path: '/specifications', icon: IconBooks },
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
   { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
@@ -95,7 +95,7 @@ const NAV_SECTIONS = [
     key: 'outils',
     label: 'Outils',
     items: [
-      { name: 'specifications', path: '/specifications', icon: IconFileText },
+      { name: 'specifications', path: '/specifications', icon: IconBooks },
       { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
       { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
