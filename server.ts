@@ -11,6 +11,7 @@ import { registerDetDataRoutes } from "./server/routes/detData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
 import { registerBpuRoutes } from "./server/routes/bpu";
 import { registerPriceLibraryRoutes } from "./server/routes/priceLibrary";
+import { registerReferentielRoutes } from "./server/routes/referentiels";
 import { registerSituationRoutes } from "./server/routes/situations";
 import { registerCctpRoutes } from "./server/routes/cctps";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
@@ -683,6 +684,7 @@ export async function createApp() {
   registerDpgfRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerBpuRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPriceLibraryRoutes(app, { supabaseAdmin, getTenantId });
+  registerReferentielRoutes(app, { supabaseAdmin });
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCctpRoutes(app, { supabaseAdmin, getTenantId });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
