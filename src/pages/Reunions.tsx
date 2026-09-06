@@ -37,18 +37,6 @@ type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
 type MobileView = 'projects' | 'meetings' | 'detail';
 type ParentKind = 'project' | 'proposal' | 'tender';
 
-const SUBSECTIONS: { key: Subsection; label: string }[] = [
-  { key: 'projet', label: 'Projets' },
-  { key: 'visite_candidature', label: 'Visites Candidatures' },
-  { key: 'visite_proposition', label: 'Visites Propositions' },
-];
-
-const TOP_SECTIONS = [
-  { key: 'projects' as const, label: 'Projets', icon: IconBuilding },
-  { key: 'proposals' as const, label: 'Propositions', icon: IconBriefcase },
-  { key: 'tenders' as const, label: 'Appels d\'offres', icon: IconClipboardList },
-];
-
 function formatDate(iso: string) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -358,16 +346,10 @@ export default function Reunions() {
     proposals: false,
     tenders: false,
   });
-  const [expandedProjectSubsections, setExpandedProjectSubsections] = useState<Record<string, boolean>>({
-    projet: true,
-    visite_candidature: false,
-    visite_proposition: false,
-  });
 
   // Active entity
   const [activeKind, setActiveKind] = useState<ParentKind>('project');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [selectedSection, setSelectedSection] = useState<Subsection>('projet');
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [selectedTender, setSelectedTender] = useState<Tender | null>(null);
 
@@ -432,13 +414,12 @@ export default function Reunions() {
     }
   }, []);
 
-  const selectProject = (project: Project, section: Subsection) => {
+  const selectProject = (project: Project) => {
     setActiveKind('project');
     setSelectedProject(project);
-    setSelectedSection(section);
     setSelectedProposal(null);
     setSelectedTender(null);
-    loadMeetings('project', project.id, section);
+    loadMeetings('project', project.id, 'projet');
     setShowNewMeeting(false);
     setMobileView('meetings');
   };
@@ -483,7 +464,7 @@ export default function Reunions() {
     if (!newMeetingTitle.trim()) return;
 
     const body: any = {
-      type: activeKind === 'project' ? selectedSection : 'projet',
+      type: 'projet' satisfies Subsection,
       title: newMeetingTitle.trim(),
       date: newMeetingDate,
       notes: '',
@@ -625,10 +606,6 @@ export default function Reunions() {
     setExpandedTopSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const toggleProjectSubsection = (key: string) => {
-    setExpandedProjectSubsections(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   const hasActiveEntity = activeKind === 'project' ? !!selectedProject : activeKind === 'proposal' ? !!selectedProposal : !!selectedTender;
 
   // ── Panel: project/entity list ───────────────────────────────────────────────
@@ -636,18 +613,18 @@ export default function Reunions() {
   const ProjectsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-64 md:flex-shrink-0 md:border-r
+      md:w-72 md:flex-shrink-0 md:border-r
       ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
     `} style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
       <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="relative">
-          <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
+          <IconSearch size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
           <input
             type="text"
             placeholder="Rechercher..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-3 py-1.5 text-xs rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
@@ -657,57 +634,39 @@ export default function Reunions() {
         <div>
           <button
             onClick={() => toggleTopSection('projects')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
           >
-            {expandedTopSections.projects ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-            <IconBuilding size={12} />
+            {expandedTopSections.projects ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+            <IconBuilding size={14} />
             Projets
           </button>
           {expandedTopSections.projects && (
             <div className="pl-2 pb-1">
-              {SUBSECTIONS.map(({ key, label }) => (
-                <div key={key}>
-                  <button
-                    onClick={() => toggleProjectSubsection(key)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
-                  >
-                    {expandedProjectSubsections[key] ? <IconChevronDown size={10} /> : <IconChevronRight size={10} />}
-                    {label}
-                  </button>
-                  {expandedProjectSubsections[key] && (
-                    <div className="pb-0.5">
-                      {filteredProjects().length === 0 ? (
-                        <p className="px-5 py-1 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
-                      ) : (
-                        filteredProjects().map(project => {
-                          const isActive = activeKind === 'project' && selectedProject?.id === project.id && selectedSection === key;
-                          return (
-                            <button
-                              key={project.id}
-                              onClick={() => selectProject(project, key)}
-                              className="w-full text-left px-5 py-1.5 text-xs transition-colors truncate"
-                              style={isActive
-                                ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-                                : { color: 'var(--tblr-muted)' }}
-                              onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
-                              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
-                            >
-                              <div className="truncate font-medium">{project.name}</div>
-                              <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+              {filteredProjects().length === 0 ? (
+                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
+              ) : (
+                filteredProjects().map(project => {
+                  const isActive = activeKind === 'project' && selectedProject?.id === project.id;
+                  return (
+                    <button
+                      key={project.id}
+                      onClick={() => selectProject(project)}
+                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
+                      style={isActive
+                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                        : { color: 'var(--tblr-muted)' }}
+                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
+                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                    >
+                      <div className="truncate font-medium">{project.name}</div>
+                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           )}
         </div>
@@ -716,19 +675,19 @@ export default function Reunions() {
         <div>
           <button
             onClick={() => toggleTopSection('proposals')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
           >
-            {expandedTopSections.proposals ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-            <IconBriefcase size={12} />
+            {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+            <IconBriefcase size={14} />
             Propositions
           </button>
           {expandedTopSections.proposals && (
             <div className="pl-2 pb-1">
               {filteredProposals().length === 0 ? (
-                <p className="px-4 py-1.5 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
+                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
               ) : (
                 filteredProposals().map(proposal => {
                   const isActive = activeKind === 'proposal' && selectedProposal?.id === proposal.id;
@@ -736,7 +695,7 @@ export default function Reunions() {
                     <button
                       key={proposal.id}
                       onClick={() => selectProposal(proposal)}
-                      className="w-full text-left px-4 py-1.5 text-xs transition-colors truncate"
+                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
                       style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
@@ -744,7 +703,7 @@ export default function Reunions() {
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
                       <div className="truncate font-medium">{proposal.title}</div>
-                      <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
+                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
                     </button>
                   );
                 })
@@ -757,19 +716,19 @@ export default function Reunions() {
         <div>
           <button
             onClick={() => toggleTopSection('tenders')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
           >
-            {expandedTopSections.tenders ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-            <IconClipboardList size={12} />
+            {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+            <IconClipboardList size={14} />
             Appels d'offres
           </button>
           {expandedTopSections.tenders && (
             <div className="pl-2 pb-1">
               {filteredTenders().length === 0 ? (
-                <p className="px-4 py-1.5 text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
+                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
               ) : (
                 filteredTenders().map(tender => {
                   const isActive = activeKind === 'tender' && selectedTender?.id === tender.id;
@@ -777,7 +736,7 @@ export default function Reunions() {
                     <button
                       key={tender.id}
                       onClick={() => selectTender(tender)}
-                      className="w-full text-left px-4 py-1.5 text-xs transition-colors truncate"
+                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
                       style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
@@ -785,7 +744,7 @@ export default function Reunions() {
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
                       <div className="truncate font-medium">{tender.title}</div>
-                      <div className="truncate text-[9px]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
+                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
                     </button>
                   );
                 })
@@ -801,13 +760,13 @@ export default function Reunions() {
 
   const activeEntityName = getParentName();
   const activeEntitySubtitle = activeKind === 'project'
-    ? SUBSECTIONS.find(s => s.key === selectedSection)?.label
+    ? 'Projet'
     : activeKind === 'proposal' ? 'Proposition' : "Appel d'offres";
 
   const MeetingsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-64 md:flex-shrink-0 md:border-r
+      md:w-72 md:flex-shrink-0 md:border-r
       ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
     `} style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
       {/* Mobile back button */}
@@ -836,10 +795,10 @@ export default function Reunions() {
         <>
           <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-xs font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
+              <h3 className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
               <button
                 onClick={() => setShowNewMeeting(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
                 style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                 title="Nouvelle réunion"
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-primary)', e.currentTarget.style.color = '#fff')}
@@ -849,7 +808,7 @@ export default function Reunions() {
                 <span>Nouveau</span>
               </button>
             </div>
-            <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>
+            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>
           </div>
 
           {showNewMeeting && (
@@ -860,7 +819,7 @@ export default function Reunions() {
                 value={newMeetingTitle}
                 onChange={e => { setNewMeetingTitle(e.target.value); setCreateError(''); }}
                 autoFocus
-                className="w-full px-2 py-1.5 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                className="w-full px-2 py-1.5 text-[13px] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                 onKeyDown={e => e.key === 'Enter' && createMeeting()}
               />
@@ -868,7 +827,7 @@ export default function Reunions() {
                 type="date"
                 value={newMeetingDate}
                 onChange={e => setNewMeetingDate(e.target.value)}
-                className="w-full px-2 py-1.5 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                className="w-full px-2 py-1.5 text-[13px] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
               {createError && (
@@ -897,9 +856,9 @@ export default function Reunions() {
 
           <div className="flex-1 overflow-y-auto">
             {loadingMeetings ? (
-              <div className="flex items-center justify-center h-20 text-xs" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
+              <div className="flex items-center justify-center h-20 text-[13px]" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
             ) : meetings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-xs gap-2" style={{ color: 'var(--tblr-muted)' }}>
+              <div className="flex flex-col items-center justify-center h-32 text-[13px] gap-2" style={{ color: 'var(--tblr-muted)' }}>
                 <IconNotes size={24} className="opacity-30" />
                 <p>Aucune réunion</p>
                 <button onClick={() => setShowNewMeeting(true)} className="hover:underline" style={{ color: 'var(--tblr-primary)' }}>+ Ajouter</button>
@@ -923,9 +882,9 @@ export default function Reunions() {
                 >
                   <div className="flex items-start justify-between gap-1">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{meeting.title}</p>
-                      <p className="text-[10px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
-                        <IconCalendar size={9} />
+                      <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{meeting.title}</p>
+                      <p className="text-[11px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+                        <IconCalendar size={11} />
                         {formatDate(meeting.date)}
                       </p>
                     </div>
@@ -945,7 +904,7 @@ export default function Reunions() {
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center h-full text-xs gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
+        <div className="flex flex-col items-center justify-center h-full text-[13px] gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
           <IconBuilding size={28} className="opacity-20" />
           <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
           <button
