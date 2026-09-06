@@ -1,550 +1,751 @@
-import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+// ── Bibliothèque d'ouvrages ──────────────────────────────────────────────────
+// Cette page était un éditeur de documents « cahier des charges », doublon de
+// l'onglet CCTP/DPGF des projets. Elle est devenue le fonds d'articles du
+// cabinet : la base dans laquelle les CCTP, DPGF et DQE viendront puiser.
+//
+// Un article se classe sur trois nomenclatures publiques, servies ensemble par
+// GET /api/referentiels : le corps d'état (FFB), le NF DTU qui régit son
+// exécution, et le code NAF de l'activité qui le réalise ; l'élément d'ouvrage
+// SfB s'y ajoute pour situer l'article dans le bâtiment.
+//
+// Son prix courant est celui qu'on injectera dans un DPGF ; l'historique
+// d'observations garde à côté chaque prix constaté, sans l'écraser — c'est là
+// que viendront se déverser les réponses des entreprises aux appels d'offres.
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
-  IconPlus,
-  IconDeviceFloppy,
-  IconTrash,
-  IconFileCode,
-  IconArrowUpRight,
-  IconFileTypePdf,
-  IconFileTypeDoc,
-  IconFileTypeXls
+  IconPlus, IconSearch, IconTrash, IconDeviceFloppy, IconX, IconChevronRight,
+  IconChevronDown, IconBooks, IconCurrencyEuro, IconHistory, IconStar,
+  IconStarFilled, IconFileText, IconLoader2, IconAlertTriangle,
 } from '@tabler/icons-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../lib/utils';
-import type { Specification, SpecSection, Project } from '../types';
 import { useTranslation } from 'react-i18next';
-import { saveAs } from 'file-saver';
-import MarkdownEditor from '../components/MarkdownEditor';
-import { fetchJson } from '../lib/api';
+import { fetchJson, apiFetch } from '../lib/api';
+import { formatCurrency, cn } from '../lib/utils';
+import type {
+  Referentiels, ArticleBibliotheque, PrixObservation, PrixStats,
+  RepartitionBibliotheque, OrigineArticle,
+} from '../types/library';
+
+const REFERENTIELS_VIDES: Referentiels = {
+  sfb: [], corpsEtat: [], dtu: [], naf: [], dtuParCorpsEtat: {}, corpsEtatParDtu: {},
+};
+
+const ARTICLE_VIDE = {
+  designation: '', unite: 'U', prix_unitaire: 0, code: '', description: '', notes: '',
+  corps_etat_code: '', dtu_code: '', sfb_code: '', naf_code: '',
+};
+
+/** Un article venu du cabinet se distingue à l'œil du fonds de référence. */
+function BadgeOrigine({ origine }: { origine: OrigineArticle }) {
+  const { t } = useTranslation();
+  const cabinet = origine !== 'reference';
+  return (
+    <span
+      className="px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
+      style={cabinet
+        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
+        : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+      title={t(cabinet ? 'library_origin_cabinet_hint' : 'library_origin_reference_hint')}
+    >
+      {t(`library_origin_${origine}`)}
+    </span>
+  );
+}
 
 export default function Specifications() {
   const { t } = useTranslation();
   const { specId } = useParams<{ specId: string }>();
-  const [specs, setSpecs] = useState<Specification[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeSpec, setActiveSpec] = useState<Specification | null>(null);
-  const [sections, setSections] = useState<SpecSection[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isNewSpecModalOpen, setIsNewSpecModalOpen] = useState(false);
-  const [newSpecTitle, setNewSpecTitle] = useState('');
-  const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const navigate = useNavigate();
+
+  const [referentiels, setReferentiels] = useState<Referentiels>(REFERENTIELS_VIDES);
+  const [repartition, setRepartition] = useState<RepartitionBibliotheque | null>(null);
+  const [articles, setArticles] = useState<ArticleBibliotheque[]>([]);
+  const [chargement, setChargement] = useState(true);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const [recherche, setRecherche] = useState('');
+  const [corpsEtatActif, setCorpsEtatActif] = useState<string | null>(null);
+  const [dtuActif, setDtuActif] = useState<string>('');
+  const [origineActive, setOrigineActive] = useState<string>('');
+  const [famillesOuvertes, setFamillesOuvertes] = useState<Record<string, boolean>>({});
+
+  const [selection, setSelection] = useState<ArticleBibliotheque | null>(null);
+  const [brouillon, setBrouillon] = useState<Record<string, any> | null>(null);
+  const [enregistrement, setEnregistrement] = useState(false);
+
+  const [observations, setObservations] = useState<PrixObservation[]>([]);
+  const [stats, setStats] = useState<PrixStats | null>(null);
+  const [nouveauPrix, setNouveauPrix] = useState('');
+  const [nouvelleEntreprise, setNouvelleEntreprise] = useState('');
+  const [nouvelleOrigine, setNouvelleOrigine] = useState<PrixObservation['origine']>('offre');
+  const [definirCourant, setDefinirCourant] = useState(false);
+
+  // ── Chargement ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetchSpecs();
-    fetchProjects();
+    fetchJson<Referentiels>('/api/referentiels')
+      .then(setReferentiels)
+      .catch(() => setErreur(t('library_error_referentiels')));
   }, []);
 
-  useEffect(() => {
-    if (specId && specs.length > 0) {
-      const spec = specs.find(s => s.id === specId);
-      if (spec) {
-        handleSelectSpec(spec);
-      }
-    }
-  }, [specId, specs]);
-
-  const fetchSpecs = () => {
-    fetchJson('/api/specifications')
-      .then(setSpecs)
-      .catch(err => console.error(err));
-  };
-
-  const fetchProjects = () => {
-    fetchJson('/api/projects')
-      .then(setProjects)
-      .catch(err => console.error(err));
-  };
-
-  const handleSelectSpec = (spec: Specification) => {
-    setActiveSpec(spec);
+  const chargerArticles = useCallback(async () => {
+    setChargement(true);
     try {
-      setSections(JSON.parse(spec.content));
-    } catch (e) {
-      setSections([]);
-    }
-  };
-
-  const handleAddItem = (sectionId: string) => {
-    setSections(prev => prev.map(section => {
-      if (section.id === sectionId) {
-        return {
-          ...section,
-          items: [
-            ...section.items,
-            { id: `item-${Date.now()}`, code: 'NEW', description: 'New Item', material: '-', notes: '-' }
-          ]
-        };
-      }
-      return section;
-    }));
-  };
-
-  const handleAddSection = () => {
-    setSections(prev => [
-      ...prev,
-      { id: `section-${Date.now()}`, title: 'New Section', items: [] }
-    ]);
-  };
-
-  const handleSave = async () => {
-    if (!activeSpec) return;
-    setIsSaving(true);
-    try {
-      const isNew = !specs.some(s => s.id === activeSpec.id);
-      const method = isNew ? 'POST' : 'PUT';
-      const url = isNew ? '/api/specifications' : `/api/specifications/${activeSpec.id}`;
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...activeSpec,
-          content: JSON.stringify(sections)
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (isNew) {
-          setSpecs(prev => [{ ...activeSpec, last_updated: data.last_updated }, ...prev]);
-        } else {
-          setSpecs(prev => prev.map(s => s.id === activeSpec.id ? { ...activeSpec, last_updated: data.last_updated } : s));
-        }
-        setActiveSpec(prev => prev ? { ...prev, last_updated: data.last_updated } : null);
-      }
-    } catch (err) {
-      console.error(err);
+      const params = new URLSearchParams({ limit: '200' });
+      if (recherche.trim()) params.set('q', recherche.trim());
+      if (corpsEtatActif) params.set('corps_etat_code', corpsEtatActif);
+      if (dtuActif) params.set('dtu_code', dtuActif);
+      if (origineActive) params.set('origine', origineActive);
+      const data = await fetchJson<ArticleBibliotheque[]>(`/api/price-library?${params}`);
+      setArticles(data);
+      setErreur(null);
+    } catch {
+      setArticles([]);
+      setErreur(t('library_error_load'));
     } finally {
-      setIsSaving(false);
+      setChargement(false);
     }
-  };
+  }, [recherche, corpsEtatActif, dtuActif, origineActive]);
 
-  const handleDelete = async () => {
-    if (!activeSpec || !confirm('Are you sure you want to delete this specification?')) return;
+  // La recherche est débouncée : la requête part côté serveur, une frappe par
+  // caractère la lancerait autant de fois.
+  useEffect(() => {
+    const timer = setTimeout(chargerArticles, 250);
+    return () => clearTimeout(timer);
+  }, [chargerArticles]);
+
+  const chargerRepartition = useCallback(() => {
+    fetchJson<RepartitionBibliotheque>('/api/price-library/repartition')
+      .then(setRepartition)
+      .catch(() => setRepartition(null));
+  }, []);
+  useEffect(chargerRepartition, [chargerRepartition]);
+
+  // Ouverture directe sur un article par son URL (/specifications/:id).
+  useEffect(() => {
+    if (!specId || selection?.id === specId) return;
+    const trouve = articles.find(a => a.id === specId);
+    if (trouve) selectionner(trouve);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specId, articles]);
+
+  const chargerPrix = useCallback(async (articleId: string) => {
     try {
-      const res = await fetch(`/api/specifications/${activeSpec.id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        setSpecs(prev => prev.filter(s => s.id !== activeSpec.id));
-        setActiveSpec(null);
-        setSections([]);
-      }
-    } catch (err) {
-      console.error(err);
+      const data = await fetchJson<{ observations: PrixObservation[]; stats: PrixStats }>(
+        `/api/price-library/${articleId}/prix`);
+      setObservations(data.observations);
+      setStats(data.stats);
+    } catch {
+      setObservations([]);
+      setStats(null);
     }
+  }, []);
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  const selectionner = (article: ArticleBibliotheque) => {
+    setSelection(article);
+    setBrouillon({ ...ARTICLE_VIDE, ...article });
+    chargerPrix(article.id);
+    navigate(`/specifications/${article.id}`, { replace: true });
   };
 
-  const handleNewSpec = async () => {
-    if (!newSpecTitle || !selectedProjectId) return;
+  const nouvelArticle = () => {
+    setSelection(null);
+    setObservations([]);
+    setStats(null);
+    setBrouillon({ ...ARTICLE_VIDE, corps_etat_code: corpsEtatActif ?? '', dtu_code: dtuActif });
+    navigate('/specifications', { replace: true });
+  };
 
-    const template = specs.find(s => s.id === selectedTemplateId);
-
-    const newSpec: Specification = {
-      id: `spec-${Date.now()}`,
-      project_id: selectedProjectId,
-      title: newSpecTitle,
-      content: template ? template.content : JSON.stringify([{ id: 's1', title: 'General Provisions', items: [] }]),
-      last_updated: new Date().toISOString()
-    };
-
+  const enregistrer = async () => {
+    if (!brouillon?.designation?.trim()) return;
+    setEnregistrement(true);
     try {
-      const res = await fetch('/api/specifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSpec)
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const savedSpec = { ...newSpec, last_updated: data.last_updated };
-        setSpecs(prev => [savedSpec, ...prev]);
-        handleSelectSpec(savedSpec);
-        setIsNewSpecModalOpen(false);
-        setNewSpecTitle('');
-        setSelectedProjectId('');
-      }
-    } catch (err) {
-      console.error(err);
+      const corps = { ...brouillon, prix_unitaire: Number(brouillon.prix_unitaire) || 0 };
+      const article = selection
+        ? await apiFetch<ArticleBibliotheque>(`/api/price-library/${selection.id}`,
+          { method: 'PUT', body: JSON.stringify(corps) })
+        : await apiFetch<ArticleBibliotheque>('/api/price-library',
+          { method: 'POST', body: JSON.stringify(corps) });
+      setSelection(article);
+      setBrouillon({ ...ARTICLE_VIDE, ...article });
+      chargerArticles();
+      chargerRepartition();
+      chargerPrix(article.id);
+      navigate(`/specifications/${article.id}`, { replace: true });
+    } catch {
+      setErreur(t('library_error_save'));
+    } finally {
+      setEnregistrement(false);
     }
   };
 
-  const exportToPDF = async () => {
-    if (!activeSpec) return;
-    const { jsPDF } = await import('jspdf');
-    const doc = new jsPDF();
-    const project = projects.find(p => p.id === activeSpec.project_id);
+  const supprimer = async () => {
+    if (!selection || !confirm(t('library_delete_confirm', { name: selection.designation }))) return;
+    await apiFetch(`/api/price-library/${selection.id}`, { method: 'DELETE' });
+    setSelection(null);
+    setBrouillon(null);
+    chargerArticles();
+    chargerRepartition();
+    navigate('/specifications', { replace: true });
+  };
 
-    let y = 20;
-    doc.setFontSize(22);
-    doc.text(activeSpec.title, 20, y);
-    y += 10;
-
-    doc.setFontSize(12);
-    doc.setTextColor(100);
-    doc.text(`Project: ${project?.name || 'Unknown'}`, 20, y);
-    y += 7;
-    doc.text(`Date: ${new Date(activeSpec.last_updated).toLocaleDateString()}`, 20, y);
-    y += 15;
-
-    doc.setTextColor(0);
-    sections.forEach((section, sIdx) => {
-      if (y > 270) { doc.addPage(); y = 20; }
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${sIdx + 1}. ${section.title}`, 20, y);
-      y += 10;
-
-      section.items.forEach((item) => {
-        if (y > 270) { doc.addPage(); y = 20; }
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.text(`${item.code}: ${item.description}`, 25, y);
-        y += 5;
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Material: ${item.material}`, 30, y);
-        y += 5;
-        if (item.notes) {
-          doc.text(`Notes: ${item.notes}`, 30, y);
-          y += 7;
-        } else {
-          y += 2;
-        }
-      });
-      y += 5;
+  const basculerFavori = async (article: ArticleBibliotheque) => {
+    const maj = await apiFetch<ArticleBibliotheque>(`/api/price-library/${article.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...article, favori: !article.favori }),
     });
-
-    doc.save(`${activeSpec.title}.pdf`);
+    setArticles(prev => prev.map(a => (a.id === maj.id ? maj : a)));
+    if (selection?.id === maj.id) setSelection(maj);
   };
 
-  const exportToDOCX = () => {
-    if (!activeSpec) return;
-    const data = {
-      projet: { nom: projects.find(p => p.id === activeSpec.project_id)?.name || 'Unknown' },
-      lots: [{ numero: '1', intitule: activeSpec.title, ouvrages: sections.flatMap(s => s.items.map(i => ({ designation: i.description, quantite: 0, unite: '-', prix_unitaire: 0, total_ht: 0 }))) }]
-    };
-    import('../services/documentService').then(service => service.generateWordDoc(data));
+  const ajouterObservation = async () => {
+    if (!selection) return;
+    const prix = Number(String(nouveauPrix).replace(',', '.'));
+    if (!Number.isFinite(prix)) return;
+    await apiFetch(`/api/price-library/${selection.id}/prix`, {
+      method: 'POST',
+      body: JSON.stringify({
+        prix_ht: prix,
+        entreprise: nouvelleEntreprise,
+        origine: nouvelleOrigine,
+        definir_comme_courant: definirCourant,
+      }),
+    });
+    setNouveauPrix('');
+    setNouvelleEntreprise('');
+    setDefinirCourant(false);
+    chargerPrix(selection.id);
+    if (definirCourant) chargerArticles();
   };
 
-  const exportToExcel = () => {
-    if (!activeSpec) return;
-    const data = {
-      projet: { nom: projects.find(p => p.id === activeSpec.project_id)?.name || 'Unknown' },
-      lots: [{ numero: '1', intitule: activeSpec.title, ouvrages: sections.flatMap(s => s.items.map(i => ({ designation: i.description, quantite: 0, unite: '-', prix_unitaire: 0, total_ht: 0 }))) }]
-    };
-    import('../services/documentService').then(service => service.generateExcelDoc(data));
+  const supprimerObservation = async (id: string) => {
+    await apiFetch(`/api/price-library/prix/${id}`, { method: 'DELETE' });
+    if (selection) chargerPrix(selection.id);
+  };
+
+  // ── Données dérivées ───────────────────────────────────────────────────────
+
+  const familles = useMemo(() => {
+    const out: { famille: string; metiers: typeof referentiels.corpsEtat }[] = [];
+    for (const ce of referentiels.corpsEtat) {
+      const groupe = out.find(g => g.famille === ce.famille);
+      if (groupe) groupe.metiers.push(ce);
+      else out.push({ famille: ce.famille, metiers: [ce] });
+    }
+    return out;
+  }, [referentiels.corpsEtat]);
+
+  // Les DTU proposés suivent le corps d'état choisi : sur « Couverture », les
+  // 115 normes se réduisent aux 19 qui concernent le métier.
+  const dtuDisponibles = useMemo(() => {
+    const codes = corpsEtatActif ? referentiels.dtuParCorpsEtat[corpsEtatActif] : null;
+    if (!codes) return referentiels.dtu;
+    const permis = new Set(codes);
+    return referentiels.dtu.filter(d => permis.has(d.code));
+  }, [corpsEtatActif, referentiels]);
+
+  const dtuBrouillonDisponibles = useMemo(() => {
+    const codes = brouillon?.corps_etat_code
+      ? referentiels.dtuParCorpsEtat[brouillon.corps_etat_code] : null;
+    if (!codes) return referentiels.dtu;
+    const permis = new Set(codes);
+    return referentiels.dtu.filter(d => permis.has(d.code));
+  }, [brouillon?.corps_etat_code, referentiels]);
+
+  const libelle = (liste: { code: string; libelle?: string; titre?: string }[], code: string | null) =>
+    liste.find(x => x.code === code)?.libelle ?? liste.find(x => x.code === code)?.titre ?? null;
+
+  const majBrouillon = (champ: string, valeur: any) =>
+    setBrouillon(prev => (prev ? { ...prev, [champ]: valeur } : prev));
+
+  // ── Rendu ──────────────────────────────────────────────────────────────────
+
+  const styleChamp = {
+    background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)',
   };
 
   return (
-    <div className="h-full min-h-[calc(100vh-160px)] flex flex-col md:flex-row gap-4 max-w-7xl mx-auto">
-      <div className="w-full md:w-80 flex flex-col gap-4 shrink-0">
-        <header className="space-y-1">
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('specifications')}</h2>
-          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('spec_library')}</p>
-        </header>
-
-        <div
-          className="flex-1 rounded-lg p-2 overflow-y-auto"
-          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
-        >
-          <div className="space-y-1">
-            {specs.map((spec) => {
-              const project = projects.find(p => p.id === spec.project_id);
-              const isActive = activeSpec?.id === spec.id;
-              return (
-                <button
-                  key={spec.id}
-                  onClick={() => handleSelectSpec(spec)}
-                  className="w-full text-left px-4 py-3 rounded-lg transition-all flex items-center justify-between group"
-                  style={isActive
-                    ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-                    : { color: 'var(--tblr-muted)' }
-                  }
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <IconFileCode
-                      className="w-4 h-4 shrink-0"
-                      style={{ color: isActive ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
-                    />
-                    <div className="overflow-hidden">
-                      <p className="text-sm font-medium truncate">{spec.title}</p>
-                      <p className="text-[10px] opacity-60 truncate">{project?.name || 'Unknown Project'}</p>
-                    </div>
-                  </div>
-                  <IconArrowUpRight className={cn("w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0", isActive && "opacity-100")} />
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setIsNewSpecModalOpen(true)}
-              className="w-full py-2 rounded-lg text-xs font-medium hover:border-blue-300 transition-all uppercase tracking-wide mt-2 flex items-center justify-center gap-2"
-              style={{ border: '1px dashed var(--tblr-border)', color: 'var(--tblr-muted)' }}
-            >
-              <IconPlus size={14} />
-              {t('add_project')}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="flex-1 rounded-lg flex flex-col overflow-hidden"
+    <div className="flex flex-col lg:flex-row gap-4 h-full">
+      {/* ── Colonne 1 : nomenclature des corps d'état ── */}
+      <aside
+        className="lg:w-72 flex-shrink-0 rounded-lg overflow-hidden flex flex-col"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
-        {activeSpec ? (
-          <>
-            <div
-              className="p-6 flex items-center justify-between"
-              style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <input
-                    className="text-xl font-bold tracking-tight bg-transparent border-none outline-none focus:ring-0 p-0"
-                    style={{ color: 'var(--tblr-text)' }}
-                    value={activeSpec.title || ''}
-                    onChange={e => setActiveSpec({ ...activeSpec, title: e.target.value })}
-                  />
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <input
-                    type="checkbox"
-                    id="is_template"
-                    checked={activeSpec.is_template || false}
-                    onChange={e => setActiveSpec({ ...activeSpec, is_template: e.target.checked })}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                    style={{ borderColor: 'var(--tblr-border)' }}
-                  />
-                  <label htmlFor="is_template" className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('specs_save_as_template')}</label>
-                </div>
-                <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
-                  {t('revision_date')}: {new Date(activeSpec.last_updated).toLocaleDateString()}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="flex items-center rounded-lg p-1 mr-2"
-                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-                >
-                  <button
-                    onClick={exportToPDF}
-                    className="p-1.5 rounded-md transition-all hover:text-red-500"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    title="Export PDF"
-                  >
-                    <IconFileTypePdf size={18} />
-                  </button>
-                  <button
-                    onClick={exportToDOCX}
-                    className="p-1.5 rounded-md transition-all hover:text-blue-500"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    title="Export DOCX"
-                  >
-                    <IconFileTypeDoc size={18} />
-                  </button>
-                  <button
-                    onClick={exportToExcel}
-                    className="p-1.5 rounded-md transition-all hover:text-green-500"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    title="Export XLSX"
-                  >
-                    <IconFileTypeXls size={18} />
-                  </button>
-                </div>
+        <div className="p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
+            <IconBooks size={20} />
+            {t('specifications')}
+          </h2>
+          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+            {repartition
+              ? t('library_subtitle', { count: repartition.total })
+              : t('library_subtitle_empty')}
+          </p>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-2">
+          <button
+            onClick={() => { setCorpsEtatActif(null); setDtuActif(''); }}
+            className="w-full text-left px-4 py-2 text-[13px] font-medium transition-colors"
+            style={corpsEtatActif === null
+              ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+              : { color: 'var(--tblr-muted)' }}
+          >
+            {t('library_all_trades')}
+          </button>
+
+          {familles.map(({ famille, metiers }) => {
+            const ouverte = famillesOuvertes[famille] ?? true;
+            return (
+              <div key={famille}>
                 <button
-                  onClick={handleDelete}
-                  className="p-2 transition-colors hover:text-red-500"
+                  onClick={() => setFamillesOuvertes(p => ({ ...p, [famille]: !ouverte }))}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
                   style={{ color: 'var(--tblr-muted)' }}
                 >
-                  <IconTrash size={20} />
+                  {ouverte ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                  {famille}
                 </button>
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  {isSaving ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <IconDeviceFloppy size={18} />
-                  )}
-                  {t('commit_changes')}
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-8 space-y-12">
-              {sections.map((section, sIdx) => (
-                <div key={section.id} className="space-y-6">
-                  <div className="flex items-center gap-4 pb-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-                    <span className="text-sm font-mono font-bold" style={{ color: 'var(--tblr-primary)' }}>0{sIdx + 1}</span>
-                    <input
-                      type="text"
-                      value={section.title || ''}
-                      onChange={e => {
-                        const newTitle = e.target.value;
-                        setSections(prev => prev.map(s => s.id === section.id ? { ...s, title: newTitle } : s));
-                      }}
-                      className="text-lg font-bold bg-transparent border-none outline-none focus:ring-0 w-full tracking-tight"
-                      style={{ color: 'var(--tblr-text)' }}
-                      placeholder={t('section_title')}
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    {section.items.map((item, iIdx) => (
-                      <div
-                        key={item.id}
-                        className="grid grid-cols-12 gap-4 p-4 rounded-lg group transition-colors hover:border-blue-200"
-                        style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}
-                      >
-                        <div className="col-span-2">
-                          <label className="text-[10px] font-medium uppercase tracking-wider block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('code')}</label>
-                          <input className="w-full bg-transparent border-none outline-none text-sm font-mono" style={{ color: 'var(--tblr-primary)' }} value={item.code || ''} readOnly />
-                        </div>
-                        <div className="col-span-4">
-                          <label className="text-[10px] font-medium uppercase tracking-wider block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</label>
-                          <MarkdownEditor
-                            value={item.description || ''}
-                            onChange={value => {
-                              setSections(prev => prev.map(s => s.id === section.id ? { ...s, items: s.items.map(it => it.id === item.id ? { ...it, description: value } : it) } : s));
-                            }}
-                          />
-                        </div>
-                        <div className="col-span-3">
-                          <label className="text-[10px] font-medium uppercase tracking-wider block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('material')}</label>
-                          <input className="w-full bg-transparent border-none outline-none text-sm" style={{ color: 'var(--tblr-text)' }} value={item.material || ''} onChange={e => {
-                              const val = e.target.value;
-                              setSections(prev => prev.map(s => s.id === section.id ? { ...s, items: s.items.map(it => it.id === item.id ? { ...it, material: val } : it) } : s));
-                          }} />
-                        </div>
-                        <div className="col-span-3">
-                          <label className="text-[10px] font-medium uppercase tracking-wider block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('notes')}</label>
-                          <MarkdownEditor
-                            value={item.notes || ''}
-                            onChange={value => {
-                              setSections(prev => prev.map(s => s.id === section.id ? { ...s, items: s.items.map(it => it.id === item.id ? { ...it, notes: value } : it) } : s));
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                {ouverte && metiers.map(metier => {
+                  const actif = corpsEtatActif === metier.code;
+                  const nombre = repartition?.parCorpsEtat[metier.code] ?? 0;
+                  return (
                     <button
-                      onClick={() => handleAddItem(section.id)}
-                      className="w-full py-2 rounded-lg text-xs font-medium transition-all uppercase tracking-wide flex items-center justify-center gap-2 hover:border-blue-300"
-                      style={{ border: '1px dashed var(--tblr-border)', color: 'var(--tblr-muted)' }}
+                      key={metier.code}
+                      onClick={() => { setCorpsEtatActif(metier.code); setDtuActif(''); }}
+                      className="w-full flex items-center justify-between gap-2 pl-8 pr-4 py-1.5 text-[13px] text-left transition-colors"
+                      style={actif
+                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+                        : { color: 'var(--tblr-muted)' }}
                     >
-                      <IconPlus size={14} />
-                      {t('add_item')}
+                      <span className="truncate">{metier.libelle}</span>
+                      <span className="text-[11px] flex-shrink-0 tabular-nums">{nombre || ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* ── Colonne 2 : liste des articles ── */}
+      <section
+        className="lg:w-96 flex-shrink-0 rounded-lg overflow-hidden flex flex-col"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+      >
+        <div className="p-3 space-y-2" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
+              <input
+                type="text"
+                placeholder={t('library_search')}
+                value={recherche}
+                onChange={e => setRecherche(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                style={styleChamp}
+              />
+            </div>
+            <button
+              onClick={nouvelArticle}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
+            >
+              <IconPlus size={16} />
+              {t('library_new_article')}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={dtuActif}
+              onChange={e => setDtuActif(e.target.value)}
+              className="flex-1 min-w-0 px-2 py-1.5 rounded-lg text-[13px] outline-none"
+              style={styleChamp}
+            >
+              <option value="">{t('library_all_dtu')}</option>
+              {dtuDisponibles.map(d => (
+                <option key={d.code} value={d.code}>{d.code} — {d.titre}</option>
+              ))}
+            </select>
+            <select
+              value={origineActive}
+              onChange={e => setOrigineActive(e.target.value)}
+              className="px-2 py-1.5 rounded-lg text-[13px] outline-none"
+              style={styleChamp}
+            >
+              <option value="">{t('library_all_origins')}</option>
+              <option value="saisie">{t('library_origin_saisie')}</option>
+              <option value="bpu">{t('library_origin_bpu')}</option>
+              <option value="offre">{t('library_origin_offre')}</option>
+              <option value="reference">{t('library_origin_reference')}</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {chargement ? (
+            <p className="p-4 text-sm" style={{ color: 'var(--tblr-muted)' }}>Chargement...</p>
+          ) : articles.length === 0 ? (
+            <div className="p-6 text-center text-sm space-y-2" style={{ color: 'var(--tblr-muted)' }}>
+              <IconBooks size={32} className="mx-auto opacity-30" />
+              <p>{t('library_empty')}</p>
+              <button onClick={nouvelArticle} className="hover:underline" style={{ color: 'var(--tblr-primary)' }}>
+                {t('library_create_first')}
+              </button>
+            </div>
+          ) : articles.map(article => {
+            const actif = selection?.id === article.id;
+            return (
+              <div
+                key={article.id}
+                onClick={() => selectionner(article)}
+                className="group px-3 py-2.5 cursor-pointer transition-colors"
+                style={{
+                  borderBottom: '1px solid var(--tblr-border)',
+                  background: actif ? 'var(--tblr-primary-lt)' : undefined,
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                      {article.designation}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <BadgeOrigine origine={article.origine} />
+                      {article.dtu_code && (
+                        <span className="text-[11px] font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                          {article.dtu_code}
+                        </span>
+                      )}
+                      {article.unite && (
+                        <span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{article.unite}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
+                      {formatCurrency(Number(article.prix_unitaire) || 0)}
+                    </span>
+                    <button
+                      onClick={e => { e.stopPropagation(); basculerFavori(article); }}
+                      style={{ color: article.favori ? '#f59f00' : 'var(--tblr-muted)' }}
+                      title="Favori"
+                    >
+                      {article.favori ? <IconStarFilled size={13} /> : <IconStar size={13} />}
                     </button>
                   </div>
                 </div>
-              ))}
-              <button
-                onClick={handleAddSection}
-                className="w-full py-4 rounded-lg font-medium text-sm uppercase tracking-wide flex items-center justify-center gap-2 hover:border-blue-200 transition-all"
-                style={{ border: '2px dashed var(--tblr-border)', color: 'var(--tblr-muted)' }}
-              >
-                <IconPlus size={18} />
-                {t('init_section')}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center gap-6" style={{ color: 'var(--tblr-muted)' }}>
-            <div className="w-20 h-20 rounded-lg flex items-center justify-center" style={{ background: 'var(--tblr-surface-2)' }}>
-              <IconFileCode size={40} className="opacity-20" />
-            </div>
-            <p className="text-sm font-medium uppercase tracking-widest">{t('select_spec')}</p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── Colonne 3 : fiche de l'article ── */}
+      <section
+        className="flex-1 min-w-0 rounded-lg overflow-y-auto"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
+      >
+        {erreur && (
+          <div className="m-4 flex items-center gap-2 px-3 py-2 rounded-lg text-sm border"
+            style={{ color: '#e67700', background: '#fff3bf', borderColor: '#ffe066' }}>
+            <IconAlertTriangle size={16} />
+            {erreur}
           </div>
         )}
-      </div>
-      <AnimatePresence>
-        {isNewSpecModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-lg shadow-xl w-full max-w-md overflow-hidden"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-            >
-              <div
-                className="p-6 flex items-center justify-between"
-                style={{ borderBottom: '1px solid var(--tblr-border)' }}
-              >
-                <h3 className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>{t('specs_new_title')}</h3>
+
+        {!brouillon ? (
+          <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center" style={{ color: 'var(--tblr-muted)' }}>
+            <IconFileText size={48} className="opacity-20" />
+            <p className="text-sm">{t('library_select_hint')}</p>
+            <p className="text-xs max-w-md">{t('library_select_detail')}</p>
+          </div>
+        ) : (
+          <div className="p-5 max-w-3xl space-y-6">
+            {/* En-tête */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
+                  {selection ? selection.designation : t('library_new_article_title')}
+                </h3>
+                <div className="flex items-center gap-2 mt-1">
+                  {selection && <BadgeOrigine origine={selection.origine} />}
+                  {selection?.usage_count ? (
+                    <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                      {t('library_used_times', { count: selection.usage_count })}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {selection && (
+                  <button
+                    onClick={supprimer}
+                    className="p-2 rounded-lg transition-colors"
+                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
+                    title="Supprimer"
+                  >
+                    <IconTrash size={16} />
+                  </button>
+                )}
                 <button
-                  onClick={() => setIsNewSpecModalOpen(false)}
-                  style={{ color: 'var(--tblr-muted)' }}
+                  onClick={enregistrer}
+                  disabled={enregistrement || !brouillon.designation?.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
-                  <IconArrowUpRight className="rotate-45" size={20} />
+                  {enregistrement ? <IconLoader2 size={16} className="animate-spin" /> : <IconDeviceFloppy size={16} />}
+                  {t('save')}
                 </button>
               </div>
-              <div className="p-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_template_optional')}</label>
-                  <select
-                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                    onChange={e => setSelectedTemplateId(e.target.value)}
-                  >
-                    <option value="">{t('specs_select_template')}</option>
-                    {specs.filter(s => s.is_template).map(s => (
-                      <option key={s.id} value={s.id}>{s.title}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_title_label')}</label>
+            </div>
+
+            {/* Identification */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <label className="sm:col-span-4 text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_designation')}</span>
+                <input
+                  type="text"
+                  value={brouillon.designation}
+                  onChange={e => majBrouillon('designation', e.target.value)}
+                  placeholder={t('library_designation_placeholder')}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                  style={styleChamp}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_code')}</span>
+                <input
+                  type="text" value={brouillon.code ?? ''}
+                  onChange={e => majBrouillon('code', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_unit')}</span>
+                <input
+                  type="text" value={brouillon.unite ?? ''}
+                  onChange={e => majBrouillon('unite', e.target.value)}
+                  placeholder={t('library_unit_placeholder')}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
+                />
+              </label>
+              <label className="sm:col-span-2 text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_unit_price')}</span>
+                <div className="relative">
+                  <IconCurrencyEuro className="absolute right-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
                   <input
-                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                    placeholder={t('specs_title_example')}
-                    value={newSpecTitle}
-                    onChange={e => setNewSpecTitle(e.target.value)}
+                    type="number" step="0.01" value={brouillon.prix_unitaire ?? 0}
+                    onChange={e => majBrouillon('prix_unitaire', e.target.value)}
+                    className="w-full pl-3 pr-9 py-2 rounded-lg text-sm outline-none tabular-nums" style={styleChamp}
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('specs_project_label')}</label>
+              </label>
+            </div>
+
+            {/* Classement */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('library_classification')}</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-sm">
+                  <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_trade')}</span>
                   <select
-                    className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                    value={selectedProjectId}
-                    onChange={e => setSelectedProjectId(e.target.value)}
+                    value={brouillon.corps_etat_code ?? ''}
+                    onChange={e => { majBrouillon('corps_etat_code', e.target.value); majBrouillon('dtu_code', ''); }}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
                   >
-                    <option value="">{t('specs_select_project')}</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                    <option value="">{t('library_unclassified')}</option>
+                    {familles.map(({ famille, metiers }) => (
+                      <optgroup key={famille} label={famille}>
+                        {metiers.map(m => <option key={m.code} value={m.code}>{m.libelle}</option>)}
+                      </optgroup>
                     ))}
                   </select>
+                </label>
+                <label className="text-sm">
+                  <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_dtu')}</span>
+                  <select
+                    value={brouillon.dtu_code ?? ''}
+                    onChange={e => majBrouillon('dtu_code', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
+                  >
+                    <option value="">{t('library_no_dtu')}</option>
+                    {dtuBrouillonDisponibles.map(d => (
+                      <option key={d.code} value={d.code}>
+                        {d.code} — {d.titre}{d.norme ? ` (${d.norme})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_sfb')}</span>
+                  <select
+                    value={brouillon.sfb_code ?? ''}
+                    onChange={e => majBrouillon('sfb_code', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
+                  >
+                    <option value="">— Non classé —</option>
+                    {referentiels.sfb.filter(s => s.niveau === 1).map(groupe => (
+                      <optgroup key={groupe.code} label={`(${groupe.code}) ${groupe.libelle}`}>
+                        {referentiels.sfb
+                          .filter(s => s.parent_code === groupe.code)
+                          .map(s => (
+                            <option key={s.code} value={s.code}>({s.code}) {s.libelle.slice(0, 70)}</option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_naf')}</span>
+                  <select
+                    value={brouillon.naf_code ?? ''}
+                    onChange={e => majBrouillon('naf_code', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={styleChamp}
+                  >
+                    <option value="">{t('library_unclassified')}</option>
+                    {referentiels.naf.filter(n => n.niveau === 5).map(n => (
+                      <option key={n.code} value={n.code}>{n.code} — {n.libelle}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {brouillon.dtu_code && (
+                <p className="mt-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  {libelle(referentiels.dtu as any, brouillon.dtu_code)}
+                </p>
+              )}
+            </div>
+
+            {/* Prescriptions */}
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>
+                  {t('library_description')}
+                </span>
+                <textarea
+                  rows={5}
+                  value={brouillon.description ?? ''}
+                  onChange={e => majBrouillon('description', e.target.value)}
+                  placeholder={t('library_description_placeholder')}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-y leading-relaxed"
+                  style={styleChamp}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_notes')}</span>
+                <textarea
+                  rows={2}
+                  value={brouillon.notes ?? ''}
+                  onChange={e => majBrouillon('notes', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-y"
+                  style={styleChamp}
+                />
+              </label>
+            </div>
+
+            {/* Historique de prix */}
+            {selection && (
+              <div>
+                <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
+                  <IconHistory size={16} />
+                  {t('library_price_history')}
+                </h4>
+
+                {stats && stats.nombre > 0 && (
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    {([['library_min', stats.min], ['library_median', stats.mediane], ['library_max', stats.max]] as const).map(([label, valeur]) => (
+                      <div key={label} className="px-3 py-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t(label)}</p>
+                        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
+                          {valeur == null ? '—' : formatCurrency(valeur)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {observations.length > 0 && (
+                  <div className="rounded-lg overflow-hidden mb-3" style={{ border: '1px solid var(--tblr-border)' }}>
+                    {observations.map((obs, i) => (
+                      <div
+                        key={obs.id}
+                        className="flex items-center gap-3 px-3 py-2 text-sm"
+                        style={{ borderTop: i > 0 ? '1px solid var(--tblr-border)' : undefined }}
+                      >
+                        <span className="tabular-nums font-medium w-24" style={{ color: 'var(--tblr-text)' }}>
+                          {formatCurrency(Number(obs.prix_ht))}
+                        </span>
+                        <span className="text-xs w-24" style={{ color: 'var(--tblr-muted)' }}>
+                          {new Date(obs.date_observation).toLocaleDateString('fr-FR')}
+                        </span>
+                        <span className="text-xs flex-1 truncate" style={{ color: 'var(--tblr-muted)' }}>
+                          {obs.entreprise || t(`library_origin_${obs.origine}`)}
+                        </span>
+                        <button onClick={() => supprimerObservation(obs.id)} style={{ color: 'var(--tblr-muted)' }}>
+                          <IconX size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-end gap-2 p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                  <label className="text-xs">
+                    <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_observed_price')}</span>
+                    <input
+                      type="text" inputMode="decimal" value={nouveauPrix}
+                      onChange={e => setNouveauPrix(e.target.value)}
+                      className="w-28 px-2 py-1.5 rounded text-sm outline-none tabular-nums"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    />
+                  </label>
+                  <label className="text-xs flex-1 min-w-[140px]">
+                    <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_company')}</span>
+                    <input
+                      type="text" value={nouvelleEntreprise}
+                      onChange={e => setNouvelleEntreprise(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded text-sm outline-none"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    />
+                  </label>
+                  <label className="text-xs">
+                    <span className="block mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('library_provenance')}</span>
+                    <select
+                      value={nouvelleOrigine}
+                      onChange={e => setNouvelleOrigine(e.target.value as PrixObservation['origine'])}
+                      className="px-2 py-1.5 rounded text-sm outline-none"
+                      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    >
+                      <option value="offre">{t('library_provenance_offre')}</option>
+                      <option value="marche">{t('library_provenance_marche')}</option>
+                      <option value="bpu">{t('library_origin_bpu')}</option>
+                      <option value="saisie">{t('library_provenance_saisie')}</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs pb-2" style={{ color: 'var(--tblr-muted)' }}>
+                    <input type="checkbox" checked={definirCourant} onChange={e => setDefinirCourant(e.target.checked)} />
+                    {t('library_set_current')}
+                  </label>
+                  <button
+                    onClick={ajouterObservation}
+                    disabled={!nouveauPrix.trim()}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                      'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40',
+                    )}
+                  >
+                    <IconPlus size={14} />
+                    {t('add')}
+                  </button>
                 </div>
+                <p className="mt-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('library_price_hint')}</p>
               </div>
-              <div
-                className="p-6 flex gap-3"
-                style={{ background: 'var(--tblr-surface-2)' }}
-              >
-                <button
-                  onClick={() => setIsNewSpecModalOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                  style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                >
-                  {t('btn_cancel')}
-                </button>
-                <button
-                  onClick={handleNewSpec}
-                  disabled={!newSpecTitle || !selectedProjectId}
-                  className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  {t('btn_create')}
-                </button>
-              </div>
-            </motion.div>
+            )}
           </div>
         )}
-      </AnimatePresence>
+      </section>
     </div>
   );
 }

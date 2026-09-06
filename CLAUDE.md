@@ -129,7 +129,10 @@ The schema lives in `supabase/schema.sql`. Key tables:
 | `proposals` | Client proposals (devis) |
 | `tenders` | Market opportunities (appels d'offres) |
 | `invoices` | Factures (Factur-X EN 16931 compliant) |
-| `specifications` | CCTP documents |
+| `specifications` | Anciens documents « cahier des charges » — plus exposés dans l'UI depuis que `/specifications` est devenue la bibliothèque d'ouvrages ; l'API subsiste, les lignes sont conservées |
+| `articles_type` | Bibliothèque d'ouvrages du cabinet (article, prix courant, classement, provenance) |
+| `article_prix_observations` | Prix constatés par article, sans écraser le prix courant |
+| `ref_sfb_elements`, `ref_corps_etat`, `ref_dtu`, `ref_dtu_corps_etat`, `ref_naf` | Nomenclatures publiques, **globales** et non multi-tenant |
 | `documents` | Versioned document repository |
 | `site_reports` | Construction site inspection reports |
 | `meetings` | Meeting minutes (réunions de chantier) |
@@ -274,6 +277,49 @@ Deux mécanismes tournent sans qu'on leur pose de question :
   Volontairement **en lecture seule** : hors session il n'existe aucun jeton
   utilisateur à transmettre à l'API interne, et fabriquer un jeton de service
   contournerait les contrôles que les actions d'agent traversent justement.
+
+### Bibliothèque d'ouvrages
+
+`/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de
+documents mais le fonds d'articles réutilisables du cabinet : la base dans
+laquelle les CCTP, DPGF et DQE viennent puiser. `articles_type`, qui servait
+déjà de bibliothèque de prix alimentée par les BPU, en est le support.
+
+Un article se classe sur trois nomenclatures publiques, servies ensemble par
+`GET /api/referentiels` (`server/routes/referentiels.ts`, mises en cache 1 h
+car elles ne bougent qu'à la révision d'une norme) :
+
+| Table | Nomenclature | Rôle sur l'article |
+|---|---|---|
+| `ref_sfb_elements` | EU SfB plus, août 2024 (32 éléments, 284 sous-éléments) | où se situe l'ouvrage dans le bâtiment |
+| `ref_corps_etat` + `ref_dtu` | NF DTU par métiers, BNTEC/FFB, janvier 2026 (23 métiers, 115 normes) | quel métier l'exécute, sous quelle norme |
+| `ref_naf` | NAF rév. 2, INSEE, section F et connexes (141 codes) | quelle activité d'entreprise le réalise |
+
+Ces tables sont **globales**, pas multi-tenant : une nomenclature publique est
+la même pour tous les cabinets, et la dupliquer par tenant multiplierait une
+donnée qui ne change qu'une fois par an. Elles portent une RLS en lecture
+seule ; seule la service role écrit. `ref_dtu_corps_etat` est une liaison N-N
+parce qu'un même DTU relève parfois de deux métiers (NF DTU 26.1 : façades et
+enduits intérieurs).
+
+Deux invariants :
+
+1. **`origine` est le repère de provenance**, avec un vocabulaire fermé
+   (`reference`, `saisie`, `bpu`, `offre`, `import`). C'est lui qui distingue
+   un article créé par le cabinet du fonds de référence, et qui le signalera
+   comme tel une fois injecté dans un CCTP ou un DPGF. Il n'est posé **qu'à la
+   création** : un article saisi à la main puis re-remonté par un BPU garde sa
+   provenance, sinon le repère s'effacerait au premier import. La colonne
+   `source`, plus ancienne, garde le détail libre (« projet:&lt;id&gt; »).
+2. **Le prix courant et les prix observés sont deux choses.**
+   `articles_type.prix_unitaire` est le prix qu'on injecte dans un DPGF ;
+   `article_prix_observations` garde chaque prix constaté sans l'écraser, avec
+   son entreprise et sa date. C'est cette table que les réponses des
+   entreprises aux appels d'offres viendront alimenter. Reprendre une
+   observation comme prix courant reste un geste explicite
+   (`definir_comme_courant`) : une offre isolée ne redéfinit pas d'office le
+   prix de référence du cabinet. Les statistiques renvoient une **médiane**, pas
+   une moyenne, qu'une offre anormalement basse fausserait.
 
 ### OCR
 
