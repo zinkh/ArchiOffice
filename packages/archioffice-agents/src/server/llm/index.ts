@@ -146,6 +146,38 @@ export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
   return def.create({ apiKey, model });
 }
 
+/**
+ * Le fournisseur qui transcrira une dictée.
+ *
+ * La transcription ne suit pas forcément le fournisseur choisi pour le chat,
+ * parce qu'ils ne savent pas tous lire de l'audio : Claude n'accepte aucune
+ * entrée audio, et la transcription Mistral (Voxtral) se facture à la minute,
+ * ce que le catalogue au jeton ne sait pas exprimer. Un cabinet basculé sur
+ * Claude depuis /admin garderait sinon un micro qui ne marche pas, alors que
+ * la clé Gemini de l'instance est là.
+ *
+ * D'où la règle : le fournisseur actif s'il sait transcrire, Gemini sinon.
+ * La clé explicite (BYOK) n'est PAS reportée sur le repli — elle appartient
+ * au fournisseur pour lequel elle a été saisie.
+ */
+export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  const active = describeLlmSelection(opts);
+  const def = PROVIDERS[active.provider];
+  const hasKey = !!(opts.apiKey || (def && process.env[def.envKey]));
+  if (def && hasKey && isPricedModel(active.provider, active.model)) {
+    const provider = resolveLlmProvider(opts);
+    if (provider.transcribe) return provider;
+  }
+
+  if (!process.env.GEMINI_API_KEY) {
+    throw new LlmNotConfiguredError(
+      "La dictée vocale demande un fournisseur capable de lire l'audio. "
+      + `${def?.label ?? active.provider} ne transcrit pas, et aucune clé Gemini (GEMINI_API_KEY) n'est configurée pour prendre le relais.`,
+    );
+  }
+  return resolveLlmProvider({ provider: 'gemini' });
+}
+
 export { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
 export { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 export { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
@@ -166,6 +198,7 @@ export {
 } from './config.js';
 export { LlmNotConfiguredError } from './types.js';
 export type {
+  LlmAudio,
   LlmChatParams,
   LlmChatResult,
   LlmMessage,
@@ -173,5 +206,7 @@ export type {
   LlmToolCall,
   LlmToolDef,
   LlmToolResult,
+  LlmTranscriptionParams,
+  LlmTranscriptionResult,
   LlmUsage,
 } from './types.js';

@@ -1025,6 +1025,12 @@ export default {
       "agent_chat_drop_hint": "Drop a document here to attach it",
       "agent_chat_uploading": "Uploading {{name}}…",
       "agent_chat_upload_error": "Failed to upload the document.",
+      "agent_voice_start": "Dictate the message",
+      "agent_voice_stop": "Stop dictation",
+      "agent_voice_listening": "Listening…",
+      "agent_voice_transcribing": "Transcribing…",
+      "agent_voice_error_permission": "Microphone unavailable. Allow microphone access for this site.",
+      "agent_voice_error_engine": "Voice dictation is not available on this device.",
 
       // Loading / error states
       "error_loading_title": "Couldn't load the data",

@@ -386,14 +386,18 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
     inputTokens: number; outputTokens: number;
+    // Jetons d'entrée AUDIO (dictée vocale), comptés à part parce qu'ils se
+    // facturent à un autre tarif que le texte. Absent sur un appel texte.
+    audioInputTokens?: number;
   }): Promise<{ newBalance: number; costCents: number }> {
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
-    const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens);
+    const audioInputTokens = params.audioInputTokens ?? 0;
+    const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
     await supabaseAdmin.rpc('deduct_ai_credits', { p_tenant_id: params.tenantId, p_amount_cents: costCents });
     const { data: t } = await supabaseAdmin.from('tenants')
       .select('ai_credit_balance_eur_cents').eq('id', params.tenantId).single();
@@ -401,8 +405,12 @@ export async function createApp() {
     await supabaseAdmin.from('agent_token_usage').insert({
       tenant_id: params.tenantId, agent_id: params.agentId,
       user_id: params.userId, conversation_id: params.conversationId,
-      tokens_used: params.inputTokens + params.outputTokens,
-      input_tokens: params.inputTokens, output_tokens: params.outputTokens,
+      // Les jetons audio sont des jetons d'entrée : ils comptent dans les
+      // mêmes colonnes que le texte, seul leur tarif diffère (au-dessus, dans
+      // priceEurCents). Une colonne de plus n'apporterait rien que
+      // endpoint_type='transcription' ne dise déjà.
+      tokens_used: params.inputTokens + audioInputTokens + params.outputTokens,
+      input_tokens: params.inputTokens + audioInputTokens, output_tokens: params.outputTokens,
       cost_eur_cents: costCents, endpoint_type: params.endpointType,
       // Recorded so a usage line can be read back together with the rate
       // that produced it — without these two columns a €0.40 call and a

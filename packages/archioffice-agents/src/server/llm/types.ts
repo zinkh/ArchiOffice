@@ -74,6 +74,36 @@ export interface LlmChatResult {
   raw?: unknown;
 }
 
+/** Un enregistrement audio tel que le navigateur l'a produit. */
+export interface LlmAudio {
+  data: Buffer;
+  /** Type IANA, éventuellement paramétré ('audio/webm;codecs=opus'). Les
+   *  adaptateurs qui n'acceptent que le type nu s'en chargent eux-mêmes. */
+  mimeType: string;
+}
+
+export interface LlmTranscriptionParams {
+  audio: LlmAudio;
+  /** Étiquette BCP-47 de la langue attendue ('fr-FR'). Indication, pas
+   *  contrainte : un modèle multilingue reste libre de reconnaître autre
+   *  chose plutôt que de forcer une transcription fausse. */
+  language?: string;
+  /** Vocabulaire probable de la dictée — les termes du cabinet, les noms de
+   *  projets. Améliore nettement la reconnaissance du jargon (CCTP, DPGF,
+   *  APS, gros œuvre) qu'un modèle généraliste écrirait phonétiquement. */
+  vocabulary?: string[];
+}
+
+export interface LlmTranscriptionResult {
+  /** Le texte dicté, sans commentaire du modèle. Vide si l'enregistrement ne
+   *  portait aucune parole — un silence n'est pas une erreur. */
+  text: string;
+  /** `audioInputTokens` compte à part : tous les fournisseurs qui acceptent
+   *  de l'audio le facturent au-dessus de leur tarif texte (voir
+   *  ModelCost.audioInputUsdPerM). */
+  usage: LlmUsage & { audioInputTokens: number };
+}
+
 export interface LlmProvider {
   /** Stable provider key ('gemini', 'anthropic', 'mistral') — used in logs
    *  and, from step 2 on, to price a call and record it in
@@ -82,6 +112,13 @@ export interface LlmProvider {
   /** Concrete model id this instance calls. */
   readonly model: string;
   chat(params: LlmChatParams): Promise<LlmChatResult>;
+  /** Transcription d'un enregistrement vocal, quand le fournisseur sait lire
+   *  l'audio. Optionnel à dessein : Claude n'accepte aucune entrée audio, et
+   *  la transcription Mistral (Voxtral) se facture à la minute, hors du
+   *  catalogue de prix au jeton sur lequel toute la facturation repose. Le
+   *  choix d'un fournisseur capable est fait une fois, dans
+   *  resolveTranscriptionProvider(). */
+  transcribe?(params: LlmTranscriptionParams): Promise<LlmTranscriptionResult>;
 }
 
 /** Thrown when no usable credentials/model could be resolved. Callers turn

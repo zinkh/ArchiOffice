@@ -221,6 +221,54 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
+### Dictée vocale
+
+Un micro dans la barre de saisie du chat (`client/useDictation.ts`). Le texte
+reconnu se dépose dans la zone de texte et s'y **arrête** : la dictée n'envoie
+jamais d'elle-même. Une reconnaissance vocale se trompe, et un agent qui écrit
+dans la base ne doit pas agir sur une phrase que personne n'a relue.
+
+Deux moteurs derrière la même interface, parce qu'aucun ne couvre tous les
+postes :
+
+| | « navigateur » | « serveur » |
+|---|---|---|
+| Mécanique | `SpeechRecognition` (Web Speech API) | `MediaRecorder` puis `POST /api/agents/transcribe` |
+| Où | Chrome, Edge, Safari | partout où l'on peut enregistrer : Firefox, client Electron |
+| Restitution | au fil de la parole | à l'arrêt de l'enregistrement |
+| Coût | nul | jetons IA du cabinet, au tarif audio |
+
+Le moteur navigateur passe en premier quand il existe. Le moteur serveur prend
+le relais là où il n'existe pas — **et là où il existe mais ne fonctionne
+pas** : dans le Chromium d'Electron, `webkitSpeechRecognition` est présent
+mais échoue en `network`, le service de reconnaissance de Google étant lié à
+un navigateur et pas à une application (même raison que pour le Web Push, plus
+bas). D'où la bascule sur erreur, et pas seulement sur absence.
+
+Trois points côté serveur :
+
+1. **La transcription retranscrit, elle ne répond pas.** Une dictée est presque
+   toujours une instruction adressée à un agent (« demande à Sophie de
+   préparer le devis ») : un modèle laissé libre y répond au lieu de l'écrire.
+   La consigne de `gemini.ts` le lui interdit explicitement, à `temperature: 0`.
+2. **Le fournisseur de transcription ne suit pas forcément celui du chat.**
+   `resolveTranscriptionProvider()` garde le fournisseur actif s'il sait lire
+   de l'audio, et bascule sur Gemini sinon : Claude n'accepte aucune entrée
+   audio, et la transcription Mistral (Voxtral) se facture à la minute, hors
+   du catalogue au jeton sur lequel toute la facturation repose. Sans ce repli,
+   un cabinet basculé sur Claude depuis `/admin` aurait un micro inerte alors
+   que la clé Gemini de l'instance est là.
+3. **Les jetons audio se facturent à leur propre tarif**
+   (`ModelCost.audioInputUsdPerM`, 1,00 $/M contre 0,50 $/M en texte chez
+   Gemini). Ils comptent dans les colonnes d'entrée de `agent_token_usage` ;
+   c'est `endpoint_type = 'transcription'` qui les distingue. Un modèle sans
+   tarif audio publié facture l'audio au tarif texte : une modalité non tarifée
+   ne doit jamais ressortir moins chère que celle qu'on tarife.
+
+Le vocabulaire du cabinet (sigles du métier, noms de projets) est soufflé au
+moteur à chaque appel. Sans lui, « le CCTP du projet Villa Martin » ressort
+phonétiquement, or c'est exactement ce que la dictée sert à nommer.
+
 ### Écritures d'agent : schéma, défauts, erreurs
 
 `AGENT_RESOURCES` (`packages/archioffice-agents/src/types.ts`) porte, pour

@@ -1,3 +1,4 @@
+import express from 'express';
 import * as Sentry from '@sentry/node';
 import type { AgentRow } from '../types.js';
 import { AGENT_DEFAULT_ACTION_SCOPES, capabilitiesFromAgent } from '../types.js';
@@ -6,18 +7,21 @@ import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 import { loadAgencyIdentity } from './agencyIdentity.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
-import { resolveLlmProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
+import { resolveLlmProvider, resolveTranscriptionProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
 type DeductAiCreditFn = (params: {
   tenantId: string; userId: string;
   agentId: string | null; conversationId: string | null;
-  endpointType: 'agent' | 'suggest_articles';
+  endpointType: 'agent' | 'suggest_articles' | 'transcription';
   // Which model actually ran: the cost per token differs by an order of
   // magnitude between them, so billing can't be computed without it.
   provider: string; model: string;
   inputTokens: number; outputTokens: number;
+  /** Jetons d'entrée audio, facturés à leur propre tarif (voir pricing.ts).
+   *  Absent sur un appel texte. */
+  audioInputTokens?: number;
 }) => Promise<{ newBalance: number; costCents: number }>;
 
 interface BillingHelpers {
@@ -29,6 +33,44 @@ interface BillingHelpers {
   // caller's auth token, so they run through the exact same validation and
   // side effects as a human using the UI.
   baseUrl: string;
+}
+
+/** Les types que la route de dictée accepte, alignés sur ce que
+ *  MediaRecorder produit selon le navigateur (webm/opus sur Chromium et
+ *  Firefox, mp4/aac sur Safari). `express.raw` ne remplit `req.body` que
+ *  pour ceux-là ; tout autre type ressort en 400 plutôt qu'en erreur du
+ *  fournisseur. */
+const TRANSCRIBE_ACCEPTED_TYPES = ['audio/*', 'video/webm', 'video/mp4'];
+
+/** Le vocabulaire propre au cabinet, soufflé au moteur de transcription.
+ *
+ *  Sans lui, les sigles du métier et surtout les noms de projets ressortent
+ *  phonétiquement — « le CCTP du projet Villa Martin » devient « le C.C.T.P.
+ *  du projet villa martain » — et c'est justement ce que la dictée sert à
+ *  nommer. Les sigles sont fixes, les noms de projets viennent du cabinet,
+ *  plafonnés parce qu'une liste trop longue dilue l'indication au lieu de
+ *  l'affiner. Un échec de lecture ne fait pas échouer la dictée : on
+ *  transcrit avec les seuls sigles.
+ */
+const DOMAIN_VOCABULARY = [
+  'CCTP', 'DPGF', 'DQE', 'BPU', 'DCE', 'DOE', 'PLU', 'APS', 'APD', 'ACT', 'VISA',
+  'MOE', 'MOA', 'OPC', 'OPR', 'PC', 'DP', 'AO', 'OS', 'SPS',
+  'appel d\'offres', 'gros œuvre', 'second œuvre', 'maîtrise d\'œuvre',
+  'maîtrise d\'ouvrage', 'ordre de service', 'compte rendu de chantier',
+  'réunion de chantier', 'levée de réserves', 'situation de travaux', 'devis', 'facture',
+];
+
+async function transcriptionVocabulary(supabaseAdmin: any, tenantId: string): Promise<string[]> {
+  try {
+    const { data } = await supabaseAdmin.from('projects')
+      .select('name').eq('tenant_id', tenantId).limit(40);
+    const names = ((data as any) || [])
+      .map((p: any) => p?.name)
+      .filter((n: any): n is string => typeof n === 'string' && n.trim().length > 0);
+    return [...DOMAIN_VOCABULARY, ...names];
+  } catch {
+    return DOMAIN_VOCABULARY;
+  }
 }
 
 export function registerAgentRoutes(
@@ -212,6 +254,91 @@ export function registerAgentRoutes(
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
+
+  // POST /api/agents/transcribe
+  //
+  // Dictée vocale : l'enregistrement du navigateur entre ici, le texte
+  // reconnu en ressort. Il n'est JAMAIS envoyé à l'agent au passage — la
+  // transcription remplit la zone de saisie, l'utilisateur relit et envoie
+  // lui-même. Une reconnaissance vocale se trompe, et un agent qui écrit dans
+  // la base ne doit pas agir sur une phrase que personne n'a relue.
+  //
+  // Le corps est reçu brut plutôt qu'en multipart : le client poste un seul
+  // Blob, sans champ à côté, et express.raw évite d'ajouter multer au
+  // périmètre du paquet. Le plafond est bien en dessous des 20 Mo qu'une
+  // requête Gemini accepte en ligne — quelques minutes d'Opus pèsent moins
+  // d'un mégaoctet, un corps plus gros n'est pas une dictée.
+  app.post(
+    '/api/agents/transcribe',
+    express.raw({ type: TRANSCRIBE_ACCEPTED_TYPES, limit: '10mb' }),
+    async (req: any, res: any) => {
+      const startedAt = Date.now();
+      try {
+        const tenantId = await getTenantId(req.user.id);
+
+        const audio: Buffer | undefined = Buffer.isBuffer(req.body) ? req.body : undefined;
+        if (!audio || audio.length === 0) {
+          // express.raw n'a pas reconnu le type, ou le corps est vide : dans
+          // les deux cas rien à transcrire, et le dire précisément évite une
+          // enquête côté client sur un 500 muet.
+          return res.status(400).json({
+            error: "Aucun enregistrement audio reçu (Content-Type attendu : audio/webm, audio/mp4, audio/ogg, audio/wav).",
+          });
+        }
+
+        const { plan } = await getTenantPlan(tenantId);
+        if (plan !== 'enterprise') {
+          return res.status(403).json({ error: 'Plan Enterprise requis pour accéder aux agents IA.', code: 'ENTERPRISE_REQUIRED' });
+        }
+        if (billing) await billing.maybeRefreshMonthlyCredits(tenantId, plan);
+
+        const { data: tenantData } = await supabaseAdmin.from('tenants')
+          .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
+        const billingMode = (tenantData as any)?.agent_billing_mode ?? 'prepaid';
+        const balance = (tenantData as any)?.ai_credit_balance_eur_cents ?? 0;
+        if (billingMode === 'prepaid' && balance <= 0) {
+          return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+        }
+
+        const provider = resolveTranscriptionProvider(await getPlatformAiConfig(supabaseAdmin));
+        if (!provider.transcribe) {
+          // resolveTranscriptionProvider ne rend qu'un fournisseur capable ;
+          // ce garde-fou n'existe que pour que le type soit sûr ici.
+          throw new LlmNotConfiguredError("Le fournisseur IA actif ne sait pas transcrire d'audio.");
+        }
+
+        const result = await provider.transcribe({
+          audio: { data: audio, mimeType: String(req.headers['content-type'] || 'audio/webm') },
+          language: typeof req.query.lang === 'string' ? req.query.lang : 'fr-FR',
+          vocabulary: await transcriptionVocabulary(supabaseAdmin, tenantId),
+        });
+
+        const { inputTokens, outputTokens, audioInputTokens } = result.usage;
+        let newBalance = balance;
+        let costCents = 0;
+        if ((inputTokens + outputTokens + audioInputTokens) > 0 && billing) {
+          const deducted = await billing.deductAiCredit({
+            tenantId, userId: req.user.id,
+            agentId: typeof req.query.agent_id === 'string' ? req.query.agent_id : null,
+            conversationId: null,
+            endpointType: 'transcription',
+            provider: provider.id, model: provider.model,
+            inputTokens, outputTokens, audioInputTokens,
+          });
+          newBalance = deducted.newBalance;
+          costCents = deducted.costCents;
+        }
+
+        console.log(`[agent transcribe] ${audio.length}o en ${Date.now() - startedAt}ms tenant=${tenantId} ${provider.id}/${provider.model} chars=${result.text.length}`);
+        res.json({ text: result.text, cost_eur_cents: costCents, remaining_balance: newBalance });
+      } catch (e: any) {
+        if (e instanceof LlmNotConfiguredError) return res.status(503).json({ error: e.message });
+        console.error(`[agent transcribe error] ${e.message}`);
+        Sentry.captureException(e, { tags: { feature: 'agent-transcribe' }, extra: { userId: req.user?.id } });
+        res.status(500).json({ error: `Transcription impossible : ${e.message}` });
+      }
+    },
+  );
 
   // POST /api/agents/:id/chat
   app.post('/api/agents/:id/chat', async (req: any, res: any) => {
