@@ -171,7 +171,7 @@ describe('Bibliothèque de prix', () => {
       ],
     });
     expect(first.status).toBe(201);
-    expect(first.body).toEqual({ created: 2, updated: 0 });
+    expect(first.body).toEqual({ created: 2, updated: 0, prixRemontes: 0 });
 
     // Même désignation et même unité : c'est un prix à réactualiser, pas un
     // second article. Sans ce dédoublonnage la bibliothèque se remplit de
@@ -182,7 +182,7 @@ describe('Bibliothèque de prix', () => {
         { designation: 'Coffrage', unite: 'm2', prix_unitaire: 30 },
       ],
     });
-    expect(second.body).toEqual({ created: 1, updated: 1 });
+    expect(second.body).toEqual({ created: 1, updated: 1, prixRemontes: 0 });
 
     const rows = fakeSupabaseAdmin.getTable('articles_type').filter(r => r.tenant_id === tenantId);
     expect(rows).toHaveLength(3);
@@ -199,7 +199,7 @@ describe('Bibliothèque de prix', () => {
         { designation: 'ENDUIT', unite: 'M2', prix_unitaire: 25 },
       ],
     });
-    expect(res.body).toEqual({ created: 1, updated: 0 });
+    expect(res.body).toEqual({ created: 1, updated: 0, prixRemontes: 0 });
   });
 
   it('écarte les articles sans désignation et refuse les envois démesurés', async () => {
@@ -207,7 +207,7 @@ describe('Bibliothèque de prix', () => {
 
     const vide = await request(app).post('/api/price-library/bulk').set(authHeader(token))
       .send({ items: [{ designation: '   ', unite: 'm2', prix_unitaire: 10 }] });
-    expect(vide.body).toEqual({ created: 0, updated: 0 });
+    expect(vide.body).toEqual({ created: 0, updated: 0, prixRemontes: 0 });
 
     const trop = await request(app).post('/api/price-library/bulk').set(authHeader(token))
       .send({ items: Array.from({ length: 501 }, (_, i) => ({ designation: `A${i}`, unite: 'u', prix_unitaire: 1 })) });

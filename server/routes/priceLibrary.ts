@@ -10,6 +10,7 @@
 // routes à portée projet.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { ecrireObservations } from '../articlePrices';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -240,7 +241,35 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
         if (error) throw error;
       }
 
-      res.status(201).json({ created: toInsert.length, updated: toUpdate.length });
+      // Un envoi depuis un DPGF ou un BPU est aussi un prix constaté à une
+      // date : on le garde dans l'historique, sinon un article renvoyé trois
+      // fois en deux ans n'aurait que son dernier prix et aucune trajectoire.
+      // La clé de source vaut « bulk:<source>:<clé de dédoublonnage> », donc un
+      // renvoi du même document corrige l'observation au lieu de l'empiler.
+      const observations = [...toInsert, ...toUpdate]
+        .filter(r => Number(r.prix_unitaire) > 0 && r.source)
+        .map(r => ({
+          article_id: r.id,
+          prix_ht: Number(r.prix_unitaire),
+          unite: r.unite || null,
+          date_observation: r.date_prix || today,
+          origine: 'bpu' as const,
+          entreprise: null,
+          project_id: typeof r.source === 'string' && r.source.startsWith('projet:')
+            ? r.source.slice('projet:'.length) : null,
+          source_ref: `bulk:${r.source}:${dedupKey(r.designation, r.unite)}`,
+          created_by: req.user.id,
+        }));
+      let prixRemontes = 0;
+      try {
+        prixRemontes = await ecrireObservations(supabaseAdmin, tenantId, observations);
+      } catch (e: any) {
+        // Les articles sont enregistrés ; l'historique est un plus, pas une
+        // raison de faire échouer l'envoi.
+        console.error('[POST /api/price-library/bulk] historique de prix', e);
+      }
+
+      res.status(201).json({ created: toInsert.length, updated: toUpdate.length, prixRemontes });
     } catch (e: any) {
       console.error('[POST /api/price-library/bulk]', e);
       res.status(500).json({ error: 'Failed to save price library items: ' + e.message });

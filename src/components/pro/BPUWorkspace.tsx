@@ -19,6 +19,7 @@ import {
 } from './treeOps';
 import { montantEnLettres } from '../../lib/numberToFrenchWords';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
+import type { ArticleBibliotheque } from '../../types/library';
 import { formatCurrency } from '../../lib/utils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -411,8 +412,23 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   };
 
   // ── Bibliothèque ────────────────────────────────────────────────────────────
-  const insererDepuisBibliotheque = (modeles: Omit<BPULigne, 'id'>[]) => {
+  // La conversion article -> ligne de bordereau vit ici : un BPU n'a pas de
+  // quantités (elles se constatent à l'exécution) et porte une nature au sens
+  // du règlement de la consultation, deux choses qu'un DPGF ignore.
+  const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]) => {
     if (!selectedChap) return;
+    const modeles: Omit<BPULigne, 'id'>[] = articles.map(a => ({
+      numero: a.code ?? '',
+      designation: a.designation,
+      unite: a.unite || 'u',
+      quantite: 0,
+      prixUnitaire: Number(a.prix_unitaire) || 0,
+      prixTotal: 0,
+      type: 'ouvrage' as const,
+      nature: 'base' as const,
+      articleTypeId: a.id,   // provenance : c'est par ce fil que les prix remontent
+      cctpDescription: a.description ?? undefined,
+    }));
     const { lotIdx, chapIdx } = selectedChap;
     // Les clés de ligne sont positionnelles : une insertion par programme
     // pendant une édition validerait dans le mauvais article.
@@ -991,6 +1007,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             onClose={() => setShowLibrary(false)}
             onInsert={insererDepuisBibliotheque}
             canInsert={!!selectedChap}
+            hintCible="Sélectionnez d’abord un chapitre dans le bordereau"
           />
         )}
       </div>

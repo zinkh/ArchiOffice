@@ -321,6 +321,51 @@ Deux invariants :
    prix de référence du cabinet. Les statistiques renvoient une **médiane**, pas
    une moyenne, qu'une offre anormalement basse fausserait.
 
+#### La boucle : bibliothèque → documents → offres → bibliothèque
+
+`PriceLibraryPanel` sert les **trois** éditeurs (CCTP, DPGF, BPU/DQE). Il rend
+les articles bruts et non des lignes déjà formées : un article devient une
+ligne de DPGF (avec quantité), une ligne de BPU (sans quantité, avec nature)
+ou un article de CCTP (dont `description` amorce le texte technique). Chaque
+éditeur fait sa propre conversion — la centraliser obligerait le panneau à
+connaître les trois formes.
+
+`Ligne.articleTypeId` (`src/types/dpgf.ts`, donc partagé par le CCTP et le BPU
+qui étendent ce type) est le fil qui referme la boucle. Il sert deux choses à
+la fois, et c'est pour cela qu'il vit sur `Ligne` et non sur le seul
+`BPULigne` :
+
+1. **Le repère** demandé dans les documents : un badge « BIB » marque dans le
+   DPGF et le CCTP les articles issus du fonds du cabinet.
+2. **La remontée des prix.** Quand une entreprise renvoie un bordereau chiffré,
+   `OffreBPU.prix` est une table `id de ligne -> P.U.` ; `articleTypeId` dit à
+   quel article de la bibliothèque chaque prix se rapporte.
+   `server/articlePrices.ts` verse alors une observation par ligne. Sans ce
+   champ, un prix reçu ne se rattache à rien et la boucle ne se referme pas.
+
+La remontée est **automatique** : `POST` et `PUT` sur les offres du BPU
+l'appellent, en meilleur effort (l'offre est déjà enregistrée, un échec de la
+remontée ne doit pas la faire perdre) ; `POST
+/api/projects/:id/bpu/offres/:offreId/vers-bibliotheque` permet de la rejouer.
+Une offre `ecartee` est ignorée, et un prix `null` aussi — dans une offre,
+`null` veut dire « non chiffré », surtout pas zéro, qui est un prix.
+
+L'idempotence tient à `article_prix_observations.source_ref`, une clé stable
+(« bpu:&lt;offreId&gt;:&lt;ligneId&gt; », « bulk:&lt;source&gt;:&lt;clé&gt; ») sous index unique,
+sur laquelle l'écriture se fait en **upsert**. Sans elle, une offre corrigée
+puis réimportée ajouterait un doublon et la médiane d'un article finirait par
+mesurer le nombre d'imports plutôt que le nombre d'entreprises consultées.
+Deux points à ne pas défaire :
+
+- **L'index est total, pas partiel.** Un `WHERE source_ref IS NOT NULL` aurait
+  semblé plus propre, mais PostgREST n'émet pas le prédicat de l'index dans son
+  `ON CONFLICT` et Postgres refuse alors d'inférer une contrainte partielle.
+  Le prédicat est inutile : Postgres tient les NULL pour distincts, donc les
+  observations saisies à la main restent libres de se répéter.
+- **Un même lot d'upsert ne peut pas porter deux fois la même clé** — Postgres
+  répond « ON CONFLICT DO UPDATE command cannot affect row a second time ».
+  D'où le garde-fou par `source_ref` dans `remonterPrixOffre()`.
+
 ### OCR
 
 `packages/archioffice-agents/src/server/ocr.ts` rattrape les documents sans
