@@ -370,6 +370,39 @@ Deux mécanismes tournent sans qu'on leur pose de question :
   utilisateur à transmettre à l'API interne, et fabriquer un jeton de service
   contournerait les contrôles que les actions d'agent traversent justement.
 
+### Délégation entre agents
+
+Incident du 7 septembre 2026 : un agent avait créé 19 CCTP vides en réponse à
+des demandes qui visaient en réalité la Bibliothèque d'ouvrages, faute d'outil
+sur `articles_type` et de tout moyen de savoir qu'un collègue, lui, l'avait.
+`AgentContext.colleagues` (`context.ts`) ferme cette boucle : à chaque appel,
+`buildAgentContext()` liste les autres agents **actifs** du cabinet (jamais
+l'agent lui-même — d'où le nouveau paramètre `currentAgentId`), avec leur nom,
+leur métier et le libellé humain de leurs ressources autorisées (déduit de
+`AGENT_RESOURCES` à partir de leur `action_scopes`).
+
+Toujours peuplée, **sans condition de `context_scopes`** : à la différence des
+projets, contacts ou du référentiel du cabinet, savoir qui d'autre existe dans
+le cabinet n'expose aucune donnée métier — la restreindre derrière un scope
+n'aurait fait que réintroduire le trou qui a causé l'incident pour certains
+agents.
+
+`buildAgentSystemPrompt()` (`systemPrompts.ts`) traduit cette liste en une
+règle explicite (« Une demande qui sort de ton métier... ») : nommer le
+collègue dont le rôle ou les ressources correspondent plutôt que d'improviser
+avec la ressource la plus proche, et demander franchement à l'utilisateur qui
+s'en occupe si aucun collègue listé ne convient — jamais deviner. La règle
+survit à un `system_prompt_override` complet (comme les notes fetch_url et
+messagerie) : elle vient des données (`ctx.colleagues`), pas du texte du
+prompt, donc un architecte qui réécrit tout le prompt d'un agent ne doit pas
+perdre au passage sa capacité à rediriger vers un collègue.
+
+La délégation reste une **suggestion faite à l'utilisateur**, pas un transfert
+automatique : chaque agent est une conversation séparée (voir le sélecteur
+d'agent dans `AgentChat.tsx`), et rien ne fait encore parler un agent à un
+autre. « Déléguer » veut dire, pour l'instant, nommer la bonne personne et
+laisser l'utilisateur basculer de conversation.
+
 ### Bibliothèque d'ouvrages
 
 `/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de

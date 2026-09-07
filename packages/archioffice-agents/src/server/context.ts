@@ -1,4 +1,5 @@
 import type { AgentContext } from '../types.js';
+import { AGENT_RESOURCES } from '../types.js';
 // Pinned to the 1.x line deliberately: pdf-parse@2 depends on @napi-rs/canvas
 // (a Rust native binary, for its screenshot/image-rendering features, which
 // this file never uses) — that native module's runtime needs system
@@ -143,6 +144,7 @@ export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
   userId: string,
+  currentAgentId: string,
   scopes: string[],
   attachedDocumentIds: string[] = []
 ): Promise<AgentContext> {
@@ -161,10 +163,31 @@ export async function buildAgentContext(
     recentDocuments: [],
     tasks: [],
     documentContents: [],
+    colleagues: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
   };
 
   const fetches: Promise<void>[] = [];
+
+  // Toujours peuplé, sans condition de context_scopes (voir AgentContext.colleagues) :
+  // c'est ce qui permet à un agent de rediriger une demande hors de son
+  // ressort vers le bon collègue plutôt que de l'improviser avec le mauvais
+  // outil.
+  fetches.push(
+    supabaseAdmin.from('agents').select('id, name, role_title, action_scopes')
+      .eq('tenant_id', tenantId).eq('is_active', true).neq('id', currentAgentId)
+      .then((r: any) => {
+        if (r.error) { console.warn('[agent context] colleagues fetch failed:', r.error.message); return; }
+        ctx.colleagues = ((r.data || []) as any[]).map(a => ({
+          id: a.id,
+          name: a.name,
+          roleTitle: a.role_title,
+          resourceLabels: ((a.action_scopes || []) as string[])
+            .map(key => AGENT_RESOURCES.find(res => res.key === key)?.label)
+            .filter((label): label is string => !!label),
+        }));
+      })
+  );
 
   if (scopes.includes('projects')) {
     fetches.push(

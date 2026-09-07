@@ -328,6 +328,17 @@ export interface AgentContext {
   recentDocuments: { id: string; name: string; project_id: string; phase: string; uploaded_at: string; file_url: string }[];
   tasks: { id: string; title: string; status: string; due_date: string; project_id: string }[];
   documentContents: { id: string; name: string; content: string }[];
+  /**
+   * Les autres agents actifs du cabinet (jamais l'agent lui-même), avec ce
+   * qu'ils sont autorisés à écrire — pour qu'un agent sache vers qui
+   * rediriger une demande qui n'est pas de son ressort au lieu de
+   * l'improviser avec le mauvais outil (voir l'incident du 7 septembre 2026 :
+   * un agent avait créé des CCTP vides pour une demande de bibliothèque
+   * d'ouvrages, faute de savoir qu'un collègue avait le bon outil).
+   * Toujours peuplé, sans condition de context_scopes : connaître les
+   * collègues du cabinet n'expose aucune donnée métier.
+   */
+  colleagues: { id: string; name: string; roleTitle: string; resourceLabels: string[] }[];
   firmKnowledge: {
     phaseBenchmarks: { phase: string; avgDurationDays: number; sampleSize: number }[];
     priceCatalog: { designation: string; unite: string; prix_unitaire: number; categorie: string | null }[];
