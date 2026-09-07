@@ -1,13 +1,20 @@
-// ── Versement du BPU et de ses offres vers le comparatif ACT ─────────────────
+// ── Versement d'un DPGF ou d'un BPU, et de ses offres, vers le comparatif ACT ─
 // Le module ACT (src/components/ACTModule.tsx) possède déjà un comparatif
 // détaillé par article, avec son écran de comparaison, sa notation et son
 // générateur de RAO. Ses articles sont aujourd'hui saisis un par un à la main.
-// Le BPU les produit, et les offres importées remplissent les prix.
+// Le DPGF ou le BPU les produisent, et les offres importées remplissent les
+// prix — l'un ou l'autre, selon lequel des deux le cabinet a fait chiffrer.
 //
 // À la demande, jamais automatiquement et jamais dans les deux sens : le
 // comparatif ACT est éditable par l'architecte, une synchronisation
 // automatique se battrait contre lui.
-import type { BPU, BPULigne, OffreBPU } from '../types/bpu';
+//
+// `versComparatif` opère sur les types de BASE (Lot/Ligne, dpgf.ts) et non sur
+// BPU spécifiquement : un DPGF et un BPU partagent le même arbre, et
+// `projectLotId` vit maintenant sur Lot pour cette raison précise — la même
+// fonction sert donc les deux documents. `bpuVersComparatif` reste exporté
+// comme alias : c'est le nom que le code et les tests existants connaissent.
+import type { Lot, Ligne, OffreDocument } from '../types/dpgf';
 
 /** Forme des articles attendue par ACTModule (voir son ComparatifArticle). */
 export interface ComparatifArticle {
@@ -34,18 +41,19 @@ export interface VersementResultat {
 }
 
 /**
- * Projette le bordereau et les offres retenues vers la structure du comparatif.
+ * Projette un document (DPGF ou BPU) et les offres retenues vers la structure
+ * du comparatif.
  *
- * ComparatifLot.lot_id désigne un project_lots.id, pas un lot interne au BPU :
- * un lot de bordereau non rattaché ne peut pas être versé. Ils sont rapportés
- * à l'appelant plutôt que laissés tomber en silence.
+ * ComparatifLot.lot_id désigne un project_lots.id, pas un lot interne au
+ * document : un lot non rattaché ne peut pas être versé. Ils sont rapportés à
+ * l'appelant plutôt que laissés tomber en silence.
  */
-export function bpuVersComparatif(bpu: BPU, offres: OffreBPU[]): VersementResultat {
+export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementResultat {
   const comparatif: ComparatifLot[] = [];
   const lotsNonRattaches: { numero: string; titre: string }[] = [];
   const retenues = offres.filter(o => o.statut !== 'ecartee' && o.entrepriseId);
 
-  for (const lot of bpu.lots) {
+  for (const lot of lots) {
     if (!lot.projectLotId) {
       lotsNonRattaches.push({ numero: lot.numero, titre: lot.titre });
       continue;
@@ -59,7 +67,7 @@ export function bpuVersComparatif(bpu: BPU, offres: OffreBPU[]): VersementResult
         prix: {}, is_section_header: true,
       });
 
-      const walk = (lignes: BPULigne[]) => {
+      const walk = (lignes: Ligne[]) => {
         for (const l of lignes) {
           // Un article parent porte la somme de ses enfants : il ne se chiffre
           // pas et n'a donc rien à faire dans un comparatif de prix.
@@ -97,4 +105,17 @@ export function bpuVersComparatif(bpu: BPU, offres: OffreBPU[]): VersementResult
   }
 
   return { comparatif, lotsNonRattaches };
+}
+
+/** Alias conservé pour le code et les tests qui connaissent déjà ce nom. */
+export function bpuVersComparatif(bpu: { lots: Lot[] }, offres: OffreDocument[]): VersementResultat {
+  return versComparatif(bpu.lots, offres);
+}
+
+/**
+ * Même chose pour un DPGF (ou tout document dont l'arbre est déjà des Lot[]) :
+ * un alias nommé, plutôt que d'obliger chaque appelant à écrire `.lots`.
+ */
+export function dpgfVersComparatif(dpgf: { lots: Lot[] }, offres: OffreDocument[]): VersementResultat {
+  return versComparatif(dpgf.lots, offres);
 }

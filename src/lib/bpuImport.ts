@@ -10,7 +10,7 @@
 // réservé aux cellules saisies par l'utilisateur : il rend 0 en cas d'échec, ce
 // qui transformerait « l'entreprise n'a pas chiffré ce poste » en « elle a
 // chiffré 0 € » — autre chose au moment de classer les offres.
-import type { BPU, BPULigne } from '../types/bpu';
+import type { Lot, Ligne } from '../types/dpgf';
 import { forEachLigne } from '../components/pro/treeOps';
 import { SHEET_META, BPU_SHEET_SCHEMA } from './bpuExport';
 
@@ -180,6 +180,23 @@ export interface Rapprochement {
   alertes: string[];
 }
 
+/**
+ * Le strict nécessaire pour rapprocher une offre importée : un DPGF (avec
+ * quantités) et un BPU/DQE partagent le même arbre lots > chapitres >
+ * articles, donc ce module et le dialogue qui l'utilise (OffreImportDialog)
+ * servent les deux sans dupliquer la mécanique de rapprochement. `bpuId` dans
+ * `meta` garde son nom : c'est la clé littérale du fichier Excel exporté
+ * (feuille Méta, `bpu_id`), un format déjà figé qu'il n'y a aucune raison de
+ * faire bouger pour ce qui reste une vérification générique d'identité de
+ * document.
+ */
+export interface DocumentAvecArticles {
+  id: string;
+  lots: Lot[];
+  totalHT: number;
+  version: string;
+}
+
 export interface ResultatImport {
   meta: { schemaVersion?: number; bpuId?: string; version?: string; correspond: boolean };
   rapprochements: Rapprochement[];
@@ -200,9 +217,11 @@ interface ArticleRef {
   refBpu?: string;
 }
 
-function indexArticles(bpu: BPU): ArticleRef[] {
+function indexArticles(document: DocumentAvecArticles): ArticleRef[] {
   const out: ArticleRef[] = [];
-  forEachLigne(bpu.lots, (l: BPULigne) => {
+  // `refBpu` n'existe que sur BPULigne ; l'intersection le lit sans forcer
+  // Ligne (le type de base, partagé avec le DPGF) à le porter.
+  forEachLigne(document.lots, (l: Ligne & { refBpu?: string }) => {
     // Un article parent porte la somme de ses enfants, il ne se chiffre pas.
     if (l.children?.length) return;
     out.push({
@@ -221,8 +240,8 @@ function indexArticles(bpu: BPU): ArticleRef[] {
  * Un article déjà pris par un rapprochement plus sûr ne peut pas être
  * revendiqué une seconde fois.
  */
-export function rapprocher(lignes: LigneImportee[], bpu: BPU): Omit<ResultatImport, 'meta'> {
-  const articles = indexArticles(bpu);
+export function rapprocher(lignes: LigneImportee[], document: DocumentAvecArticles): Omit<ResultatImport, 'meta'> {
+  const articles = indexArticles(document);
   const parRef = new Map<string, ArticleRef>();
   const parNumero = new Map<string, ArticleRef[]>();
   const parDesignation = new Map<string, ArticleRef[]>();
@@ -360,7 +379,7 @@ export interface FeuilleBrute {
 }
 
 /** Analyse un classeur déjà lu. Séparé de la lecture pour rester testable. */
-export function analyserClasseur(feuilles: FeuilleBrute[], bpu: BPU): ResultatImport {
+export function analyserClasseur(feuilles: FeuilleBrute[], document: DocumentAvecArticles): ResultatImport {
   const meta: ResultatImport['meta'] = { correspond: true };
 
   const feuilleMeta = feuilles.find(f => f.nom === SHEET_META);
@@ -370,7 +389,7 @@ export function analyserClasseur(feuilles: FeuilleBrute[], bpu: BPU): ResultatIm
     meta.bpuId = kv.get('bpu_id') ? String(kv.get('bpu_id')) : undefined;
     meta.version = kv.get('version') ? String(kv.get('version')) : undefined;
     meta.correspond =
-      (meta.bpuId === undefined || meta.bpuId === bpu.id)
+      (meta.bpuId === undefined || meta.bpuId === document.id)
       && (meta.schemaVersion === undefined || meta.schemaVersion === BPU_SHEET_SCHEMA);
   }
 
@@ -405,11 +424,11 @@ export function analyserClasseur(feuilles: FeuilleBrute[], bpu: BPU): ResultatIm
     }
   }
 
-  return { meta, ...rapprocher(lignes, bpu) };
+  return { meta, ...rapprocher(lignes, document) };
 }
 
 /** Lit un fichier renvoyé par une entreprise et le rapproche du bordereau. */
-export async function parseOffreFile(file: File, bpu: BPU): Promise<ResultatImport> {
+export async function parseOffreFile(file: File, document: DocumentAvecArticles): Promise<ResultatImport> {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   // Les valeurs calculées seulement : aucune formule du fichier n'est évaluée.
@@ -424,5 +443,5 @@ export async function parseOffreFile(file: File, bpu: BPU): Promise<ResultatImpo
     };
   });
 
-  return analyserClasseur(feuilles, bpu);
+  return analyserClasseur(feuilles, document);
 }

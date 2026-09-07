@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconDeviceFloppy, IconTag, IconBuildingStore,
+  IconBuildingCommunity,
 } from '@tabler/icons-react';
 import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
+import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 
 interface CCTPEditorProps {
@@ -31,6 +33,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   );
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showDecoupage, setShowDecoupage] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -167,22 +170,57 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     });
   };
 
+  // ── Bâtiment / phase / localisation ───────────────────────────────────────
+  // Même registre document + attribut hérité que le DPGF et le BPU (voir
+  // DecoupageDocument dans types/dpgf.ts) : le CCTP partage le même dpgf.lots.
+  const updateBatimentPhase = (champ: 'batimentId' | 'phaseId', valeur: string | undefined) => {
+    if (!selection) return;
+    mutateDPGF(d => {
+      if (selection.kind === 'lot') {
+        (d.lots[selection.lotIdx] as any)[champ] = valeur;
+      } else if (selection.kind === 'chapitre') {
+        (d.lots[selection.lotIdx].chapitres[selection.chapIdx] as any)[champ] = valeur;
+      } else {
+        (d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx] as any)[champ] = valeur;
+      }
+    });
+  };
+
+  const updateLocalisation = (localisation: string) => {
+    if (!selection || selection.kind !== 'ligne') return;
+    mutateDPGF(d => {
+      d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx].localisation = localisation;
+    });
+  };
+
   // ── Derive selected data ──────────────────────────────────────────────────
   const getSelectedData = () => {
     if (!selection) return null;
     if (selection.kind === 'lot') {
       const lot = dpgf.lots[selection.lotIdx];
-      return { label: 'Lot', name: `${lot.numero} — ${lot.titre}`, cctpOnly: false, description: (lot as any).cctpDescription ?? '', ligne: null };
+      return {
+        label: 'Lot', name: `${lot.numero} — ${lot.titre}`, cctpOnly: false,
+        description: (lot as any).cctpDescription ?? '', ligne: null,
+        batimentId: lot.batimentId, phaseId: lot.phaseId,
+      };
     }
     if (selection.kind === 'chapitre') {
       const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
       if (!chap) return null;
-      return { label: 'Chapitre', name: `${chap.numero} — ${chap.titre}`, cctpOnly: !!chap.cctpOnly, description: chap.cctpDescription ?? '', ligne: null };
+      return {
+        label: 'Chapitre', name: `${chap.numero} — ${chap.titre}`, cctpOnly: !!chap.cctpOnly,
+        description: chap.cctpDescription ?? '', ligne: null,
+        batimentId: chap.batimentId, phaseId: chap.phaseId,
+      };
     }
     const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
     const ligne = chap?.lignes[selection.ligneIdx];
     if (!ligne) return null;
-    return { label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly, description: ligne.cctpDescription ?? '', ligne };
+    return {
+      label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly,
+      description: ligne.cctpDescription ?? '', ligne,
+      batimentId: ligne.batimentId, phaseId: ligne.phaseId,
+    };
   };
 
   const selData = getSelectedData();
@@ -210,6 +248,18 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => setShowDecoupage(v => !v)}
+            title="Bâtiments / phases"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
+              showDecoupage
+                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
+                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
+            }`}
+          >
+            <IconBuildingCommunity size={14} />
+            Bâtiments / phases
+          </button>
+          <button
             onClick={() => setShowLibrary(v => !v)}
             title="Bibliothèque d’ouvrages"
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
@@ -230,6 +280,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
           </button>
         </div>
       </div>
+
+      {showDecoupage && (
+        <DecoupagePanel
+          doc={dpgf}
+          onPatch={patch => mutateDPGF(d => Object.assign(d, patch))}
+          onClose={() => setShowDecoupage(false)}
+        />
+      )}
 
       <div className="flex flex-1 overflow-hidden">
 
@@ -447,6 +505,38 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     </div>
                   );
                 })()}
+                {/* Bâtiment / phase / localisation */}
+                {(dpgf.multiBatiments || dpgf.multiPhases || selection.kind === 'ligne') && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    {(dpgf.multiBatiments || dpgf.multiPhases) && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Bâtiment / phase :</span>
+                        <SelecteursDecoupage
+                          doc={dpgf}
+                          batimentId={selData.batimentId}
+                          phaseId={selData.phaseId}
+                          onBatimentChange={v => updateBatimentPhase('batimentId', v)}
+                          onPhaseChange={v => updateBatimentPhase('phaseId', v)}
+                        />
+                      </div>
+                    )}
+                    {selection.kind === 'ligne' && selData.ligne && (
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[11px] text-zinc-500 dark:text-zinc-400" htmlFor="cctp-localisation">
+                          Localisation (pièce, ouvrage) :
+                        </label>
+                        <input
+                          id="cctp-localisation"
+                          type="text"
+                          value={selData.ligne.localisation || ''}
+                          onChange={e => updateLocalisation(e.target.value)}
+                          placeholder="Ex : SdB étage, façade nord…"
+                          className="px-2 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-800 outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Description CCTP */}

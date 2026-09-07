@@ -4,13 +4,15 @@ import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush,
-  IconX, IconBuildingStore,
+  IconX, IconBuildingStore, IconFileImport, IconScale, IconBuildingCommunity,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
-import { DPGF, Lot, Chapitre, Ligne } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
 import { formatCurrency } from '../../lib/utils';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
+import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
+import { DpgfGroupedView } from './DpgfGroupedView';
 import type { ArticleBibliotheque } from '../../types/library';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
@@ -45,11 +47,17 @@ interface DPGFWorkspaceProps {
   onDragStart?: (ligne: Ligne) => void;
   showTree?: boolean;
   onToggleTree?: () => void;
+  /** Ouvre l'import d'une offre reçue sur ce DPGF. Absent tant que ProTab ne le fournit pas. */
+  onImportOffre?: () => void;
+  /** Verse le DPGF et ses offres au comparatif détaillé du module ACT. */
+  onPushToAct?: () => void;
+  /** Juste pour désactiver « Verser au comparatif » tant qu'aucune offre n'est reçue. */
+  offres?: OffreDocument[];
 }
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, onSave, projectName, onDropExternal, onDragStart,
-  showTree: showTreeProp, onToggleTree,
+  showTree: showTreeProp, onToggleTree, onImportOffre, onPushToAct, offres = [],
 }) => {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -66,12 +74,20 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showDecoupage, setShowDecoupage] = useState(false);
+  const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
   const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   // ── Derived flat rows ────────────────────────────────────────────────────────
+  // Nombre de colonnes ajoutées en queue de tableau par le découpage
+  // (bâtiment, phase — chacune conditionnelle — et localisation, toujours
+  // présente). Sert à étendre le colSpan des lignes de totaux en pied de
+  // tableau, qui ne connaissent pas ces colonnes autrement.
+  const nbColsDecoupage = (dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0) + 1;
+
   const flatRows: FlatRow<Lot, Chapitre, Ligne>[] =
     buildFlatRows(dpgf.lots, { expandedLots, expandedChaps, expandedLignes });
 
@@ -295,6 +311,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           if (field === 'prixTotal') {
             return { ...ligne, prixTotal: evalFormula(value) };
           }
+          if (field === 'localisation') {
+            return { ...ligne, localisation: value };
+          }
           return ligne;
         });
         lot.chapitres = [...lot.chapitres.slice(0, ci), chap, ...lot.chapitres.slice(ci + 1)];
@@ -323,6 +342,40 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   };
 
   const cancelEdit = () => setEditingCell(null);
+
+  /**
+   * Pose batimentId/phaseId sur un lot, un chapitre ou un article, identifié
+   * par sa clé de ligne — même dispatch que commitEdit, mais un <select>
+   * s'applique tout de suite, sans passer par l'état d'édition en cours.
+   */
+  const setDecoupageChamp = (rKey: string, champ: 'batimentId' | 'phaseId', valeur: string | undefined) => {
+    const parsed = parseRowKey(rKey);
+    if (!parsed) return;
+    if (parsed.kind === 'ligne') {
+      const { lotIdx: li, chapIdx: ci, lignePath } = parsed;
+      mutateLots(lots => {
+        const newLots = [...lots];
+        const lot = { ...newLots[li] };
+        const chap = { ...lot.chapitres[ci] };
+        chap.lignes = mutateLigneAtPath([...chap.lignes], lignePath, ligne => ({ ...ligne, [champ]: valeur }));
+        lot.chapitres = [...lot.chapitres.slice(0, ci), chap, ...lot.chapitres.slice(ci + 1)];
+        newLots[li] = recomputeLot(lot);
+        return newLots;
+      });
+    } else if (parsed.kind === 'chapitre') {
+      const { lotIdx: li, chapIdx: ci } = parsed;
+      mutateLots(lots => {
+        const newLots = [...lots];
+        const lot = { ...newLots[li] };
+        lot.chapitres = lot.chapitres.map((c, i) => i === ci ? { ...c, [champ]: valeur } : c);
+        newLots[li] = lot;
+        return newLots;
+      });
+    } else if (parsed.kind === 'lot') {
+      const { lotIdx: li } = parsed;
+      mutateLots(lots => lots.map((l, i) => i === li ? { ...l, [champ]: valeur } : l));
+    }
+  };
 
   // ── Clipboard ────────────────────────────────────────────────────────────────
   const copySelected = () => {
@@ -443,6 +496,17 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
               id: 'openLib', label: 'Bibliothèque', icon: <IconBuildingStore size={20} />,
               onClick: () => setShowLibrary(v => !v), active: showLibrary,
             },
+            {
+              id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
+              onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+            },
+          ],
+        },
+        {
+          label: 'Marché',
+          actions: [
+            { id: 'import', label: 'Importer une offre', icon: <IconFileImport size={20} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
+            { id: 'toAct', label: 'Verser au comparatif ACT', icon: <IconScale size={20} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0 },
           ],
         },
         {
@@ -540,7 +604,39 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
 
+      {showDecoupage && (
+        <DecoupagePanel
+          doc={dpgf}
+          onPatch={patch => onChange({ ...dpgf, ...patch })}
+          onClose={() => setShowDecoupage(false)}
+        />
+      )}
+
+      {/* Classement : l'arbre par lot reste la seule vue éditable ; les autres
+          réordonnent les mêmes articles pour la lecture, sans les dupliquer. */}
+      {(dpgf.multiBatiments || dpgf.multiPhases) && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
+          <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Classement</label>
+          <select
+            className="px-2 py-1 text-xs border border-zinc-300 rounded outline-none focus:ring-1 focus:ring-blue-400"
+            value={groupement}
+            onChange={e => setGroupement(e.target.value as GroupementDpgf)}
+          >
+            <option value="lot">Par lot (éditable)</option>
+            {dpgf.multiBatiments && <option value="batiment">Par bâtiment</option>}
+            {dpgf.multiPhases && <option value="phase">Par phase</option>}
+            {dpgf.multiBatiments && dpgf.multiPhases && <option value="batiment-phase">Par bâtiment et phase</option>}
+          </select>
+          {groupement !== 'lot' && (
+            <span className="text-[11px] text-zinc-400">Lecture seule — repassez « Par lot » pour éditer.</span>
+          )}
+        </div>
+      )}
+
       {/* Main workspace */}
+      {groupement !== 'lot' ? (
+        <DpgfGroupedView dpgf={dpgf} groupement={groupement} />
+      ) : (
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left tree panel ─────────────────────────────────────────────── */}
@@ -598,6 +694,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 <th className="px-2 py-2 text-right font-semibold w-24">Quantité</th>
                 <th className="px-2 py-2 text-right font-semibold w-28">P.U. HT (€)</th>
                 <th className="px-2 py-2 text-right font-semibold w-28">Total HT (€)</th>
+                {dpgf.multiBatiments && <th className="px-1 py-2 text-center font-semibold w-14">Bât.</th>}
+                {dpgf.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">Phase</th>}
+                <th className="px-2 py-2 text-left font-semibold w-28">Localisation</th>
                 <th className="px-2 py-2 w-16"></th>
               </tr>
             </thead>
@@ -630,6 +729,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <td className="px-2 py-1 text-right font-bold text-sm font-mono text-[#1e5090]">
                         {formatCurrency(row.lot.sousTotal)}
                       </td>
+                      {(dpgf.multiBatiments || dpgf.multiPhases) && (
+                        <td className="px-1 py-1" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)}>
+                          <div className="flex items-center gap-1 justify-center">
+                            <SelecteursDecoupage
+                              doc={dpgf} batimentId={row.lot.batimentId} phaseId={row.lot.phaseId}
+                              onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                              onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                            />
+                          </div>
+                        </td>
+                      )}
+                      <td className="px-1 py-1" />{/* pas de localisation au niveau lot */}
                       <td className="px-1 py-1">
                         <button onClick={() => deleteLot(row.lotIdx)} className="text-red-400 hover:text-red-600 opacity-60 hover:opacity-100">
                           <IconTrash size={14} />
@@ -662,6 +773,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={5}>
                         <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} />
                       </td>
+                      {(dpgf.multiBatiments || dpgf.multiPhases) && (
+                        <td className="px-1 py-1" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)}>
+                          <div className="flex items-center gap-1 justify-center">
+                            <SelecteursDecoupage
+                              doc={dpgf} batimentId={row.chapitre!.batimentId} phaseId={row.chapitre!.phaseId}
+                              onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                              onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                            />
+                          </div>
+                        </td>
+                      )}
+                      <td className="px-1 py-1" />{/* pas de localisation au niveau chapitre */}
                       <td className="px-1 py-1 flex gap-0.5 items-center">
                         <button onClick={() => addLigne(row.lotIdx, row.chapIdx!)} className="text-blue-400 hover:text-blue-600" title="Ajouter article">
                           <IconPlus size={13} />
@@ -739,6 +862,20 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric />
                       )}
                     </td>
+                    {(dpgf.multiBatiments || dpgf.multiPhases) && (
+                      <td className="px-1 py-0.5" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)}>
+                        <div className="flex items-center gap-1 justify-center">
+                          <SelecteursDecoupage
+                            doc={dpgf} batimentId={l.batimentId} phaseId={l.phaseId}
+                            onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                            onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                          />
+                        </div>
+                      </td>
+                    )}
+                    <td className="px-2 py-0.5 text-xs text-zinc-500">
+                      <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs" />
+                    </td>
                     <td className="px-1 py-0.5 flex gap-0.5 items-center justify-end">
                       {canAddChild && (
                         <button
@@ -761,19 +898,19 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
               <tr className="bg-[#1e5090] text-white font-bold">
                 <td colSpan={6} className="px-4 py-2 text-sm">TOTAL HT</td>
                 <td className="px-2 py-2 text-right font-mono">{formatCurrency(dpgf.totalHT)}</td>
-                <td />
+                <td colSpan={nbColsDecoupage} />
               </tr>
               <tr className="bg-[#2563eb]/10 text-zinc-700 dark:text-zinc-300">
                 <td colSpan={6} className="px-4 py-1.5 text-sm">TVA {dpgf.TVA}%</td>
                 <td className="px-2 py-1.5 text-right font-mono text-sm">
                   {formatCurrency(dpgf.totalTTC - dpgf.totalHT)}
                 </td>
-                <td />
+                <td colSpan={nbColsDecoupage} />
               </tr>
               <tr className="bg-[#1e5090]/90 text-white font-bold">
                 <td colSpan={6} className="px-4 py-2">TOTAL TTC</td>
                 <td className="px-2 py-2 text-right font-mono">{formatCurrency(dpgf.totalTTC)}</td>
-                <td />
+                <td colSpan={nbColsDecoupage} />
               </tr>
             </tbody>
           </table>
@@ -789,6 +926,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           />
         )}
       </div>
+      )}
     </div>
   );
 };

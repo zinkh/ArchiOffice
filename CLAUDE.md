@@ -366,6 +366,55 @@ Deux points à ne pas défaire :
   répond « ON CONFLICT DO UPDATE command cannot affect row a second time ».
   D'où le garde-fou par `source_ref` dans `remonterPrixOffre()`.
 
+### Bâtiments, phases, localisation et offres DPGF
+
+Une opération porte parfois plusieurs bâtiments et se mène en plusieurs
+phases. `DecoupageDocument` (`src/types/dpgf.ts`) porte ce découpage — deux
+registres au niveau du document (`batiments: Batiment[]`, `phases:
+PhaseOperation[]`, chacun activable par un booléen `multiBatiments`/
+`multiPhases`) plus un attribut `batimentId`/`phaseId` (`DecoupageNoeud`)
+hérité en cascade lot → chapitre → article, résolu par `batimentEffectif()`
+et `phaseEffective()`. C'est le même principe que les tranches du BPU
+(`Tranche`/`trancheId`) : un registre partagé plutôt qu'un quatrième niveau
+d'arbre, pour ne pas toucher `FlatRow`/`rowKey`/`MAX_ARTICLE_DEPTH` et
+l'aplatissement de `treeOps.ts`, communs aux trois éditeurs. `DPGF`, `BPU` et
+le CCTP (qui édite le même `DPGF`) étendent tous `DecoupageDocument` ; le
+panneau qui gère les deux registres (`DecoupagePanel.tsx`) et le couple de
+`<select>` compacts qui identifient bâtiment/phase sur une ligne
+(`SelecteursDecoupage`) sont donc partagés par les trois. `Ligne` porte en
+plus `localisation?: string` (pièce ou ouvrage, texte libre — la
+nomenclature des pièces varie trop d'un projet à l'autre pour un vocabulaire
+fermé), disponible sur chaque article dans les trois éditeurs.
+
+Le classement du DPGF (`GroupementDpgf = 'lot' | 'batiment' | 'phase' |
+'batiment-phase'`) reste par défaut « par lot » — la seule vue éditable, le
+sélecteur de classement n'apparaissant que si `multiBatiments` ou
+`multiPhases` est actif. Les trois autres classements sont rendus par
+`DpgfGroupedView.tsx`, une vue de LECTURE qui réordonne les mêmes articles
+sans dupliquer l'arbre éditable : exactement le même principe que le
+comparatif ACT, qui lit le BPU sans jamais y réécrire. Un article sans
+bâtiment ou sans phase identifiés tombe dans un groupe « sans affectation »,
+volontairement affiché en dernier — une exception à régulariser, pas le
+premier chiffre qu'on veut voir.
+
+**Le DPGF verse maintenant lui aussi ses offres au comparatif ACT.** L'ACT
+récupère les offres des entreprises sur la base du DPGF ou du BPU selon le
+document utilisé pour consulter — jusqu'ici seul le BPU avait cette notion.
+`OffreDocument` (`src/types/dpgf.ts`, ex-`OffreBPU`, conservé comme alias
+dans `types/bpu.ts` pour ne pas casser les call sites existants) et
+`DocumentAvecArticles` (`src/lib/bpuImport.ts`) généralisent le
+rapprochement de fichier d'offre, `OffreImportDialog.tsx` (ex-
+`BPUImportDialog`) et `versComparatif()` (`src/lib/bpuToAct.ts`, avec les
+alias `bpuVersComparatif`/`dpgfVersComparatif`) pour que le même moteur et la
+même boîte de dialogue servent les deux documents. Comme pour le BPU, les
+offres du DPGF vivent dans une colonne séparée du document
+(`dpgfs.offres` JSONB, routes sous `/api/projects/:id/dpgf/offres`) pour que
+l'autosave du document n'efface pas un import fait entre-temps.
+`article_prix_observations.source_ref` est préfixé par la provenance
+(`` `dpgf:<offreId>:<ligneId>` `` vs `` `bpu:<offreId>:<ligneId>` ``, porté
+par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
+se marchent pas dessus dans le même index d'idempotence.
+
 ### OCR
 
 `packages/archioffice-agents/src/server/ocr.ts` rattrape les documents sans
@@ -484,9 +533,9 @@ import type { Project } from '@/src/types';
 | Réunion de chantier | Site meeting / construction meeting |
 | Ordre de service | Work order |
 
-## No Tests
+## Tests
 
-There is no test suite. `npm run lint` runs TypeScript type-checking only. Validate changes manually by running the dev server.
+There is a Vitest suite (`npm test`), run in CI (`.github/workflows/*.yml`, job `lint-and-build`) after `npm run lint` and before `npm run build` — a change is not done until all three pass. `tests/*.test.ts` cover server routes end-to-end through the real Express app against `tests/testServer.ts`'s in-memory `fakeSupabaseAdmin` (a small PostgREST-like emulator with `.select/.insert/.update/.delete/.upsert(rows, {onConflict})/.eq/.single/.maybeSingle`, `.seed(table, rows)`, `.getTable(table)`); `src/lib/__tests__/*.test.ts` cover pure frontend logic (import/rapprochement, ACT-versement, formulas). `npm run lint` (`tsc --noEmit`) still only type-checks — it does not run the tests.
 
 ## Docker
 

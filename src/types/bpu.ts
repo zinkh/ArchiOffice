@@ -11,7 +11,8 @@
 // components/pro/treeOps.ts, la charge utile du glisser-déposer et les
 // conversions DPGF<->BPU fonctionnent sans adaptateur. Le BPU est réellement le
 // même arbre d'articles, c'est la prémisse de « le DQE est une vue ».
-import type { Ligne, Chapitre, Lot } from './dpgf';
+import type { Ligne, Chapitre, Lot, DecoupageDocument, OffreDocument, OffreAnomalie } from './dpgf';
+export type { OffreAnomalie } from './dpgf';
 
 /**
  * Nature d'un article au sens du règlement de la consultation. Une PSE
@@ -55,8 +56,9 @@ export interface BPUChapitre extends Chapitre {
 export interface BPULot extends Lot {
   chapitres: BPUChapitre[];
   trancheId?: string;
-  /** Rattachement à project_lots.id — requis pour verser au comparatif ACT. */
-  projectLotId?: string;
+  // `projectLotId` (rattachement à project_lots.id, requis pour verser au
+  // comparatif ACT) est désormais porté par Lot : un DPGF verse lui aussi ses
+  // offres au comparatif depuis cette PR, avec le même rattachement.
 }
 
 /**
@@ -92,7 +94,7 @@ export interface MarcheHeader {
   delaiPaiementJours?: number;
 }
 
-export interface BPU {
+export interface BPU extends DecoupageDocument {
   id: string;
   projectId: string;
   /** DPGF d'origine, quand le BPU a été initialisé depuis lui. */
@@ -116,52 +118,11 @@ export interface BPU {
   totalTTC: number;
 }
 
-/**
- * Offre reçue d'une entreprise, issue du réimport de son bordereau chiffré.
- * Stockée dans la colonne bpu_data.offres, SÉPARÉE du document : l'autosave
- * débouncée de ProTab réécrit le document entier, et une offre logée dans le
- * même blob serait effacée par la première sauvegarde suivant l'import.
- */
-export interface OffreBPU {
-  id: string;
-  /** Renvoie vers act_data.consultation.entreprises[].id quand elle existe. */
-  entrepriseId?: string;
-  entrepriseNom: string;
-  lotIds?: string[];
-  dateReception: string;
-  fichierNom: string;
-  importedAt: string;
-  importedBy?: string;
-  /** Version du document au moment de l'import, pour détecter un décalage. */
-  bpuVersion: string;
-  /**
-   * articleId -> P.U. HT remis. `null` signifie « non chiffré » ou « pour
-   * mémoire » : surtout pas 0, qui est un prix et changerait le classement.
-   * Table plate et non tableau : la comparaison lit en O(1) et survit à une
-   * réorganisation de l'arbre après l'import.
-   */
-  prix: Record<string, number | null>;
-  anomalies: OffreAnomalie[];
-  /** Mis en cache pour la liste des offres. */
-  totalOffreHT?: number;
-  statut: 'brouillon' | 'validee' | 'ecartee';
-  motifEcart?: string;
-}
-
-export interface OffreAnomalie {
-  articleId?: string;
-  rowIndex?: number;
-  code:
-    | 'pu_manquant'
-    | 'pu_zero'
-    | 'pu_aberrant'
-    | 'unite_differente'
-    | 'designation_modifiee'
-    | 'quantite_modifiee'
-    | 'ligne_ajoutee'
-    | 'ligne_supprimee';
-  message: string;
-}
+// `OffreBPU` était le seul type d'offre du projet ; un DPGF a désormais lui
+// aussi ses offres, sur le même arbre — voir types/dpgf.ts pour la définition
+// et le raisonnement. Cet alias garde le nom que le code du BPU utilise
+// partout (ProTab, BPUWorkspace, bpuToAct) sans toucher ces call sites.
+export type OffreBPU = OffreDocument;
 
 /** Ligne complète telle que renvoyée par GET /api/projects/:projectId/bpu. */
 export interface BPURow {
