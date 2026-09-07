@@ -9,7 +9,7 @@
 //   - A provider with no key configured is refused with LlmNotConfiguredError,
 //     which the routes turn into a 503 (distinct from a call that ran and
 //     failed).
-import { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
+import { createGeminiProvider, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TTS_MODEL } from './gemini.js';
 import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
 import { isPricedModel, MODEL_CATALOG } from './pricing.js';
@@ -146,7 +146,59 @@ export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
   return def.create({ apiKey, model });
 }
 
-export { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
+/**
+ * Le fournisseur qui transcrira une dictée.
+ *
+ * La transcription ne suit pas forcément le fournisseur choisi pour le chat,
+ * parce qu'ils ne savent pas tous lire de l'audio : Claude n'accepte aucune
+ * entrée audio, et la transcription Mistral (Voxtral) se facture à la minute,
+ * ce que le catalogue au jeton ne sait pas exprimer. Un cabinet basculé sur
+ * Claude depuis /admin garderait sinon un micro qui ne marche pas, alors que
+ * la clé Gemini de l'instance est là.
+ *
+ * D'où la règle : le fournisseur actif s'il sait transcrire, Gemini sinon.
+ * La clé explicite (BYOK) n'est PAS reportée sur le repli — elle appartient
+ * au fournisseur pour lequel elle a été saisie.
+ */
+export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  const active = describeLlmSelection(opts);
+  const def = PROVIDERS[active.provider];
+  const hasKey = !!(opts.apiKey || (def && process.env[def.envKey]));
+  if (def && hasKey && isPricedModel(active.provider, active.model)) {
+    const provider = resolveLlmProvider(opts);
+    if (provider.transcribe) return provider;
+  }
+
+  if (!process.env.GEMINI_API_KEY) {
+    throw new LlmNotConfiguredError(
+      "La dictée vocale demande un fournisseur capable de lire l'audio. "
+      + `${def?.label ?? active.provider} ne transcrit pas, et aucune clé Gemini (GEMINI_API_KEY) n'est configurée pour prendre le relais.`,
+    );
+  }
+  return resolveLlmProvider({ provider: 'gemini' });
+}
+
+/**
+ * Le fournisseur qui lira une réponse à voix haute.
+ *
+ * Contrairement à la transcription, il n'y a pas de fournisseur actif à
+ * garder : aucun modèle de chat, chez aucun des trois fournisseurs, ne
+ * produit de l'audio en sortie — la synthèse demande un modèle dédié, que
+ * seul Gemini propose dans notre catalogue. La clé Gemini de l'instance
+ * pilote donc toujours cette voix, quel que soit le fournisseur choisi pour
+ * le chat dans /admin.
+ */
+export function resolveSpeechProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  const apiKey = opts.provider === 'gemini' ? opts.apiKey : undefined;
+  if (!apiKey && !process.env.GEMINI_API_KEY) {
+    throw new LlmNotConfiguredError(
+      "La synthèse vocale demande une clé Gemini (GEMINI_API_KEY) : c'est le seul fournisseur du catalogue qui sache produire de l'audio.",
+    );
+  }
+  return resolveLlmProvider({ provider: 'gemini', model: DEFAULT_GEMINI_TTS_MODEL, apiKey });
+}
+
+export { createGeminiProvider, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TTS_MODEL } from './gemini.js';
 export { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 export { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
 export {
@@ -166,12 +218,17 @@ export {
 } from './config.js';
 export { LlmNotConfiguredError } from './types.js';
 export type {
+  LlmAudio,
   LlmChatParams,
   LlmChatResult,
   LlmMessage,
   LlmProvider,
+  LlmSpeechParams,
+  LlmSpeechResult,
   LlmToolCall,
   LlmToolDef,
   LlmToolResult,
+  LlmTranscriptionParams,
+  LlmTranscriptionResult,
   LlmUsage,
 } from './types.js';

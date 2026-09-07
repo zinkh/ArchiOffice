@@ -23,6 +23,11 @@ export interface ModelCost {
   inputUsdPerM: number;
   /** Provider's own price, USD per million output tokens. */
   outputUsdPerM: number;
+  /** Provider's own price for AUDIO input tokens, USD per million, when it
+   *  differs from the text rate — Gemini charges audio at twice its text
+   *  rate. Absent means the model bills audio like text (or takes no audio
+   *  at all, which resolveTranscriptionProvider() checks separately). */
+  audioInputUsdPerM?: number;
   /** Human-readable label for the model picker. */
   label: string;
 }
@@ -33,7 +38,13 @@ export interface ModelCost {
 export const MODEL_CATALOG: Record<string, Record<string, ModelCost>> = {
   // Google, https://ai.google.dev/gemini-api/docs/pricing
   gemini: {
-    'gemini-3-flash-preview': { inputUsdPerM: 0.50, outputUsdPerM: 3.00, label: 'Gemini 3 Flash' },
+    'gemini-3-flash-preview': { inputUsdPerM: 0.50, outputUsdPerM: 3.00, audioInputUsdPerM: 1.00, label: 'Gemini 3 Flash' },
+    // Modèle de synthèse vocale dédié — un modèle de chat ordinaire ne sait
+    // pas produire d'audio en sortie. outputUsdPerM porte ici directement le
+    // tarif audio : contrairement à gemini-3-flash-preview, ce modèle ne
+    // produit jamais que de l'audio, donc pas besoin d'un tarif texte de
+    // sortie séparé (voir audioInputUsdPerM plus haut, pour le sens inverse).
+    'gemini-2.5-flash-preview-tts': { inputUsdPerM: 0.50, outputUsdPerM: 10.00, label: 'Gemini 2.5 Flash TTS' },
   },
   // Anthropic, first-party API rates (verified 2026-06-24).
   anthropic: {
@@ -80,12 +91,18 @@ export function listPricedModels(): { provider: string; model: string; label: st
  *
  * Rounds up to at least 1 cent, as the flat-rate version it replaces did:
  * a call that costs a fraction of a cent still consumes a cent of credit.
+ *
+ * `audioInputTokens` counts separately from `inputTokens` because a dictated
+ * instruction reaches the model as audio, which every provider that accepts
+ * it bills above its text rate. Defaults to 0, so the text call sites are
+ * unchanged.
  */
 export function priceEurCents(
   provider: string,
   model: string,
   inputTokens: number,
   outputTokens: number,
+  audioInputTokens: number = 0,
 ): number {
   const cost = getModelCost(provider, model);
   if (!cost) {
@@ -97,13 +114,24 @@ export function priceEurCents(
       .flatMap(models => Object.values(models))
       .reduce((a, b) => (b.outputUsdPerM > a.outputUsdPerM ? b : a));
     console.warn(`[ai pricing] unpriced model ${provider}/${model} — billed at the highest known rate`);
-    return priceFrom(worst, inputTokens, outputTokens);
+    return priceFrom(worst, inputTokens, outputTokens, audioInputTokens);
   }
-  return priceFrom(cost, inputTokens, outputTokens);
+  return priceFrom(cost, inputTokens, outputTokens, audioInputTokens);
 }
 
-function priceFrom(cost: ModelCost, inputTokens: number, outputTokens: number): number {
+function priceFrom(
+  cost: ModelCost,
+  inputTokens: number,
+  outputTokens: number,
+  audioInputTokens: number,
+): number {
+  // A model with no published audio rate bills audio like text rather than
+  // free: an unpriced modality must never come out cheaper than the one we
+  // do price.
+  const audioRate = cost.audioInputUsdPerM ?? cost.inputUsdPerM;
   const eur =
-    ((inputTokens / 1_000_000) * cost.inputUsdPerM + (outputTokens / 1_000_000) * cost.outputUsdPerM) * markup();
+    ((inputTokens / 1_000_000) * cost.inputUsdPerM +
+      (audioInputTokens / 1_000_000) * audioRate +
+      (outputTokens / 1_000_000) * cost.outputUsdPerM) * markup();
   return Math.max(1, Math.ceil(eur * 100));
 }

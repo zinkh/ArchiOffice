@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
+import { useDictation } from './useDictation.js';
+import { useSpeech } from './useSpeech.js';
+import type { Speech } from './useSpeech.js';
 import type { CopilotSuggestion, CopilotSuggestionRaw } from '@/src/lib/copilotSuggestions';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
 
@@ -85,8 +88,11 @@ function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
   );
 }
 
-function MessageBubble({ msg, agentColor }: { msg: AgentMessage & { artifact?: AgentArtifact }; agentColor: string }) {
+function MessageBubble({ msg, agentColor, speech }: { msg: AgentMessage & { artifact?: AgentArtifact }; agentColor: string; speech: Speech }) {
   const isUser = msg.role === 'user';
+  // La lecture à voix haute ne sert que les réponses de l'agent : ce que
+  // l'utilisateur a écrit, il vient de le formuler lui-même.
+  const isSpeaking = !isUser && speech.activeId === msg.id;
   return (
     <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
@@ -94,7 +100,7 @@ function MessageBubble({ msg, agentColor }: { msg: AgentMessage & { artifact?: A
           <IconRobot size={13} color="white" />
         </div>
       )}
-      <div className="max-w-[82%]">
+      <div className="max-w-[82%] group">
         <div
           className="px-3 py-2 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap"
           style={
@@ -106,6 +112,23 @@ function MessageBubble({ msg, agentColor }: { msg: AgentMessage & { artifact?: A
           {msg.content}
         </div>
         {msg.artifact && <ArtifactCard artifact={msg.artifact} />}
+        {!isUser && msg.content && (
+          <button
+            onClick={() => speech.toggle(msg.id, msg.content)}
+            className="mt-1 p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+            style={{ color: isSpeaking ? 'var(--tblr-primary)' : 'var(--tblr-muted)', opacity: isSpeaking ? 1 : undefined }}
+            title="Lire à voix haute"
+            aria-label="Lire à voix haute"
+          >
+            {isSpeaking && speech.status === 'loading' ? (
+              <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+            ) : isSpeaking ? (
+              <IconPlayerStopFilled size={14} />
+            ) : (
+              <IconVolume size={14} />
+            )}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -114,6 +137,16 @@ function MessageBubble({ msg, agentColor }: { msg: AgentMessage & { artifact?: A
 // ── Document picker ───────────────────────────────────────────────────────────
 
 interface DocMeta { id: string; name: string; phase?: string }
+
+/** Raccorde une bribe dictée à ce qui est déjà dans la zone de saisie.
+ *  La dictée complète le texte au lieu de le remplacer : on peut commencer au
+ *  clavier, continuer à la voix, et reprendre au clavier. */
+function appendDictated(current: string, addition: string): string {
+  const clean = addition.trim();
+  if (!clean) return current;
+  if (!current) return clean;
+  return /\s$/.test(current) ? current + clean : `${current} ${clean}`;
+}
 
 function DocumentPicker({ attached, onAttach, onDetach }: {
   attached: DocMeta[];
@@ -231,7 +264,7 @@ function saveDraft(agentId: string, value: string): void {
 }
 
 export function AgentChatProvider({ children }: { children: React.ReactNode }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -256,6 +289,36 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const abortReasonRef = useRef<'user' | 'timeout' | null>(null);
 
   const activeAgent: Agent | null = agents.find(a => a.id === activeAgentId) ?? null;
+
+  // Dictée vocale. Le texte reconnu se dépose dans la zone de saisie et s'y
+  // arrête : c'est l'utilisateur qui relit et envoie. Voir useDictation.ts
+  // pour les deux moteurs (reconnaissance du navigateur, ou enregistrement
+  // transcrit par le serveur là où elle n'existe pas).
+  const dictation = useDictation({
+    language: i18n.language?.startsWith('en') ? 'en-US' : 'fr-FR',
+    agentId: activeAgentId,
+    onTranscript: (text: string) => {
+      setInput(prev => {
+        const next = appendDictated(prev, text);
+        if (activeAgentId) saveDraft(activeAgentId, next);
+        return next;
+      });
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
+  });
+
+  // Synthèse vocale des réponses. Un bouton par message d'agent (voir
+  // MessageBubble) ; voir useSpeech.ts pour les deux moteurs.
+  const speech = useSpeech({
+    language: i18n.language?.startsWith('en') ? 'en-US' : 'fr-FR',
+    agentId: activeAgentId,
+  });
+  // Le micro et le haut-parleur ne doivent jamais tourner ensemble : la voix
+  // de l'agent serait captée par la dictée, et un enregistrement en cours
+  // n'a pas à être couvert par une réponse qui se lit toute seule.
+  useEffect(() => {
+    if (dictation.status !== 'idle') speech.stop();
+  }, [dictation.status, speech]);
 
   // Surfaces "still working" feedback while a request is in flight, instead of
   // leaving the user staring at bouncing dots with no sense of progress.
@@ -346,10 +409,17 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(false);
     setAgentSelectorOpen(false);
     setExpanded(false);
-  }, []);
+    // Une réponse ne continue pas à se lire derrière un panneau refermé.
+    speech.stop();
+  }, [speech]);
 
   const sendMessage = async () => {
     if (!input.trim() || !activeAgentId || loading) return;
+    // Le micro ne reste pas ouvert par-dessus un envoi : la suite de la
+    // dictée arriverait dans une zone que l'on vient de vider. Une lecture en
+    // cours n'a pas non plus sa place pendant qu'une nouvelle réponse arrive.
+    if (dictation.status !== 'idle') dictation.stop();
+    speech.stop();
     const agentId = activeAgentId;
     const rawInput = input.trim();
     const userMsg: AgentMessage = {
@@ -491,6 +561,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
   const resetConversation = async () => {
     if (!activeAgentId) return;
+    speech.stop();
     try {
       await apiFetch(`/api/agents/${activeAgentId}/conversation`, { method: 'DELETE' });
     } catch (e) {
@@ -505,6 +576,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const switchAgent = (agentId: string): void => {
+    speech.stop();
     setActiveAgentId(agentId);
     setAgentSelectorOpen(false);
     setAttachedDocs([]);
@@ -712,7 +784,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} />
+                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} />
               ))}
               {loading && (
                 <div className="flex flex-col gap-1">
@@ -773,12 +845,61 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   {(tokenBalance / 100).toFixed(2)} € de crédits IA restants
                 </div>
               )}
+              {/* Ce que la reconnaissance entend en ce moment, pas encore
+                  arrêté : affiché à part, en gris, pour qu'on voie que la
+                  machine suit sans que ces mots provisoires se mêlent au
+                  texte que l'on relira avant d'envoyer. */}
+              {(dictation.status !== 'idle' || dictation.interim) && (
+                <div className="flex items-center gap-2 text-[11px] mb-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                  {dictation.status === 'transcribing' ? (
+                    <div className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+                  ) : (
+                    <span className="w-2 h-2 rounded-full animate-pulse shrink-0" style={{ background: '#c92a2a' }} />
+                  )}
+                  <span className="truncate">
+                    {dictation.interim || t(dictation.status === 'transcribing' ? 'agent_voice_transcribing' : 'agent_voice_listening')}
+                  </span>
+                </div>
+              )}
+              {dictation.error && (
+                <div className="text-[11px] mb-1.5" style={{ color: '#c92a2a' }}>
+                  {dictation.error === 'permission' ? t('agent_voice_error_permission')
+                    : dictation.error === 'tokens' ? t('agent_tokens_exhausted')
+                    : dictation.error === 'engine' ? t('agent_voice_error_engine')
+                    : dictation.error}
+                </div>
+              )}
+              {speech.error && (
+                <div className="text-[11px] mb-1.5" style={{ color: '#c92a2a' }}>
+                  {speech.error === 'tokens' ? t('agent_tokens_exhausted')
+                    : speech.error === 'enterprise' ? t('enterprise_required')
+                    : t('agent_speech_error')}
+                </div>
+              )}
               <div className="flex gap-2 items-end">
                 <DocumentPicker
                   attached={attachedDocs}
                   onAttach={doc => setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc])}
                   onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))}
                 />
+                {/* Rien à afficher sur un poste qui ne sait ni reconnaître ni
+                    enregistrer : un bouton inerte vaut moins que pas de
+                    bouton. */}
+                {dictation.supported && (
+                  <button
+                    onClick={dictation.toggle}
+                    disabled={loading || dictation.status === 'transcribing'}
+                    className="p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+                    title={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start')}
+                    aria-label={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start')}
+                    aria-pressed={dictation.status === 'listening'}
+                    style={{ color: dictation.status === 'listening' ? '#c92a2a' : 'var(--tblr-muted)' }}
+                  >
+                    {dictation.status === 'listening'
+                      ? <IconPlayerStopFilled size={15} />
+                      : <IconMicrophone size={15} />}
+                  </button>
+                )}
                 <textarea
                   ref={textareaRef}
                   rows={1}

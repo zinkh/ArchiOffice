@@ -82,13 +82,14 @@ export class FakeSupabaseAdmin {
     },
   };
 
-  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — only
-  // 'increment_ai_credits' is called anywhere in this codebase.
+  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — the two AI-credit
+  // functions are the only ones this codebase calls.
   async rpc(fnName: string, params: Record<string, any>) {
-    if (fnName === 'increment_ai_credits') {
+    if (fnName === 'increment_ai_credits' || fnName === 'deduct_ai_credits') {
+      const sign = fnName === 'increment_ai_credits' ? 1 : -1;
       const tenants = this.tables.get('tenants') || [];
       const tenant = tenants.find(t => t.id === params.p_tenant_id);
-      if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
+      if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + sign * params.p_amount_cents;
       return { data: null, error: null };
     }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
