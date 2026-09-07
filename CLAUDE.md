@@ -397,11 +397,52 @@ messagerie) : elle vient des données (`ctx.colleagues`), pas du texte du
 prompt, donc un architecte qui réécrit tout le prompt d'un agent ne doit pas
 perdre au passage sa capacité à rediriger vers un collègue.
 
-La délégation reste une **suggestion faite à l'utilisateur**, pas un transfert
-automatique : chaque agent est une conversation séparée (voir le sélecteur
-d'agent dans `AgentChat.tsx`), et rien ne fait encore parler un agent à un
-autre. « Déléguer » veut dire, pour l'instant, nommer la bonne personne et
-laisser l'utilisateur basculer de conversation.
+Sans `delegate_enabled` (capacité suivante), la délégation reste une
+**suggestion faite à l'utilisateur** : nommer la bonne personne et le laisser
+basculer de conversation lui-même.
+
+### Consultation entre agents et flux d'activité
+
+Deux capacités indépendantes, dans le même esprit que `web_fetch_enabled` —
+une colonne de plus sur `agents`, réglable depuis `/agents/:id/edit`, off par
+défaut (`supabase/migrate_agent_interop.sql`) :
+
+| Colonne | Outil | Fichier |
+|---|---|---|
+| `delegate_enabled` | `consulter_agent` | `server/delegateTools.ts` |
+| `notify_users_enabled` | `publier_flux_activite` | `server/notifyTools.ts` |
+
+**`consulter_agent(agent_id, message)`** fait ce que la suggestion ci-dessus
+ne pouvait pas : obtenir la réponse du collègue **dans le même tour**, plutôt
+que renvoyer l'utilisateur ouvrir une autre conversation. Il n'existe pas de
+notion de « conversation entre agents » séparée — la question part par
+`POST /api/agents/:id/chat` sur la conversation du collègue **avec le même
+utilisateur**, avec son jeton (même principe que le reste des outils
+d'agent : « une action se comporte exactement comme si l'utilisateur l'avait
+faite lui-même »). La consultation est donc facturée normalement, aux
+crédits du même tenant, et s'enregistre pour de vrai dans l'historique du
+collègue — pas un aparté hors système.
+
+Un seul niveau : l'en-tête `X-Agent-Delegation`, posé sur cet appel imbriqué,
+retire `consulter_agent` des outils de ce tour côté route de chat
+(`routes.ts`), quel que soit le réglage du collègue consulté. Sans ce
+garde-fou, deux agents qui se renvoient la question boucleraient
+indéfiniment, chaque tour étant facturé. `AgentChatResponse.consulted` fait
+remonter qui a été consulté ; `AgentChat.tsx` bascule alors automatiquement
+sur la conversation de ce collègue pour montrer sa réponse (après un court
+délai, le temps de lire d'abord celle de l'agent interrogé) — c'est ce qui
+« ouvre son onglet ».
+
+**`publier_flux_activite(message)`** est le pendant pour un vrai utilisateur :
+poster dans Notifications & Flux d'activité, sous le nom de l'agent
+(`feed_posts.user_id`/`user_name`, validés côté serveur contre `agents` par
+`as_agent_id` — jamais un nom envoyé tel quel). Aucun nouveau canal : même
+table, même mécanique de mention (`@Prénom Nom`, `server/routes/activityFeed.ts`)
+que le flux humain, donc les mêmes notifications système. `AgentContext.teamMembers`
+(comme `colleagues`, toujours peuplé, sans condition de `context_scopes` : ce
+sont des noms, pas une donnée métier) donne à l'agent le nom exact à
+reprendre — la mention n'y répond qu'à une correspondance stricte avec
+`profiles.name`.
 
 ### Bibliothèque d'ouvrages
 

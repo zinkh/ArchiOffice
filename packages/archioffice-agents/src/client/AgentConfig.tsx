@@ -45,6 +45,8 @@ export default function AgentConfig() {
   const [mailSendEnabled, setMailSendEnabled] = useState(false);
   const [geoEnabled, setGeoEnabled] = useState(false);
   const [docsReadEnabled, setDocsReadEnabled] = useState(false);
+  const [delegateEnabled, setDelegateEnabled] = useState(false);
+  const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -66,6 +68,8 @@ export default function AgentConfig() {
         setMailSendEnabled(!!found.mail_send_enabled);
         setGeoEnabled(!!found.geo_enabled);
         setDocsReadEnabled(!!found.docs_read_enabled);
+        setDelegateEnabled(!!found.delegate_enabled);
+        setNotifyUsersEnabled(!!found.notify_users_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -104,6 +108,8 @@ export default function AgentConfig() {
           mail_send_enabled: mailEnabled && mailSendEnabled,
           geo_enabled: geoEnabled,
           docs_read_enabled: docsReadEnabled,
+          delegate_enabled: delegateEnabled,
+          notify_users_enabled: notifyUsersEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -309,6 +315,28 @@ export default function AgentConfig() {
               style={{ accentColor: 'var(--tblr-primary)' }}
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_read')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={delegateEnabled}
+              onChange={() => setDelegateEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_delegate')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={notifyUsersEnabled}
+              onChange={() => setNotifyUsersEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_notify_users')}</span>
           </label>
         </div>
 

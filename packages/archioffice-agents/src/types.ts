@@ -205,6 +205,15 @@ export interface AgentCapabilities {
   geo: boolean;
   /** Lecture du CCTP et du DPGF d'un projet. */
   docsRead: boolean;
+  /** consulter_agent — interroger un collègue (autre agent actif du cabinet)
+   *  et recevoir sa réponse dans le même tour. Un seul niveau : un agent
+   *  consulté ne peut pas lui-même en consulter un autre (voir routes.ts,
+   *  en-tête X-Agent-Delegation). */
+  delegate: boolean;
+  /** publier_flux_activite — poster dans Notifications & Flux d'activité en
+   *  mentionnant une personne du cabinet, pour la prévenir sans passer par
+   *  la conversation privée entre l'utilisateur et l'agent. */
+  notifyUsers: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -214,6 +223,8 @@ export function capabilitiesFromAgent(agent: {
   mail_send_enabled?: boolean | null;
   geo_enabled?: boolean | null;
   docs_read_enabled?: boolean | null;
+  delegate_enabled?: boolean | null;
+  notify_users_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -224,6 +235,8 @@ export function capabilitiesFromAgent(agent: {
     mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
     geo: !!agent.geo_enabled,
     docsRead: !!agent.docs_read_enabled,
+    delegate: !!agent.delegate_enabled,
+    notifyUsers: !!agent.notify_users_enabled,
   };
 }
 
@@ -245,6 +258,8 @@ export interface Agent {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  delegate_enabled: boolean;
+  notify_users_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -293,6 +308,11 @@ export interface AgentChatResponse {
   tokens_used: number;
   remaining_balance: number;
   artifact?: AgentArtifact;
+  /** Les collègues consultés pendant ce tour (consulter_agent), dans l'ordre
+   *  où la consultation a eu lieu. Le client s'en sert pour ouvrir la
+   *  conversation du collègue et montrer sa réponse, déjà enregistrée dans
+   *  sa propre conversation avec l'utilisateur. */
+  consulted?: { id: string; name: string }[];
 }
 
 // Internal server-side types
@@ -314,6 +334,8 @@ export interface AgentRow {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  delegate_enabled: boolean;
+  notify_users_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
@@ -339,6 +361,14 @@ export interface AgentContext {
    * collègues du cabinet n'expose aucune donnée métier.
    */
   colleagues: { id: string; name: string; roleTitle: string; resourceLabels: string[] }[];
+  /**
+   * Les personnes du cabinet (profils utilisateurs), pour qu'un agent
+   * mentionne la bonne personne dans le flux d'activité (publier_flux_activite)
+   * au lieu d'inventer un nom : la mention n'y fonctionne que sur une
+   * correspondance exacte avec `profiles.name` (voir activityFeed.ts). Comme
+   * `colleagues`, toujours peuplé : ce sont des noms, pas une donnée métier.
+   */
+  teamMembers: { id: string; name: string }[];
   firmKnowledge: {
     phaseBenchmarks: { phase: string; avgDurationDays: number; sampleSize: number }[];
     priceCatalog: { designation: string; unite: string; prix_unitaire: number; categorie: string | null }[];

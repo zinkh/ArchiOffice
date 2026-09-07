@@ -1,0 +1,29 @@
+-- ============================================================
+-- ArchiOffice — Migration : agents qui échangent entre eux et
+-- avec de vrais utilisateurs
+-- ============================================================
+-- Deux nouvelles capacités, dans le même esprit que web_fetch_enabled/
+-- mail_enabled/geo_enabled/docs_read_enabled : une colonne par capacité,
+-- réglable agent par agent depuis /agents/:id/edit.
+--
+--   - delegate_enabled : l'agent peut consulter un collègue (un autre agent
+--     actif du cabinet) et recevoir sa réponse dans le même tour
+--     (consulter_agent, packages/archioffice-agents/src/server/delegateTools.ts).
+--     La consultation passe par la conversation du collègue avec le MÊME
+--     utilisateur — pas de conversation « entre agents » séparée — et se
+--     facture normalement à ses crédits IA. Un seul niveau : l'en-tête
+--     X-Agent-Delegation, posé sur l'appel imbriqué, retire cette capacité
+--     pour ce tour quel que soit le réglage du collègue consulté.
+--
+--   - notify_users_enabled : l'agent peut poster dans Notifications & Flux
+--     d'activité en mentionnant une personne du cabinet
+--     (publier_flux_activite, .../notifyTools.ts) — même table (feed_posts),
+--     même mécanique de mention que le flux humain
+--     (server/routes/activityFeed.ts), donc les mêmes notifications système.
+--
+-- Off par défaut pour les deux, comme web_fetch_enabled : ce sont des
+-- capacités autonomes (l'agent décide seul de consulter ou de publier, sans
+-- confirmation explicite comme pour l'envoi de mail), au cabinet de les
+-- activer agent par agent plutôt que de les recevoir toutes allumées.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS delegate_enabled     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS notify_users_enabled BOOLEAN NOT NULL DEFAULT FALSE;

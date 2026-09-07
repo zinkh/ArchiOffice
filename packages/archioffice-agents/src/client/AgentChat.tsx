@@ -475,6 +475,14 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       setMessages(prev => [...prev, assistantMsg]);
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
       saveDraft(agentId, '');
+      // L'agent a consulté un collègue (consulter_agent) : sa réponse est
+      // déjà enregistrée dans SA conversation avec l'utilisateur (voir
+      // routes.ts) — on y bascule pour la montrer, après avoir laissé le
+      // temps de lire la réponse de l'agent qu'on vient de recevoir.
+      if (res.consulted?.length) {
+        const target = res.consulted[0];
+        setTimeout(() => switchAgent(target.id), 1200);
+      }
     } catch (e: any) {
       const errText: string = e?.message ?? t('agent_chat_error');
       if (e?.name === 'AbortError') {

@@ -89,6 +89,60 @@ describe('Activity Feed', () => {
     expect(fakeSupabaseAdmin.getTable('mentions').some(m => m.mentioned_user_id === mentionedId && m.tenant_id === tenantId)).toBe(true);
   });
 
+  // Un agent (publier_flux_activite, notifyTools.ts) poste sous son propre
+  // nom plutôt que sous celui de l'utilisateur qui lui parle — c'est ce qui
+  // distingue « Sophie prévient Marc » d'un post que l'humain aurait écrit.
+  describe('post attribué à un agent (as_agent_id)', () => {
+    it('poste sous le nom de l\'agent plutôt que celui de l\'utilisateur', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('agents', [{ id: 'agent-sophie', tenant_id: tenantId, name: 'Sophie', is_active: true }]);
+
+      const res = await request(app).post('/api/feed/posts').set(authHeader(token))
+        .send({ content: 'Le devis est prêt pour relecture.', as_agent_id: 'agent-sophie' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.user_name).toBe('Sophie');
+      expect(res.body.user_id).toBe('agent-sophie');
+      expect(fakeSupabaseAdmin.getTable('feed_posts').find(p => p.id === res.body.id)?.user_name).toBe('Sophie');
+    });
+
+    it('notifie la personne mentionnée par l\'agent, avec son nom en expéditeur', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      const { userId: mentionedId } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('profiles', [{ id: mentionedId, tenant_id: tenantId, name: 'Marie Curie' }]);
+      fakeSupabaseAdmin.seed('agents', [{ id: 'agent-sophie', tenant_id: tenantId, name: 'Sophie', is_active: true }]);
+
+      await request(app).post('/api/feed/posts').set(authHeader(token))
+        .send({ content: 'Salut @Marie Curie, le devis est prêt.', as_agent_id: 'agent-sophie' });
+
+      expect(fakeSupabaseAdmin.getTable('mentions').some(m => m.mentioned_user_id === mentionedId && m.author_name === 'Sophie')).toBe(true);
+    });
+
+    it('refuse un agent inexistant ou d\'un autre cabinet', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      const otherTenant = makeTenant();
+      fakeSupabaseAdmin.seed('agents', [{ id: 'agent-foreign', tenant_id: otherTenant, name: 'Intrus', is_active: true }]);
+
+      const res = await request(app).post('/api/feed/posts').set(authHeader(token))
+        .send({ content: 'Message', as_agent_id: 'agent-foreign' });
+      expect(res.status).toBe(400);
+      expect(fakeSupabaseAdmin.getTable('feed_posts').some(p => p.content === 'Message')).toBe(false);
+    });
+
+    it('refuse un agent désactivé', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('agents', [{ id: 'agent-retired', tenant_id: tenantId, name: 'Ancien agent', is_active: false }]);
+
+      const res = await request(app).post('/api/feed/posts').set(authHeader(token))
+        .send({ content: 'Message', as_agent_id: 'agent-retired' });
+      expect(res.status).toBe(400);
+    });
+  });
+
   it('reports and clears the unread notifications count', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

@@ -17,7 +17,8 @@ function baseAgent(overrides: Partial<AgentRow> = {}): AgentRow {
     role_title: 'Secrétaire Administrative', avatar_initials: 'SA', avatar_color: '#000',
     context_scopes: [], action_scopes: [],
     web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
-    geo_enabled: false, docs_read_enabled: false, is_active: true, is_system_template: false,
+    geo_enabled: false, docs_read_enabled: false, delegate_enabled: false, notify_users_enabled: false,
+    is_active: true, is_system_template: false,
     ...overrides,
   };
 }
@@ -26,7 +27,7 @@ function baseContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
     tenantName: 'AAZS', currentDate: '7 septembre 2026', currentUserName: 'Khaldoun',
     projects: [], contacts: [], upcomingMeetings: [], recentDocuments: [], tasks: [],
-    documentContents: [], colleagues: [],
+    documentContents: [], colleagues: [], teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
     ...overrides,
   };
@@ -87,6 +88,22 @@ describe('buildAgentContext — collègues du cabinet', () => {
     const ctx = await buildAgentContext(db, 'tenant-1', 'user-1', 'agent-sophie', []);
     expect(ctx.colleagues.map(c => c.name)).toEqual(['Marc']);
   });
+
+  it('peuple teamMembers depuis profiles, même sans context_scopes', async () => {
+    const db = new FakeSupabaseAdmin();
+    db.seed('tenants', [{ id: 'tenant-1', name: 'AAZS' }]);
+    db.seed('profiles', [
+      { id: 'user-1', tenant_id: 'tenant-1', name: 'Khaldoun' },
+      { id: 'user-2', tenant_id: 'tenant-1', name: 'Marie Curie' },
+    ]);
+    db.seed('agents', [{ id: 'agent-sophie', tenant_id: 'tenant-1', name: 'Sophie', role_title: 'Secrétaire', action_scopes: [], is_active: true }]);
+
+    const ctx = await buildAgentContext(db, 'tenant-1', 'user-1', 'agent-sophie', []);
+    expect(ctx.teamMembers).toEqual(expect.arrayContaining([
+      { id: 'user-1', name: 'Khaldoun' },
+      { id: 'user-2', name: 'Marie Curie' },
+    ]));
+  });
 });
 
 describe('buildAgentSystemPrompt — délégation vers le bon collègue', () => {
@@ -121,5 +138,62 @@ describe('buildAgentSystemPrompt — délégation vers le bon collègue', () => 
     expect(prompt).toContain('Tu es un agent sur mesure.');
     expect(prompt).toContain('COLLÈGUES DU CABINET');
     expect(prompt).toContain('Marc (Économiste)');
+  });
+});
+
+describe('buildAgentSystemPrompt — consultation directe (delegate_enabled)', () => {
+  const ctx = baseContext({
+    colleagues: [{ id: 'agent-marc', name: 'Marc', roleTitle: 'Économiste', resourceLabels: [] }],
+  });
+
+  it("affiche l'id du collègue et demande de consulter directement, plutôt que de simplement l'orienter", () => {
+    const prompt = buildAgentSystemPrompt(baseAgent({ delegate_enabled: true }), ctx);
+    expect(prompt).toContain('Marc [id: agent-marc]');
+    expect(prompt).toContain('consulte-le directement avec consulter_agent(agent_id, message)');
+    expect(prompt).toContain('CONSULTATION D\'UN COLLÈGUE (consulter_agent)');
+    expect(prompt).toContain('✓ Consulter un collègue');
+  });
+
+  it("n'affiche jamais l'id ni la consigne d'outil quand la consultation n'est pas activée", () => {
+    const prompt = buildAgentSystemPrompt(baseAgent({ delegate_enabled: false }), ctx);
+    expect(prompt).not.toContain('[id: agent-marc]');
+    expect(prompt).not.toContain('consulter_agent(');
+    expect(prompt).toContain('✗ Tu NE peux PAS consulter un autre agent');
+  });
+
+  it('conserve la consigne de consultation directe sur un prompt personnalisé', () => {
+    const prompt = buildAgentSystemPrompt(
+      baseAgent({ delegate_enabled: true, system_prompt_override: 'Tu es un agent sur mesure.' }),
+      ctx,
+    );
+    expect(prompt).toContain('utilise consulter_agent(agent_id, message)');
+  });
+});
+
+describe('buildAgentSystemPrompt — flux d\'activité (notify_users_enabled)', () => {
+  const ctx = baseContext({ teamMembers: [{ id: 'user-1', name: 'Khaldoun Sektaoui' }] });
+
+  it('liste les membres du cabinet et la consigne de mention quand activé', () => {
+    const prompt = buildAgentSystemPrompt(baseAgent({ notify_users_enabled: true }), ctx);
+    expect(prompt).toContain("MEMBRES DE L'ÉQUIPE");
+    expect(prompt).toContain('Khaldoun Sektaoui');
+    expect(prompt).toContain('FLUX D\'ACTIVITÉ DU CABINET (publier_flux_activite)');
+    expect(prompt).toContain('✓ Publier dans Notifications & Flux d\'activité');
+  });
+
+  it("n'expose ni la liste ni l'outil quand ce n'est pas activé", () => {
+    const prompt = buildAgentSystemPrompt(baseAgent({ notify_users_enabled: false }), ctx);
+    expect(prompt).not.toContain("MEMBRES DE L'ÉQUIPE");
+    expect(prompt).not.toContain('publier_flux_activite(');
+    expect(prompt).toContain('✗ Tu NE peux PAS publier dans le flux');
+  });
+
+  it('conserve la consigne de mention sur un prompt personnalisé', () => {
+    const prompt = buildAgentSystemPrompt(
+      baseAgent({ notify_users_enabled: true, system_prompt_override: 'Tu es un agent sur mesure.' }),
+      ctx,
+    );
+    expect(prompt).toContain('Khaldoun Sektaoui');
+    expect(prompt).toContain('publier_flux_activite');
   });
 });

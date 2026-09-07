@@ -3,6 +3,8 @@ import { fetchUrlSafely } from './webFetch.js';
 import { buildMailTools, executeMailTool, MAIL_TOOL_NAMES } from './mailTools.js';
 import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
 import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES } from './projectDocTools.js';
+import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
+import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
 
 export type { FunctionDeclarationLike };
@@ -129,6 +131,8 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
   if (caps.geo) tools.push(...buildGeoTools());
   if (caps.docsRead) tools.push(...buildProjectDocTools());
+  if (caps.delegate) tools.push(...buildDelegateTools());
+  if (caps.notifyUsers) tools.push(...buildNotifyTools());
 
   return tools;
 }
@@ -223,6 +227,8 @@ export interface AgentActionCall {
 export interface AgentActionResult {
   response: Record<string, unknown>;
   summary?: string;
+  /** Voir ToolOutcome.consulted (toolTypes.ts) — posé par consulter_agent. */
+  consulted?: { id: string; name: string };
 }
 
 // Contacts don't have a single "name" column, so their identity is derived;
@@ -274,7 +280,12 @@ export async function executeAgentAction(
   baseUrl: string,
   authHeader: string | undefined,
   caps: AgentCapabilities,
-  call: AgentActionCall
+  call: AgentActionCall,
+  /** L'agent qui exécute cette action — seul publier_flux_activite s'en sert
+   *  (pour poster sous son propre nom, voir notifyTools.ts), mais il vit ici
+   *  plutôt que dans un paramètre à part pour rester au même niveau que
+   *  `caps` dans la signature. */
+  selfAgent?: { id: string; name: string }
 ): Promise<AgentActionResult> {
   const name = call.name;
   const args = call.args || {};
@@ -319,6 +330,19 @@ export async function executeAgentAction(
     if (!caps.docsRead) return { response: { error: "La lecture du CCTP et du DPGF n'est pas activée pour cet agent." } };
     if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return executeProjectDocTool(baseUrl, authHeader, name, args);
+  }
+
+  if (name && DELEGATE_TOOL_NAMES.includes(name)) {
+    if (!caps.delegate) return { response: { error: "La consultation d'un collègue n'est pas activée pour cet agent." } };
+    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeDelegateTool(baseUrl, authHeader, name, args);
+  }
+
+  if (name && NOTIFY_TOOL_NAMES.includes(name)) {
+    if (!caps.notifyUsers) return { response: { error: "La publication dans le flux d'activité n'est pas activée pour cet agent." } };
+    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
+    return executeNotifyTool(baseUrl, authHeader, name, args, selfAgent.id);
   }
 
   const resourceKey = String(args.resource || '');

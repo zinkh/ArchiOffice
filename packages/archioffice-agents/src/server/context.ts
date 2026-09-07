@@ -164,6 +164,7 @@ export async function buildAgentContext(
     tasks: [],
     documentContents: [],
     colleagues: [],
+    teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
   };
 
@@ -186,6 +187,21 @@ export async function buildAgentContext(
             .map(key => AGENT_RESOURCES.find(res => res.key === key)?.label)
             .filter((label): label is string => !!label),
         }));
+      })
+  );
+
+  // Même principe que colleagues : toujours peuplé, pour que
+  // publier_flux_activite mentionne un nom qui correspond réellement à
+  // profiles.name (seule forme que la mention reconnaît, voir
+  // activityFeed.ts) plutôt qu'un nom deviné.
+  fetches.push(
+    supabaseAdmin.from('profiles').select('id, name')
+      .eq('tenant_id', tenantId)
+      .then((r: any) => {
+        if (r.error) { console.warn('[agent context] team members fetch failed:', r.error.message); return; }
+        ctx.teamMembers = ((r.data || []) as any[])
+          .filter(p => p.name)
+          .map(p => ({ id: p.id, name: p.name }));
       })
   );
 
