@@ -7,14 +7,14 @@ import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 import { loadAgencyIdentity } from './agencyIdentity.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
-import { resolveLlmProvider, resolveTranscriptionProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
+import { resolveLlmProvider, resolveTranscriptionProvider, resolveSpeechProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
 type DeductAiCreditFn = (params: {
   tenantId: string; userId: string;
   agentId: string | null; conversationId: string | null;
-  endpointType: 'agent' | 'suggest_articles' | 'transcription';
+  endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
   // Which model actually ran: the cost per token differs by an order of
   // magnitude between them, so billing can't be computed without it.
   provider: string; model: string;
@@ -41,6 +41,13 @@ interface BillingHelpers {
  *  pour ceux-là ; tout autre type ressort en 400 plutôt qu'en erreur du
  *  fournisseur. */
 const TRANSCRIBE_ACCEPTED_TYPES = ['audio/*', 'video/webm', 'video/mp4'];
+
+/** Plafond de la synthèse vocale, en caractères. Un message d'agent dépasse
+ *  rarement quelques centaines de mots ; au-delà de ~4000 caractères (le seuil
+ *  choisi pour couvrir un compte rendu de chantier détaillé), on lit un
+ *  document plutôt qu'une réponse de chat — la synthèse vocale n'est pas
+ *  conçue pour ça, et chaque caractère de plus se facture. */
+const MAX_SPEECH_CHARS = 4000;
 
 /** Le vocabulaire propre au cabinet, soufflé au moteur de transcription.
  *
@@ -339,6 +346,89 @@ export function registerAgentRoutes(
       }
     },
   );
+
+  // POST /api/agents/speak
+  //
+  // Synthèse vocale : le texte d'un message déjà affiché entre ici, un fichier
+  // WAV en ressort. Contrairement à la dictée, il n'y a rien à faire relire —
+  // le texte a déjà été validé par un humain avant d'arriver dans le chat
+  // (soit tapé par l'utilisateur, soit une réponse d'agent déjà affichée), la
+  // synthèse ne fait que le prononcer.
+  //
+  // Le corps est du JSON ordinaire (le texte à lire pèse quelques kilo-octets,
+  // pas un enregistrement) ; la réponse est en revanche l'audio brut, pas du
+  // JSON — un fichier WAV encodé en base64 gonflerait le transfert d'un tiers
+  // pour rien.
+  app.post('/api/agents/speak', async (req: any, res: any) => {
+    const startedAt = Date.now();
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const text: string = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      if (!text) return res.status(400).json({ error: 'text is required' });
+      if (text.length > MAX_SPEECH_CHARS) {
+        return res.status(400).json({ error: `Texte trop long pour la synthèse vocale (${MAX_SPEECH_CHARS} caractères maximum).` });
+      }
+
+      const { plan } = await getTenantPlan(tenantId);
+      if (plan !== 'enterprise') {
+        return res.status(403).json({ error: 'Plan Enterprise requis pour accéder aux agents IA.', code: 'ENTERPRISE_REQUIRED' });
+      }
+      if (billing) await billing.maybeRefreshMonthlyCredits(tenantId, plan);
+
+      const { data: tenantData } = await supabaseAdmin.from('tenants')
+        .select('ai_credit_balance_eur_cents, agent_billing_mode').eq('id', tenantId).single();
+      const billingMode = (tenantData as any)?.agent_billing_mode ?? 'prepaid';
+      const balance = (tenantData as any)?.ai_credit_balance_eur_cents ?? 0;
+      if (billingMode === 'prepaid' && balance <= 0) {
+        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+      }
+
+      const provider = resolveSpeechProvider(await getPlatformAiConfig(supabaseAdmin));
+      if (!provider.speak) {
+        // resolveSpeechProvider ne rend qu'un fournisseur capable ; ce
+        // garde-fou n'existe que pour que le type soit sûr ici.
+        throw new LlmNotConfiguredError("Le fournisseur IA actif ne sait pas synthétiser de la voix.");
+      }
+
+      const result = await provider.speak({
+        text,
+        language: typeof req.body?.language === 'string' ? req.body.language : 'fr-FR',
+      });
+
+      const { inputTokens, outputTokens } = result.usage;
+      let newBalance = balance;
+      let costCents = 0;
+      if ((inputTokens + outputTokens) > 0 && billing) {
+        const deducted = await billing.deductAiCredit({
+          tenantId, userId: req.user.id,
+          agentId: typeof req.body?.agent_id === 'string' ? req.body.agent_id : null,
+          conversationId: null,
+          endpointType: 'speech',
+          provider: provider.id, model: provider.model,
+          inputTokens, outputTokens,
+        });
+        newBalance = deducted.newBalance;
+        costCents = deducted.costCents;
+      }
+
+      console.log(`[agent speak] ${text.length} caractères en ${Date.now() - startedAt}ms tenant=${tenantId} ${provider.id}/${provider.model} audio=${result.audio.data.length}o`);
+      res.set({
+        'Content-Type': result.audio.mimeType,
+        'Content-Length': String(result.audio.data.length),
+        // Lues côté client pour afficher le coût sans faire porter la réponse
+        // par du JSON — voir le commentaire en tête de route.
+        'X-Cost-Eur-Cents': String(costCents),
+        'X-Remaining-Balance-Cents': String(newBalance),
+        'Access-Control-Expose-Headers': 'X-Cost-Eur-Cents, X-Remaining-Balance-Cents',
+      });
+      res.send(result.audio.data);
+    } catch (e: any) {
+      if (e instanceof LlmNotConfiguredError) return res.status(503).json({ error: e.message });
+      console.error(`[agent speak error] ${e.message}`);
+      Sentry.captureException(e, { tags: { feature: 'agent-speak' }, extra: { userId: req.user?.id } });
+      res.status(500).json({ error: `Synthèse vocale impossible : ${e.message}` });
+    }
+  });
 
   // POST /api/agents/:id/chat
   app.post('/api/agents/:id/chat', async (req: any, res: any) => {

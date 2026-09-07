@@ -1031,6 +1031,7 @@ export default {
       "agent_voice_transcribing": "Transcribing…",
       "agent_voice_error_permission": "Microphone unavailable. Allow microphone access for this site.",
       "agent_voice_error_engine": "Voice dictation is not available on this device.",
+      "agent_speech_error": "Reading the reply aloud failed.",
 
       // Loading / error states
       "error_loading_title": "Couldn't load the data",

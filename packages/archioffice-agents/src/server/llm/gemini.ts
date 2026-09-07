@@ -14,11 +14,20 @@ import type {
   LlmChatResult,
   LlmMessage,
   LlmProvider,
+  LlmSpeechParams,
+  LlmSpeechResult,
   LlmTranscriptionParams,
   LlmTranscriptionResult,
 } from './types.js';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+// Un modèle de chat ordinaire ne produit pas d'audio en sortie : la synthèse
+// vocale passe toujours par ce modèle dédié, quel que soit celui choisi pour
+// le chat (voir resolveSpeechProvider() dans index.ts).
+export const DEFAULT_GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+// Voix « Kore » : neutre et posée, sans accent marqué, adaptée à un cadre
+// professionnel plutôt qu'à un assistant grand public enjoué.
+const DEFAULT_GEMINI_TTS_VOICE = 'Kore';
 
 interface GeminiPart {
   text?: string;
@@ -74,6 +83,30 @@ function toGeminiContents(messages: LlmMessage[]): { role: string; parts: Gemini
   }
 
   return contents;
+}
+
+/** Gemini TTS rend du PCM brut (mono, 16 bits, 24 kHz), qu'aucun lecteur audio
+ *  ne sait ouvrir sans conteneur — ni la balise `<audio>` du navigateur, ni un
+ *  `Audio()` construit à la main. On l'enveloppe dans un en-tête WAV minimal
+ *  (44 octets) plutôt que de dépendre d'une bibliothèque pour un format aussi
+ *  simple à écrire soi-même. */
+function pcmToWav(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerSample = 16): Buffer {
+  const blockAlign = channels * (bitsPerSample / 8);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // taille du sous-bloc fmt
+  header.writeUInt16LE(1, 20); // PCM non compressé
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * blockAlign, 28); // débit en octets/s
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
 }
 
 /** L'API n'accepte que le type nu : un `audio/webm;codecs=opus` (ce que
@@ -214,6 +247,40 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
         usage: {
           inputTokens,
           audioInputTokens,
+          outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+        },
+      };
+    },
+
+    async speak(params: LlmSpeechParams): Promise<LlmSpeechResult> {
+      if (!client) {
+        const { GoogleGenAI } = await import('@google/genai');
+        client = new GoogleGenAI({ apiKey: opts.apiKey });
+      }
+      // `model` est celui avec lequel ce provider a été construit — toujours
+      // DEFAULT_GEMINI_TTS_MODEL ici, resolveSpeechProvider() étant le seul
+      // appelant (voir index.ts). Un modèle de chat ordinaire refuserait
+      // responseModalities: ['AUDIO'].
+      const response = await client.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: params.text }] }],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: params.voice || DEFAULT_GEMINI_TTS_VOICE } },
+            ...(params.language ? { languageCode: params.language } : {}),
+          },
+        },
+      });
+
+      const part = response.candidates?.[0]?.content?.parts?.find((p: GeminiPart) => p.inlineData);
+      const b64 = part?.inlineData?.data;
+      if (!b64) throw new Error("Le fournisseur n'a renvoyé aucun audio.");
+
+      return {
+        audio: { data: pcmToWav(Buffer.from(b64, 'base64')), mimeType: 'audio/wav' },
+        usage: {
+          inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
           outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
         },
       };

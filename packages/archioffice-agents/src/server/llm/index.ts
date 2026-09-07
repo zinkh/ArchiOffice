@@ -9,7 +9,7 @@
 //   - A provider with no key configured is refused with LlmNotConfiguredError,
 //     which the routes turn into a 503 (distinct from a call that ran and
 //     failed).
-import { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
+import { createGeminiProvider, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TTS_MODEL } from './gemini.js';
 import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
 import { isPricedModel, MODEL_CATALOG } from './pricing.js';
@@ -178,7 +178,27 @@ export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmP
   return resolveLlmProvider({ provider: 'gemini' });
 }
 
-export { createGeminiProvider, DEFAULT_GEMINI_MODEL } from './gemini.js';
+/**
+ * Le fournisseur qui lira une réponse à voix haute.
+ *
+ * Contrairement à la transcription, il n'y a pas de fournisseur actif à
+ * garder : aucun modèle de chat, chez aucun des trois fournisseurs, ne
+ * produit de l'audio en sortie — la synthèse demande un modèle dédié, que
+ * seul Gemini propose dans notre catalogue. La clé Gemini de l'instance
+ * pilote donc toujours cette voix, quel que soit le fournisseur choisi pour
+ * le chat dans /admin.
+ */
+export function resolveSpeechProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  const apiKey = opts.provider === 'gemini' ? opts.apiKey : undefined;
+  if (!apiKey && !process.env.GEMINI_API_KEY) {
+    throw new LlmNotConfiguredError(
+      "La synthèse vocale demande une clé Gemini (GEMINI_API_KEY) : c'est le seul fournisseur du catalogue qui sache produire de l'audio.",
+    );
+  }
+  return resolveLlmProvider({ provider: 'gemini', model: DEFAULT_GEMINI_TTS_MODEL, apiKey });
+}
+
+export { createGeminiProvider, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TTS_MODEL } from './gemini.js';
 export { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 export { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
 export {
@@ -203,6 +223,8 @@ export type {
   LlmChatResult,
   LlmMessage,
   LlmProvider,
+  LlmSpeechParams,
+  LlmSpeechResult,
   LlmToolCall,
   LlmToolDef,
   LlmToolResult,

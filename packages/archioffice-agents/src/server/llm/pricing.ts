@@ -39,6 +39,12 @@ export const MODEL_CATALOG: Record<string, Record<string, ModelCost>> = {
   // Google, https://ai.google.dev/gemini-api/docs/pricing
   gemini: {
     'gemini-3-flash-preview': { inputUsdPerM: 0.50, outputUsdPerM: 3.00, audioInputUsdPerM: 1.00, label: 'Gemini 3 Flash' },
+    // Modèle de synthèse vocale dédié — un modèle de chat ordinaire ne sait
+    // pas produire d'audio en sortie. outputUsdPerM porte ici directement le
+    // tarif audio : contrairement à gemini-3-flash-preview, ce modèle ne
+    // produit jamais que de l'audio, donc pas besoin d'un tarif texte de
+    // sortie séparé (voir audioInputUsdPerM plus haut, pour le sens inverse).
+    'gemini-2.5-flash-preview-tts': { inputUsdPerM: 0.50, outputUsdPerM: 10.00, label: 'Gemini 2.5 Flash TTS' },
   },
   // Anthropic, first-party API rates (verified 2026-06-24).
   anthropic: {

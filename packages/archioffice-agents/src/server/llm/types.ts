@@ -104,6 +104,22 @@ export interface LlmTranscriptionResult {
   usage: LlmUsage & { audioInputTokens: number };
 }
 
+export interface LlmSpeechParams {
+  /** Le texte à lire. Toujours celui d'un message déjà affiché — la synthèse
+   *  ne fabrique jamais son propre texte. */
+  text: string;
+  /** Étiquette BCP-47 de la langue à parler ('fr-FR'). */
+  language?: string;
+  /** Voix prédéfinie du fournisseur, quand il en propose plusieurs. Absente,
+   *  l'adaptateur choisit sa voix par défaut. */
+  voice?: string;
+}
+
+export interface LlmSpeechResult {
+  audio: LlmAudio;
+  usage: LlmUsage;
+}
+
 export interface LlmProvider {
   /** Stable provider key ('gemini', 'anthropic', 'mistral') — used in logs
    *  and, from step 2 on, to price a call and record it in
@@ -119,6 +135,10 @@ export interface LlmProvider {
    *  choix d'un fournisseur capable est fait une fois, dans
    *  resolveTranscriptionProvider(). */
   transcribe?(params: LlmTranscriptionParams): Promise<LlmTranscriptionResult>;
+  /** Synthèse vocale d'un texte. Optionnel pour la même raison que
+   *  `transcribe` : ni Claude ni Mistral n'exposent de synthèse dans notre
+   *  catalogue. resolveSpeechProvider() est le seul appelant. */
+  speak?(params: LlmSpeechParams): Promise<LlmSpeechResult>;
 }
 
 /** Thrown when no usable credentials/model could be resolved. Callers turn

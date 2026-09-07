@@ -386,7 +386,7 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;

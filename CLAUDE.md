@@ -269,6 +269,50 @@ Le vocabulaire du cabinet (sigles du métier, noms de projets) est soufflé au
 moteur à chaque appel. Sans lui, « le CCTP du projet Villa Martin » ressort
 phonétiquement, or c'est exactement ce que la dictée sert à nommer.
 
+### Synthèse vocale
+
+Symétrique de la dictée : un haut-parleur sur chaque message d'agent
+(`client/useSpeech.ts`), qui lit à voix haute le texte déjà affiché. Rien à
+faire relire ici — contrairement à la dictée, le texte a déjà été validé par
+un humain avant d'arriver dans le chat (tapé par l'utilisateur, ou une réponse
+d'agent déjà affichée à l'écran) : la synthèse ne fait que le prononcer.
+
+Mêmes deux moteurs que la dictée, pour la même raison — aucun ne couvre tous
+les postes :
+
+| | « navigateur » | « serveur » |
+|---|---|---|
+| Mécanique | `speechSynthesis` (Web Speech API) | `POST /api/agents/speak`, lu via `<audio>` |
+| Où | partout où des voix système sont installées | là où il n'y en a pas |
+| Coût | nul | jetons IA du cabinet |
+
+Le navigateur passe en premier. Le serveur prend le relais quand le premier
+échoue, **pas seulement quand il est absent** : `speechSynthesis` existe dans
+le Chromium d'Electron mais peut n'y exposer aucune voix, et `speak()` avale
+alors la consigne sans jamais déclencher ni `start` ni `error` — un silence
+au-delà d'un court délai (`BROWSER_START_TIMEOUT_MS`) vaut donc une panne,
+exactement comme la dictée y échoue en `network` pour la même raison (le
+moteur est lié au navigateur, pas à l'application).
+
+Deux points côté serveur :
+
+1. **La voix passe toujours par un modèle TTS dédié**
+   (`DEFAULT_GEMINI_TTS_MODEL`, `gemini-2.5-flash-preview-tts`), jamais par le
+   modèle de chat actif : aucun modèle de chat, chez aucun des trois
+   fournisseurs, ne produit de l'audio en sortie. `resolveSpeechProvider()`
+   n'a donc pas la branche « garder le fournisseur actif » de
+   `resolveTranscriptionProvider()` — il n'y a rien à garder, seul Gemini sait
+   faire, quel que soit le fournisseur choisi pour le chat dans `/admin`.
+2. **Gemini TTS rend du PCM brut**, qu'aucun lecteur ne sait ouvrir sans
+   conteneur. `pcmToWav()` (`gemini.ts`) l'enveloppe dans un en-tête WAV
+   minimal (44 octets) plutôt que de dépendre d'une bibliothèque pour un
+   format aussi simple à écrire soi-même.
+
+La route répond en binaire (`audio/wav`), pas en JSON : un fichier encodé en
+base64 gonflerait le transfert d'un tiers pour rien. Le coût et le solde
+restant voyagent en en-têtes (`X-Cost-Eur-Cents`, `X-Remaining-Balance-Cents`)
+plutôt que dans un corps qui n'est déjà plus du JSON.
+
 ### Écritures d'agent : schéma, défauts, erreurs
 
 `AGENT_RESOURCES` (`packages/archioffice-agents/src/types.ts`) porte, pour

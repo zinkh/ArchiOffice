@@ -1048,6 +1048,7 @@ export default {
       "agent_voice_transcribing": "Transcription en cours…",
       "agent_voice_error_permission": "Micro inaccessible. Autorisez l'accès au microphone pour ce site.",
       "agent_voice_error_engine": "La dictée vocale n'est pas disponible sur ce poste.",
+      "agent_speech_error": "La lecture à voix haute a échoué.",
       "agent_tokens_remaining": "{{count}} tokens restants",
       "agent_tokens_exhausted": "Solde de tokens épuisé",
       "agent_tokens_recharge": "Recharger",
