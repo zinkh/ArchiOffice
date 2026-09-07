@@ -117,7 +117,7 @@ export function registerBpuRoutes(app: Express, { supabaseAdmin, getTenantId, ge
       let prixRemontes = 0;
       try {
         prixRemontes = await remonterPrixOffre(supabaseAdmin, tenantId, {
-          projectId, document: row.document, offre: saved, userId: req.user.id,
+          projectId, sourceKind: 'bpu', document: row.document, offre: saved, userId: req.user.id,
         });
       } catch (e: any) {
         console.error('[POST bpu/offres] remontée des prix', e);
@@ -154,7 +154,7 @@ export function registerBpuRoutes(app: Express, { supabaseAdmin, getTenantId, ge
       let prixRemontes = 0;
       try {
         prixRemontes = await remonterPrixOffre(supabaseAdmin, tenantId, {
-          projectId: req.params.projectId, document: row.document,
+          projectId: req.params.projectId, sourceKind: 'bpu', document: row.document,
           offre: updated, userId: req.user.id,
         });
       } catch (e: any) {
@@ -180,7 +180,7 @@ export function registerBpuRoutes(app: Express, { supabaseAdmin, getTenantId, ge
       if (!offre) return res.status(404).json({ error: 'Offre introuvable' });
 
       const prixRemontes = await remonterPrixOffre(supabaseAdmin, tenantId, {
-        projectId: req.params.projectId, document: row.document,
+        projectId: req.params.projectId, sourceKind: 'bpu', document: row.document,
         offre, userId: req.user.id,
       });
       res.json({ prixRemontes });

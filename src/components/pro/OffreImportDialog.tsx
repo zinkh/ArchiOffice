@@ -1,19 +1,25 @@
+// Anciennement BPUImportDialog : sert désormais aussi bien un DPGF qu'un
+// BPU/DQE — les deux partagent le même arbre lots > chapitres > articles
+// (lib/bpuImport.ts, généralisé pour ne plus dépendre du seul type BPU), donc
+// la même mécanique de rapprochement s'applique aux deux sans duplication.
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   IconX, IconUpload, IconAlertTriangle, IconCheck, IconArrowRight, IconLoader2,
 } from '@tabler/icons-react';
-import type { BPU, OffreBPU, OffreAnomalie } from '../../types/bpu';
-import { parseOffreFile, type ResultatImport, type Rapprochement } from '../../lib/bpuImport';
+import type { OffreDocument, OffreAnomalie } from '../../types/dpgf';
+import { parseOffreFile, type DocumentAvecArticles, type ResultatImport, type Rapprochement } from '../../lib/bpuImport';
 import { formatCurrency } from '../../lib/utils';
 
 interface Entreprise { id: string; nom: string }
 
 interface Props {
-  bpu: BPU;
+  doc: DocumentAvecArticles;
+  /** « bordereau » (BPU/DQE) ou « DPGF », pour les deux messages qui le nomment. */
+  docLabel?: string;
   /** Entreprises déjà consultées (act_data.consultation.entreprises). */
   entreprises?: Entreprise[];
   onClose: () => void;
-  onConfirm: (offre: Omit<OffreBPU, 'id' | 'importedAt'>) => Promise<void> | void;
+  onConfirm: (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => Promise<void> | void;
 }
 
 type Etape = 'fichier' | 'rapprochement';
@@ -27,7 +33,7 @@ const CONFIANCE_LABEL: Record<string, string> = {
   exacte: 'Référence', haute: 'Sûr', basse: 'À confirmer',
 };
 
-export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClose, onConfirm }) => {
+export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau', entreprises = [], onClose, onConfirm }) => {
   const [etape, setEtape] = useState<Etape>('fichier');
   const [fichier, setFichier] = useState<File | null>(null);
   const [entrepriseNom, setEntrepriseNom] = useState('');
@@ -51,15 +57,15 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
       if (l.children?.length) { walk(l.children); return; }
       out.push({ id: l.id, numero: l.numero, designation: l.designation });
     });
-    bpu.lots.forEach(lot => lot.chapitres.forEach(c => walk(c.lignes)));
+    doc.lots.forEach(lot => lot.chapitres.forEach(c => walk(c.lignes)));
     return out;
-  }, [bpu]);
+  }, [doc]);
 
   const lancerAnalyse = useCallback(async () => {
     if (!fichier) return;
     setAnalyse(true); setErreur(null);
     try {
-      const r = await parseOffreFile(fichier, bpu);
+      const r = await parseOffreFile(fichier, doc);
       if (r.rapprochements.length === 0 && r.nonAppariees.length === 0) {
         setErreur(
           "Aucune ligne de prix n'a pu être lue dans ce fichier. Vérifiez qu'il contient bien "
@@ -77,7 +83,7 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
     } finally {
       setAnalyse(false);
     }
-  }, [fichier, bpu]);
+  }, [fichier, doc]);
 
   // ── Décompte et total, tels qu'ils seront enregistrés ──────────────────────
   const retenus = useMemo(() => {
@@ -91,9 +97,9 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
       if (l.children?.length) { walk(l.children); return; }
       m.set(l.id, l.quantite || 0);
     });
-    bpu.lots.forEach(lot => lot.chapitres.forEach(c => walk(c.lignes)));
+    doc.lots.forEach(lot => lot.chapitres.forEach(c => walk(c.lignes)));
     return m;
-  }, [bpu]);
+  }, [doc]);
 
   const prixFinal = useMemo(() => {
     const prix: Record<string, number | null> = {};
@@ -114,7 +120,7 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
     [prixFinal, quantiteParArticle],
   );
 
-  const ecartEstimation = bpu.totalHT > 0 ? (totalOffre - bpu.totalHT) / bpu.totalHT * 100 : null;
+  const ecartEstimation = doc.totalHT > 0 ? (totalOffre - doc.totalHT) / doc.totalHT * 100 : null;
   const nbNonChiffres = articles.length - Object.values(prixFinal).filter(p => p != null).length;
   const nbAConfirmer = resultat
     ? resultat.rapprochements.filter((r, i) => r.confiance === 'basse' && !approxValides.has(i)).length : 0;
@@ -153,7 +159,7 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
       await onConfirm({
         entrepriseId, entrepriseNom: entrepriseNom.trim(),
         dateReception, fichierNom: fichier.name,
-        bpuVersion: bpu.version,
+        documentVersion: doc.version,
         prix: prixFinal, anomalies,
         totalOffreHT: totalOffre,
         statut: 'validee',
@@ -191,7 +197,7 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
         {etape === 'fichier' && (
           <div className="p-5 space-y-4">
             <div>
-              <label className={label}>Bordereau chiffré renvoyé par l'entreprise</label>
+              <label className={label}>{docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise</label>
               <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-300 rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors">
                 <IconUpload size={22} className="text-zinc-400" />
                 <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .xls ou .csv'}</span>
@@ -254,7 +260,7 @@ export const BPUImportDialog: React.FC<Props> = ({ bpu, entreprises = [], onClos
               <div className="mx-5 mt-3 px-3 py-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
                 <IconAlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <span>
-                  Ce fichier ne semble pas issu de la version courante de ce bordereau
+                  Ce fichier ne semble pas issu de la version courante de ce {docLabel}
                   {resultat.meta.version && ` (version ${resultat.meta.version})`}. Vérifiez les
                   rattachements avant de valider.
                 </span>

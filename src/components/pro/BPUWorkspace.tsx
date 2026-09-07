@@ -5,7 +5,7 @@ import {
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconLayoutColumns, IconBuildingStore, IconFileImport, IconFileExport,
-  IconArrowsExchange, IconAbc, IconScale,
+  IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
@@ -19,6 +19,7 @@ import {
 } from './treeOps';
 import { montantEnLettres } from '../../lib/numberToFrenchWords';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
+import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { formatCurrency } from '../../lib/utils';
 
@@ -131,6 +132,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   const [showMarche, setShowMarche] = useState(false);
   const [showTranches, setShowTranches] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showDecoupage, setShowDecoupage] = useState(false);
   // Chapitre visé par une insertion depuis la bibliothèque.
   const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
@@ -151,6 +153,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   const nbCols = 4 + (showQte ? 1 : 0) + 1 + (showMontant ? 1 : 0)
     + (showLettres ? 1 : 0) + (showOffres ? offres.length + 1 : 0) + 1;
+  // Colonnes ajoutées en queue de tableau par le découpage (bâtiment, phase —
+  // chacune conditionnelle — et localisation, toujours présente), en plus de
+  // celles déjà comptées par nbCols. Même raisonnement que DPGFWorkspace.
+  const nbColsDecoupage = (bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0) + 1;
 
   // ── Mutations ───────────────────────────────────────────────────────────────
   const mutateLots = useCallback((fn: (lots: BPULot[]) => BPULot[]) => {
@@ -296,6 +302,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             case 'numero': return { ...ligne, numero: raw };
             case 'designation': return { ...ligne, designation: raw };
             case 'unite': return { ...ligne, unite: raw };
+            case 'localisation': return { ...ligne, localisation: raw };
             case 'prixUnitaireLettres': return { ...ligne, prixUnitaireLettres: raw };
             case 'quantite': {
               const q = evalFormula(raw);
@@ -345,6 +352,40 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       next[li] = recomputeLot(lot);
       return next;
     });
+  };
+
+  /**
+   * Pose batimentId/phaseId sur un lot, un chapitre ou un article, identifié
+   * par sa clé de ligne — même dispatch que commitEdit, mais un <select>
+   * s'applique tout de suite. Jumeau de DPGFWorkspace.setDecoupageChamp.
+   */
+  const setDecoupageChamp = (rKey: string, champ: 'batimentId' | 'phaseId', valeur: string | undefined) => {
+    const parsed = parseRowKey(rKey);
+    if (!parsed) return;
+    if (parsed.kind === 'ligne') {
+      const { lotIdx: li, chapIdx: ci, lignePath } = parsed;
+      mutateLots(lots => {
+        const next = [...lots];
+        const lot = { ...next[li] };
+        const chap = { ...lot.chapitres[ci] };
+        chap.lignes = mutateLigneAtPath([...chap.lignes], lignePath, (ligne: BPULigne) => ({ ...ligne, [champ]: valeur }));
+        lot.chapitres = [...lot.chapitres.slice(0, ci), chap, ...lot.chapitres.slice(ci + 1)];
+        next[li] = recomputeLot(lot);
+        return next;
+      });
+    } else if (parsed.kind === 'chapitre') {
+      const { lotIdx: li, chapIdx: ci } = parsed;
+      mutateLots(lots => {
+        const next = [...lots];
+        const lot = { ...next[li] };
+        lot.chapitres = lot.chapitres.map((c, i) => i === ci ? { ...c, [champ]: valeur } : c);
+        next[li] = lot;
+        return next;
+      });
+    } else {
+      const { lotIdx: li } = parsed;
+      mutateLots(lots => lots.map((l, i) => i === li ? { ...l, [champ]: valeur } : l));
+    }
   };
 
   // ── Sélection ───────────────────────────────────────────────────────────────
@@ -532,6 +573,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             { id: 'marche', label: 'En-tête', icon: <IconAbc size={20} />, onClick: () => setShowMarche(v => !v), active: showMarche },
             { id: 'tranches', label: 'Tranches', icon: <IconStackPush size={20} />, onClick: () => setShowTranches(v => !v), active: showTranches },
             {
+              id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
+              onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+            },
+            {
               id: 'lettres', label: 'Prix en lettres', icon: <IconAbc size={20} />,
               onClick: () => patchBpu({ prixEnLettres: !bpu.prixEnLettres }), active: bpu.prixEnLettres,
             },
@@ -674,6 +719,15 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         />
       )}
 
+      {/* ── Bâtiments et phases ──────────────────────────────────────────── */}
+      {showDecoupage && (
+        <DecoupagePanel
+          doc={bpu}
+          onPatch={patch => patchBpu(patch)}
+          onClose={() => setShowDecoupage(false)}
+        />
+      )}
+
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Volet arbre ────────────────────────────────────────────────── */}
@@ -753,6 +807,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   </th>
                 ))}
                 {showOffres && <th className="px-2 py-2 text-right font-semibold w-24">Moins-disant</th>}
+                {bpu.multiBatiments && <th className="px-1 py-2 text-center font-semibold w-14">Bât.</th>}
+                {bpu.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">Phase</th>}
+                <th className="px-2 py-2 text-left font-semibold w-28">Localisation</th>
                 <th className="px-2 py-2 w-16"></th>
               </tr>
             </thead>
@@ -801,6 +858,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       {showMontant && <td className="px-2 py-2 text-right font-mono text-[#1e5090]">{formatCurrency(row.lot.sousTotal)}</td>}
                       {showOffres && offres.map(o => <td key={o.id} />)}
                       {showOffres && <td />}
+                      {(bpu.multiBatiments || bpu.multiPhases) && (
+                        <td className="px-1 py-2" colSpan={(bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0)}>
+                          <div className="flex items-center gap-1 justify-center">
+                            <SelecteursDecoupage
+                              doc={bpu} batimentId={row.lot.batimentId} phaseId={row.lot.phaseId}
+                              onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                              onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                            />
+                          </div>
+                        </td>
+                      )}
+                      <td />{/* pas de localisation au niveau lot */}
                       <td className="px-1 py-2 text-right">
                         <button onClick={() => deleteLot(row.lotIdx)} className="text-red-400 hover:text-red-600 opacity-40 hover:opacity-100" title="Supprimer le lot">
                           <IconTrash size={13} />
@@ -829,6 +898,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={nbCols - 3}>
                         <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} />
                       </td>
+                      {(bpu.multiBatiments || bpu.multiPhases) && (
+                        <td className="px-1 py-1" colSpan={(bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0)}>
+                          <div className="flex items-center gap-1 justify-center">
+                            <SelecteursDecoupage
+                              doc={bpu} batimentId={row.chapitre!.batimentId} phaseId={row.chapitre!.phaseId}
+                              onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                              onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                            />
+                          </div>
+                        </td>
+                      )}
+                      <td />{/* pas de localisation au niveau chapitre */}
                       <td className="px-1 py-1 text-right">
                         <button onClick={() => addLigne(row.lotIdx, row.chapIdx!)} className="text-blue-500 hover:text-blue-700 opacity-50 hover:opacity-100 mr-1" title="Ajouter un article">
                           <IconPlus size={12} />
@@ -912,6 +993,22 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         {mini != null ? fmt2(mini) : ''}
                       </td>
                     )}
+                    {(bpu.multiBatiments || bpu.multiPhases) && (
+                      <td className="px-1 py-0.5" colSpan={(bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0)}>
+                        {hasChildren ? null : (
+                          <div className="flex items-center gap-1 justify-center">
+                            <SelecteursDecoupage
+                              doc={bpu} batimentId={l.batimentId} phaseId={l.phaseId}
+                              onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
+                              onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-2 py-0.5 text-xs text-zinc-500">
+                      {hasChildren ? null : <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs" />}
+                    </td>
                     <td className="px-1 py-0.5 text-right whitespace-nowrap">
                       <NatureMenu current={nature} onPick={n => patchLigneAt(rKey, { nature: n })} />
                       {canAddChild && (
@@ -938,7 +1035,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         dont {NATURE_LABELS[n as NatureArticle]} (hors offre de base)
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-zinc-500">{formatCurrency(montant)}</td>
-                      <td />
+                      <td colSpan={1 + nbColsDecoupage} />
                     </tr>
                   ))}
                   {bpu.tranches.map(t => (
@@ -947,25 +1044,25 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         {t.code} — {t.libelle} ({t.type})
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-zinc-500">{formatCurrency(vent.parTranche[t.id] ?? 0)}</td>
-                      <td />
+                      <td colSpan={1 + nbColsDecoupage} />
                     </tr>
                   ))}
                   <tr className="bg-[#edf1f7] dark:bg-zinc-800/30">
                     <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm text-zinc-600 font-semibold">TVA {bpu.TVA} %</td>
                     <td className="px-2 py-2 text-right font-mono text-zinc-600">{formatCurrency(grandTVA)}</td>
-                    <td />
+                    <td colSpan={1 + nbColsDecoupage} />
                   </tr>
                   <tr className="bg-[#1e5090] text-white font-bold">
                     <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm">
                       {colSet === 'comparatif' ? 'TOTAL HT' : 'MONTANT ESTIMATIF HT'}
                     </td>
                     <td className="px-2 py-2 text-right font-mono">{formatCurrency(bpu.totalHT)}</td>
-                    <td />
+                    <td colSpan={1 + nbColsDecoupage} />
                   </tr>
                   <tr className="bg-[#1a4080] text-white font-bold">
                     <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm">MONTANT ESTIMATIF TTC</td>
                     <td className="px-2 py-2 text-right font-mono">{formatCurrency(bpu.totalTTC)}</td>
-                    <td />
+                    <td colSpan={1 + nbColsDecoupage} />
                   </tr>
                   {showOffres && (
                     <tr className="bg-[#0f2d5c] text-white font-bold text-xs">
@@ -973,7 +1070,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       {offres.map(o => (
                         <td key={o.id} className="px-2 py-2 text-right font-mono">{formatCurrency(totauxOffres.get(o.id) ?? 0)}</td>
                       ))}
-                      <td /><td />
+                      <td /><td colSpan={1 + nbColsDecoupage} />
                     </tr>
                   )}
                 </>
@@ -982,7 +1079,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
               {/* Le bordereau se termine sur une mention, pas sur un total. */}
               {!showTotaux && (
                 <tr className="bg-[#edf1f7] dark:bg-zinc-800/30">
-                  <td colSpan={nbCols} className="px-4 py-3 text-xs text-zinc-500 italic text-center">
+                  <td colSpan={nbCols + nbColsDecoupage} className="px-4 py-3 text-xs text-zinc-500 italic text-center">
                     Un bordereau de prix unitaires ne comporte pas de total : les travaux sont réglés
                     sur quantités réellement exécutées. Basculer sur le jeu de colonnes « DQE » pour
                     obtenir le montant estimatif.

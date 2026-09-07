@@ -4,13 +4,13 @@ import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { BPUWorkspace } from './BPUWorkspace';
 import { PrintPageDecorations } from '../PrintPageDecorations';
-import { DPGF, Ligne } from '../../types/dpgf';
+import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
 import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
 import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
-import { BPUImportDialog } from './BPUImportDialog';
-import { bpuVersComparatif } from '../../lib/bpuToAct';
+import { OffreImportDialog } from './OffreImportDialog';
+import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
@@ -77,6 +77,19 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
   });
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
+
+  // Offres reçues sur le DPGF. Chargées à part du document lui-même (route
+  // dédiée, cf. server/routes/dpgf.ts) : GET /api/projects/:id/dpgf ne rend
+  // que le document, exactement comme avant cette fonctionnalité — useDPGF.ts
+  // en dépend et n'a aucune raison de changer de forme pour ça.
+  const [dpgfOffres, setDpgfOffres] = useState<OffreDocument[]>([]);
+  useEffect(() => {
+    let annule = false;
+    apiFetch<OffreDocument[]>(`/api/projects/${projectId}/dpgf/offres`)
+      .then(rows => { if (!annule) setDpgfOffres(rows); })
+      .catch(() => { /* pas encore de DPGF, ou hors ligne : liste vide */ });
+    return () => { annule = true; };
+  }, [projectId]);
 
   // Vue divisée (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
@@ -194,7 +207,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   }, [projectId]);
 
   // ── Offres reçues des entreprises ───────────────────────────────────────────
-  const [importOuvert, setImportOuvert] = useState(false);
+  // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
+  // discriminant dit dans lequel des deux on est en train d'importer.
+  const [importCible, setImportCible] = useState<'dpgf' | 'bpu' | null>(null);
 
   /**
    * Les offres vivent dans une colonne séparée du document et passent par leur
@@ -217,23 +232,39 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     }
   }, [projectId]);
 
+  /** Même chose côté DPGF, sur sa propre route et son propre état d'offres. */
+  const enregistrerOffreDpgf = useCallback(async (offre: any) => {
+    const saved = await apiFetch<OffreDocument & { prixRemontes?: number }>(
+      `/api/projects/${projectId}/dpgf/offres`,
+      { method: 'POST', body: JSON.stringify({ offre }) },
+    );
+    setDpgfOffres(prev => [...prev, saved]);
+    if (saved.prixRemontes) {
+      window.alert(
+        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+      );
+    }
+  }, [projectId]);
+
   /**
-   * Verse le bordereau et les offres dans le comparatif détaillé du module ACT,
-   * qui sait déjà les comparer, les noter et en tirer un RAO. À la demande
-   * seulement : ce comparatif est éditable, une synchronisation automatique se
-   * battrait contre l'architecte.
+   * Verse un résultat de versComparatif (DPGF ou BPU) dans le comparatif
+   * détaillé du module ACT, qui sait déjà comparer, noter et en tirer un RAO.
+   * À la demande seulement : ce comparatif est éditable, une synchronisation
+   * automatique se battrait contre l'architecte.
    */
-  const verserAuComparatifAct = useCallback(async () => {
-    if (!bpu) return;
-    const { comparatif, lotsNonRattaches } = bpuVersComparatif(bpu, offres);
+  const verserComparatif = useCallback(async (
+    resultat: { comparatif: any[]; lotsNonRattaches: { numero: string; titre: string }[] },
+    docLabel: string,
+  ) => {
+    const { comparatif, lotsNonRattaches } = resultat;
     if (lotsNonRattaches.length) {
       const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
       if (!window.confirm(
-        `Ces lots du bordereau ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
+        `Ces lots du ${docLabel} ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
       )) return;
     }
     if (!comparatif.length) {
-      window.alert("Aucun lot du bordereau n'est rattaché à un lot du projet : rien à verser.");
+      window.alert(`Aucun lot du ${docLabel} n'est rattaché à un lot du projet : rien à verser.`);
       return;
     }
     try {
@@ -247,7 +278,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     } catch (e: any) {
       window.alert(`Le versement a échoué : ${e?.message ?? 'erreur inconnue'}`);
     }
-  }, [bpu, offres, projectId]);
+  }, [projectId]);
+
+  const verserAuComparatifAct = useCallback(async () => {
+    if (!bpu) return;
+    await verserComparatif(bpuVersComparatif(bpu, offres), 'bordereau');
+  }, [bpu, offres, verserComparatif]);
+
+  const verserAuComparatifActDpgf = useCallback(async () => {
+    if (!dpgf) return;
+    await verserComparatif(dpgfVersComparatif(dpgf, dpgfOffres), 'DPGF');
+  }, [dpgf, dpgfOffres, verserComparatif]);
 
   // Cross-panel DnD
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
@@ -395,6 +436,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                   projectName={projectName}
                   showTree={showTree}
                   onToggleTree={toggleTree}
+                  onImportOffre={() => setImportCible('dpgf')}
+                  onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
+                  offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
                   onDropExternal={ligne => {
                     // Dropped from right panel — find last chapitre in last lot
@@ -510,7 +554,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
                 onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
                 onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
-                onImportOffre={() => setImportOuvert(true)}
+                onImportOffre={() => setImportCible('bpu')}
                 onPushToAct={verserAuComparatifAct}
                 onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
                 onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
@@ -521,11 +565,20 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         )}
       </div>
 
-      {importOuvert && bpu && (
-        <BPUImportDialog
-          bpu={bpu}
-          onClose={() => setImportOuvert(false)}
+      {importCible === 'bpu' && bpu && (
+        <OffreImportDialog
+          doc={bpu}
+          docLabel="bordereau"
+          onClose={() => setImportCible(null)}
           onConfirm={enregistrerOffre}
+        />
+      )}
+      {importCible === 'dpgf' && dpgf && (
+        <OffreImportDialog
+          doc={dpgf}
+          docLabel="DPGF"
+          onClose={() => setImportCible(null)}
+          onConfirm={enregistrerOffreDpgf}
         />
       )}
     </div>

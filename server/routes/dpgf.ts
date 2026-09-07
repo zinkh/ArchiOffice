@@ -10,12 +10,26 @@
 // server/routes/cctps.ts's per-field CCTP CRUD.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { remonterPrixOffre } from '../articlePrices';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
+}
+
+/**
+ * Lit la ligne dpgfs du projet (document + offres), ou null si le DPGF
+ * n'existe pas encore. Distinct de la lecture de GET /dpgf : celle-ci ne rend
+ * que le document parsé, pour ne rien changer au contrat qu'useDPGF.ts et
+ * ProTab.tsx lui connaissent déjà.
+ */
+async function loadRow(supabaseAdmin: any, tenantId: string, projectId: string) {
+  const { data, error } = await supabaseAdmin.from('dpgfs').select('*')
+    .eq('project_id', projectId).eq('tenant_id', tenantId).single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data ?? null;
 }
 
 export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
@@ -57,6 +71,123 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
+    }
+  });
+
+  // ── Offres reçues des entreprises ──────────────────────────────────────────
+  // Même raisonnement que server/routes/bpu.ts : une colonne séparée du
+  // document, servie par ses propres endpoints — l'autosauvegarde du DPGF
+  // réécrit `data` en bloc, une offre logée dedans serait effacée par la
+  // sauvegarde suivant son import. Un DPGF verse désormais lui aussi ses
+  // offres au comparatif ACT (lib/documentToAct.ts), au même titre qu'un BPU.
+
+  app.get('/api/projects/:projectId/dpgf/offres', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      res.json(row?.offres ?? []);
+    } catch (e: any) {
+      console.error('[GET /api/projects/:projectId/dpgf/offres]', e);
+      res.status(500).json({ error: 'Failed to fetch offres' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/dpgf/offres', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { offre } = req.body;
+      if (!offre || typeof offre !== 'object') {
+        return res.status(400).json({ error: 'Champ `offre` manquant ou invalide' });
+      }
+      const row = await loadRow(supabaseAdmin, tenantId, projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+
+      const saved = { ...offre, id: offre.id || crypto.randomUUID(), importedAt: new Date().toISOString() };
+      const offres = [...(row.offres ?? []), saved];
+
+      const { error } = await supabaseAdmin.from('dpgfs')
+        .update({ offres }).eq('id', row.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Import de l'offre de "${saved.entrepriseNom}" sur le DPGF`, saved.entrepriseNom || '', saved.id, 'dpgf_offre', 'Situations/DPGF');
+
+      // Remontée vers la bibliothèque d'ouvrages, en meilleur effort : l'offre
+      // est déjà enregistrée, un échec ici ne doit pas la faire perdre.
+      const documentDpgf = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      let prixRemontes = 0;
+      try {
+        prixRemontes = await remonterPrixOffre(supabaseAdmin, tenantId, {
+          projectId, sourceKind: 'dpgf', document: documentDpgf, offre: saved, userId: req.user.id,
+        });
+      } catch (e: any) {
+        console.error('[POST dpgf/offres] remontée des prix', e);
+      }
+
+      res.status(201).json({ ...saved, prixRemontes });
+    } catch (e: any) {
+      console.error('[POST /api/projects/:projectId/dpgf/offres]', e);
+      res.status(500).json({ error: "Failed to add offre: " + e.message });
+    }
+  });
+
+  app.put('/api/projects/:projectId/dpgf/offres/:offreId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+
+      const current = (row.offres ?? []) as any[];
+      const idx = current.findIndex(o => o.id === req.params.offreId);
+      if (idx < 0) return res.status(404).json({ error: 'Offre introuvable' });
+
+      // L'identifiant reste celui de l'URL : le corps ne peut pas le déplacer.
+      const updated = { ...current[idx], ...req.body, id: current[idx].id };
+      const offres = current.map((o, i) => (i === idx ? updated : o));
+
+      const { error } = await supabaseAdmin.from('dpgfs')
+        .update({ offres }).eq('id', row.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      // Une correction de prix ou un changement de statut change ce que
+      // l'offre dit : on rejoue la remontée, dont l'upsert sur `source_ref`
+      // rectifie les observations déjà écrites au lieu de les doubler.
+      const documentDpgf = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      let prixRemontes = 0;
+      try {
+        prixRemontes = await remonterPrixOffre(supabaseAdmin, tenantId, {
+          projectId: req.params.projectId, sourceKind: 'dpgf', document: documentDpgf,
+          offre: updated, userId: req.user.id,
+        });
+      } catch (e: any) {
+        console.error('[PUT dpgf/offres] remontée des prix', e);
+      }
+
+      res.json({ ...updated, prixRemontes });
+    } catch (e: any) {
+      console.error('[PUT /api/projects/:projectId/dpgf/offres/:offreId]', e);
+      res.status(500).json({ error: 'Failed to update offre: ' + e.message });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/dpgf/offres/:offreId', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+
+      const current = (row.offres ?? []) as any[];
+      const offres = current.filter(o => o.id !== req.params.offreId);
+      if (offres.length === current.length) return res.status(404).json({ error: 'Offre introuvable' });
+
+      const { error } = await supabaseAdmin.from('dpgfs')
+        .update({ offres }).eq('id', row.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('[DELETE /api/projects/:projectId/dpgf/offres/:offreId]', e);
+      res.status(500).json({ error: 'Failed to delete offre' });
     }
   });
 

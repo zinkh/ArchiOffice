@@ -72,12 +72,18 @@ export async function ecrireObservations(
 }
 
 /**
- * Verse dans la bibliothèque les prix d'une offre reçue sur un BPU.
+ * Verse dans la bibliothèque les prix d'une offre reçue sur un DPGF ou un BPU.
  *
  * Seules les lignes issues de la bibliothèque (`articleTypeId` renseigné) sont
  * concernées : pour les autres, il n'existe aucun article auquel rattacher le
  * prix. Un prix `null` est ignoré — dans une offre, `null` veut dire « non
  * chiffré » ou « pour mémoire », surtout pas zéro, qui est un prix.
+ *
+ * `sourceKind` distingue les deux documents dans `source_ref` (« dpgf:… » vs
+ * « bpu:… ») : une même entreprise peut renvoyer un DPGF chiffré ET un
+ * bordereau sur le même projet, avec des jeux de lignes différents portant
+ * parfois le même id par coïncidence — sans ce préfixe, l'upsert d'idempotence
+ * pourrait faire correspondre à tort l'un à l'autre.
  *
  * Renvoie le nombre d'observations écrites, pour que l'appelant puisse le dire
  * à l'utilisateur sans refaire le calcul.
@@ -87,12 +93,13 @@ export async function remonterPrixOffre(
   tenantId: string,
   opts: {
     projectId: string;
+    sourceKind: 'dpgf' | 'bpu';
     document: DocumentArbre | null | undefined;
     offre: any;
     userId?: string;
   },
 ): Promise<number> {
-  const { projectId, document, offre, userId } = opts;
+  const { projectId, sourceKind, document, offre, userId } = opts;
   if (!offre?.id || !offre?.prix || typeof offre.prix !== 'object') return 0;
   // Une offre écartée ne doit pas peser sur les statistiques du cabinet.
   if (offre.statut === 'ecartee') return 0;
@@ -124,7 +131,7 @@ export async function remonterPrixOffre(
     // prix remontent — ce sont bien deux observations de la même entreprise
     // sur deux emplois de l'article. Le garde-fou ici ne sert qu'à ne pas
     // écrire deux fois la MÊME clé dans un seul lot, ce que l'upsert refuse.
-    const sourceRef = `bpu:${offre.id}:${ligne.id}`;
+    const sourceRef = `${sourceKind}:${offre.id}:${ligne.id}`;
     if (vus.has(sourceRef)) continue;
     vus.add(sourceRef);
 
