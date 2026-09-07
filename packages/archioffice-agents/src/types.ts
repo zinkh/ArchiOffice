@@ -93,8 +93,24 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
   { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'project_id', 'description', 'content'],
-    required: ['title'],
-    fields: 'title*, project_id, description, content' },
+    // project_id est obligatoire depuis l'incident du 7 septembre 2026 : un
+    // agent avait créé 19 CCTP sans projet (project_id NULL), invisibles
+    // nulle part dans l'application (la seule vue qui les affiche filtre par
+    // projet), en réponse à des demandes qui visaient en réalité la
+    // Bibliothèque d'ouvrages (voir la ressource 'articles_type' ci-dessous).
+    required: ['title', 'project_id'],
+    fields: 'title*, project_id*, description, content' },
+  { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
+    // À ne pas confondre avec 'specifications' (CCTP) : ceci est le catalogue
+    // d'articles réutilisables du cabinet — un article a un prix unitaire et
+    // se range par corps de métier, un CCTP est un document de projet. Un
+    // agent qui « intègre les articles d'un document à la bibliothèque »
+    // crée un enregistrement par article ici, jamais un CCTP par chapitre.
+    knownFields: ['designation', 'unite', 'prix_unitaire', 'categorie', 'lot_type', 'description', 'notes', 'origine', 'code'],
+    required: ['designation'],
+    enums: { origine: ['reference', 'saisie', 'bpu', 'offre', 'import'] },
+    defaults: { origine: 'saisie' },
+    fields: "désignation*, unité, prix_unitaire, catégorie, lot_type (corps de métier), description, notes, origine (reference/saisie/bpu/offre/import), code" },
   { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'description', 'start_date', 'end_date', 'due_date', 'project_id', 'status', 'priority', 'assignee_id', 'progress', 'dependencies'],
     required: ['title'],
@@ -162,7 +178,7 @@ export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
   'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects'],
   'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
-  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
   'responsable-hqe':     ['specifications', 'tasks'],

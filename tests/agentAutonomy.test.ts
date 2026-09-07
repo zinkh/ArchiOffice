@@ -4,7 +4,7 @@
 // planifiée, et la mise en page des documents produits.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildAgentTools, executeAgentAction, prepareRecord } from '../packages/archioffice-agents/src/server/tools';
+import { buildAgentTools, executeAgentAction, prepareRecord, describeAuthorizedResources } from '../packages/archioffice-agents/src/server/tools';
 import { capabilitiesFromAgent, AGENT_DEFAULT_ACTION_SCOPES, AGENT_RESOURCES } from '../packages/archioffice-agents/src/types';
 import {
   ALERT_RULES_BY_CODE, effectiveSettings, evaluateSnapshot, type TenantSnapshot,
@@ -424,6 +424,58 @@ describe('préparation des écritures', () => {
         expect(resource.knownFields).toContain(field);
       }
     }
+  });
+});
+
+// ── Bibliothèque d'ouvrages (articles_type) vs CCTP (specifications) ────────
+// Le 7 septembre 2026, un agent a créé 19 CCTP sans projet en réponse à des
+// demandes qui visaient en réalité la Bibliothèque d'ouvrages : les agents
+// n'avaient aucun outil d'écriture sur articles_type, seul le CCTP
+// ressemblait de loin à une « bibliothèque ». Ces tests protègent les deux
+// correctifs : un CCTP exige désormais un projet, et articles_type est une
+// ressource à part entière, jamais confondue avec le CCTP.
+describe("Bibliothèque d'ouvrages (articles_type)", () => {
+  const specifications = AGENT_RESOURCES.find(r => r.key === 'specifications')!;
+  const articlesType = AGENT_RESOURCES.find(r => r.key === 'articles_type')!;
+
+  it('exige désormais un projet pour créer un CCTP', () => {
+    const prepared = prepareRecord(specifications, { title: 'Lot 00 - Généralités' });
+    expect(prepared.missingRequired).toEqual(['project_id']);
+  });
+
+  it("pose 'saisie' comme provenance par défaut d'un article de bibliothèque", () => {
+    const prepared = prepareRecord(articlesType, { designation: 'Chape fluide anhydrite' });
+    expect(prepared.data.origine).toBe('saisie');
+    expect(prepared.missingRequired).toEqual([]);
+  });
+
+  it('nomme la désignation manquante plutôt que de laisser échouer /api/price-library', () => {
+    const prepared = prepareRecord(articlesType, { prix_unitaire: 12.5 });
+    expect(prepared.missingRequired).toEqual(['designation']);
+  });
+
+  it("étiquette articles_type Bibliothèque d'ouvrages, jamais CCTP", () => {
+    // La confusion venait justement de là : le seul outil disponible était
+    // étiqueté "CCTP", ce qui a poussé un agent à l'utiliser pour une demande
+    // de bibliothèque. Un futur renommage de l'étiquette CCTP ne doit pas
+    // recréer la même ambiguïté avec la bibliothèque.
+    expect(articlesType.label).toBe("Bibliothèque d'ouvrages");
+    expect(articlesType.label).not.toContain('CCTP');
+    expect(specifications.label).not.toBe("Bibliothèque d'ouvrages");
+  });
+
+  it("expose create/update/delete/search sur articles_type à un agent qui y est autorisé", () => {
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['articles_type'] });
+    const names = buildAgentTools(caps).map(t => t.name);
+    expect(names).toEqual(expect.arrayContaining(['create_record', 'update_record', 'delete_record', 'search_records']));
+
+    const schema = describeAuthorizedResources(['articles_type']);
+    expect(schema).toContain("Bibliothèque d'ouvrages");
+    expect(schema).toContain('resource: "articles_type"');
+  });
+
+  it("accorde la Bibliothèque d'ouvrages à l'économiste par défaut", () => {
+    expect(AGENT_DEFAULT_ACTION_SCOPES.economiste).toContain('articles_type');
   });
 });
 

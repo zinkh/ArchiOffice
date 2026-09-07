@@ -35,6 +35,16 @@ describe('Specifications (CCTP)', () => {
     expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === id)).toBeUndefined();
   });
 
+  it('refuse un CCTP sans projet', async () => {
+    // Un CCTP sans project_id n'apparaît nulle part dans l'application (la
+    // seule vue qui les affiche filtre par projet) — voir server/routes/specifications.ts.
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/specifications').set(authHeader(token)).send({ title: 'CCTP orphelin', content: '[]' });
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('specifications').some(s => s.title === 'CCTP orphelin')).toBe(false);
+  });
+
   it('never lets a caller update or delete another tenant\'s specification', async () => {
     const tenantB = makeTenant();
     const specId = 'spec-b';

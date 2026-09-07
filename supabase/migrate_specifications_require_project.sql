@@ -1,0 +1,11 @@
+-- Un CCTP sans projet est invisible partout dans l'application (la seule vue
+-- qui les affiche filtre par project_id) : le 7 septembre 2026, un agent IA
+-- en a créé 19 sans projet (project_id NULL) en réponse à des demandes qui
+-- visaient en réalité la Bibliothèque d'ouvrages (articles_type), une
+-- ressource distincte à laquelle les agents n'avaient jusqu'ici aucun accès
+-- en écriture — voir packages/archioffice-agents/src/types.ts (ressource
+-- 'articles_type') et server/routes/specifications.ts.
+--
+-- Posée après nettoyage : vérifié à 0 ligne à project_id NULL sur l'ensemble
+-- des tenants avant d'appliquer la contrainte.
+ALTER TABLE specifications ALTER COLUMN project_id SET NOT NULL;

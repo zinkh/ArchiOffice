@@ -29,6 +29,12 @@ export function registerSpecificationRoutes(app: Express, { supabaseAdmin, getTe
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, title, content, is_template } = req.body;
+      // Un CCTP sans projet est invisible partout dans l'application (la
+      // seule vue qui les affiche filtre par project_id) : le 7 septembre
+      // 2026, un agent IA en a créé 19 sans projet en réponse à des demandes
+      // qui visaient en réalité la Bibliothèque d'ouvrages (articles_type),
+      // une ressource distincte. Refuser ici évite d'en recréer.
+      if (!project_id) return res.status(400).json({ error: "project_id est obligatoire pour créer un CCTP" });
       const id = bodyId || crypto.randomUUID();
       const last_updated = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'specifications').insert({ id, project_id, title, content, last_updated, is_template: !!is_template });
