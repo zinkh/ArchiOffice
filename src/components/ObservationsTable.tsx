@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-table';
 import { IconPlus, IconTrash, IconColumns, IconChevronDown } from '@tabler/icons-react';
 import { Observation, ProjectLot } from '../types';
+import { openSignedUrl } from '../lib/signedStorageUrl';
 
 interface Props {
   projectId: string;
@@ -281,9 +282,9 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         const photos = info.getValue() || [];
         if (photos.length === 0) return null;
         return (
-          <a href={photos[0]} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
+          <button type="button" onClick={() => openSignedUrl(photos[0])} className="text-xs text-blue-500 hover:underline">
             {photos.length} photo{photos.length > 1 ? 's' : ''}
-          </a>
+          </button>
         );
       },
     }),
