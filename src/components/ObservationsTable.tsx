@@ -55,6 +55,7 @@ const COLUMN_LABELS: Record<string, string> = {
 
 export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -70,10 +71,17 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     : `/api/projects/${projectId}/observations`;
 
   const fetchObservations = useCallback(() => {
+    setLoadError(false);
     fetch(endpoint)
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setObservations(data); })
-      .catch(console.error);
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setObservations(data);
+        else throw new Error('Unexpected response shape');
+      })
+      .catch(err => { console.error(err); setLoadError(true); });
   }, [endpoint]);
 
   useEffect(() => { fetchObservations(); }, [fetchObservations]);
@@ -360,6 +368,18 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           )}
         </div>
       </div>
+
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+          <span>Impossible de charger les observations (session expirée ou connexion interrompue).</span>
+          <button
+            onClick={fetchObservations}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all"
+          >
+            Réessayer
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl">
