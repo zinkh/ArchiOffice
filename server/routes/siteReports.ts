@@ -22,6 +22,9 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (error) throw error;
       const parsedReports = (reports || []).map((report: any) => ({
         ...report,
+        pageFormat: report.pageformat ?? null,
+        meetingNotes: report.meetingnotes ?? null,
+        nextMeeting: report.nextmeeting ?? null,
         stakeholders: Array.isArray(report.stakeholders) ? report.stakeholders : (() => { try { return report.stakeholders ? JSON.parse(report.stakeholders) : []; } catch (e) {
           console.error("[GET /api/projects/:projectId/reports]", e); return []; } })(),
         companies: Array.isArray(report.companies) ? report.companies : (() => { try { return report.companies ? JSON.parse(report.companies) : []; } catch (e) {
@@ -102,12 +105,19 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting, meteo, temperature, attendance, statut, decisions } = req.body;
+      // The live site_reports table predates the snake_case convention used
+      // elsewhere in the schema — these three columns were created unquoted
+      // from camelCase source, so Postgres folded them to all-lowercase
+      // with no underscore (pageformat/meetingnotes/nextmeeting), not
+      // page_format/meeting_notes/next_meeting like schema.sql documents.
+      // Sending the camelCase JS keys straight through (as this route used
+      // to) makes PostgREST 404 on every PUT — see 2026-09-08 incident.
       const update: any = {
-        pageFormat: pageFormat || null,
+        pageformat: pageFormat || null,
         stakeholders: stakeholders || [],
         companies: companies || [],
-        meetingNotes: meetingNotes || null,
-        nextMeeting: nextMeeting || null
+        meetingnotes: meetingNotes || null,
+        nextmeeting: nextMeeting || null
       };
       if (meteo !== undefined) update.meteo = meteo;
       if (temperature !== undefined) update.temperature = temperature;
@@ -117,12 +127,16 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const { error } = await supabaseAdmin.from('site_reports').update(update).eq('id', reportId).eq('tenant_id', tenantId);
       if (error) throw error;
       const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
+      const saved = updatedReport as any;
       res.json({
-        ...(updatedReport as any),
-        stakeholders: (updatedReport as any)?.stakeholders || [],
-        companies: (updatedReport as any)?.companies || [],
-        attendance: (updatedReport as any)?.attendance || [],
-        decisions: (updatedReport as any)?.decisions || [],
+        ...saved,
+        pageFormat: saved?.pageformat ?? null,
+        meetingNotes: saved?.meetingnotes ?? null,
+        nextMeeting: saved?.nextmeeting ?? null,
+        stakeholders: saved?.stakeholders || [],
+        companies: saved?.companies || [],
+        attendance: saved?.attendance || [],
+        decisions: saved?.decisions || [],
       });
     } catch (error) {
       captureWithContext(error, { route: 'PUT /api/reports/:reportId', tenantId, userId: req.user?.id });

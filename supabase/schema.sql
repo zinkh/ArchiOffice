@@ -349,12 +349,19 @@ CREATE TABLE IF NOT EXISTS ordres_de_service (
 );
 CREATE INDEX IF NOT EXISTS idx_ordres_de_service_tenant_project ON ordres_de_service(tenant_id, project_id);
 
+-- pageformat/meetingnotes/nextmeeting predate this schema's snake_case
+-- convention: the columns were created unquoted from camelCase source, so
+-- Postgres folded them to all-lowercase with no underscore rather than the
+-- page_format/meeting_notes/next_meeting this file used to (wrongly) claim.
+-- Keep the names below in sync with the live DB, not with what "should" be
+-- there — server/routes/siteReports.ts maps to/from camelCase at the API
+-- boundary instead.
 CREATE TABLE IF NOT EXISTS site_reports (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, date TEXT NOT NULL, report_number INTEGER NOT NULL,
-  page_format TEXT, stakeholders TEXT, companies TEXT,
-  meeting_notes TEXT, next_meeting TEXT, meteo TEXT,
+  pageformat TEXT, stakeholders TEXT, companies TEXT,
+  meetingnotes TEXT, nextmeeting TEXT, meteo TEXT,
   temperature TEXT, effectif_total TEXT,
   attendance JSONB DEFAULT '[]', statut TEXT NOT NULL DEFAULT 'brouillon',
   decisions JSONB DEFAULT '[]'
