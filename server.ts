@@ -7,7 +7,6 @@ import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
-import { registerDetDataRoutes } from "./server/routes/detData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
 import { registerBpuRoutes } from "./server/routes/bpu";
 import { registerPriceLibraryRoutes } from "./server/routes/priceLibrary";
@@ -690,7 +689,6 @@ export async function createApp() {
   // `.eq('tenant_id', tenantId)` on each query.
   registerProjectTemplateRoutes(app, { supabaseAdmin, getTenantId });
   registerActDataRoutes(app, { supabaseAdmin, getTenantId });
-  registerDetDataRoutes(app, { supabaseAdmin, getTenantId });
   registerDpgfRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerBpuRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPriceLibraryRoutes(app, { supabaseAdmin, getTenantId });
@@ -701,7 +699,7 @@ export async function createApp() {
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
-  registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage });
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

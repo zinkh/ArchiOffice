@@ -30,7 +30,6 @@ export class AppDatabase extends Dexie {
     seller_bic?: string;
   }>;
   actData!: Table<any>;
-  detData!: Table<any>;
   users!: Table<UserProfile>;
 
   constructor() {
@@ -49,7 +48,6 @@ export class AppDatabase extends Dexie {
       syncQueue: '++id, table, method',
       settings: 'id',
       actData: 'projectId',
-      detData: 'id, projectId',
       users: 'id, email'
     });
   }

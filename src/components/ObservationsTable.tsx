@@ -16,6 +16,8 @@ interface Props {
   lots: ProjectLot[];
   reportId?: string;
   currentReportId?: string;
+  /** Restricts the table to one observation type (e.g. 'reserve' for the "Réserves" tab). */
+  typeFilter?: Observation['type'];
 }
 
 const STATUTS = ['À faire', 'En cours', 'Levée', 'Urgent', 'Refusée'] as const;
@@ -28,6 +30,14 @@ const statutColors: Record<string, string> = {
   'Refusée': 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
 };
 
+const URGENCES = ['normal', 'urgent', 'bloquant'] as const;
+
+const urgenceColors: Record<string, string> = {
+  normal: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+  urgent: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  bloquant: 'bg-red-600 text-white',
+};
+
 const columnHelper = createColumnHelper<Observation>();
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -35,13 +45,15 @@ const COLUMN_LABELS: Record<string, string> = {
   lot: 'Lot',
   texte: 'Observation',
   statut: 'Statut',
+  urgence: 'Urgence',
   due_date: 'Délai',
   created_report_number: 'CR émis',
   resolved_report_number: 'CR levée',
+  photos: 'Photos',
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, reportId, currentReportId }: Props) {
+export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
   const [observations, setObservations] = useState<Observation[]>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -95,7 +107,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     fetch(`/api/projects/${projectId}/observations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texte: '', statut: 'À faire', created_report_id: currentReportId || null }),
+      body: JSON.stringify({ texte: '', statut: 'À faire', type: typeFilter || 'observation', created_report_id: currentReportId || null }),
     })
       .then(r => r.json())
       .then(newObs => setObservations(prev => [...prev, newObs]))
@@ -110,6 +122,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   };
 
   const filtered = observations.filter(o => {
+    if (typeFilter && (o.type || 'observation') !== typeFilter) return false;
     if (openOnly && o.statut === 'Levée') return false;
     if (statusFilter && o.statut !== statusFilter) return false;
     if (lotFilter && o.lot_id !== lotFilter) return false;
@@ -191,6 +204,26 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         );
       },
     }),
+    columnHelper.accessor('urgence', {
+      header: 'Urgence',
+      size: 100,
+      cell: info => {
+        const row = info.row.original;
+        const val = info.getValue() || 'normal';
+        return (
+          <select
+            className={`w-full p-1 rounded text-[10px] font-bold uppercase tracking-wider border-none cursor-pointer ${urgenceColors[val] || ''}`}
+            value={val}
+            onChange={e => {
+              updateLocal(row.id, { urgence: e.target.value as Observation['urgence'] });
+              saveField(row.id, 'urgence', e.target.value);
+            }}
+          >
+            {URGENCES.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        );
+      },
+    }),
     columnHelper.accessor('due_date', {
       header: 'Délai',
       size: 130,
@@ -223,6 +256,19 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       cell: info => {
         const v = info.getValue();
         return v ? <span className="font-mono text-xs text-green-500">#{String(v).padStart(2, '0')}</span> : null;
+      },
+    }),
+    columnHelper.accessor('photos', {
+      header: 'Photos',
+      size: 60,
+      cell: info => {
+        const photos = info.getValue() || [];
+        if (photos.length === 0) return null;
+        return (
+          <a href={photos[0]} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
+            {photos.length} photo{photos.length > 1 ? 's' : ''}
+          </a>
+        );
       },
     }),
     columnHelper.display({

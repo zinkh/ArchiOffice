@@ -38,9 +38,12 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { date, report_number } = req.body;
+      const { date, report_number, meteo, temperature, effectif_total } = req.body;
       const id = crypto.randomUUID();
-      const { error: insErr } = await supabaseAdmin.from('site_reports').insert({ id, tenant_id: tenantId, project_id: projectId, date, report_number });
+      const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
+        id, tenant_id: tenantId, project_id: projectId, date, report_number,
+        meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,
+      });
       if (insErr) throw insErr;
       const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
       const projectName = (project as any)?.name || '';
@@ -98,17 +101,29 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
-      const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting } = req.body;
-      const { error } = await supabaseAdmin.from('site_reports').update({
+      const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting, meteo, temperature, attendance, statut, decisions } = req.body;
+      const update: any = {
         pageFormat: pageFormat || null,
         stakeholders: stakeholders || [],
         companies: companies || [],
         meetingNotes: meetingNotes || null,
         nextMeeting: nextMeeting || null
-      }).eq('id', reportId).eq('tenant_id', tenantId);
+      };
+      if (meteo !== undefined) update.meteo = meteo;
+      if (temperature !== undefined) update.temperature = temperature;
+      if (attendance !== undefined) update.attendance = attendance;
+      if (statut !== undefined) update.statut = statut;
+      if (decisions !== undefined) update.decisions = decisions;
+      const { error } = await supabaseAdmin.from('site_reports').update(update).eq('id', reportId).eq('tenant_id', tenantId);
       if (error) throw error;
       const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
-      res.json({ ...(updatedReport as any), stakeholders: (updatedReport as any)?.stakeholders || [], companies: (updatedReport as any)?.companies || [] });
+      res.json({
+        ...(updatedReport as any),
+        stakeholders: (updatedReport as any)?.stakeholders || [],
+        companies: (updatedReport as any)?.companies || [],
+        attendance: (updatedReport as any)?.attendance || [],
+        decisions: (updatedReport as any)?.decisions || [],
+      });
     } catch (error) {
       captureWithContext(error, { route: 'PUT /api/reports/:reportId', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update report" });

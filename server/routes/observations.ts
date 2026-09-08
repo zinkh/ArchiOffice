@@ -12,15 +12,18 @@
 // tenant before inserting the link row.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { sanitizeFilename } from '../sanitizeFilename';
+import { handleSingleImageUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
+  uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
 }
 
-export function registerObservationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerObservationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage }: RouteDeps) {
   app.get("/api/projects/:projectId/observations", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -47,14 +50,15 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { lot_id, contact_id, texte, statut, due_date, created_report_id } = req.body;
+      const { lot_id, contact_id, texte, statut, due_date, created_report_id, type, urgence } = req.body;
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
       const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
       const id = `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert({
         id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
         texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
-        created_report_id: created_report_id || null, number
+        created_report_id: created_report_id || null, number,
+        type: type || 'observation', urgence: urgence || 'normal'
       }).select().single();
       if (error) throw error;
       if (created_report_id) {
@@ -73,8 +77,16 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { lot_id, contact_id, texte, statut, due_date, resolved_report_id } = req.body;
-      const update: any = { lot_id: lot_id || null, contact_id: contact_id || null, texte, statut, due_date: due_date || null };
+      const { lot_id, contact_id, texte, statut, due_date, resolved_report_id, type, urgence, photos } = req.body;
+      const update: any = {};
+      if (lot_id !== undefined) update.lot_id = lot_id || null;
+      if (contact_id !== undefined) update.contact_id = contact_id || null;
+      if (texte !== undefined) update.texte = texte;
+      if (statut !== undefined) update.statut = statut;
+      if (due_date !== undefined) update.due_date = due_date || null;
+      if (type !== undefined) update.type = type;
+      if (urgence !== undefined) update.urgence = urgence;
+      if (photos !== undefined) update.photos = photos;
       if (statut === 'Levée' && resolved_report_id) update.resolved_report_id = resolved_report_id;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update(update).eq('id', id);
       if (error) throw error;
@@ -82,6 +94,35 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     } catch (error) {
       console.error("[PUT /api/observations/:id]", error);
       res.status(500).json({ error: "Failed to update observation" });
+    }
+  });
+
+  // Image-only whitelist (same magic-byte sniffing as meeting photos): these
+  // render inline in the reportage photo grid, so anything that isn't a real
+  // image wouldn't display there anyway.
+  app.post("/api/observations/:id/photos", handleSingleImageUpload('file'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const sniffedMime = sniffImageMime(file.buffer);
+      if (!sniffedMime) {
+        return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
+      }
+      const { data: obs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('photos').eq('id', id).maybeSingle();
+      if (!obs) return res.status(404).json({ error: "Observation not found" });
+      const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
+      const photoId = crypto.randomUUID();
+      const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
+      const file_url = await uploadToStorage('meeting-photos', storagePath, buffer, mimetype);
+      const photos = [...((obs as any).photos || []), file_url];
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update({ photos }).eq('id', id);
+      if (error) throw error;
+      res.status(201).json({ photos });
+    } catch (error: any) {
+      console.error("[POST /api/observations/:id/photos]", error);
+      res.status(500).json({ error: error.message || "Failed to upload photo" });
     }
   });
 

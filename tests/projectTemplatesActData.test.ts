@@ -1,9 +1,12 @@
-// Phase 7 pilot: end-to-end Supertest coverage for the three route domains
-// extracted out of server.ts into server/routes/*.ts (project templates,
-// ACT data, DET data) — confirms the extraction didn't change behavior, and
-// that tenantScopedFrom() (used internally by these routes instead of a
+// Phase 7 pilot: end-to-end Supertest coverage for route domains extracted
+// out of server.ts into server/routes/*.ts (project templates, ACT data) —
+// confirms the extraction didn't change behavior, and that
+// tenantScopedFrom() (used internally by these routes instead of a
 // hand-written `.eq('tenant_id', tenantId)`) still enforces tenant
 // isolation end-to-end through the real app.
+// DET data coverage was dropped with det_data itself: src/pages/DET.tsx was
+// never mounted/routed and det_data held no real data — the DET tab now runs
+// entirely on site_reports/observations, covered by their own tests.
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
@@ -87,39 +90,5 @@ describe('ACT data', () => {
     // the route inserts a brand-new tenant-A row rather than touching tenant B's.
     const victimRow = fakeSupabaseAdmin.getTable('act_data').find(r => r.id === 'act-b');
     expect(victimRow?.companies).toEqual(['Victim']);
-  });
-});
-
-describe('DET data', () => {
-  it('creates, updates, and deletes a compte-rendu within one tenant', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    const projectId = 'project-1';
-
-    const created = await request(app).post(`/api/projects/${projectId}/det`).set(authHeader(token)).send({ info: { title: 'CR n°1' } });
-    expect(created.status).toBe(201);
-    const crId = created.body.id;
-
-    const updated = await request(app).put(`/api/projects/${projectId}/det/${crId}`).set(authHeader(token)).send({ info: { title: 'CR n°1 (révisé)' } });
-    expect(updated.status).toBe(200);
-
-    const deleted = await request(app).delete(`/api/projects/${projectId}/det/${crId}`).set(authHeader(token));
-    expect(deleted.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('det_data').find(r => r.id === crId)).toBeUndefined();
-  });
-
-  it('never lets a caller mutate another tenant\'s compte-rendu', async () => {
-    const tenantB = makeTenant();
-    const crId = 'cr-b';
-    fakeSupabaseAdmin.seed('det_data', [{ id: crId, tenant_id: tenantB, project_id: 'project-b', info: { title: 'SECRET-CR-B' } }]);
-
-    const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
-
-    await request(app).put(`/api/projects/project-b/det/${crId}`).set(authHeader(token)).send({ info: { title: 'Hacked' } });
-    expect((fakeSupabaseAdmin.getTable('det_data').find(r => r.id === crId)?.info as any)?.title).toBe('SECRET-CR-B');
-
-    await request(app).delete(`/api/projects/project-b/det/${crId}`).set(authHeader(token));
-    expect(fakeSupabaseAdmin.getTable('det_data').find(r => r.id === crId)).toBeDefined();
   });
 });

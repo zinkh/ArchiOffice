@@ -355,7 +355,9 @@ CREATE TABLE IF NOT EXISTS site_reports (
   project_id TEXT, date TEXT NOT NULL, report_number INTEGER NOT NULL,
   page_format TEXT, stakeholders TEXT, companies TEXT,
   meeting_notes TEXT, next_meeting TEXT, meteo TEXT,
-  temperature TEXT, effectif_total TEXT
+  temperature TEXT, effectif_total TEXT,
+  attendance JSONB DEFAULT '[]', statut TEXT NOT NULL DEFAULT 'brouillon',
+  decisions JSONB DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 
@@ -523,16 +525,6 @@ CREATE TABLE IF NOT EXISTS act_data (
 );
 
 -- DET Data (Comptes Rendus de Réunions)
-CREATE TABLE IF NOT EXISTS det_data (
-  id TEXT PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id TEXT NOT NULL,
-  info JSONB DEFAULT '{}',
-  observations JSONB DEFAULT '[]',
-  intervenants JSONB DEFAULT '[]',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Tables complémentaires DPGF/CCTP
 CREATE TABLE IF NOT EXISTS lignes_ouvrages (
   id TEXT PRIMARY KEY,
@@ -631,7 +623,6 @@ ALTER TABLE lignes_ouvrages      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE articles_type        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_templates    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE act_data             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE det_data              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE join_requests        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing_events       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE custom_references    ENABLE ROW LEVEL SECURITY;
@@ -726,8 +717,6 @@ CREATE POLICY "tenant_isolation" ON articles_type
 CREATE POLICY "tenant_isolation" ON project_templates
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON act_data
-  USING (tenant_id = my_tenant_id());
-CREATE POLICY "tenant_isolation" ON det_data
   USING (tenant_id = my_tenant_id());
 
 -- Jonctions : visibles si le projet parent l'est

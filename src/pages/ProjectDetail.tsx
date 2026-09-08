@@ -66,8 +66,7 @@ import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategori
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
-import ConstructionReportModule from '../components/ConstructionReportModule';
-import SiteReports from '../components/SiteReports';
+import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProTab } from '../components/pro/ProTab';
@@ -2994,13 +2993,12 @@ export default function ProjectDetail() {
 
             {/* Tab content for PRO, VISA, AOR ... */}
             {activeTab === 'DET' && (
+              <ChantierModule
+                project={project}
+                lots_list={project.lots_list || []}
+                ordresDeService={ordresDeService}
+                osSituationsContent={
               <div className="space-y-8">
-                {/* Construction Report Module */}
-                <ConstructionReportModule 
-                  project={project} 
-                  lots_list={project.lots_list || []} 
-                />
-
                 {/* Ordres de Service Travaux */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
@@ -3202,9 +3200,6 @@ export default function ProjectDetail() {
                   </div>
                 </div>
 
-                {/* Comptes Rendus de Chantier */}
-                <SiteReports project={project} lots_list={project.lots_list || []} />
-
                 {/* RFI Section */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
@@ -3299,6 +3294,8 @@ export default function ProjectDetail() {
                   </div>
                 </div>
               </div>
+                }
+              />
             )}
             {activeTab === 'RDT' && (
               <div className="space-y-8">
