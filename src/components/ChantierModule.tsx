@@ -8,6 +8,8 @@ import {
 import { Project, ProjectLot, SiteReport, Observation, OrdreDeService } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
 import ObservationsTable from './ObservationsTable';
+import { SignedImage } from './SignedImage';
+import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cn } from '../lib/utils';
 
 interface ChantierModuleProps {
@@ -574,9 +576,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                       return (
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                           {photos.map((url, i) => (
-                            <a key={i} href={url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-                              <img src={url} alt="" className="w-full h-full object-cover" />
-                            </a>
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => openSignedUrl(url)}
+                              className="block aspect-square rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800"
+                            >
+                              <SignedImage src={url} alt="" className="w-full h-full object-cover" />
+                            </button>
                           ))}
                         </div>
                       );
@@ -813,14 +820,20 @@ function PhotosTab({ observations, reports }: { observations: Observation[]; rep
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map((item, i) => (
-        <a key={i} href={item.url} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
+        <button
+          key={i}
+          type="button"
+          onClick={() => openSignedUrl(item.url)}
+          className="block text-left rounded-lg overflow-hidden"
+          style={{ border: '1px solid var(--tblr-border)' }}
+        >
           <div className="aspect-square bg-zinc-100 dark:bg-zinc-800">
-            <img src={item.url} alt="" className="w-full h-full object-cover" />
+            <SignedImage src={item.url} alt="" className="w-full h-full object-cover" />
           </div>
           <div className="p-2 text-[10px] text-[var(--tblr-muted)] truncate">
             {item.report ? `CR ${item.report.report_number}` : ''} {item.obs.lot?.lot_title || ''}
           </div>
-        </a>
+        </button>
       ))}
     </div>
   );
