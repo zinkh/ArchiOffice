@@ -13,7 +13,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
-import { handleSingleImageUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
+import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -100,7 +100,7 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
   // Image-only whitelist (same magic-byte sniffing as meeting photos): these
   // render inline in the reportage photo grid, so anything that isn't a real
   // image wouldn't display there anyway.
-  app.post("/api/observations/:id/photos", handleSingleImageUpload('file'), async (req: any, res: any) => {
+  app.post("/api/observations/:id/photos", handleSingleSitePhotoUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;

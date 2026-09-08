@@ -1539,7 +1539,7 @@ export default function ProjectDetail() {
           />
         ) : (
           <div className={`lg:h-full overflow-visible lg:overflow-y-auto ${activeTab === 'PRO' ? 'p-0' : 'p-4 sm:p-6'}`}>
-            <div className={activeTab === 'PRO' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
+            <div className={activeTab === 'PRO' || activeTab === 'DET' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="flex items-center justify-between -mt-2 mb-2">
                 <button

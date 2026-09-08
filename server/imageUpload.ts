@@ -29,6 +29,22 @@ export const imageUpload = multer({
   },
 });
 
+// Meeting and observation photos are full-resolution phone-camera shots of
+// a site visit, not the tiny avatar/logo uploads `imageUpload` above was
+// sized for — a modern phone photo routinely exceeds 5 MB before
+// resizeImage() ever gets to shrink it, so those uploads need their own,
+// larger cap rather than raising the one meant to keep avatars/logos small.
+export const sitePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB — covers an unedited phone camera photo
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
+      return cb(new Error('Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP.'));
+    }
+    cb(null, true);
+  },
+});
+
 /** Sniffs the real file format from its magic bytes; returns null if it
  *  isn't one of the whitelisted image formats, regardless of what the
  *  client claimed via Content-Type or filename extension. */
@@ -111,6 +127,17 @@ export async function resizeImage(
  *  instead of falling through to Express's generic (HTML) error handler. */
 export function handleSingleImageUpload(fieldName: string) {
   const middleware = imageUpload.single(fieldName);
+  return (req: any, res: any, next: any) => {
+    middleware(req, res, (err: any) => {
+      if (err) return res.status(400).json({ error: err.message || 'Upload invalide' });
+      next();
+    });
+  };
+}
+
+/** Same as handleSingleImageUpload, on the larger sitePhotoUpload cap. */
+export function handleSingleSitePhotoUpload(fieldName: string) {
+  const middleware = sitePhotoUpload.single(fieldName);
   return (req: any, res: any, next: any) => {
     middleware(req, res, (err: any) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload invalide' });
