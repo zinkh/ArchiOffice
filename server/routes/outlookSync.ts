@@ -27,12 +27,15 @@
 // can prompt reconnecting (src/hooks/useMailConnections.ts).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { resolveMailAccount, isFirstMailAccountForUser } from '../mailAccounts';
+import { outlookAccessTokenCache } from '../mailTokenCache';
+import { getOutlookAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
 import { fetchOutlookFullMessage } from '../mailFullMessage';
 import { normalizeOutlookFolders } from '../mailFolders';
 import { isInsufficientScopeError } from '../mailProviderErrors';
 import { mailAttachmentUpload, ATTACHMENT_MAX_FILE_BYTES } from '../mailAttachmentUpload';
-import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
+import { encryptSecret } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -58,48 +61,14 @@ function sanitizeReturnTo(value: unknown): string {
 }
 
 export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  const accessTokenCache = new Map<string, { token: string; expiresAt: number }>();
-
-  async function getConnection(tenantId: string, userId: string) {
-    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
-      .select('*').eq('user_id', userId).eq('provider', 'microsoft').maybeSingle();
-    return data as any;
+  // Plusieurs adresses Outlook par utilisateur sont possibles depuis le
+  // support multi-comptes (server/mailAccounts.ts) : accountId (query ou
+  // body) désigne un compte précis, sinon le défaut de l'utilisateur.
+  async function getConnection(tenantId: string, userId: string, accountId?: string | null) {
+    return resolveMailAccount(supabaseAdmin, tenantId, userId, 'microsoft', accountId);
   }
 
-  async function getAccessToken(connection: any): Promise<string> {
-    const now = Date.now();
-    const cached = accessTokenCache.get(connection.user_id);
-    if (cached && cached.expiresAt > now + 60000) return cached.token;
-
-    const clientId = process.env.AZURE_CLIENT_ID;
-    const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) throw new Error('AZURE_CLIENT_ID / AZURE_CLIENT_SECRET non configurés');
-
-    const currentRefreshToken = decryptSecretMaybe(connection.refresh_token);
-    const resp = await fetch(`${AUTHORITY}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        refresh_token: currentRefreshToken,
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'refresh_token',
-        scope: OUTLOOK_SCOPE,
-      }).toString(),
-    });
-    const data: any = await resp.json();
-    if (!resp.ok || !data.access_token) throw new Error(data.error_description || data.error || 'Échec du rafraîchissement du token Microsoft');
-    // Microsoft rotates refresh tokens on each use — persist the new one or
-    // the connection stops working once the original expires/is revoked.
-    if (data.refresh_token && data.refresh_token !== currentRefreshToken) {
-      connection.refresh_token = data.refresh_token;
-      tenantScopedFrom(supabaseAdmin, connection.tenant_id, 'email_connections')
-        .update({ refresh_token: encryptSecret(data.refresh_token) }).eq('id', connection.id)
-        .then(() => {}, (err: any) => console.error('[Outlook refresh_token persist]', err.message));
-    }
-    accessTokenCache.set(connection.user_id, { token: data.access_token, expiresAt: now + (data.expires_in || 3600) * 1000 });
-    return data.access_token;
-  }
+  const getAccessToken = (connection: any) => getOutlookAccessToken(supabaseAdmin, connection);
 
   // Every handler that calls a ReadWrite/Send-scoped Graph endpoint goes
   // through this so an INSUFFICIENT_SCOPE response is never one-off code.
@@ -116,23 +85,6 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
     const host = req.headers['x-forwarded-host'] || req.get('host');
     return `${proto}://${host}/api/outlook/callback`;
   }
-
-  // GET /api/outlook/status
-  app.get('/api/outlook/status', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
-      res.json({
-        connected: !!connection,
-        id: connection?.id || null,
-        email: connection?.external_account_email || null,
-        last_synced_at: connection?.last_synced_at || null,
-      });
-    } catch (error: any) {
-      console.error('[GET /api/outlook/status]', error);
-      res.status(500).json({ error: 'Failed to get Outlook status' });
-    }
-  });
 
   // GET /api/outlook/auth — returns the consent URL for an authenticated
   // fetch to call; the frontend navigates there itself.
@@ -200,8 +152,11 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
         }
       } catch { /* non-fatal — connection still works without the display email */ }
 
-      accessTokenCache.delete(userId);
-      const existing = await getConnection(tenantId, userId);
+      // Une même adresse Outlook se reconnecte (mise à jour du token) ; une
+      // adresse différente devient un compte de plus (server/mailAccounts.ts).
+      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+        .select('id').eq('user_id', userId).eq('provider', 'microsoft').eq('external_account_email', email).maybeSingle();
+      if (existing) outlookAccessTokenCache.delete(existing.id);
       const row = {
         refresh_token: encryptSecret(tokenData.refresh_token),
         access_token: tokenData.access_token,
@@ -212,11 +167,13 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
       if (existing) {
         await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id);
       } else {
+        const isFirst = await isFirstMailAccountForUser(supabaseAdmin, tenantId, userId);
         await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
           id: crypto.randomUUID(),
           user_id: userId,
           provider: 'microsoft',
           auth_type: 'oauth',
+          is_default: isFirst,
           ...row,
         });
       }
@@ -224,21 +181,6 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
     } catch (error: any) {
       console.error('[Outlook callback error]', error.message);
       res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}outlook_error=1`);
-    }
-  });
-
-  // DELETE /api/outlook/disconnect
-  app.delete('/api/outlook/disconnect', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      accessTokenCache.delete(req.user.id);
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').delete().eq('user_id', req.user.id).eq('provider', 'microsoft');
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, 'Déconnexion de Outlook', '', tenantId, 'integration', 'Intégrations');
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error('[DELETE /api/outlook/disconnect]', error);
-      res.status(500).json({ error: 'Failed to disconnect Outlook' });
     }
   });
 
@@ -271,7 +213,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.get('/api/outlook/search', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const { email, from, to, subject, q, dateFrom, dateTo, hasAttachment, folderId } = req.query as Record<string, string | undefined>;
       if (!email && !from && !to && !subject && !q && !dateFrom && !dateTo && !hasAttachment) {
@@ -323,7 +265,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.get('/api/outlook/messages', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const { pageToken, folderId } = req.query as { pageToken?: string; folderId?: string };
       const maxResults = Math.min(parseInt(String(req.query.maxResults || INBOX_PAGE_SIZE), 10) || INBOX_PAGE_SIZE, 50);
@@ -355,7 +297,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.get('/api/outlook/folders', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const accessToken = await getAccessToken(connection);
       const url = new URL(`${GRAPH_BASE}/me/mailFolders`);
@@ -375,7 +317,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.get('/api/outlook/messages/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const accessToken = await getAccessToken(connection);
       const message = await fetchOutlookFullMessage(accessToken, req.params.id);
@@ -393,7 +335,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.get('/api/outlook/messages/:id/attachments/:attachmentId', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch(`${GRAPH_BASE}/me/messages/${req.params.id}/attachments/${req.params.attachmentId}`, {
@@ -417,7 +359,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.post('/api/outlook/messages/:id/move', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const { destinationId } = req.body;
       if (!destinationId) return res.status(400).json({ error: 'destinationId requis' });
@@ -442,7 +384,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.delete('/api/outlook/messages/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch(`${GRAPH_BASE}/me/messages/${req.params.id}`, {
@@ -463,7 +405,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.post('/api/outlook/send', mailAttachmentUpload, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const { to, cc, subject, text, html } = req.body;
       if (!to || !subject) return res.status(400).json({ error: 'to et subject requis' });
@@ -516,7 +458,7 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
   app.post('/api/outlook/messages/:id/reply', mailAttachmentUpload, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Outlook non connecté.' });
       const { comment, replyAll } = req.body;
 

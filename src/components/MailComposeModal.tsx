@@ -1,19 +1,21 @@
-// Compose/reply window — sends via the connected provider's own API
-// (Gmail messages.send, Outlook sendMail/reply), never the legacy SMTP path,
-// except for IMAP/Infomaniak connections: the IMAP protocol has no send
-// capability at all (not a design choice — the protocol simply doesn't have
-// one) and Infomaniak has no send API either, so that case falls back to the
-// existing /api/send-email SMTP route. Kept deliberately simple — a plain
-// <textarea>, no rich-text editor — consistent with "minimal but useful".
+// Compose/reply window — sends via the connected account's own API (Gmail
+// messages.send, Outlook sendMail/reply), or via /api/send-email for an IMAP
+// account that has its own SMTP configured (Réglages → Mes boîtes mail).
+// Kept deliberately simple — a plain <textarea>, no rich-text editor —
+// consistent with "minimal but useful".
+//
+// Depuis le support multi-comptes, le sélecteur liste des ADRESSES (une par
+// compte connecté), pas des fournisseurs : deux comptes Gmail se
+// distinguent par leur adresse, chacun choisissable comme expéditeur.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconX, IconPaperclip, IconLoader2, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
-
-export type MailProvider = 'google' | 'microsoft' | 'infomaniak';
+import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 
 export interface MailReplyContext {
+  accountId: string;
   provider: MailProvider;
   messageId: string; // Gmail/Outlook id — unused when replying from an infomaniak message (SMTP fallback has no native reply)
   threadId?: string | null; // Gmail only — keeps the reply in the same thread
@@ -23,19 +25,21 @@ export interface MailReplyContext {
 }
 
 interface MailComposeModalProps {
-  connectedProviders: { provider: MailProvider; email: string }[];
+  accounts: MailAccount[];
   replyTo?: MailReplyContext | null;
   onClose: () => void;
   onSent?: () => void;
 }
-
-const SENDABLE: MailProvider[] = ['google', 'microsoft'];
 
 const PROVIDER_ICON: Record<MailProvider, typeof IconBrandGoogle> = {
   google: IconBrandGoogle,
   microsoft: IconBrandWindows,
   infomaniak: IconMailbox,
 };
+
+function canSendNatively(a: MailAccount): boolean {
+  return a.provider === 'google' || a.provider === 'microsoft' || a.hasSmtp;
+}
 
 async function postForm<T>(url: string, form: FormData): Promise<T> {
   const token = await getAccessToken();
@@ -45,14 +49,15 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   return data;
 }
 
-export default function MailComposeModal({ connectedProviders, replyTo, onClose, onSent }: MailComposeModalProps) {
+export default function MailComposeModal({ accounts, replyTo, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
-  const sendable = connectedProviders.filter(p => SENDABLE.includes(p.provider));
-  const imapOnly = sendable.length === 0;
+  const sendable = accounts.filter(canSendNatively);
+  const noSendableAccount = sendable.length === 0;
 
-  const [provider, setProvider] = useState<MailProvider | null>(
-    replyTo && SENDABLE.includes(replyTo.provider) ? replyTo.provider : sendable[0]?.provider || null
+  const [accountId, setAccountId] = useState<string | null>(
+    replyTo ? replyTo.accountId : sendable.find(a => a.isDefault)?.id || sendable[0]?.id || null
   );
+  const account = sendable.find(a => a.id === accountId) || null;
   const [to, setTo] = useState(replyTo?.fromAddress || '');
   const [subject, setSubject] = useState(
     replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : ''
@@ -62,19 +67,29 @@ export default function MailComposeModal({ connectedProviders, replyTo, onClose,
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isNativeReply = !!replyTo && replyTo.provider === provider;
+  const isNativeReply = !!replyTo && replyTo.accountId === accountId;
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!to.trim() || !subject.trim() || !provider) return;
+    if (!to.trim() || !subject.trim()) return;
     setSending(true);
     setError(null);
     try {
-      if (provider === 'google') {
+      if (!account) {
+        // Aucun compte ne peut envoyer nativement (IMAP sans SMTP propre,
+        // ou aucun compte connecté du tout) : POST /api/send-email retombe
+        // sur le SMTP du cabinet (server/routes/sendEmail.ts), exactement
+        // comme avant le support multi-comptes.
+        await apiFetch('/api/send-email', {
+          method: 'POST',
+          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>` }),
+        });
+      } else if (account.provider === 'google') {
         const fd = new FormData();
         fd.set('to', to);
         fd.set('subject', subject);
         fd.set('text', body);
+        fd.set('accountId', account.id);
         if (isNativeReply && replyTo?.threadId) fd.set('threadId', replyTo.threadId);
         if (isNativeReply && replyTo?.messageIdHeader) {
           fd.set('inReplyTo', replyTo.messageIdHeader);
@@ -82,23 +97,26 @@ export default function MailComposeModal({ connectedProviders, replyTo, onClose,
         }
         files.forEach(f => fd.append('attachments', f));
         await postForm('/api/gmail/send', fd);
-      } else if (provider === 'microsoft' && isNativeReply) {
+      } else if (account.provider === 'microsoft' && isNativeReply) {
         const fd = new FormData();
         fd.set('comment', body);
+        fd.set('accountId', account.id);
         files.forEach(f => fd.append('attachments', f));
         await postForm(`/api/outlook/messages/${encodeURIComponent(replyTo!.messageId)}/reply`, fd);
-      } else if (provider === 'microsoft') {
+      } else if (account.provider === 'microsoft') {
         const fd = new FormData();
         fd.set('to', to);
         fd.set('subject', subject);
         fd.set('text', body);
+        fd.set('accountId', account.id);
         files.forEach(f => fd.append('attachments', f));
         await postForm('/api/outlook/send', fd);
       } else {
-        // infomaniak (or no provider capable of sending natively): SMTP fallback.
+        // Compte IMAP avec son propre SMTP configuré (Réglages → Mes boîtes
+        // mail) : /api/send-email sait aiguiller vers ce compte précis.
         await apiFetch('/api/send-email', {
           method: 'POST',
-          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>` }),
+          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id }),
         });
       }
       onSent?.();
@@ -127,27 +145,27 @@ export default function MailComposeModal({ connectedProviders, replyTo, onClose,
 
         <div className="p-4 space-y-3 flex-1 overflow-y-auto">
           {sendable.length > 1 && !isNativeReply && (
-            <div className="flex gap-2">
-              {sendable.map(p => {
-                const Icon = PROVIDER_ICON[p.provider];
+            <div className="flex gap-2 flex-wrap">
+              {sendable.map(a => {
+                const Icon = PROVIDER_ICON[a.provider];
                 return (
                   <button
-                    key={p.provider}
+                    key={a.id}
                     type="button"
-                    onClick={() => setProvider(p.provider)}
+                    onClick={() => setAccountId(a.id)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
-                    style={p.provider === provider
+                    style={a.id === accountId
                       ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
                       : { border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
                   >
-                    <Icon size={13} /> {p.email}
+                    <Icon size={13} /> {a.displayName || a.email}
                   </button>
                 );
               })}
             </div>
           )}
 
-          {imapOnly && (
+          {noSendableAccount && (
             <p className="text-xs rounded-lg px-3 py-2" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-muted)' }}>
               {t('mail_compose_imap_fallback')}
             </p>

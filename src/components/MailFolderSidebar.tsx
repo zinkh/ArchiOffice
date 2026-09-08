@@ -1,10 +1,12 @@
-// Per-provider folder/label list for the Mailbox page — each connected
-// provider keeps its own selected folder (Gmail labels, Outlook folders,
+// Per-account folder/label list for the Mailbox page — each connected
+// account keeps its own selected folder (Gmail labels, Outlook folders,
 // IMAP mailboxes are three different concepts normalized server-side by
 // server/mailFolders.ts into one common {id, name, specialUse} shape).
-// Folders are fetched once per provider on mount/connection change and not
-// refreshed automatically — consistent with the rest of the mail connectors,
-// which never poll in the background.
+// Keyed by accountId, not provider — since the multi-comptes support, two
+// accounts of the same provider each need their own folder list and
+// selection. Folders are fetched once per account on mount/connection
+// change and not refreshed automatically — consistent with the rest of the
+// mail connectors, which never poll in the background.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,8 +14,9 @@ import {
   IconFileText, IconArchive, IconTrash, IconAlertTriangle, IconFolder, IconLoader2,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 
-export type MailProvider = 'google' | 'microsoft' | 'infomaniak';
+export type { MailProvider };
 type MailSpecialUse = 'inbox' | 'sent' | 'drafts' | 'archive' | 'trash' | 'spam' | null;
 
 interface MailFolder {
@@ -23,9 +26,9 @@ interface MailFolder {
 }
 
 interface MailFolderSidebarProps {
-  providers: { provider: MailProvider; email: string }[];
-  selected: Partial<Record<MailProvider, string>>;
-  onSelectFolder: (provider: MailProvider, folderId: string, folderName: string) => void;
+  accounts: MailAccount[];
+  selected: Partial<Record<string, string>>; // accountId -> folderId
+  onSelectFolder: (accountId: string, provider: MailProvider, folderId: string, folderName: string) => void;
 }
 
 const FOLDER_ENDPOINT: Record<MailProvider, string> = {
@@ -55,36 +58,36 @@ const SPECIAL_USE_ICON: Record<Exclude<MailSpecialUse, null>, typeof IconInbox> 
   spam: IconAlertTriangle,
 };
 
-export default function MailFolderSidebar({ providers, selected, onSelectFolder }: MailFolderSidebarProps) {
+export default function MailFolderSidebar({ accounts, selected, onSelectFolder }: MailFolderSidebarProps) {
   const { t } = useTranslation();
-  const [foldersByProvider, setFoldersByProvider] = useState<Partial<Record<MailProvider, MailFolder[]>>>({});
-  const [loading, setLoading] = useState<Partial<Record<MailProvider, boolean>>>({});
+  const [foldersByAccount, setFoldersByAccount] = useState<Record<string, MailFolder[]>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    providers.forEach(({ provider }) => {
-      setLoading(prev => ({ ...prev, [provider]: true }));
-      apiFetch<MailFolder[]>(FOLDER_ENDPOINT[provider])
-        .then(folders => setFoldersByProvider(prev => ({ ...prev, [provider]: folders })))
-        .catch(() => setFoldersByProvider(prev => ({ ...prev, [provider]: [] })))
-        .finally(() => setLoading(prev => ({ ...prev, [provider]: false })));
+    accounts.forEach(({ id, provider }) => {
+      setLoading(prev => ({ ...prev, [id]: true }));
+      apiFetch<MailFolder[]>(`${FOLDER_ENDPOINT[provider]}?accountId=${encodeURIComponent(id)}`)
+        .then(folders => setFoldersByAccount(prev => ({ ...prev, [id]: folders })))
+        .catch(() => setFoldersByAccount(prev => ({ ...prev, [id]: [] })))
+        .finally(() => setLoading(prev => ({ ...prev, [id]: false })));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers.map(p => p.provider).join(',')]);
+  }, [accounts.map(a => a.id).join(',')]);
 
-  if (providers.length === 0) return null;
+  if (accounts.length === 0) return null;
 
   return (
     <div className="w-full sm:w-48 shrink-0 space-y-4">
-      {providers.map(({ provider, email }) => {
+      {accounts.map(({ id, provider, email, displayName }) => {
         const Icon = PROVIDER_ICON[provider];
-        const folders = foldersByProvider[provider] || [];
-        const activeFolder = selected[provider] || DEFAULT_FOLDER_ID[provider];
+        const folders = foldersByAccount[id] || [];
+        const activeFolder = selected[id] || DEFAULT_FOLDER_ID[provider];
         return (
-          <div key={provider}>
+          <div key={id}>
             <div className="flex items-center gap-1.5 px-1 mb-1 text-xs font-semibold truncate" style={{ color: 'var(--tblr-muted)' }}>
-              <Icon size={13} className="shrink-0" /> <span className="truncate">{email}</span>
+              <Icon size={13} className="shrink-0" /> <span className="truncate">{displayName || email}</span>
             </div>
-            {loading[provider] && folders.length === 0 ? (
+            {loading[id] && folders.length === 0 ? (
               <div className="flex items-center justify-center py-2" style={{ color: 'var(--tblr-muted)' }}>
                 <IconLoader2 size={14} className="animate-spin" />
               </div>
@@ -96,7 +99,7 @@ export default function MailFolderSidebar({ providers, selected, onSelectFolder 
                   return (
                     <button
                       key={f.id}
-                      onClick={() => onSelectFolder(provider, f.id, f.name)}
+                      onClick={() => onSelectFolder(id, provider, f.id, f.name)}
                       className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-left truncate transition-colors"
                       style={active
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
@@ -107,7 +110,7 @@ export default function MailFolderSidebar({ providers, selected, onSelectFolder 
                     </button>
                   );
                 })}
-                {!loading[provider] && folders.length === 0 && (
+                {!loading[id] && folders.length === 0 && (
                   <p className="px-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('mail_folders_empty')}</p>
                 )}
               </div>

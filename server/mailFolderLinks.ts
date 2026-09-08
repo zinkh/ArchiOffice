@@ -48,7 +48,7 @@ export function registerMailFolderLinkRoutes(app: Express, { supabaseAdmin, getT
           folder_name,
           local_type,
           local_id,
-        }, { onConflict: 'user_id,provider,folder_id,local_type,local_id', ignoreDuplicates: true })
+        }, { onConflict: 'connection_id,folder_id,local_type,local_id', ignoreDuplicates: true })
         .select()
         .maybeSingle();
 
@@ -108,9 +108,13 @@ export function registerMailFolderLinkRoutes(app: Express, { supabaseAdmin, getT
         .select('*').eq('id', req.params.id).eq('user_id', req.user.id).maybeSingle();
       if (!link) return res.status(404).json({ error: 'Lien introuvable.' });
 
-      if (link.provider === 'google') return res.redirect(`/api/gmail/messages?labelId=${encodeURIComponent(link.folder_id)}`);
-      if (link.provider === 'microsoft') return res.redirect(`/api/outlook/messages?folderId=${encodeURIComponent(link.folder_id)}`);
-      return res.redirect(`/api/mail/imap/messages?folder=${encodeURIComponent(link.folder_id)}`);
+      // accountId précise le compte, indispensable dès qu'il en existe
+      // plusieurs du même fournisseur — sans lui la requête retomberait sur
+      // le compte par défaut, pas forcément celui du lien.
+      const accountParam = `accountId=${encodeURIComponent(link.connection_id)}`;
+      if (link.provider === 'google') return res.redirect(`/api/gmail/messages?labelId=${encodeURIComponent(link.folder_id)}&${accountParam}`);
+      if (link.provider === 'microsoft') return res.redirect(`/api/outlook/messages?folderId=${encodeURIComponent(link.folder_id)}&${accountParam}`);
+      return res.redirect(`/api/mail/imap/messages?folder=${encodeURIComponent(link.folder_id)}&${accountParam}`);
     } catch (error: any) {
       console.error('[GET /api/mail/folder-links/:id/messages]', error.message);
       res.status(500).json({ error: error.message || 'Échec de la résolution du dossier lié' });

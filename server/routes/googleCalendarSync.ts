@@ -27,8 +27,11 @@
 //    this must stay visible in the UI copy, not just this comment.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { resolveCalendarConnection, resolveWriteCalendar, listReadCalendars, refreshCalendarList } from '../calendarAccounts';
+import { calendarAccessTokenCache } from '../mailTokenCache';
+import { getGoogleCalendarAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
-import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
+import { encryptSecret } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -37,7 +40,14 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
-const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+// calendar.readonly en plus de calendar.events : sans lui, calendarList.list
+// (server/calendarAccounts.ts:refreshCalendarList) échoue en 403 et l'app ne
+// peut lister les calendriers d'un compte, seulement écrire dans 'primary'.
+// Un compte connecté avant cet ajout garde l'ancien scope, plus étroit — un
+// appel à calendarList 403 alors avec la même forme reconnue par
+// isInsufficientScopeError() que Gmail/Outlook, pour proposer de reconnecter
+// plutôt qu'échouer sans explication.
+const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
 
 // milestones.due_date / tasks.start_date|end_date are plain TEXT columns —
 // most rows hold a clean yyyy-MM-dd, but some are written elsewhere in the
@@ -58,40 +68,17 @@ function addOneDay(dateStr: string): string {
 }
 
 export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  // Keyed by user_id, not a single module-level value — unlike Zoho's one
-  // token per tenant, every connected user has their own.
-  const accessTokenCache = new Map<string, { token: string; expiresAt: number }>();
-
-  async function getConnection(tenantId: string, userId: string) {
-    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections')
-      .select('*').eq('user_id', userId).eq('provider', 'google').maybeSingle();
-    return data as any;
+  // Plusieurs comptes Google Calendar par utilisateur sont possibles depuis
+  // le support multi-comptes (server/calendarAccounts.ts) : connectionId
+  // (query) désigne un compte précis, sinon le plus ancien de l'utilisateur —
+  // conservé pour /status et /disconnect qui parlent encore de « le » compte
+  // par commodité (le multi-comptes complet vit derrière
+  // GET /api/calendar/accounts, server/routes/calendarAccounts.ts).
+  async function getConnection(tenantId: string, userId: string, connectionId?: string | null) {
+    return resolveCalendarConnection(supabaseAdmin, tenantId, userId, connectionId);
   }
 
-  async function getAccessToken(connection: any): Promise<string> {
-    const now = Date.now();
-    const cached = accessTokenCache.get(connection.user_id);
-    if (cached && cached.expiresAt > now + 60000) return cached.token;
-
-    const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId) throw new Error('VITE_GOOGLE_CLIENT_ID non configuré');
-
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        refresh_token: decryptSecretMaybe(connection.refresh_token),
-        client_id: clientId,
-        ...(clientSecret ? { client_secret: clientSecret } : {}),
-        grant_type: 'refresh_token',
-      }).toString(),
-    });
-    const data: any = await resp.json();
-    if (!resp.ok || !data.access_token) throw new Error(data.error_description || data.error || 'Échec du rafraîchissement du token Google');
-    accessTokenCache.set(connection.user_id, { token: data.access_token, expiresAt: now + (data.expires_in || 3600) * 1000 });
-    return data.access_token;
-  }
+  const getAccessToken = getGoogleCalendarAccessToken;
 
   function getRedirectUri(req: any): string {
     if (process.env.GOOGLE_CALENDAR_REDIRECT_URI) return process.env.GOOGLE_CALENDAR_REDIRECT_URI;
@@ -180,19 +167,26 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
         if (userinfoResp.ok) email = (await userinfoResp.json()).email || null;
       } catch { /* non-fatal — connection still works without the display email */ }
 
-      accessTokenCache.delete(userId);
-      const existing = await getConnection(tenantId, userId);
+      // Une même adresse Google se reconnecte (mise à jour du token, par ex.
+      // pour élargir le scope) ; une adresse différente devient un compte de
+      // plus (server/calendarAccounts.ts).
+      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections')
+        .select('*').eq('user_id', userId).eq('provider', 'google').eq('external_account_email', email).maybeSingle();
+      if (existing) calendarAccessTokenCache.delete(existing.id);
+      let connectionId: string;
       if (existing) {
+        connectionId = existing.id;
         await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections').update({
           refresh_token: encryptSecret(tokenData.refresh_token),
           access_token: tokenData.access_token,
           expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
           external_account_email: email,
-          external_calendar_id: 'primary',
+          scopes: GOOGLE_CALENDAR_SCOPE,
         }).eq('id', existing.id);
       } else {
+        connectionId = crypto.randomUUID();
         await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections').insert({
-          id: crypto.randomUUID(),
+          id: connectionId,
           user_id: userId,
           provider: 'google',
           refresh_token: encryptSecret(tokenData.refresh_token),
@@ -203,6 +197,16 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
           scopes: GOOGLE_CALENDAR_SCOPE,
         });
       }
+      // Découverte automatique des calendriers de ce compte — best-effort :
+      // un échec ici (réseau, scope) ne doit pas faire échouer la connexion
+      // elle-même, l'utilisateur peut toujours rejouer le refresh depuis
+      // /calendar (POST /api/calendar/accounts/:id/refresh).
+      try {
+        const savedConnection = await getConnection(tenantId, userId, connectionId);
+        if (savedConnection) await refreshCalendarList(supabaseAdmin, tenantId, userId, savedConnection);
+      } catch (err: any) {
+        console.error('[Google Calendar callback] refreshCalendarList failed:', err.message);
+      }
       res.redirect('/calendar?google_calendar_connected=1');
     } catch (error: any) {
       console.error('[Google Calendar callback error]', error.message);
@@ -210,12 +214,19 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
     }
   });
 
-  // DELETE /api/google-calendar/disconnect
+  // DELETE /api/google-calendar/disconnect?connectionId= — sans
+  // connectionId, déconnecte le plus ancien compte Google de l'utilisateur
+  // (compatibilité avec l'UI mono-compte historique) ; la déconnexion d'un
+  // compte précis passe par DELETE /api/calendar/accounts/:connectionId
+  // (server/routes/calendarAccounts.ts).
   app.delete('/api/google-calendar/disconnect', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      accessTokenCache.delete(req.user.id);
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections').delete().eq('user_id', req.user.id).eq('provider', 'google');
+      const connection = await getConnection(tenantId, req.user.id, req.query.connectionId);
+      if (connection) {
+        calendarAccessTokenCache.delete(connection.id);
+        await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_connections').delete().eq('id', connection.id);
+      }
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Google Calendar', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
@@ -227,35 +238,62 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
 
   // GET /api/google-calendar/events?start=yyyy-MM-dd&end=yyyy-MM-dd — read
   // -only, fetched live from Google on every call, never persisted here.
+  // Agrège tous les calendriers affichés (sync_enabled) de tous les comptes
+  // connectés de l'utilisateur, groupés par compte pour ne rafraîchir qu'un
+  // seul jeton par compte plutôt qu'un par calendrier.
   app.get('/api/google-calendar/events', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
-      if (!connection) return res.json([]);
       const { start, end } = req.query as { start?: string; end?: string };
       if (!start || !end) return res.status(400).json({ error: 'start et end requis' });
 
-      const accessToken = await getAccessToken(connection);
-      const calendarId = connection.external_calendar_id || 'primary';
-      const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
-      url.searchParams.set('timeMin', new Date(`${start}T00:00:00Z`).toISOString());
-      url.searchParams.set('timeMax', new Date(`${end}T23:59:59Z`).toISOString());
-      url.searchParams.set('singleEvents', 'true');
-      url.searchParams.set('orderBy', 'startTime');
-      url.searchParams.set('maxResults', '250');
+      const calendars = await listReadCalendars(supabaseAdmin, tenantId, req.user.id);
+      if (calendars.length === 0) return res.json([]);
 
-      const resp = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
-      const data: any = await resp.json();
-      if (!resp.ok) throw new Error(data.error?.message || 'Échec de la récupération des événements Google');
+      const byConnection = new Map<string, typeof calendars>();
+      for (const cal of calendars) {
+        if (!byConnection.has(cal.connection_id)) byConnection.set(cal.connection_id, []);
+        byConnection.get(cal.connection_id)!.push(cal);
+      }
 
-      const events = ((data.items as any[]) || [])
-        .filter(ev => ev.status !== 'cancelled')
-        .map(ev => ({
-          id: `google-${ev.id}`,
-          title: ev.summary || '(Sans titre)',
-          date: ev.start?.date || (ev.start?.dateTime ? ev.start.dateTime.slice(0, 10) : null),
-        }))
-        .filter(ev => !!ev.date);
+      const events: any[] = [];
+      for (const [connectionId, cals] of byConnection) {
+        const connection = await getConnection(tenantId, req.user.id, connectionId);
+        if (!connection) continue;
+        let accessToken: string;
+        try {
+          accessToken = await getAccessToken(connection);
+        } catch (err: any) {
+          console.error(`[GET /api/google-calendar/events] token refresh failed for ${connectionId}:`, err.message);
+          continue; // un compte en échec ne doit pas priver l'utilisateur des autres
+        }
+        for (const cal of cals) {
+          const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.external_calendar_id)}/events`);
+          url.searchParams.set('timeMin', new Date(`${start}T00:00:00Z`).toISOString());
+          url.searchParams.set('timeMax', new Date(`${end}T23:59:59Z`).toISOString());
+          url.searchParams.set('singleEvents', 'true');
+          url.searchParams.set('orderBy', 'startTime');
+          url.searchParams.set('maxResults', '250');
+          const resp = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+          const data: any = await resp.json();
+          if (!resp.ok) {
+            console.error(`[GET /api/google-calendar/events] ${cal.display_name}:`, data.error?.message);
+            continue;
+          }
+          for (const ev of (data.items as any[]) || []) {
+            if (ev.status === 'cancelled') continue;
+            const date = ev.start?.date || (ev.start?.dateTime ? ev.start.dateTime.slice(0, 10) : null);
+            if (!date) continue;
+            events.push({
+              id: `google-${cal.id}-${ev.id}`,
+              title: ev.summary || '(Sans titre)',
+              date,
+              calendarId: cal.id,
+              color: cal.color || null,
+            });
+          }
+        }
+      }
       res.json(events);
     } catch (error: any) {
       console.error('[GET /api/google-calendar/events]', error.message);
@@ -264,17 +302,21 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
   });
 
   // POST /api/google-calendar/sync — push only (ArchiOffice → Google), on
-  // demand. Scope: milestones/tasks belonging to projects this user is a
-  // member of (via project_members) — not every project in the tenant,
-  // which would push unrelated colleagues' deadlines into this user's
-  // personal calendar.
+  // demand, toujours vers le calendrier désigné comme défaut
+  // (server/calendarAccounts.ts:resolveWriteCalendar), quel que soit le
+  // compte auquel il appartient. Scope: milestones/tasks belonging to
+  // projects this user is a member of (via project_members) — not every
+  // project in the tenant, which would push unrelated colleagues' deadlines
+  // into this user's personal calendar.
   app.post('/api/google-calendar/sync', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const writeCalendar = await resolveWriteCalendar(supabaseAdmin, tenantId, req.user.id);
+      if (!writeCalendar) return res.status(400).json({ error: 'Aucun calendrier par défaut — connectez Google Calendar et choisissez un calendrier cible.' });
+      const connection = await getConnection(tenantId, req.user.id, writeCalendar.connection_id);
       if (!connection) return res.status(400).json({ error: 'Google Calendar non connecté.' });
       const accessToken = await getAccessToken(connection);
-      const calendarId = connection.external_calendar_id || 'primary';
+      const calendarId = writeCalendar.external_calendar_id;
       const eventsBase = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
       const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 
@@ -284,7 +326,10 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
       let pushed = 0, updated = 0, deleted = 0;
       const errors: string[] = [];
 
-      const { data: links } = await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').select('*').eq('user_id', req.user.id).eq('provider', 'google');
+      // Les liens sont désormais rattachés au calendrier (calendar_id), pas
+      // seulement au provider : deux calendriers différents du même
+      // fournisseur ne doivent pas se marcher dessus sur le même jalon.
+      const { data: links } = await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').select('*').eq('user_id', req.user.id).eq('calendar_id', writeCalendar.id);
       const linkByLocal = new Map<string, any>((links || []).map((l: any) => [`${l.local_type}-${l.local_id}`, l]));
       const seenLocalKeys = new Set<string>();
 
@@ -310,7 +355,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
               const resp = await fetch(eventsBase, { method: 'POST', headers, body: JSON.stringify(body) });
               const created: any = await resp.json();
               if (!resp.ok) throw new Error(created?.error?.message || 'POST failed');
-              await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').insert({ id: crypto.randomUUID(), user_id: req.user.id, provider: 'google', local_type: 'milestone', local_id: m.id, external_event_id: created.id });
+              await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').insert({ id: crypto.randomUUID(), user_id: req.user.id, provider: 'google', calendar_id: writeCalendar.id, local_type: 'milestone', local_id: m.id, external_event_id: created.id });
               pushed++;
             }
           } catch (err: any) {
@@ -334,7 +379,7 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
               const resp = await fetch(eventsBase, { method: 'POST', headers, body: JSON.stringify(body) });
               const created: any = await resp.json();
               if (!resp.ok) throw new Error(created?.error?.message || 'POST failed');
-              await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').insert({ id: crypto.randomUUID(), user_id: req.user.id, provider: 'google', local_type: 'task', local_id: tsk.id, external_event_id: created.id });
+              await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_event_links').insert({ id: crypto.randomUUID(), user_id: req.user.id, provider: 'google', calendar_id: writeCalendar.id, local_type: 'task', local_id: tsk.id, external_event_id: created.id });
               pushed++;
             }
           } catch (err: any) {

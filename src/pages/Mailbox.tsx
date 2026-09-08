@@ -1,24 +1,25 @@
-// Real inbox page: lists messages from whichever mailbox(es) the user has
-// connected (Gmail and/or IMAP/Infomaniak, via useMailConnections — shared
-// with CorrespondenceTab.tsx) and lets the user attach any message to a
+// Real inbox page: lists messages from every mailbox the user has connected
+// (Gmail, Outlook and/or IMAP/Infomaniak — possibly several of the same
+// provider, via useMailAccounts) and lets the user attach any message to a
 // project, proposal, or tender (server/mailLinks.ts). Same read-only,
 // non-storing principle as the rest of the mail connectors: messages are
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch, IconStar, IconStarFilled } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
-import { useMailConnections } from '../hooks/useMailConnections';
+import { useMailAccounts, type MailAccount, type MailProvider } from '../hooks/useMailAccounts';
 import MailMessageView from '../components/MailMessageView';
-import MailFolderSidebar, { type MailProvider } from '../components/MailFolderSidebar';
+import MailFolderSidebar from '../components/MailFolderSidebar';
 import MailComposeModal from '../components/MailComposeModal';
 import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
 
 type LocalType = 'project' | 'proposal' | 'tender';
 
 interface Message {
-  provider: 'google' | 'microsoft' | 'infomaniak';
+  accountId: string;
+  provider: MailProvider;
   externalMessageId: string;
   externalThreadId?: string | null;
   subject: string;
@@ -30,28 +31,34 @@ interface Message {
 
 const PAGE_SIZE = 25;
 
+const PROVIDER_ICON: Record<MailProvider, typeof IconBrandGoogle> = {
+  google: IconBrandGoogle,
+  microsoft: IconBrandWindows,
+  infomaniak: IconMailbox,
+};
+
+// Pagination state par compte — Gmail/Outlook paginent par pageToken, IMAP
+// par une fenêtre croissante (limit) puisque son /messages n'est pas
+// curseur-paginé (cf. server/routes/imapMailSync.ts).
+interface AccountPagination { pageToken: string | null; limit: number; hasMore: boolean }
+
 export default function Mailbox() {
   const { t } = useTranslation();
   const {
-    gmailStatus, outlookStatus, imapStatus, error, setError,
+    accounts, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
-    connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
-    insufficientScopeProvider, setInsufficientScopeProvider, noteMailError,
-  } = useMailConnections();
+    connectGmail, connectOutlook, connectImap, disconnect, setDefault, anyConnected,
+    insufficientScopeAccountId, setInsufficientScopeAccountId, noteMailError, reconnectAccount,
+  } = useMailAccounts();
   const [actioningKey, setActioningKey] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const [gmailPageToken, setGmailPageToken] = useState<string | null>(null);
-  const [gmailHasMore, setGmailHasMore] = useState(true);
-  const [outlookPageToken, setOutlookPageToken] = useState<string | null>(null);
-  const [outlookHasMore, setOutlookHasMore] = useState(true);
-  const [imapLimit, setImapLimit] = useState(PAGE_SIZE);
-  const [imapHasMore, setImapHasMore] = useState(true);
+  const [pagination, setPagination] = useState<Record<string, AccountPagination>>({});
   const [attachTarget, setAttachTarget] = useState<Message | null>(null);
   const [attachedKeys, setAttachedKeys] = useState<Set<string>>(new Set());
   const [readTarget, setReadTarget] = useState<Message | null>(null);
-  const [selectedFolders, setSelectedFolders] = useState<Partial<Record<MailProvider, string>>>({});
+  const [selectedFolders, setSelectedFolders] = useState<Record<string, string>>({});
   const [composing, setComposing] = useState(false);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -73,73 +80,66 @@ export default function Mailbox() {
     fetchJson<Tender[]>('/api/tenders').then(setTenders).catch(() => {});
   }, []);
 
+  const paginationFor = useCallback((accountId: string): AccountPagination =>
+    pagination[accountId] || { pageToken: null, limit: PAGE_SIZE, hasMore: true }, [pagination]);
+
+  const listEndpoint = (account: MailAccount, opts: { append: boolean }): string => {
+    const p = paginationFor(account.id);
+    const folder = selectedFolders[account.id];
+    const params = new URLSearchParams({ accountId: account.id });
+    if (account.provider === 'google') {
+      if (opts.append && p.pageToken) params.set('pageToken', p.pageToken);
+      if (folder) params.set('labelId', folder);
+      params.set('maxResults', String(PAGE_SIZE));
+      return `/api/gmail/messages?${params}`;
+    }
+    if (account.provider === 'microsoft') {
+      if (opts.append && p.pageToken) params.set('pageToken', p.pageToken);
+      if (folder) params.set('folderId', folder);
+      params.set('maxResults', String(PAGE_SIZE));
+      return `/api/outlook/messages?${params}`;
+    }
+    const nextLimit = opts.append ? p.limit + PAGE_SIZE : PAGE_SIZE;
+    params.set('limit', String(nextLimit));
+    if (folder) params.set('folder', folder);
+    return `/api/mail/imap/messages?${params}`;
+  };
+
   const loadMessages = useCallback(async (opts: { append: boolean } = { append: false }) => {
+    if (accounts.length === 0) return;
     setLoading(true);
     setError(null);
     try {
-      const jobs: Promise<Message[]>[] = [];
-      if (gmailStatus.connected && (opts.append ? gmailHasMore : true)) {
-        const gmailParams = new URLSearchParams();
-        if (opts.append && gmailPageToken) gmailParams.set('pageToken', gmailPageToken);
-        if (selectedFolders.google) gmailParams.set('labelId', selectedFolders.google);
-        jobs.push(
-          apiFetch<{ messages: any[]; nextPageToken: string | null }>(
-            `/api/gmail/messages${gmailParams.toString() ? `?${gmailParams.toString()}` : ''}`
-          ).then(res => {
-            setGmailPageToken(res.nextPageToken);
-            setGmailHasMore(!!res.nextPageToken);
-            return res.messages.map(r => ({
-              provider: 'google' as const,
-              externalMessageId: r.id,
-              externalThreadId: r.threadId,
-              subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
-            }));
-          })
-        );
-      }
-      if (outlookStatus.connected && (opts.append ? outlookHasMore : true)) {
-        const outlookParams = new URLSearchParams();
-        if (opts.append && outlookPageToken) outlookParams.set('pageToken', outlookPageToken);
-        if (selectedFolders.microsoft) outlookParams.set('folderId', selectedFolders.microsoft);
-        jobs.push(
-          apiFetch<{ messages: any[]; nextPageToken: string | null }>(
-            `/api/outlook/messages${outlookParams.toString() ? `?${outlookParams.toString()}` : ''}`
-          ).then(res => {
-            setOutlookPageToken(res.nextPageToken);
-            setOutlookHasMore(!!res.nextPageToken);
-            return res.messages.map(r => ({
-              provider: 'microsoft' as const,
-              externalMessageId: r.id,
-              subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
-            }));
-          })
-        );
-      }
-      if (imapStatus.connected && (opts.append ? imapHasMore : true)) {
-        const nextLimit = opts.append ? imapLimit + PAGE_SIZE : PAGE_SIZE;
-        const imapParams = new URLSearchParams({ limit: String(nextLimit) });
-        if (selectedFolders.infomaniak) imapParams.set('folder', selectedFolders.infomaniak);
-        jobs.push(
-          apiFetch<any[]>(`/api/mail/imap/messages?${imapParams.toString()}`).then(rows => {
-            setImapHasMore(rows.length >= nextLimit);
-            setImapLimit(nextLimit);
+      const jobs = accounts
+        .filter(a => opts.append ? paginationFor(a.id).hasMore : true)
+        .map(async (a): Promise<Message[]> => {
+          if (a.provider === 'infomaniak') {
+            const nextLimit = opts.append ? paginationFor(a.id).limit + PAGE_SIZE : PAGE_SIZE;
+            const rows = await apiFetch<any[]>(listEndpoint(a, opts));
+            setPagination(prev => ({ ...prev, [a.id]: { pageToken: null, limit: nextLimit, hasMore: rows.length >= nextLimit } }));
             return rows.map(r => ({
-              provider: 'infomaniak' as const,
+              accountId: a.id, provider: a.provider,
               externalMessageId: `${r.folder}:${r.uid}`,
               subject: r.subject, from: r.from, to: r.to, date: r.date,
             }));
-          })
-        );
-      }
+          }
+          const res = await apiFetch<{ messages: any[]; nextPageToken: string | null }>(listEndpoint(a, opts));
+          setPagination(prev => ({ ...prev, [a.id]: { pageToken: res.nextPageToken, limit: PAGE_SIZE, hasMore: !!res.nextPageToken } }));
+          return res.messages.map(r => ({
+            accountId: a.id, provider: a.provider,
+            externalMessageId: r.id, externalThreadId: r.threadId,
+            subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
+          }));
+        });
       const settled = await Promise.all(jobs);
       setMessages(prev => {
-        // Gmail pages append via its own token; IMAP re-fetches its whole
-        // growing window each call — so merge everything fresh and de-dupe
-        // rather than trying to patch prev in place per-provider.
+        // Gmail/Outlook pages append via their own token; IMAP re-fetches
+        // its whole growing window each call — so merge everything fresh
+        // and de-dupe rather than trying to patch prev in place per-account.
         const combined = opts.append ? [...prev, ...settled.flat()] : settled.flat();
         const seen = new Set<string>();
         const deduped = combined.filter(m => {
-          const key = `${m.provider}-${m.externalMessageId}`;
+          const key = `${m.accountId}-${m.externalMessageId}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -152,18 +152,13 @@ export default function Mailbox() {
     } finally {
       setLoading(false);
     }
-  }, [
-    gmailStatus.connected, outlookStatus.connected, imapStatus.connected,
-    gmailPageToken, gmailHasMore, outlookPageToken, outlookHasMore, imapLimit, imapHasMore,
-    selectedFolders, setError, t,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, selectedFolders, setError, t]);
 
-  const selectFolder = (provider: MailProvider, folderId: string) => {
-    setSelectedFolders(prev => ({ ...prev, [provider]: folderId }));
+  const selectFolder = (accountId: string, _provider: MailProvider, folderId: string) => {
+    setSelectedFolders(prev => ({ ...prev, [accountId]: folderId }));
     setIsSearchActive(false);
-    if (provider === 'google') { setGmailPageToken(null); setGmailHasMore(true); }
-    if (provider === 'microsoft') { setOutlookPageToken(null); setOutlookHasMore(true); }
-    if (provider === 'infomaniak') { setImapLimit(PAGE_SIZE); setImapHasMore(true); }
+    setPagination(prev => ({ ...prev, [accountId]: { pageToken: null, limit: PAGE_SIZE, hasMore: true } }));
   };
 
   // Advanced search — unlike loadMessages() above, each provider's /search
@@ -184,47 +179,26 @@ export default function Mailbox() {
       if (searchForm.dateTo) base.set('dateTo', searchForm.dateTo);
       if (searchForm.hasAttachment) base.set('hasAttachment', 'true');
 
-      const jobs: Promise<Message[]>[] = [];
-      if (gmailStatus.connected) {
+      const jobs = accounts.map(async (a): Promise<Message[]> => {
         const params = new URLSearchParams(base);
-        if (selectedFolders.google) params.set('folderId', selectedFolders.google);
-        jobs.push(
-          apiFetch<any[]>(`/api/gmail/search?${params.toString()}`).then(rows => rows.map(r => ({
-            provider: 'google' as const,
-            externalMessageId: r.id,
-            externalThreadId: r.threadId,
-            subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
-          })))
-        );
-      }
-      if (outlookStatus.connected) {
-        const params = new URLSearchParams(base);
-        if (selectedFolders.microsoft) params.set('folderId', selectedFolders.microsoft);
-        jobs.push(
-          apiFetch<any[]>(`/api/outlook/search?${params.toString()}`).then(rows => rows.map(r => ({
-            provider: 'microsoft' as const,
-            externalMessageId: r.id,
-            subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet,
-          })))
-        );
-      }
-      if (imapStatus.connected) {
-        const params = new URLSearchParams(base);
-        if (selectedFolders.infomaniak) params.set('folder', selectedFolders.infomaniak);
-        jobs.push(
-          apiFetch<any[]>(`/api/mail/imap/search?${params.toString()}`).then(rows => rows.map(r => ({
-            provider: 'infomaniak' as const,
-            externalMessageId: `${r.folder}:${r.uid}`,
-            subject: r.subject, from: r.from, to: r.to, date: r.date,
-          })))
-        );
-      }
+        params.set('accountId', a.id);
+        const folder = selectedFolders[a.id];
+        if (a.provider === 'infomaniak') {
+          if (folder) params.set('folder', folder);
+          const rows = await apiFetch<any[]>(`/api/mail/imap/search?${params}`);
+          return rows.map(r => ({ accountId: a.id, provider: a.provider, externalMessageId: `${r.folder}:${r.uid}`, subject: r.subject, from: r.from, to: r.to, date: r.date }));
+        }
+        if (folder) params.set('folderId', folder);
+        const path = a.provider === 'google' ? `/api/gmail/search?${params}` : `/api/outlook/search?${params}`;
+        const rows = await apiFetch<any[]>(path);
+        return rows.map(r => ({ accountId: a.id, provider: a.provider, externalMessageId: r.id, externalThreadId: r.threadId, subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet }));
+      });
 
       const settled = await Promise.all(jobs);
       const combined = settled.flat();
       const seen = new Set<string>();
       const deduped = combined.filter(m => {
-        const key = `${m.provider}-${m.externalMessageId}`;
+        const key = `${m.accountId}-${m.externalMessageId}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -237,7 +211,7 @@ export default function Mailbox() {
     } finally {
       setSearching(false);
     }
-  }, [searchForm, hasSearchCriteria, gmailStatus.connected, outlookStatus.connected, imapStatus.connected, selectedFolders, setError, t]);
+  }, [searchForm, hasSearchCriteria, accounts, selectedFolders, setError, t]);
 
   const clearSearch = () => {
     setIsSearchActive(false);
@@ -247,26 +221,21 @@ export default function Mailbox() {
 
   useEffect(() => {
     if (anyConnected) {
-      setGmailPageToken(null);
-      setGmailHasMore(true);
-      setOutlookPageToken(null);
-      setOutlookHasMore(true);
-      setImapLimit(PAGE_SIZE);
-      setImapHasMore(true);
+      setPagination({});
       loadMessages({ append: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gmailStatus.connected, outlookStatus.connected, imapStatus.connected]);
+  }, [accounts.map(a => a.id).join(',')]);
 
-  // Re-fetch when the user picks a different folder for any provider —
-  // separate from the connection-status effect above so switching folders
-  // doesn't reset every other provider's pagination too.
+  // Re-fetch when the user picks a different folder for any account —
+  // separate from the connection-list effect above so switching folders
+  // doesn't reset every other account's pagination too.
   useEffect(() => {
     if (anyConnected) loadMessages({ append: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFolders]);
 
-  const hasMore = !isSearchActive && ((gmailStatus.connected && gmailHasMore) || (outlookStatus.connected && outlookHasMore) || (imapStatus.connected && imapHasMore));
+  const hasMore = !isSearchActive && accounts.some(a => paginationFor(a.id).hasMore);
 
   const attach = async (localType: LocalType, localId: string) => {
     if (!attachTarget) return;
@@ -274,6 +243,7 @@ export default function Mailbox() {
       method: 'POST',
       body: JSON.stringify({
         provider: attachTarget.provider,
+        connection_id: attachTarget.accountId,
         local_type: localType,
         local_id: localId,
         external_message_id: attachTarget.externalMessageId,
@@ -285,7 +255,7 @@ export default function Mailbox() {
         message_date: attachTarget.date ? new Date(attachTarget.date).toISOString() : null,
       }),
     });
-    setAttachedKeys(prev => new Set(prev).add(`${attachTarget.provider}-${attachTarget.externalMessageId}`));
+    setAttachedKeys(prev => new Set(prev).add(`${attachTarget.accountId}-${attachTarget.externalMessageId}`));
     setAttachTarget(null);
   };
 
@@ -299,23 +269,23 @@ export default function Mailbox() {
 
   const readTargetProps = readTarget
     ? readTarget.provider === 'infomaniak'
-      ? { provider: readTarget.provider, ...splitImapKey(readTarget.externalMessageId) }
-      : { provider: readTarget.provider, messageId: readTarget.externalMessageId }
+      ? { accountId: readTarget.accountId, provider: readTarget.provider, ...splitImapKey(readTarget.externalMessageId) }
+      : { accountId: readTarget.accountId, provider: readTarget.provider, messageId: readTarget.externalMessageId }
     : null;
 
-  const runMailAction = async (m: Message, action: (provider: MailProvider, messageId: string, folder?: string) => Promise<void>) => {
-    const key = `${m.provider}-${m.externalMessageId}`;
+  const runMailAction = async (m: Message, action: (provider: MailProvider, messageId: string, folder: string | undefined, accountId: string) => Promise<void>) => {
+    const key = `${m.accountId}-${m.externalMessageId}`;
     setActioningKey(key);
     try {
       if (m.provider === 'infomaniak') {
         const { folder, messageId } = splitImapKey(m.externalMessageId);
-        await action(m.provider, messageId, folder);
+        await action(m.provider, messageId, folder, m.accountId);
       } else {
-        await action(m.provider, m.externalMessageId);
+        await action(m.provider, m.externalMessageId, undefined, m.accountId);
       }
-      setMessages(prev => prev.filter(x => `${x.provider}-${x.externalMessageId}` !== key));
+      setMessages(prev => prev.filter(x => `${x.accountId}-${x.externalMessageId}` !== key));
     } catch (err: any) {
-      noteMailError(m.provider, err);
+      noteMailError(m.accountId, err);
     } finally {
       setActioningKey(null);
     }
@@ -323,12 +293,6 @@ export default function Mailbox() {
 
   const handleArchive = (m: Message) => runMailAction(m, archiveMailMessage);
   const handleDelete = (m: Message) => runMailAction(m, deleteMailMessage);
-
-  const connectedProviders: { provider: MailProvider; email: string }[] = [
-    ...(gmailStatus.connected ? [{ provider: 'google' as const, email: gmailStatus.email || '' }] : []),
-    ...(outlookStatus.connected ? [{ provider: 'microsoft' as const, email: outlookStatus.email || '' }] : []),
-    ...(imapStatus.connected ? [{ provider: 'infomaniak' as const, email: imapStatus.email || '' }] : []),
-  ];
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
@@ -439,47 +403,48 @@ export default function Mailbox() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {gmailStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconBrandGoogle size={13} /> {gmailStatus.email}
-            <button onClick={disconnectGmail} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
-          </button>
-        )}
-
-        {outlookStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconBrandWindows size={13} /> {outlookStatus.email}
-            <button onClick={disconnectOutlook} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
-          </button>
-        )}
-
-        {imapStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconMailbox size={13} /> {imapStatus.email}
-            <button onClick={disconnectImap} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={() => setShowImapForm(v => !v)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconMailbox size={13} /> {t('correspondence_connect_imap')}
-          </button>
-        )}
+        {accounts.map(a => {
+          const Icon = PROVIDER_ICON[a.provider];
+          return (
+            <span key={a.id} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+              <Icon size={13} />
+              {a.displayName || a.email}
+              <button
+                onClick={() => setDefault(a.id)}
+                disabled={a.isDefault}
+                title={a.isDefault ? (t('mail_accounts_default') as string) : (t('mail_accounts_set_default') as string)}
+                className="disabled:opacity-100"
+                style={{ color: a.isDefault ? 'var(--tblr-warning)' : 'var(--tblr-muted)' }}
+              >
+                {a.isDefault ? <IconStarFilled size={13} /> : <IconStar size={13} />}
+              </button>
+              <button onClick={() => disconnect(a.id)} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
+            </span>
+          );
+        })}
+        <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
+        </button>
+        <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
+        </button>
+        <button onClick={() => setShowImapForm(v => !v)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconMailbox size={13} /> {t('correspondence_connect_imap')}
+        </button>
       </div>
 
-      {showImapForm && !imapStatus.connected && (
+      {showImapForm && (
         <form onSubmit={connectImap} className="grid grid-cols-2 gap-2 p-3 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
           <input required placeholder={t('correspondence_connect_imap_host') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.host} onChange={e => setImapForm({ ...imapForm, host: e.target.value })} />
           <input required placeholder={t('correspondence_connect_imap_port') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.port} onChange={e => setImapForm({ ...imapForm, port: e.target.value })} />
           <input required type="email" placeholder={t('correspondence_connect_imap_username') as string} className="p-2 rounded-lg text-sm col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.username} onChange={e => setImapForm({ ...imapForm, username: e.target.value })} />
           <input required type="password" placeholder={t('correspondence_connect_imap_password') as string} className="p-2 rounded-lg text-sm col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.password} onChange={e => setImapForm({ ...imapForm, password: e.target.value })} />
           <p className="col-span-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('correspondence_connect_imap_password_hint')}</p>
+          <p className="col-span-2 text-xs font-semibold uppercase tracking-wide mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('mail_accounts_smtp_section')}</p>
+          <input placeholder={t('correspondence_connect_imap_host') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpHost} onChange={e => setImapForm({ ...imapForm, smtpHost: e.target.value })} />
+          <input placeholder={t('correspondence_connect_imap_port') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpPort} onChange={e => setImapForm({ ...imapForm, smtpPort: e.target.value })} />
+          <input type="email" placeholder={t('correspondence_connect_imap_username') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpUsername} onChange={e => setImapForm({ ...imapForm, smtpUsername: e.target.value })} />
+          <input type="password" placeholder={t('correspondence_connect_imap_password') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpPassword} onChange={e => setImapForm({ ...imapForm, smtpPassword: e.target.value })} />
           <div className="col-span-2 flex items-center gap-2">
             <button type="submit" disabled={imapConnecting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ background: 'var(--tblr-primary)', color: 'white' }}>
               {imapConnecting && <IconLoader2 size={13} className="animate-spin" />} {t('correspondence_connect_imap_submit')}
@@ -496,18 +461,18 @@ export default function Mailbox() {
         </div>
       )}
 
-      {insufficientScopeProvider && (
+      {insufficientScopeAccountId && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
           <span>{t('mail_reconnect_banner')}</span>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={insufficientScopeProvider === 'google' ? connectGmail : connectOutlook}
+              onClick={() => reconnectAccount(insufficientScopeAccountId)}
               className="px-2.5 py-1 rounded-lg font-medium"
               style={{ background: 'var(--tblr-primary)', color: 'white' }}
             >
               {t('mail_reconnect_button')}
             </button>
-            <button onClick={() => setInsufficientScopeProvider(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
+            <button onClick={() => setInsufficientScopeAccountId(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
           </div>
         </div>
       )}
@@ -518,10 +483,10 @@ export default function Mailbox() {
 
       {anyConnected && (
         <div className="flex flex-col sm:flex-row gap-4">
-          <MailFolderSidebar providers={connectedProviders} selected={selectedFolders} onSelectFolder={selectFolder} />
+          <MailFolderSidebar accounts={accounts} selected={selectedFolders} onSelectFolder={selectFolder} />
           <div className="flex-1 min-w-0 space-y-1.5">
           {messages.map(m => {
-            const key = `${m.provider}-${m.externalMessageId}`;
+            const key = `${m.accountId}-${m.externalMessageId}`;
             return (
               <div
                 key={key}
@@ -594,16 +559,17 @@ export default function Mailbox() {
       {readTargetProps && (
         <MailMessageView
           provider={readTargetProps.provider}
+          accountId={readTargetProps.accountId}
           messageId={readTargetProps.messageId}
           folder={'folder' in readTargetProps ? readTargetProps.folder : undefined}
-          connectedProviders={connectedProviders}
+          accounts={accounts}
           onClose={() => setReadTarget(null)}
         />
       )}
 
       {composing && (
         <MailComposeModal
-          connectedProviders={connectedProviders}
+          accounts={accounts}
           onClose={() => setComposing(false)}
           onSent={() => loadMessages({ append: false })}
         />

@@ -1,16 +1,16 @@
 // Correspondence connector for a project/contact/tender/proposal record —
-// lets the user connect Gmail and/or IMAP (via useMailConnections, shared
-// with the Mailbox page), search either one live for emails involving a
-// given address, and explicitly attach results to this record (server/
-// mailLinks.ts). On the same read-only, non-storing principle as
-// Calendar.tsx's Google Calendar widget: nothing is fetched or kept beyond
-// what's attached here.
+// lets the user connect Gmail, Outlook and/or IMAP accounts (via
+// useMailAccounts, shared with the Mailbox page), search all of them live
+// for emails involving a given address, and explicitly attach results to
+// this record (server/mailLinks.ts). On the same read-only, non-storing
+// principle as Calendar.tsx's Google Calendar widget: nothing is fetched or
+// kept beyond what's attached here.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX, IconArchive, IconTrash, IconFolderPlus, IconFolder, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX, IconArchive, IconTrash, IconFolderPlus, IconFolder, IconChevronDown, IconChevronRight, IconStar, IconStarFilled } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { useMailConnections } from '../hooks/useMailConnections';
-import MailMessageView, { type MailProvider } from './MailMessageView';
+import { useMailAccounts, type MailProvider } from '../hooks/useMailAccounts';
+import MailMessageView from './MailMessageView';
 import MailFolderSidebar from './MailFolderSidebar';
 import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
 
@@ -21,7 +21,8 @@ interface CorrespondenceTabProps {
 }
 
 interface SearchResult {
-  provider: 'google' | 'microsoft' | 'infomaniak';
+  accountId: string;
+  provider: MailProvider;
   externalMessageId: string;
   externalThreadId?: string | null;
   subject: string;
@@ -34,6 +35,7 @@ interface SearchResult {
 interface LinkedEmail {
   id: string;
   provider: string;
+  connection_id: string | null;
   external_message_id: string;
   subject: string | null;
   from_address: string | null;
@@ -44,12 +46,14 @@ interface LinkedEmail {
 
 interface FolderLink {
   id: string;
+  connection_id: string;
   provider: MailProvider;
   folder_id: string;
   folder_name: string;
 }
 
 interface FolderMessage {
+  accountId: string;
   provider: MailProvider;
   externalMessageId: string;
   subject: string;
@@ -58,18 +62,24 @@ interface FolderMessage {
   date: string | null;
 }
 
+const PROVIDER_ICON: Record<MailProvider, typeof IconBrandGoogle> = {
+  google: IconBrandGoogle,
+  microsoft: IconBrandWindows,
+  infomaniak: IconMailbox,
+};
+
 export default function CorrespondenceTab({ localType, localId, contactEmail }: CorrespondenceTabProps) {
   const { t } = useTranslation();
   const {
-    gmailStatus, outlookStatus, imapStatus, error, setError,
+    accounts, error, setError,
     showImapForm, setShowImapForm, imapForm, setImapForm, imapConnecting,
-    connectGmail, disconnectGmail, connectOutlook, disconnectOutlook, connectImap, disconnectImap, anyConnected,
-    insufficientScopeProvider, setInsufficientScopeProvider, noteMailError,
-  } = useMailConnections();
+    connectGmail, connectOutlook, connectImap, disconnect, setDefault, anyConnected,
+    insufficientScopeAccountId, setInsufficientScopeAccountId, noteMailError, reconnectAccount,
+  } = useMailAccounts();
   const [linked, setLinked] = useState<LinkedEmail[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [readTarget, setReadTarget] = useState<{ provider: MailProvider; messageId: string; folder?: string } | null>(null);
+  const [readTarget, setReadTarget] = useState<{ accountId: string; provider: MailProvider; messageId: string; folder?: string } | null>(null);
   const [actioningKey, setActioningKey] = useState<string | null>(null);
   const [folderLinks, setFolderLinks] = useState<FolderLink[]>([]);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -85,37 +95,31 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
     return { folder, messageId: rest.join(':') };
   }
 
-  const openReader = (provider: string, externalMessageId: string) => {
+  const openReader = (accountId: string, provider: string, externalMessageId: string) => {
     if (provider === 'infomaniak') {
-      setReadTarget({ provider: 'infomaniak', ...splitImapKey(externalMessageId) });
+      setReadTarget({ accountId, provider: 'infomaniak', ...splitImapKey(externalMessageId) });
     } else {
-      setReadTarget({ provider: provider as MailProvider, messageId: externalMessageId });
+      setReadTarget({ accountId, provider: provider as MailProvider, messageId: externalMessageId });
     }
   };
 
-  const runMailAction = async (r: SearchResult, action: (provider: MailProvider, messageId: string, folder?: string) => Promise<void>) => {
-    const key = `${r.provider}-${r.externalMessageId}`;
+  const runMailAction = async (r: SearchResult, action: (provider: MailProvider, messageId: string, folder: string | undefined, accountId: string) => Promise<void>) => {
+    const key = `${r.accountId}-${r.externalMessageId}`;
     setActioningKey(key);
     try {
       if (r.provider === 'infomaniak') {
         const { folder, messageId } = splitImapKey(r.externalMessageId);
-        await action(r.provider, messageId, folder);
+        await action(r.provider, messageId, folder, r.accountId);
       } else {
-        await action(r.provider, r.externalMessageId);
+        await action(r.provider, r.externalMessageId, undefined, r.accountId);
       }
-      setResults(prev => prev.filter(x => `${x.provider}-${x.externalMessageId}` !== key));
+      setResults(prev => prev.filter(x => `${x.accountId}-${x.externalMessageId}` !== key));
     } catch (err: any) {
-      noteMailError(r.provider, err);
+      noteMailError(r.accountId, err);
     } finally {
       setActioningKey(null);
     }
   };
-
-  const connectedProviders: { provider: MailProvider; email: string }[] = [
-    ...(gmailStatus.connected ? [{ provider: 'google' as const, email: gmailStatus.email || '' }] : []),
-    ...(outlookStatus.connected ? [{ provider: 'microsoft' as const, email: outlookStatus.email || '' }] : []),
-    ...(imapStatus.connected ? [{ provider: 'infomaniak' as const, email: imapStatus.email || '' }] : []),
-  ];
 
   const loadLinked = useCallback(async () => {
     try {
@@ -139,14 +143,12 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
 
   useEffect(() => { loadFolderLinks(); }, [loadFolderLinks]);
 
-  const linkFolder = async (provider: MailProvider, folderId: string, folderName: string) => {
-    const status = provider === 'google' ? gmailStatus : provider === 'microsoft' ? outlookStatus : imapStatus;
-    if (!status.id) return;
+  const linkFolder = async (accountId: string, provider: MailProvider, folderId: string, folderName: string) => {
     try {
       await apiFetch('/api/mail/folder-links', {
         method: 'POST',
         body: JSON.stringify({
-          connection_id: status.id,
+          connection_id: accountId,
           provider,
           folder_id: folderId,
           folder_name: folderName,
@@ -176,6 +178,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
       const res = await apiFetch<{ messages: any[] } | any[]>(`/api/mail/folder-links/${link.id}/messages`);
       const rows = Array.isArray(res) ? res : res.messages || [];
       setFolderMessages(rows.map((r: any) => ({
+        accountId: link.connection_id,
         provider: link.provider,
         externalMessageId: link.provider === 'infomaniak' ? `${r.folder}:${r.uid}` : r.id,
         subject: r.subject, from: r.from, to: r.to, date: r.date,
@@ -193,50 +196,17 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
     setError(null);
     setResults([]);
     try {
-      const queries: Promise<SearchResult[]>[] = [];
-      if (gmailStatus.connected) {
-        queries.push(
-          apiFetch<any[]>(`/api/gmail/search?email=${encodeURIComponent(contactEmail)}`)
-            .then(rows => rows.map(r => ({
-              provider: 'google' as const,
-              externalMessageId: r.id,
-              externalThreadId: r.threadId,
-              subject: r.subject,
-              from: r.from,
-              to: r.to,
-              date: r.date,
-              snippet: r.snippet,
-            })))
-        );
-      }
-      if (outlookStatus.connected) {
-        queries.push(
-          apiFetch<any[]>(`/api/outlook/search?email=${encodeURIComponent(contactEmail)}`)
-            .then(rows => rows.map(r => ({
-              provider: 'microsoft' as const,
-              externalMessageId: r.id,
-              subject: r.subject,
-              from: r.from,
-              to: r.to,
-              date: r.date,
-              snippet: r.snippet,
-            })))
-        );
-      }
-      if (imapStatus.connected) {
-        queries.push(
-          apiFetch<any[]>(`/api/mail/imap/search?email=${encodeURIComponent(contactEmail)}`)
-            .then(rows => rows.map(r => ({
-              provider: 'infomaniak' as const,
-              externalMessageId: `${r.folder}:${r.uid}`,
-              subject: r.subject,
-              from: r.from,
-              to: r.to,
-              date: r.date,
-            })))
-        );
-      }
-      const settled = await Promise.all(queries);
+      const jobs = accounts.map(async (a): Promise<SearchResult[]> => {
+        const params = `email=${encodeURIComponent(contactEmail)}&accountId=${encodeURIComponent(a.id)}`;
+        if (a.provider === 'infomaniak') {
+          const rows = await apiFetch<any[]>(`/api/mail/imap/search?${params}`);
+          return rows.map(r => ({ accountId: a.id, provider: a.provider, externalMessageId: `${r.folder}:${r.uid}`, subject: r.subject, from: r.from, to: r.to, date: r.date }));
+        }
+        const path = a.provider === 'google' ? `/api/gmail/search?${params}` : `/api/outlook/search?${params}`;
+        const rows = await apiFetch<any[]>(path);
+        return rows.map(r => ({ accountId: a.id, provider: a.provider, externalMessageId: r.id, externalThreadId: r.threadId, subject: r.subject, from: r.from, to: r.to, date: r.date, snippet: r.snippet }));
+      });
+      const settled = await Promise.all(jobs);
       setResults(settled.flat());
     } catch (err: any) {
       setError(err?.message || t('correspondence_search_error') as string);
@@ -250,6 +220,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
       method: 'POST',
       body: JSON.stringify({
         provider: result.provider,
+        connection_id: result.accountId,
         local_type: localType,
         local_id: localId,
         external_message_id: result.externalMessageId,
@@ -270,43 +241,38 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
   };
 
   const isLinked = (result: SearchResult) =>
-    linked.some(l => l.provider === result.provider && l.external_message_id === result.externalMessageId);
+    linked.some(l => l.connection_id === result.accountId && l.external_message_id === result.externalMessageId);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {gmailStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconBrandGoogle size={13} /> {gmailStatus.email}
-            <button onClick={disconnectGmail} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
-          </button>
-        )}
-
-        {outlookStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconBrandWindows size={13} /> {outlookStatus.email}
-            <button onClick={disconnectOutlook} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
-          </button>
-        )}
-
-        {imapStatus.connected ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-            <IconMailbox size={13} /> {imapStatus.email}
-            <button onClick={disconnectImap} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
-          </span>
-        ) : (
-          <button onClick={() => setShowImapForm(v => !v)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-            <IconMailbox size={13} /> {t('correspondence_connect_imap')}
-          </button>
-        )}
+        {accounts.map(a => {
+          const Icon = PROVIDER_ICON[a.provider];
+          return (
+            <span key={a.id} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+              <Icon size={13} /> {a.displayName || a.email}
+              <button
+                onClick={() => setDefault(a.id)}
+                disabled={a.isDefault}
+                title={a.isDefault ? (t('mail_accounts_default') as string) : (t('mail_accounts_set_default') as string)}
+                className="disabled:opacity-100"
+                style={{ color: a.isDefault ? 'var(--tblr-warning)' : 'var(--tblr-muted)' }}
+              >
+                {a.isDefault ? <IconStarFilled size={13} /> : <IconStar size={13} />}
+              </button>
+              <button onClick={() => disconnect(a.id)} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
+            </span>
+          );
+        })}
+        <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
+        </button>
+        <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
+        </button>
+        <button onClick={() => setShowImapForm(v => !v)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <IconMailbox size={13} /> {t('correspondence_connect_imap')}
+        </button>
 
         {anyConnected && contactEmail && (
           <button onClick={search} disabled={searching} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60 ml-auto" style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}>
@@ -315,7 +281,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         )}
       </div>
 
-      {showImapForm && !imapStatus.connected && (
+      {showImapForm && (
         <form onSubmit={connectImap} className="grid grid-cols-2 gap-2 p-3 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
           <input required placeholder={t('correspondence_connect_imap_host') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.host} onChange={e => setImapForm({ ...imapForm, host: e.target.value })} />
           <input required placeholder={t('correspondence_connect_imap_port') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.port} onChange={e => setImapForm({ ...imapForm, port: e.target.value })} />
@@ -338,18 +304,18 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         </div>
       )}
 
-      {insufficientScopeProvider && (
+      {insufficientScopeAccountId && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
           <span>{t('mail_reconnect_banner')}</span>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={insufficientScopeProvider === 'google' ? connectGmail : connectOutlook}
+              onClick={() => reconnectAccount(insufficientScopeAccountId)}
               className="px-2.5 py-1 rounded-lg font-medium"
               style={{ background: 'var(--tblr-primary)', color: 'white' }}
             >
               {t('mail_reconnect_button')}
             </button>
-            <button onClick={() => setInsufficientScopeProvider(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
+            <button onClick={() => setInsufficientScopeAccountId(null)} className="hover:underline">{t('mail_reconnect_dismiss')}</button>
           </div>
         </div>
       )}
@@ -362,8 +328,8 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         <div className="space-y-1.5">
           {results.map(r => (
             <div
-              key={`${r.provider}-${r.externalMessageId}`}
-              onClick={() => openReader(r.provider, r.externalMessageId)}
+              key={`${r.accountId}-${r.externalMessageId}`}
+              onClick={() => openReader(r.accountId, r.provider, r.externalMessageId)}
               className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
               style={{ border: '1px solid var(--tblr-border)' }}
             >
@@ -382,7 +348,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); runMailAction(r, archiveMailMessage); }}
-                  disabled={actioningKey === `${r.provider}-${r.externalMessageId}`}
+                  disabled={actioningKey === `${r.accountId}-${r.externalMessageId}`}
                   title={t('mail_archive') as string}
                   className="p-1.5 rounded-lg disabled:opacity-50"
                   style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
@@ -391,7 +357,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); runMailAction(r, deleteMailMessage); }}
-                  disabled={actioningKey === `${r.provider}-${r.externalMessageId}`}
+                  disabled={actioningKey === `${r.accountId}-${r.externalMessageId}`}
                   title={t('mail_delete') as string}
                   className="p-1.5 rounded-lg disabled:opacity-50"
                   style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-danger)' }}
@@ -416,7 +382,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
             {linked.map(l => (
               <div
                 key={l.id}
-                onClick={() => openReader(l.provider, l.external_message_id)}
+                onClick={() => openReader(l.connection_id || '', l.provider, l.external_message_id)}
                 className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 style={{ border: '1px solid var(--tblr-border)' }}
               >
@@ -448,7 +414,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
 
           {showFolderPicker && (
             <div className="mb-2 p-2 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
-              <MailFolderSidebar providers={connectedProviders} selected={{}} onSelectFolder={linkFolder} />
+              <MailFolderSidebar accounts={accounts} selected={{}} onSelectFolder={linkFolder} />
             </div>
           )}
 
@@ -478,8 +444,8 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
                       )}
                       {!folderMessagesLoading && folderMessages.map(m => (
                         <div
-                          key={`${m.provider}-${m.externalMessageId}`}
-                          onClick={() => openReader(m.provider, m.externalMessageId)}
+                          key={`${m.accountId}-${m.externalMessageId}`}
+                          onClick={() => openReader(m.accountId, m.provider, m.externalMessageId)}
                           className="p-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                           style={{ border: '1px solid var(--tblr-border)' }}
                         >
@@ -499,9 +465,10 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
       {readTarget && (
         <MailMessageView
           provider={readTarget.provider}
+          accountId={readTarget.accountId}
           messageId={readTarget.messageId}
           folder={readTarget.folder}
-          connectedProviders={connectedProviders}
+          accounts={accounts}
           onClose={() => setReadTarget(null)}
         />
       )}

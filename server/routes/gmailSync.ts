@@ -24,12 +24,15 @@
 import type { Express } from 'express';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { resolveMailAccount, isFirstMailAccountForUser } from '../mailAccounts';
+import { gmailAccessTokenCache } from '../mailTokenCache';
+import { getGmailAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
 import { fetchGmailFullMessage } from '../mailFullMessage';
 import { normalizeGmailLabels } from '../mailFolders';
 import { isInsufficientScopeError } from '../mailProviderErrors';
 import { mailAttachmentUpload, ATTACHMENT_MAX_FILE_BYTES } from '../mailAttachmentUpload';
-import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
+import { encryptSecret } from '../secretsCrypto';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -52,38 +55,14 @@ function sanitizeReturnTo(value: unknown): string {
 }
 
 export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  const accessTokenCache = new Map<string, { token: string; expiresAt: number }>();
-
-  async function getConnection(tenantId: string, userId: string) {
-    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
-      .select('*').eq('user_id', userId).eq('provider', 'google').maybeSingle();
-    return data as any;
+  // Plusieurs adresses Gmail par utilisateur sont possibles depuis le
+  // support multi-comptes (server/mailAccounts.ts) : accountId (query ou
+  // body) désigne un compte précis, sinon le défaut de l'utilisateur.
+  async function getConnection(tenantId: string, userId: string, accountId?: string | null) {
+    return resolveMailAccount(supabaseAdmin, tenantId, userId, 'google', accountId);
   }
 
-  async function getAccessToken(connection: any): Promise<string> {
-    const now = Date.now();
-    const cached = accessTokenCache.get(connection.user_id);
-    if (cached && cached.expiresAt > now + 60000) return cached.token;
-
-    const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId) throw new Error('VITE_GOOGLE_CLIENT_ID non configuré');
-
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        refresh_token: decryptSecretMaybe(connection.refresh_token),
-        client_id: clientId,
-        ...(clientSecret ? { client_secret: clientSecret } : {}),
-        grant_type: 'refresh_token',
-      }).toString(),
-    });
-    const data: any = await resp.json();
-    if (!resp.ok || !data.access_token) throw new Error(data.error_description || data.error || 'Échec du rafraîchissement du token Google');
-    accessTokenCache.set(connection.user_id, { token: data.access_token, expiresAt: now + (data.expires_in || 3600) * 1000 });
-    return data.access_token;
-  }
+  const getAccessToken = getGmailAccessToken;
 
   function getRedirectUri(req: any): string {
     if (process.env.GMAIL_REDIRECT_URI) return process.env.GMAIL_REDIRECT_URI;
@@ -100,23 +79,6 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     }
     res.status(500).json({ error: data?.error?.message || fallbackMessage });
   }
-
-  // GET /api/gmail/status
-  app.get('/api/gmail/status', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
-      res.json({
-        connected: !!connection,
-        id: connection?.id || null,
-        email: connection?.external_account_email || null,
-        last_synced_at: connection?.last_synced_at || null,
-      });
-    } catch (error: any) {
-      console.error('[GET /api/gmail/status]', error);
-      res.status(500).json({ error: 'Failed to get Gmail status' });
-    }
-  });
 
   // GET /api/gmail/auth — returns the consent URL for an authenticated
   // fetch to call; the frontend navigates there itself.
@@ -180,8 +142,12 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
         if (userinfoResp.ok) email = (await userinfoResp.json()).email || null;
       } catch { /* non-fatal — connection still works without the display email */ }
 
-      accessTokenCache.delete(userId);
-      const existing = await getConnection(tenantId, userId);
+      // Une même adresse Gmail se reconnecte (mise à jour du token) ; une
+      // adresse différente devient un compte de plus — c'est tout le point
+      // du multi-comptes (server/mailAccounts.ts).
+      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+        .select('id').eq('user_id', userId).eq('provider', 'google').eq('external_account_email', email).maybeSingle();
+      if (existing) gmailAccessTokenCache.delete(existing.id);
       const row = {
         refresh_token: encryptSecret(tokenData.refresh_token),
         access_token: tokenData.access_token,
@@ -192,11 +158,13 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       if (existing) {
         await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id);
       } else {
+        const isFirst = await isFirstMailAccountForUser(supabaseAdmin, tenantId, userId);
         await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
           id: crypto.randomUUID(),
           user_id: userId,
           provider: 'google',
           auth_type: 'oauth',
+          is_default: isFirst,
           ...row,
         });
       }
@@ -207,27 +175,12 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
     }
   });
 
-  // DELETE /api/gmail/disconnect
-  app.delete('/api/gmail/disconnect', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      accessTokenCache.delete(req.user.id);
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').delete().eq('user_id', req.user.id).eq('provider', 'google');
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, 'Déconnexion de Gmail', '', tenantId, 'integration', 'Intégrations');
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error('[DELETE /api/gmail/disconnect]', error);
-      res.status(500).json({ error: 'Failed to disconnect Gmail' });
-    }
-  });
-
   // GET /api/gmail/folders — Gmail's labels, filtered/normalized to
   // something that reads as "folders" (server/mailFolders.ts).
   app.get('/api/gmail/folders', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -288,7 +241,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.get('/api/gmail/search', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const { email, from, to, subject, q, dateFrom, dateTo, hasAttachment, folderId } = req.query as Record<string, string | undefined>;
       if (!email && !from && !to && !subject && !q && !dateFrom && !dateTo && !hasAttachment) {
@@ -330,7 +283,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.get('/api/gmail/messages', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const { pageToken, labelId } = req.query as { pageToken?: string; labelId?: string };
       const maxResults = Math.min(parseInt(String(req.query.maxResults || INBOX_PAGE_SIZE), 10) || INBOX_PAGE_SIZE, 50);
@@ -349,7 +302,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.get('/api/gmail/messages/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const accessToken = await getAccessToken(connection);
       const message = await fetchGmailFullMessage(accessToken, req.params.id);
@@ -366,7 +319,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.get('/api/gmail/messages/:id/attachments/:attachmentId', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch(
@@ -392,7 +345,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.post('/api/gmail/messages/:id/archive', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/modify`, {
@@ -414,7 +367,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.post('/api/gmail/messages/:id/trash', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const accessToken = await getAccessToken(connection);
       const resp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/trash`, {
@@ -439,7 +392,7 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
   app.post('/api/gmail/send', mailAttachmentUpload, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const connection = await getConnection(tenantId, req.user.id);
+      const connection = await getConnection(tenantId, req.user.id, req.query.accountId || req.body?.accountId);
       if (!connection) return res.status(400).json({ error: 'Gmail non connecté.' });
       const { to, cc, subject, text, html, threadId, inReplyTo, references } = req.body;
       if (!to || !subject) return res.status(400).json({ error: 'to et subject requis' });
