@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -107,9 +107,9 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     }, 300);
   }, []);
 
-  const updateLocal = (id: string, patch: Partial<Observation>) => {
+  const updateLocal = useCallback((id: string, patch: Partial<Observation>) => {
     setObservations(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
-  };
+  }, []);
 
   const addRow = () => {
     fetch(`/api/projects/${projectId}/observations`, {
@@ -122,14 +122,22 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       .catch(console.error);
   };
 
-  const deleteRow = (id: string) => {
+  const deleteRow = useCallback((id: string) => {
     if (!confirm('Supprimer cette observation ?')) return;
     fetch(`/api/observations/${id}`, { method: 'DELETE' })
       .then(() => setObservations(prev => prev.filter(o => o.id !== id)))
       .catch(console.error);
-  };
+  }, []);
 
-  const filtered = observations.filter(o => {
+  // TanStack Table expects `data` and `columns` to be referentially stable
+  // across renders (its docs call this out explicitly): recreating either
+  // as a fresh array every render — as this component did before — makes
+  // its internal row-model memoization never hit, which for a non-empty
+  // table caused an unbounded render loop (confirmed by rendering this
+  // component with real data outside the browser: it never settles). Data
+  // with zero rows never hit this because there was no row model diverging
+  // for the memoization to keep rebuilding — see the 2026-09-08 incident.
+  const filtered = useMemo(() => observations.filter(o => {
     if (typeFilter && (o.type || 'observation') !== typeFilter) return false;
     if (openOnly && o.statut === 'Levée') return false;
     if (statusFilter && o.statut !== statusFilter) return false;
@@ -140,9 +148,9 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         (o.lot?.lot_title || '').toLowerCase().includes(q);
     }
     return true;
-  });
+  }), [observations, typeFilter, openOnly, statusFilter, lotFilter, globalFilter]);
 
-  const columns = [
+  const columns = useMemo(() => [
     columnHelper.accessor('number', {
       header: 'N°',
       size: 48,
@@ -291,7 +299,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </button>
       ),
     }),
-  ];
+  ], [lots, saveField, updateLocal, deleteRow]);
 
   const table = useReactTable({
     data: filtered,
