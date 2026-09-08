@@ -81,6 +81,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS email_links_unique_idx
   ON email_links(local_type, local_id, connection_id, external_message_id);
 
 -- ------------------------------------------------------------
+-- 2bis. email_folder_links : un dossier lié appartient à un COMPTE précis
+-- ------------------------------------------------------------
+-- L'index d'origine UNIQUE(user_id, provider, folder_id, local_type,
+-- local_id) suppose un seul compte par fournisseur : deux comptes Gmail
+-- ont chacun un label "INBOX", qui collisionnerait sur cet index. connection_id
+-- déterminant déjà user_id et provider (c'est une FK vers email_connections),
+-- le nouvel index s'appuie dessus directement.
+DROP INDEX IF EXISTS email_folder_links_unique_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS email_folder_links_unique_idx
+  ON email_folder_links(connection_id, folder_id, local_type, local_id);
+
+-- ------------------------------------------------------------
 -- 3. calendar_connections : un compte, plusieurs calendriers
 -- ------------------------------------------------------------
 -- external_calendar_id reste en place (lu par le back-fill de

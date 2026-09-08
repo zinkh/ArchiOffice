@@ -16,8 +16,9 @@ import { useTranslation } from 'react-i18next';
 import { IconX, IconPaperclip, IconPhoto, IconLoader2, IconDownload, IconArrowBackUp } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import MailComposeModal, { type MailReplyContext } from './MailComposeModal';
+import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 
-export type MailProvider = 'google' | 'microsoft' | 'infomaniak';
+export type { MailProvider };
 
 interface FullMailMessage {
   id: string;
@@ -35,26 +36,29 @@ interface FullMailMessage {
 
 interface MailMessageViewProps {
   provider: MailProvider;
+  accountId: string; // désigne le compte, nécessaire dès qu'il en existe plusieurs du même fournisseur
   messageId: string; // Gmail/Outlook message id, or the IMAP uid as a string
   folder?: string; // IMAP only — required to reopen the right mailbox
   // All connected mailboxes able to send natively — passed through to the
-  // reply compose modal so it can offer a provider switch when relevant.
-  connectedProviders?: { provider: MailProvider; email: string }[];
+  // reply compose modal so it can offer an account switch when relevant.
+  accounts?: MailAccount[];
   onClose: () => void;
 }
 
-function messageEndpoint(provider: MailProvider, messageId: string, folder?: string): string {
-  if (provider === 'google') return `/api/gmail/messages/${encodeURIComponent(messageId)}`;
-  if (provider === 'microsoft') return `/api/outlook/messages/${encodeURIComponent(messageId)}`;
-  return `/api/mail/imap/messages/${encodeURIComponent(folder || 'INBOX')}/${encodeURIComponent(messageId)}`;
+function messageEndpoint(provider: MailProvider, accountId: string, messageId: string, folder?: string): string {
+  const accountParam = `accountId=${encodeURIComponent(accountId)}`;
+  if (provider === 'google') return `/api/gmail/messages/${encodeURIComponent(messageId)}?${accountParam}`;
+  if (provider === 'microsoft') return `/api/outlook/messages/${encodeURIComponent(messageId)}?${accountParam}`;
+  return `/api/mail/imap/messages/${encodeURIComponent(folder || 'INBOX')}/${encodeURIComponent(messageId)}?${accountParam}`;
 }
 
-function attachmentUrl(provider: MailProvider, messageId: string, folder: string | undefined, attachment: { id: string; filename: string; mimeType: string }): string {
+function attachmentUrl(provider: MailProvider, accountId: string, messageId: string, folder: string | undefined, attachment: { id: string; filename: string; mimeType: string }): string {
+  const accountParam = `accountId=${encodeURIComponent(accountId)}`;
   if (provider === 'google') {
-    return `/api/gmail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}?filename=${encodeURIComponent(attachment.filename)}&mimeType=${encodeURIComponent(attachment.mimeType)}`;
+    return `/api/gmail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}?filename=${encodeURIComponent(attachment.filename)}&mimeType=${encodeURIComponent(attachment.mimeType)}&${accountParam}`;
   }
-  if (provider === 'microsoft') return `/api/outlook/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`;
-  return `/api/mail/imap/messages/${encodeURIComponent(folder || 'INBOX')}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`;
+  if (provider === 'microsoft') return `/api/outlook/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}?${accountParam}`;
+  return `/api/mail/imap/messages/${encodeURIComponent(folder || 'INBOX')}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}?${accountParam}`;
 }
 
 // "From" headers commonly read as "Name <email@example.com>" — replying
@@ -70,7 +74,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
-export default function MailMessageView({ provider, messageId, folder, connectedProviders, onClose }: MailMessageViewProps) {
+export default function MailMessageView({ provider, accountId, messageId, folder, accounts, onClose }: MailMessageViewProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState<FullMailMessage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,13 +86,13 @@ export default function MailMessageView({ provider, messageId, folder, connected
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiFetch<FullMailMessage>(messageEndpoint(provider, messageId, folder))
+    apiFetch<FullMailMessage>(messageEndpoint(provider, accountId, messageId, folder))
       .then(m => { if (!cancelled) setMessage(m); })
       .catch(err => { if (!cancelled) setError(err?.message || t('mail_read_error') as string); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, messageId, folder]);
+  }, [provider, accountId, messageId, folder]);
 
   const hasBlockedImages = !!message?.bodyHtml?.includes('data-blocked-src=');
   const renderedHtml = message?.bodyHtml && showImages
@@ -168,7 +172,7 @@ export default function MailMessageView({ provider, messageId, folder, connected
                   {message.attachments.map(a => (
                     <a
                       key={a.id}
-                      href={attachmentUrl(provider, messageId, folder, a)}
+                      href={attachmentUrl(provider, accountId, messageId, folder, a)}
                       target="_blank"
                       rel="noreferrer"
                       className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
@@ -190,8 +194,9 @@ export default function MailMessageView({ provider, messageId, folder, connected
 
     {replying && message && (
       <MailComposeModal
-        connectedProviders={connectedProviders || [{ provider, email: '' }]}
+        accounts={accounts || []}
         replyTo={{
+          accountId,
           provider,
           messageId,
           threadId: message.threadId,

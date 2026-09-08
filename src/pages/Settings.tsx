@@ -16,6 +16,7 @@ import { getAccessToken } from '../lib/authToken';
 import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
+import { MailAccountsCard } from '../components/MailAccountsCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -2403,6 +2404,11 @@ export default function Settings() {
           row (PUT /api/team/:id) — one save action for both, entirely separate
           from every tenant-settings section above. */}
       {renderSaveButton('profile', () => saveProfile())}
+
+      {/* Mes boîtes mail — état géré par son propre hook (useMailAccounts),
+          pas par saveSection/renderSaveButton : connecter/déconnecter/définir
+          par défaut sont des actions immédiates, pas un formulaire à valider. */}
+      <MailAccountsCard />
     </div>
   );
 }

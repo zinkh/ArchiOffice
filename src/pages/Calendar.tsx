@@ -26,19 +26,23 @@ import { cn } from '../lib/utils';
 import TeamWeekSchedule from '../components/TeamWeekSchedule';
 import { CalendarEventModal, type CalendarEventInitial } from '../components/CalendarEventModal';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
+import { CalendarAccountsPanel } from '../components/CalendarAccountsPanel';
+import { IconSettings } from '@tabler/icons-react';
 
 interface CalEvent {
   id: string;
   date: string;
   title: string;
-  // 'google' isn't populated yet (no external-calendar sync exists today)
-  // but is reserved here so a future addition doesn't need to touch every
-  // switch/condition on `ev.type` written for the milestone/task cases.
   type: 'milestone' | 'task' | 'google';
   projectId?: string | null;
   projectName?: string;
   completed?: boolean;
   overdue?: boolean;
+  // Google uniquement — la couleur du calendrier d'origine
+  // (calendar_calendars.color), pour distinguer plusieurs calendriers
+  // affichés à la fois plutôt que de tous les rendre dans le même gris.
+  calendarId?: string;
+  color?: string | null;
 }
 
 const PROJECT_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#d63939', '#0ca678', '#f59f00', '#4263eb'];
@@ -48,6 +52,11 @@ export function colorForProject(projectId?: string | null): string {
   let hash = 0;
   for (let i = 0; i < projectId.length; i++) hash = (hash * 31 + projectId.charCodeAt(i)) >>> 0;
   return PROJECT_COLORS[hash % PROJECT_COLORS.length];
+}
+
+/** Couleur d'un événement : celle de son calendrier Google s'il en a une, sinon celle de son projet. */
+export function colorForEvent(ev: Pick<CalEvent, 'projectId' | 'color'>): string {
+  return ev.color || colorForProject(ev.projectId);
 }
 
 export default function CalendarPage() {
@@ -73,9 +82,10 @@ export default function CalendarPage() {
   const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
   const [dragError, setDragError] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; email: string | null; last_synced_at: string | null } | null>(null);
-  const [googleEvents, setGoogleEvents] = useState<{ id: string; title: string; date: string }[]>([]);
+  const [googleEvents, setGoogleEvents] = useState<{ id: string; title: string; date: string; calendarId?: string; color?: string | null }[]>([]);
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
+  const [showAccountsPanel, setShowAccountsPanel] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -234,7 +244,7 @@ export default function CalendarPage() {
     const gStart = startOfWeek(startOfMonth(viewDate), { weekStartsOn: 1 });
     const gEnd = endOfWeek(endOfMonth(viewDate), { weekStartsOn: 1 });
     try {
-      const data = await apiFetch<{ id: string; title: string; date: string }[]>(
+      const data = await apiFetch<{ id: string; title: string; date: string; calendarId?: string; color?: string | null }[]>(
         `/api/google-calendar/events?start=${format(gStart, 'yyyy-MM-dd')}&end=${format(gEnd, 'yyyy-MM-dd')}`
       );
       setGoogleEvents(Array.isArray(data) ? data : []);
@@ -328,6 +338,8 @@ export default function CalendarPage() {
       date: g.date,
       title: g.title,
       type: 'google' as const,
+      calendarId: g.calendarId,
+      color: g.color,
     }));
     return [...fromMilestones, ...fromTasks, ...fromGoogle];
   }, [milestones, tasks, projectNameById, todayStr, googleEvents]);
@@ -588,6 +600,16 @@ export default function CalendarPage() {
               <IconBrandGoogle size={13} /> {t('calendar_google_connect')}
             </button>
           )}
+          <button
+            onClick={() => setShowAccountsPanel(v => !v)}
+            title={t('calendar_accounts_title') as string}
+            className="p-1.5 rounded-lg"
+            style={showAccountsPanel
+              ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
+              : { border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+          >
+            <IconSettings size={13} />
+          </button>
         </div>
       </div>
 
@@ -596,6 +618,13 @@ export default function CalendarPage() {
           {googleNotice}
           <button onClick={() => setGoogleNotice(null)} className="font-semibold shrink-0 hover:underline">{t('btn_close')}</button>
         </div>
+      )}
+
+      {showAccountsPanel && (
+        <CalendarAccountsPanel
+          onConnectAnother={connectGoogleCalendar}
+          onChanged={() => { loadGoogleStatus(); pullGoogleEvents(true); }}
+        />
       )}
 
       {error && view === 'month' && (
@@ -662,9 +691,9 @@ export default function CalendarPage() {
                       {ev.completed ? (
                         <IconCircleCheck size={14} className="mt-0.5 shrink-0" style={{ color: '#2fb344' }} />
                       ) : ev.type === 'milestone' ? (
-                        <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: colorForProject(ev.projectId) }} />
+                        <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: colorForEvent(ev) }} />
                       ) : (
-                        <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: colorForProject(ev.projectId) }} />
+                        <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: colorForEvent(ev) }} />
                       )}
                       <div className="min-w-0">
                         <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)', textDecoration: ev.completed ? 'line-through' : 'none' }}>
@@ -750,8 +779,8 @@ export default function CalendarPage() {
                         onClick={e => { e.stopPropagation(); openEditEvent(ev); }}
                         className="text-[10px] px-1 py-0.5 rounded truncate w-full cursor-pointer"
                         style={{
-                          background: colorForProject(ev.projectId) + '22',
-                          color: colorForProject(ev.projectId),
+                          background: colorForEvent(ev) + '22',
+                          color: colorForEvent(ev),
                           textDecoration: ev.completed ? 'line-through' : 'none',
                           borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none',
                           opacity: draggingEvent?.calId === ev.id ? 0.4 : 1,
@@ -787,9 +816,9 @@ export default function CalendarPage() {
                     style={{ borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none', paddingLeft: ev.overdue ? 6 : 0 }}
                   >
                     {ev.type === 'milestone' ? (
-                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForProject(ev.projectId) }} />
+                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
                     ) : (
-                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForProject(ev.projectId) }} />
+                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.title}</p>
@@ -821,9 +850,9 @@ export default function CalendarPage() {
                     {ev.completed ? (
                       <IconCircleCheck size={14} className="mt-0.5 shrink-0" style={{ color: '#2fb344' }} />
                     ) : ev.type === 'milestone' ? (
-                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForProject(ev.projectId) }} />
+                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
                     ) : (
-                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForProject(ev.projectId) }} />
+                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)', textDecoration: ev.completed ? 'line-through' : 'none' }}>

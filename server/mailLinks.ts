@@ -20,7 +20,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       const tenantId = await getTenantId(req.user.id);
       const {
-        provider, local_type, local_id, external_message_id, external_thread_id,
+        provider, connection_id, local_type, local_id, external_message_id, external_thread_id,
         subject, snippet, from_address, to_addresses, message_date,
       } = req.body;
 
@@ -31,6 +31,13 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
         return res.status(400).json({ error: 'local_type invalide' });
       }
 
+      // connection_id désambiguïse deux comptes du même provider (support
+      // multi-comptes, migrate_multi_mail_calendar.sql) — optionnel pour ne
+      // pas casser un appelant qui ne le connaîtrait pas encore, mais alors
+      // deux comptes du même fournisseur pourraient se marcher dessus sur le
+      // même external_message_id (Postgres traite les NULL comme distincts,
+      // donc ces liens-là restent simplement libres de se répéter).
+      //
       // tenantScopedFrom has no upsert() (see server/tenantScopedFrom.ts) —
       // call supabaseAdmin directly here, setting tenant_id ourselves.
       const { data, error } = await supabaseAdmin
@@ -40,6 +47,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
           tenant_id: tenantId,
           user_id: req.user.id,
           provider,
+          connection_id: connection_id || null,
           local_type,
           local_id,
           external_message_id,
@@ -49,7 +57,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
           from_address: from_address || null,
           to_addresses: to_addresses || null,
           message_date: message_date || null,
-        }, { onConflict: 'local_type,local_id,provider,external_message_id', ignoreDuplicates: true })
+        }, { onConflict: 'local_type,local_id,connection_id,external_message_id', ignoreDuplicates: true })
         .select()
         .maybeSingle();
 
