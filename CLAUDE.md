@@ -581,6 +581,82 @@ l'autosave du document n'efface pas un import fait entre-temps.
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
 
+### Multi-comptes mail et multi-calendriers
+
+`email_connections` et `calendar_connections` portaient chacune un index
+`UNIQUE(user_id, provider)` : au plus une boîte Gmail, une Outlook, une IMAP
+par utilisateur, une seule connexion Google Calendar. Un architecte a
+pourtant plusieurs adresses (cabinet, personnelle, dédiée aux AO) et parfois
+plusieurs calendriers utiles (agenda personnel + agenda partagé
+« Chantiers »). `supabase/migrate_multi_mail_calendar.sql` lève ces index et
+introduit le même principe déjà en place pour `document_templates` : une
+colonne `is_default BOOLEAN` + un index unique **partiel**
+`WHERE is_default = true`, qui garantit au plus un défaut par utilisateur
+sans empêcher d'en avoir zéro ou plusieurs comptes.
+
+**Mail** — `server/mailAccounts.ts` est le seul endroit qui décide quel
+compte sert une requête : `resolveMailAccount(tenantId, userId, provider,
+accountId?)` renvoie le compte nommé s'il appartient à l'utilisateur, sinon
+son défaut, sinon le plus ancien. Il remplace les trois `getConnection()` en
+`.maybeSingle()` que `gmailSync.ts`/`outlookSync.ts`/`imapMailSync.ts`
+avaient chacun ; toutes leurs routes acceptent désormais un `accountId`
+(query ou body) pour désigner un compte précis. `GET /api/mail/accounts`
+(`server/routes/mailAccounts.ts`) remplace les six routes `GET .../status` +
+`DELETE .../disconnect` propres à chaque fournisseur — un seul point d'entrée
+qui liste toutes les boîtes de l'utilisateur, tous fournisseurs confondus,
+sans jamais exposer un secret.
+
+Le cache de jeton OAuth (`server/mailTokenCache.ts`,
+`server/mailOAuthTokens.ts`) est keyé par `connection.id`, pas par
+`user_id` comme avant ce changement — sans ça, deux comptes Gmail du même
+utilisateur se serviraient mutuellement leur jeton d'accès.
+
+Une boîte IMAP n'a pas de capacité d'envoi (le protocole n'en a simplement
+pas) : `email_connections` porte donc en plus un SMTP propre au compte
+(`smtp_host`/`port`/`username`/`password_encrypted`, chiffré comme
+`imap_password_encrypted`). `server/mailSend.ts` envoie via le compte
+résolu (Gmail, Outlook, ou IMAP+SMTP propre) ; `POST /api/send-email`
+(factures, devis, notes d'honoraires, invitations d'équipe) tente d'abord
+le compte par défaut de l'utilisateur avant de retomber sur le SMTP du
+cabinet (`settings.smtp_*`) — c'est ce repli qui garde `/api/send-email`
+fonctionnel pour un cabinet n'ayant connecté aucune boîte personnelle. Les
+envois automatiques hors session (relances `server/dunning.ts`, alertes
+`server/agentAlerts.ts`, mails de cycle de vie) restent, eux, sur le SMTP du
+cabinet : aucun utilisateur n'est identifiable pour ces déclenchements, et
+faire tourner un traitement de fond sur un jeton OAuth personnel serait le
+secret partagé que le cadrage de cette fonctionnalité a justement écarté.
+
+`packages/archioffice-agents/src/server/mailTools.ts` (`search_emails`,
+`list_emails`, `read_email`, `send_email`) porte un paramètre `compte`
+optionnel : un `GET /api/mail/accounts` résout le compte nommé ou le défaut,
+en un seul appel — remplaçant les trois requêtes `/status` (une par
+fournisseur, ordre figé) d'avant ce changement.
+
+Deux tables filles gagnent la même désambiguïsation : `email_links.
+connection_id` et `email_folder_links` (dont l'`onConflict` porte maintenant
+sur `connection_id`, pas `user_id + provider`) évitent que deux comptes du
+même fournisseur se marchent dessus sur un même `external_message_id` ou un
+label partagé (deux comptes Gmail ont chacun un label « INBOX »).
+
+**Calendrier** — une connexion Google Calendar est un **compte**, qui expose
+plusieurs **calendriers** (`calendar_calendars`, nouvelle table) : `primary`,
+un agenda partagé, etc. Deux booléens indépendants par calendrier :
+`sync_enabled` (affiché en lecture dans `/calendar`) et `is_default` (la
+cible d'écriture du push ArchiOffice → Google, unique par utilisateur, tous
+comptes confondus — pas par calendrier). `server/calendarAccounts.ts` porte
+la résolution (`resolveWriteCalendar`, `listReadCalendars`,
+`refreshCalendarList` qui interroge `calendarList.list` chez Google) ;
+`GET /api/google-calendar/events` agrège tous les calendriers `sync_enabled`
+de tous les comptes et étiquette chaque événement de son `calendarId` et sa
+couleur (`Calendar.tsx` les distingue désormais par cette couleur plutôt que
+de tous les rendre dans le gris par défaut) ; `POST /api/google-calendar/sync`
+écrit dans le calendrier `is_default` au lieu de `'primary'` en dur. Le
+scope OAuth (`calendar.events` + `calendar.readonly`) a été élargi pour
+permettre `calendarList.list` — un compte connecté avant cet ajout garde
+l'ancien scope, plus étroit, et `calendarList` échoue alors en 403 avec la
+même forme que Gmail/Outlook (`isInsufficientScopeError`), proposant de
+reconnecter plutôt que d'échouer sans explication.
+
 ### OCR
 
 `packages/archioffice-agents/src/server/ocr.ts` rattrape les documents sans
