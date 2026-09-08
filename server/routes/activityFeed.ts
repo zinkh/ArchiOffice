@@ -313,7 +313,12 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
 
       res.json({ count: (actCount || 0) + (postCount || 0) });
     } catch (err: any) {
-      console.error("[GET /api/notifications/unread-count]", err);
+      // A freshly-created account not yet attached to an agency (still on
+      // /agency-setup) can still have this notification-bell poller mounted
+      // for the brief window before ProtectedLayout's guard redirects it —
+      // that's expected, not a bug, so it degrades to 0 without spamming
+      // Sentry (console.error is auto-captured there) on every occurrence.
+      if (err?.code !== 'NO_TENANT') console.error("[GET /api/notifications/unread-count]", err);
       res.json({ count: 0 });
     }
   });
