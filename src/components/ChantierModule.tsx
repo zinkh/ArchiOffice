@@ -3,6 +3,7 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconTrash, IconCamera,
   IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
+  IconRefresh,
 } from '@tabler/icons-react';
 import { Project, ProjectLot, SiteReport, Observation, OrdreDeService } from '../types';
 import { autoSaveDocument } from '../lib/autoSaveDocument';
@@ -139,6 +140,31 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     setSelectedReportId(newReport.id);
     setIsModalOpen(false);
     setFetchedWeather(null);
+  };
+
+  const refreshWeather = async (report: SiteReport) => {
+    if (!project.address) return;
+    setWeatherLoading(true);
+    try {
+      const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address)}&date=${report.date}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const updated = { ...report, meteo: data.meteo, temperature: data.temperature };
+      setReports(prev => prev.map(r => (r.id === report.id ? updated : r)));
+      const saveRes = await fetch(`/api/reports/${report.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+      if (saveRes.ok) {
+        const saved = await saveRes.json();
+        setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+      }
+    } catch (err) {
+      console.error('Failed to refresh weather:', err);
+    } finally {
+      setWeatherLoading(false);
+    }
   };
 
   const updateReportField = async (field: keyof SiteReport, value: any) => {
@@ -424,6 +450,16 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         <input type="number" className="bg-transparent border-none outline-none w-14"
                           value={selectedReport.temperature ?? ''} onChange={e => updateReportField('temperature', parseInt(e.target.value) || 0)} />°C
                       </span>
+                      {project.address && (
+                        <button
+                          onClick={() => refreshWeather(selectedReport)}
+                          disabled={weatherLoading}
+                          title="Actualiser la météo pour la date du compte-rendu"
+                          className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                        >
+                          <IconRefresh size={13} className={weatherLoading ? 'animate-spin' : ''} /> Actualiser
+                        </button>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
@@ -640,7 +676,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold dark:text-zinc-300">Annuler</button>
-              <button onClick={() => handleCreateReport()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold">Créer</button>
+              <button
+                onClick={() => handleCreateReport()}
+                disabled={weatherLoading}
+                title={weatherLoading ? 'Récupération de la météo en cours...' : undefined}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-bold"
+              >
+                Créer
+              </button>
             </div>
           </div>
         </div>

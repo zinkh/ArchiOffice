@@ -7,7 +7,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
-import { handleSingleImageUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
+import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -99,7 +99,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
   // fit here (same magic-byte sniffing as the logo/avatar uploads), not just
   // a generic dangerous-content blocklist: anything that isn't a real image
   // wouldn't render there anyway.
-  app.post("/api/meetings/:id/photos", handleSingleImageUpload('file'), async (req: any, res: any) => {
+  app.post("/api/meetings/:id/photos", handleSingleSitePhotoUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
