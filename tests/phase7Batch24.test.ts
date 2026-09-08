@@ -261,7 +261,10 @@ describe('Site reports (comptes-rendus de chantier)', () => {
 
     const res = await request(app).put('/api/reports/r3').set(authHeader(token)).send({ pageFormat: 'A4', meetingNotes: 'RAS', stakeholders: ['MOE'] });
     expect(res.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('site_reports').find(r => r.id === 'r3')?.meetingNotes).toBe('RAS');
+    // Stored under the DB's actual (unquoted-camelCase-folded) column name,
+    // not the camelCase request key — see server/routes/siteReports.ts.
+    expect(fakeSupabaseAdmin.getTable('site_reports').find(r => r.id === 'r3')?.meetingnotes).toBe('RAS');
+    expect(res.body.meetingNotes).toBe('RAS');
   });
 
   it('updates and deletes a site report note', async () => {
@@ -280,12 +283,12 @@ describe('Site reports (comptes-rendus de chantier)', () => {
 
   it('never lets a caller update another tenant\'s report', async () => {
     const tenantB = makeTenant();
-    fakeSupabaseAdmin.seed('site_reports', [{ id: 'report-b', tenant_id: tenantB, meetingNotes: 'Secret' }]);
+    fakeSupabaseAdmin.seed('site_reports', [{ id: 'report-b', tenant_id: tenantB, meetingnotes: 'Secret' }]);
     const tenantA = makeTenant();
     const { token } = makeUser(tenantA);
 
     await request(app).put('/api/reports/report-b').set(authHeader(token)).send({ meetingNotes: 'Hacked' });
-    expect(fakeSupabaseAdmin.getTable('site_reports').find(r => r.id === 'report-b')?.meetingNotes).toBe('Secret');
+    expect(fakeSupabaseAdmin.getTable('site_reports').find(r => r.id === 'report-b')?.meetingnotes).toBe('Secret');
   });
 });
 
