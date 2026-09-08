@@ -93,8 +93,24 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
   { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'project_id', 'description', 'content'],
-    required: ['title'],
-    fields: 'title*, project_id, description, content' },
+    // project_id est obligatoire depuis l'incident du 7 septembre 2026 : un
+    // agent avait créé 19 CCTP sans projet (project_id NULL), invisibles
+    // nulle part dans l'application (la seule vue qui les affiche filtre par
+    // projet), en réponse à des demandes qui visaient en réalité la
+    // Bibliothèque d'ouvrages (voir la ressource 'articles_type' ci-dessous).
+    required: ['title', 'project_id'],
+    fields: 'title*, project_id*, description, content' },
+  { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
+    // À ne pas confondre avec 'specifications' (CCTP) : ceci est le catalogue
+    // d'articles réutilisables du cabinet — un article a un prix unitaire et
+    // se range par corps de métier, un CCTP est un document de projet. Un
+    // agent qui « intègre les articles d'un document à la bibliothèque »
+    // crée un enregistrement par article ici, jamais un CCTP par chapitre.
+    knownFields: ['designation', 'unite', 'prix_unitaire', 'categorie', 'lot_type', 'description', 'notes', 'origine', 'code'],
+    required: ['designation'],
+    enums: { origine: ['reference', 'saisie', 'bpu', 'offre', 'import'] },
+    defaults: { origine: 'saisie' },
+    fields: "désignation*, unité, prix_unitaire, catégorie, lot_type (corps de métier), description, notes, origine (reference/saisie/bpu/offre/import), code" },
   { key: 'tasks', label: 'Tâches', basePath: '/api/tasks', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'description', 'start_date', 'end_date', 'due_date', 'project_id', 'status', 'priority', 'assignee_id', 'progress', 'dependencies'],
     required: ['title'],
@@ -162,7 +178,7 @@ export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
   'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects'],
   'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
-  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
   'responsable-hqe':     ['specifications', 'tasks'],
@@ -189,6 +205,15 @@ export interface AgentCapabilities {
   geo: boolean;
   /** Lecture du CCTP et du DPGF d'un projet. */
   docsRead: boolean;
+  /** consulter_agent — interroger un collègue (autre agent actif du cabinet)
+   *  et recevoir sa réponse dans le même tour. Un seul niveau : un agent
+   *  consulté ne peut pas lui-même en consulter un autre (voir routes.ts,
+   *  en-tête X-Agent-Delegation). */
+  delegate: boolean;
+  /** publier_flux_activite — poster dans Notifications & Flux d'activité en
+   *  mentionnant une personne du cabinet, pour la prévenir sans passer par
+   *  la conversation privée entre l'utilisateur et l'agent. */
+  notifyUsers: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -198,6 +223,8 @@ export function capabilitiesFromAgent(agent: {
   mail_send_enabled?: boolean | null;
   geo_enabled?: boolean | null;
   docs_read_enabled?: boolean | null;
+  delegate_enabled?: boolean | null;
+  notify_users_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -208,6 +235,8 @@ export function capabilitiesFromAgent(agent: {
     mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
     geo: !!agent.geo_enabled,
     docsRead: !!agent.docs_read_enabled,
+    delegate: !!agent.delegate_enabled,
+    notifyUsers: !!agent.notify_users_enabled,
   };
 }
 
@@ -229,6 +258,8 @@ export interface Agent {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  delegate_enabled: boolean;
+  notify_users_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -277,6 +308,11 @@ export interface AgentChatResponse {
   tokens_used: number;
   remaining_balance: number;
   artifact?: AgentArtifact;
+  /** Les collègues consultés pendant ce tour (consulter_agent), dans l'ordre
+   *  où la consultation a eu lieu. Le client s'en sert pour ouvrir la
+   *  conversation du collègue et montrer sa réponse, déjà enregistrée dans
+   *  sa propre conversation avec l'utilisateur. */
+  consulted?: { id: string; name: string }[];
 }
 
 // Internal server-side types
@@ -298,6 +334,8 @@ export interface AgentRow {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  delegate_enabled: boolean;
+  notify_users_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
@@ -312,6 +350,25 @@ export interface AgentContext {
   recentDocuments: { id: string; name: string; project_id: string; phase: string; uploaded_at: string; file_url: string }[];
   tasks: { id: string; title: string; status: string; due_date: string; project_id: string }[];
   documentContents: { id: string; name: string; content: string }[];
+  /**
+   * Les autres agents actifs du cabinet (jamais l'agent lui-même), avec ce
+   * qu'ils sont autorisés à écrire — pour qu'un agent sache vers qui
+   * rediriger une demande qui n'est pas de son ressort au lieu de
+   * l'improviser avec le mauvais outil (voir l'incident du 7 septembre 2026 :
+   * un agent avait créé des CCTP vides pour une demande de bibliothèque
+   * d'ouvrages, faute de savoir qu'un collègue avait le bon outil).
+   * Toujours peuplé, sans condition de context_scopes : connaître les
+   * collègues du cabinet n'expose aucune donnée métier.
+   */
+  colleagues: { id: string; name: string; roleTitle: string; resourceLabels: string[] }[];
+  /**
+   * Les personnes du cabinet (profils utilisateurs), pour qu'un agent
+   * mentionne la bonne personne dans le flux d'activité (publier_flux_activite)
+   * au lieu d'inventer un nom : la mention n'y fonctionne que sur une
+   * correspondance exacte avec `profiles.name` (voir activityFeed.ts). Comme
+   * `colleagues`, toujours peuplé : ce sont des noms, pas une donnée métier.
+   */
+  teamMembers: { id: string; name: string }[];
   firmKnowledge: {
     phaseBenchmarks: { phase: string; avgDurationDays: number; sampleSize: number }[];
     priceCatalog: { designation: string; unite: string; prix_unitaire: number; categorie: string | null }[];

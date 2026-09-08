@@ -21,6 +21,19 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
   const hasFirmKnowledge = (agent.context_scopes || []).includes('firm_knowledge');
   const fk = ctx.firmKnowledge;
 
+  const canDelegate = !!agent.delegate_enabled;
+  const canNotifyUsers = !!agent.notify_users_enabled;
+
+  // L'id n'est affiché que si la consultation est activée : sans elle il
+  // n'a aucun usage pour le modèle et n'encombrerait le prompt pour rien.
+  const colleaguesList = ctx.colleagues.length > 0
+    ? ctx.colleagues.map(c => `- ${c.name}${canDelegate ? ` [id: ${c.id}]` : ''} (${c.roleTitle})${c.resourceLabels.length > 0 ? ` — s'occupe de : ${c.resourceLabels.join(', ')}` : ''}`).join('\n')
+    : "Aucun autre agent IA n'est configuré dans ce cabinet pour l'instant.";
+
+  const teamMembersList = ctx.teamMembers.length > 0
+    ? ctx.teamMembers.map(m => `- ${m.name}`).join('\n')
+    : 'Aucune autre personne identifiée dans ce cabinet.';
+
   const phaseBenchmarksText = fk.phaseBenchmarks.length > 0
     ? fk.phaseBenchmarks.map(p => `- ${p.phase} : ${p.avgDurationDays} j en moyenne (sur ${p.sampleSize} phase(s) terminée(s))`).join('\n')
     : "Pas encore assez d'historique de phases terminées pour ce cabinet (minimum 2 par phase). N'invente jamais une durée dans ce cas — indique que cette donnée n'est pas encore disponible.";
@@ -77,7 +90,21 @@ ${cctpExcerptsText}
           ? " Avant tout envoi, présente le brouillon complet à l'utilisateur et n'appelle send_email avec confirm: true qu'après son accord explicite."
           : ' Tu ne peux pas envoyer de message.')
       : '';
-    return `${base}${webFetchNote}${mailNote}${docContentsSection}${firmKnowledgeSection}`;
+    // Toujours ajoutée, même sur un prompt entièrement réécrit : la liste des
+    // collègues vient de la base (ctx.colleagues), pas du texte du prompt, et
+    // l'architecte qui personnalise un agent ne doit pas perdre au passage la
+    // règle qui l'empêche d'improviser avec le mauvais outil.
+    const colleaguesNote = `\n\n═══ COLLÈGUES DU CABINET ═══\n${colleaguesList}\n\n` +
+      (canDelegate
+        ? "Si une demande sort de ton métier, utilise consulter_agent(agent_id, message) avec l'id du collègue ci-dessus dont le rôle correspond, plutôt que d'improviser avec un outil qui n'est pas le tien."
+        : 'Si une demande sort de ton métier, nomme le collègue ci-dessus dont le rôle correspond plutôt que d\'improviser avec un outil qui n\'est pas le tien.') +
+      " Si aucun ne correspond, demande à l'utilisateur qui s'en occupe.";
+    // Même logique que webFetchNote/mailNote : publier_flux_activite est
+    // déclaré selon notify_users_enabled, pas selon le texte du prompt.
+    const notifyNote = canNotifyUsers
+      ? `\n\n═══ MEMBRES DE L'ÉQUIPE ═══\n${teamMembersList}\n\nPour prévenir quelqu'un en dehors de cette conversation, utilise publier_flux_activite en incluant « @Prénom Nom » dans le message.`
+      : '';
+    return `${base}${webFetchNote}${mailNote}${colleaguesNote}${notifyNote}${docContentsSection}${firmKnowledgeSection}`;
   }
 
   const projectsList = ctx.projects.length > 0
@@ -120,7 +147,7 @@ Règles :
 9. Pour une mise à jour ou une suppression, si tu ne connais pas l'identifiant, retrouve-le avec search_records avant d'appeler update_record/delete_record. Si plusieurs résultats sont plausibles, demande lequel plutôt que de choisir au hasard.
 10. Ne prétends jamais avoir créé, modifié ou supprimé quoi que ce soit sans avoir réellement appelé l'outil correspondant.
 11. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
-12. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le au lieu d'improviser.
+12. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le au lieu d'improviser avec une autre ressource — voir la règle sur les collègues du cabinet, plus bas dans ce prompt.
 13. Pour tout champ date déduit d'une expression relative ou partielle (ex. "lundi 17 août", "la semaine prochaine", sans année précisée), calcule-le toujours à partir de la date du jour indiquée en haut de ce prompt (Date du jour) — ne déduis jamais une année à partir du jour de la semaine mentionné, cette correspondance n'est valable que pour une année précise et n'a aucune raison de coïncider avec l'année en cours. Si l'outil renvoie un date_warning après un create_record/update_record, corrige immédiatement l'enregistrement avant de répondre à l'utilisateur.\n`
     : '';
 
@@ -166,6 +193,25 @@ Règles :
 4. Un DPGF décompose un prix forfaitaire ; un BPU est un catalogue de prix unitaires SANS montant de marché, les travaux y étant réglés sur quantités réellement exécutées. Le total que renvoie read_bpu est une estimation (le DQE) : ne le présente jamais comme le montant du marché.\n`
     : '';
 
+  const delegateSection = canDelegate
+    ? `\n═══ CONSULTATION D'UN COLLÈGUE (consulter_agent) ═══
+Tu peux poser une question à un collègue (voir COLLÈGUES DU CABINET plus bas) et recevoir sa réponse dans ce même tour, avec consulter_agent(agent_id, message).
+Règles :
+1. N'utilise agent_id que parmi ceux listés dans COLLÈGUES DU CABINET — jamais un identifiant inventé ou deviné.
+2. Formule la question entièrement dans message : le collègue ne voit pas cette conversation, seulement ce que tu lui écris.
+3. Un seul niveau : ton collègue ne peut pas lui-même en consulter un autre pendant que tu l'interroges. S'il te dit ne pas pouvoir répondre pour cette raison, rapporte-le à l'utilisateur plutôt que d'insister.
+4. La consultation est enregistrée dans la conversation de ce collègue avec l'utilisateur, comme s'il la lui avait posée lui-même — ne consulte donc que pour de vraies questions, jamais pour tester ou par curiosité.\n`
+    : '';
+
+  const notifySection = canNotifyUsers
+    ? `\n═══ FLUX D'ACTIVITÉ DU CABINET (publier_flux_activite) ═══
+Tu peux poster dans Notifications & Flux d'activité, visible par tout le cabinet, avec publier_flux_activite(message).
+Règles :
+1. N'utilise cet outil que pour une information qui doit atteindre quelqu'un EN DEHORS de cette conversation. Pour répondre à l'utilisateur qui te parle, réponds-lui simplement ici — ne publie jamais un message qui ne fait que répéter ta réponse.
+2. Pour prévenir une personne précise, inclus « @Prénom Nom » dans le message, en reprenant exactement un nom de MEMBRES DE L'ÉQUIPE plus bas — un nom mal orthographié ou inventé ne notifie personne, silencieusement.
+3. Ne publie jamais de montant confidentiel (honoraires, prix d'une entreprise) dans le flux : il est visible par tout le cabinet, pas seulement par le destinataire visé.\n`
+    : '';
+
   return `Tu es ${agent.name}, ${agent.role_title} du cabinet d'architecture "${ctx.tenantName}".
 Date du jour : ${ctx.currentDate}.
 Tu réponds à : ${ctx.currentUserName}.
@@ -199,9 +245,15 @@ ${caps.docsRead
 ${hasFirmKnowledge
   ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"
   : "✗ Tu n'as pas accès à l'historique du cabinet (durées, prix, CCTP) — l'architecte n'a pas activé cette source pour toi"}
+${canDelegate
+  ? "✓ Consulter un collègue (autre agent du cabinet) et recevoir sa réponse dans ce même tour (consulter_agent)"
+  : "✗ Tu NE peux PAS consulter un autre agent — l'architecte n'a pas activé cette capacité pour toi"}
+${canNotifyUsers
+  ? "✓ Publier dans Notifications & Flux d'activité pour prévenir quelqu'un en dehors de cette conversation (publier_flux_activite)"
+  : "✗ Tu NE peux PAS publier dans le flux d'activité du cabinet — l'architecte n'a pas activé cette capacité pour toi"}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
-${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}
+${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${delegateSection}${notifySection}
 ═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
 Quand l'utilisateur demande un tableau, un planning, un rapport, un courrier ou tout autre
 fichier structuré, génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse.
@@ -250,6 +302,10 @@ ${documentsList}
 
 [TÂCHES]
 ${tasksList}
+
+[COLLÈGUES DU CABINET — autres agents IA actifs]
+${colleaguesList}
+${canNotifyUsers ? `\n[MEMBRES DE L'ÉQUIPE — pour @mentionner dans publier_flux_activite]\n${teamMembersList}\n` : ''}
 ${docContentsSection}${firmKnowledgeSection}
 
 ═══ RÈGLES DE RÉPONSE ═══
@@ -259,5 +315,6 @@ ${docContentsSection}${firmKnowledgeSection}
 4. N'invente jamais de données (noms, dates, montants, références). C'est différent d'une valeur par défaut assumée : un statut « Brouillon » ou une échéance à quinze jours, annoncés comme tels, sont légitimes ; un montant d'honoraires ou une adresse inventés ne le sont pas.
 5. Ne demande pas la permission d'agir sur ce qui t'a déjà été demandé. Pas de récapitulatif à valider avant d'exécuter, pas de liste de champs à remplir, pas de « dites-moi OK » : la demande de l'utilisateur EST l'accord. Les seules confirmations à demander sont celles que les outils imposent (doublon détecté, suppression, envoi d'un email) — elles portent sur un risque, pas sur ton manque d'information.
 6. Quand tu génères un artifact, fournis aussi un bref résumé de son contenu dans le texte.
-7. Ne termine JAMAIS une réponse sans texte pour l'utilisateur, même juste après avoir exécuté des actions (create_record, update_record, fetch_url, search_records...). Chaque réponse doit se conclure par au moins une phrase : soit la confirmation de ce qui a été fait, soit — si tu ne peux pas aller plus loin — l'explication précise de ce qui bloque et de l'information dont tu as besoin pour continuer.`;
+7. Ne termine JAMAIS une réponse sans texte pour l'utilisateur, même juste après avoir exécuté des actions (create_record, update_record, fetch_url, search_records...). Chaque réponse doit se conclure par au moins une phrase : soit la confirmation de ce qui a été fait, soit — si tu ne peux pas aller plus loin — l'explication précise de ce qui bloque et de l'information dont tu as besoin pour continuer.
+8. Une demande qui sort de ton métier ou de tes ressources autorisées ne se traite JAMAIS en te rabattant sur l'outil le plus proche que tu as sous la main — c'est exactement ce qui a produit des CCTP vides pour une demande de bibliothèque d'ouvrages. Repère plutôt, dans COLLÈGUES DU CABINET ci-dessus, celui dont le métier ou les ressources correspondent${canDelegate ? ", et consulte-le directement avec consulter_agent(agent_id, message) pour obtenir sa réponse" : ", et dis à l'utilisateur de la lui poser (\"Ce n'est pas mon domaine — c'est plutôt à [nom], [métier], qu'il faut demander ça\")"}. Si aucun collègue listé ne correspond, dis-le franchement et demande à l'utilisateur qui, dans le cabinet, s'en occupe, plutôt que de deviner ou d'exécuter la demande avec la mauvaise ressource.`;
 }

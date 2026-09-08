@@ -477,7 +477,7 @@ export function registerAgentRoutes(
 
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
       const contextStart = Date.now();
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, (agent as any).context_scopes || [], attachedDocumentIds);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds);
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
@@ -489,6 +489,12 @@ export function registerAgentRoutes(
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       const caps = capabilitiesFromAgent(agent as AgentRow);
+      // Un seul niveau de consultation entre agents : cet en-tête n'est posé
+      // que par consulter_agent (delegateTools.ts) sur son appel imbriqué, et
+      // retire ici la capacité quel que soit le réglage du collègue consulté
+      // — sans quoi deux agents qui se renvoient la question boucleraient
+      // indéfiniment, chaque tour étant facturé.
+      if (req.headers['x-agent-delegation']) caps.delegate = false;
       const tools = buildAgentTools(caps);
 
       // The full conversation, owned here rather than inside a vendor SDK's
@@ -547,6 +553,11 @@ export function registerAgentRoutes(
       // create_contact then create_proposal with the returned id) before it
       // produces a final natural-language reply.
       const actionSummaries: string[] = [];
+      // Collègues effectivement consultés pendant ce tour (consulter_agent) —
+      // remonté au client pour qu'il ouvre leur conversation (voir la fin de
+      // cette route et AgentChat.tsx). Dédupliqué par id : consulter deux fois
+      // le même collègue n'ouvre son onglet qu'une fois.
+      const consultedAgents = new Map<string, string>();
       const MAX_FUNCTION_ROUNDS = 4;
       let round = 0;
       if (tools.length > 0 && billing?.baseUrl) {
@@ -556,8 +567,9 @@ export function registerAgentRoutes(
           messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
           const results: LlmToolResult[] = [];
           for (const call of result.toolCalls) {
-            const { response, summary } = await executeAgentAction(billing.baseUrl, authHeader, caps, call);
+            const { response, summary, consulted } = await executeAgentAction(billing.baseUrl, authHeader, caps, call, { id: agentId, name: (agent as any).name });
             if (summary) actionSummaries.push(summary);
+            if (consulted) consultedAgents.set(consulted.id, consulted.name);
             results.push({ id: call.id, name: call.name, response });
           }
           messages.push({ role: 'tool', results });
@@ -667,6 +679,7 @@ export function registerAgentRoutes(
         cost_eur_cents: costCents,
         remaining_balance: newBalance,
         ...(artifact ? { artifact } : {}),
+        ...(consultedAgents.size > 0 ? { consulted: [...consultedAgents].map(([id, name]) => ({ id, name })) } : {}),
       });
     } catch (e: any) {
       // Kept ahead of the Sentry capture below so a missing/unusable API key

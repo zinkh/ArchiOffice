@@ -166,12 +166,29 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
   app.post("/api/feed/posts", handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { content } = req.body;
+      const { content, as_agent_id } = req.body;
       const file = req.file;
       if (!content?.trim() && !file) return res.status(400).json({ error: "Content required" });
 
-      // Get user name
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      // Un agent poste sous son propre nom, pas sous celui de l'utilisateur
+      // qui lui parle — c'est ce qui distingue « Sophie prévient Marc » d'un
+      // post que l'utilisateur aurait écrit lui-même. as_agent_id vient
+      // uniquement d'un outil d'agent (notifyTools.ts) qui connaît son propre
+      // id ; revalidé ici plutôt que de faire confiance à un nom envoyé tel
+      // quel, un agent inexistant ou d'un autre cabinet est refusé.
+      let authorId = req.user.id;
+      let userName: string;
+      if (as_agent_id) {
+        const { data: agent } = await tenantScopedFrom(supabaseAdmin, tenantId, 'agents')
+          .select('id, name, is_active').eq('id', as_agent_id).maybeSingle();
+        if (!agent || !(agent as any).is_active) {
+          return res.status(400).json({ error: "Agent introuvable ou inactif pour ce cabinet." });
+        }
+        authorId = (agent as any).id;
+        userName = (agent as any).name;
+      } else {
+        userName = await getUserName(tenantId, req.user.id, req.user.email);
+      }
 
       let attachment_url: string | null = null, attachment_name: string | null = null, attachment_type: string | null = null;
       if (file) {
@@ -185,13 +202,13 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
       const created_at = new Date().toISOString();
       const trimmedContent = content?.trim() || null;
       const { error: insertError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'feed_posts').insert({
-        id, user_id: req.user.id, user_name: userName, content: trimmedContent,
+        id, user_id: authorId, user_name: userName, content: trimmedContent,
         attachment_url, attachment_name, attachment_type, created_at, likes_count: 0
       });
       if (insertError) throw insertError;
-      if (trimmedContent) createMentionsForContent(tenantId, req.user.id, userName, trimmedContent, 'post', id, id);
+      if (trimmedContent) createMentionsForContent(tenantId, authorId, userName, trimmedContent, 'post', id, id);
       res.status(201).json({
-        id, kind: 'post', user_name: userName, user_id: req.user.id, content: trimmedContent,
+        id, kind: 'post', user_name: userName, user_id: authorId, content: trimmedContent,
         attachment_url, attachment_name, attachment_type, created_at, likes_count: 0, liked: false, comments: [], comments_count: 0
       });
     } catch (err: any) {

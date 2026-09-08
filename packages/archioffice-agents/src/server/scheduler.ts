@@ -150,7 +150,7 @@ export async function runSchedule(
   try {
     const ctx = await buildAgentContext(
       supabaseAdmin, schedule.tenant_id,
-      schedule.created_by || '',
+      schedule.created_by || '', (agent as any).id,
       (agent as any).context_scopes || [], []
     );
     const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx) +
