@@ -916,6 +916,9 @@ export interface SiteReport {
   meteo?: string;
   temperature?: number;
   effectif_total?: number;
+  attendance?: { name: string; role: string; present: boolean; excused?: boolean }[];
+  statut?: 'brouillon' | 'diffuse' | 'archive';
+  decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
 }
 
 export interface SiteReportNote {
@@ -952,6 +955,9 @@ export interface Observation {
   number?: number;
   created_at?: string;
   report_ids?: string[];
+  type?: 'observation' | 'reserve' | 'a_faire';
+  urgence?: 'normal' | 'urgent' | 'bloquant';
+  photos?: string[];
 }
 
 export interface DPGFItem {
