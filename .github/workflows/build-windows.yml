@@ -4,11 +4,17 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/windows-offline-app-install-okof14]
+    tags: ['v*']
 
 jobs:
   build-electron-windows:
     name: Build Electron NSIS installer
     runs-on: windows-latest
+    # electron-builder publishes to GitHub Releases (electron-builder.yml's
+    # `publish` block) using this job's own default GITHUB_TOKEN — the repo
+    # is public, same-repo releases just need contents:write, no separate PAT.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +91,14 @@ jobs:
           ls -la vendor/vc_redist.x64.exe
 
       - name: Build NSIS installer
-        run: npx electron-builder --win --x64 --publish never
+        # Only a version tag (v*) publishes a GitHub Release — electron-updater
+        # (electron/main.cjs) checks that feed on every launch, so a branch
+        # push or manual dispatch (dev/test builds) must never land there:
+        # onTagOrDraft only publishes when the ref is a tag, else it's the
+        # same "never" as before.
+        run: npx electron-builder --win --x64 --publish onTagOrDraft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

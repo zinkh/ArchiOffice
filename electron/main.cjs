@@ -1,9 +1,10 @@
-const { app, BrowserWindow, safeStorage, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, safeStorage, ipcMain, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 
 // package.json's "name" is the npm workspace root ("react-example", a
@@ -214,6 +215,53 @@ function registerNotificationIpc() {
   });
 }
 
+// ── Mise à jour automatique ─────────────────────────────────────────────────
+// GitHub Releases as the feed (electron-builder.yml's `publish` block) — the
+// repo is public, so no token is needed to check/download from a packaged
+// build. Runs only when packaged: an unpackaged dev run has no app.asar to
+// replace and electron-updater errors out immediately trying anyway. Never
+// blocks startup — this app is offline-first by design (see pgBootstrap.cjs),
+// so a user with no network right now, or ever, must still get a fully
+// working app; a failed/absent update check is silent past the log line.
+function initAutoUpdate() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.logger = { info: (...a) => log('[update]', ...a), warn: (...a) => log('[update:warn]', ...a), error: (...a) => log('[update:err]', ...a), debug: () => {} };
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('error', (err) => {
+    // Covers "no network" as much as anything else — not worth surfacing to
+    // the user, who did nothing wrong and has a working app regardless.
+    log('[update] Vérification de mise à jour impossible :', err?.message || err);
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Mise à jour disponible',
+      message: `Une nouvelle version d'ArchiOffice (${info.version}) a été téléchargée.`,
+      detail: "Redémarrer maintenant pour l'installer, ou plus tard au prochain lancement de l'application.",
+      buttons: ['Redémarrer maintenant', 'Plus tard'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) {
+      // isSilent=false (show the NSIS UI briefly — consistent with the
+      // installer users already saw on first install) ; isForceRunAfter=true
+      // (relaunch straight into the app instead of leaving it closed).
+      autoUpdater.quitAndInstall(false, true);
+    }
+  });
+
+  // Fires once at launch; autoUpdater has no built-in periodic re-check, but
+  // a desktop app relaunches often enough (unlike a server process) that a
+  // per-launch check is enough — no need for the interval/visibility-change
+  // machinery UpdateBanner.tsx needs for the web PWA's long-lived tabs.
+  autoUpdater.checkForUpdates().catch((err) => log('[update] checkForUpdates a échoué :', err?.message || err));
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -261,6 +309,7 @@ app.whenReady().then(() => {
     throw err;
   });
   createWindow();
+  initAutoUpdate();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
