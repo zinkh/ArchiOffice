@@ -16,9 +16,20 @@ ALTER TABLE settings
 ALTER TABLE tender_rss_sources
   ADD COLUMN IF NOT EXISTS ted_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 
-ALTER TABLE tender_rss_sources DROP CONSTRAINT IF EXISTS tender_rss_sources_source_type_check;
-ALTER TABLE tender_rss_sources ADD CONSTRAINT tender_rss_sources_source_type_check
-  CHECK (source_type IN ('rss', 'boamp', 'ted'));
+-- One statement, not the previous DROP-then-ADD pair: the local desktop
+-- build's offline schema bootstrap (electron/applySchema.cjs) applies
+-- migrations in two passes to resolve forward references, and this
+-- constraint's name collides with the one migrate_add_tender_boamp_connector.sql
+-- also drops-and-recreates — split across passes, this file's DROP could
+-- succeed as a no-op on pass 1 (before boamp's own retry-pass ADD creates
+-- the constraint), leaving this file's ADD to fail "already exists" on
+-- pass 2 with no DROP left in its own retry queue to precede it.
+DO $$
+BEGIN
+  ALTER TABLE tender_rss_sources DROP CONSTRAINT IF EXISTS tender_rss_sources_source_type_check;
+  ALTER TABLE tender_rss_sources ADD CONSTRAINT tender_rss_sources_source_type_check
+    CHECK (source_type IN ('rss', 'boamp', 'ted'));
+END $$;
 
 ALTER TABLE tender_rss_matches
   ADD COLUMN IF NOT EXISTS dedup_key TEXT,

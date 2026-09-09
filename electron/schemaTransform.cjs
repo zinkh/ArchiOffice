@@ -105,10 +105,18 @@ const DROP_PATTERNS = [
   /^\s*CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+handle_new_user\b/i,
   /^\s*DROP\s+TRIGGER\s+IF\s+EXISTS\s+on_auth_user_created\b/i,
   /^\s*CREATE\s+TRIGGER\s+on_auth_user_created\b/i,
+  // Postgres Changes (Realtime) is a Supabase-managed service backed by a
+  // `supabase_realtime` publication that only exists on their infrastructure
+  // — a local Postgres has no publication by that name to add a table to.
+  /\bsupabase_realtime\b/i,
   // Catch-all: any other statement whose executable SQL still touches Supabase's
-  // managed auth schema (e.g. one-off backfills like `UPDATE ... FROM auth.users`)
-  // can't run against a local Postgres, which never has that schema at all.
-  /\bauth\.(users|uid)\b/i,
+  // managed auth schema (e.g. one-off backfills like `UPDATE ... FROM auth.users`,
+  // or a dynamic `EXECUTE format('... USING (auth.role() = ...)')` inside a DO
+  // block, which the CREATE/DROP POLICY pattern above can't see since the DO
+  // block's own leading keyword isn't POLICY) can't run against a local
+  // Postgres, which never has that schema — or its jwt()/role()/uid()
+  // functions — at all.
+  /\bauth\.(users|uid|role|jwt)\b/i,
 ];
 
 /** Strips full-line `--` comments so DROP_PATTERNS can match the real leading keyword. */
@@ -126,7 +134,18 @@ function withoutCommentLines(stmt) {
  */
 function transformSql(sql) {
   return splitStatements(sql)
-    .map((stmt) => stmt.replace(/REFERENCES\s+auth\.users\(id\)(\s+ON\s+DELETE\s+CASCADE)?/gi, ''))
+    // Only CASCADE was stripped here originally — several columns reference
+    // auth.users(id) ON DELETE SET NULL (GDPR deletion tracking, audit logs,
+    // support tickets), which left a dangling "ON DELETE SET NULL" with no
+    // REFERENCES before it: a syntax error that broke CREATE TABLE tenants
+    // itself, i.e. the first statement a brand-new local database ever runs.
+    .map((stmt) => stmt.replace(/REFERENCES\s+auth\.users\(id\)(\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?/gi, ''))
+    // Supabase projects always have an `extensions` schema for non-core
+    // extensions (unaccent here); a vanilla local Postgres doesn't, so
+    // `CREATE EXTENSION ... WITH SCHEMA extensions` and calls qualified with
+    // `extensions.` both fail there. Installing into the default (public)
+    // schema and calling the function unqualified works the same locally.
+    .map((stmt) => stmt.replace(/\s+WITH\s+SCHEMA\s+extensions\b/gi, '').replace(/\bextensions\.(?=\w+\()/gi, ''))
     .filter((stmt) => withoutCommentLines(stmt).length > 0)
     .filter((stmt) => !DROP_PATTERNS.some((re) => re.test(withoutCommentLines(stmt))));
 }
