@@ -2,6 +2,15 @@ appId: com.archioffice.desktop
 productName: ArchiOffice
 directories:
   output: release
+# GitHub Releases as the update feed — the repo is public, so
+# electron-updater (see electron/main.cjs) can check/download from it with
+# no token embedded in the shipped app. .github/workflows/build-windows.yml
+# publishes here (GH_TOKEN, the workflow's own default token, is enough for
+# a same-repo release since the repo is public).
+publish:
+  provider: github
+  owner: zinkh
+  repo: ArchiOffice
 # The Express server is bundled into a single self-contained file by esbuild
 # (dist-server/server.cjs) and the frontend is the static dist/ SPA, so
 # neither needs any node_modules shipped. Neither embedded-postgres nor pg has
