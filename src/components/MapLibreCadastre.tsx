@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import maplibregl from 'maplibre-gl';
+// maplibre-gl 6 dropped the default export (named exports only) — this
+// namespace import keeps every existing maplibregl.Map/.Marker/... call
+// site below unchanged.
+import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const CADASTRE_MIN_ZOOM = 13;
