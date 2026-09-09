@@ -57,6 +57,7 @@ const COLUMN_LABELS: Record<string, string> = {
 export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -104,7 +105,14 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value }),
-      }).catch(console.error);
+      })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setSaveError(false); })
+        // The optimistic update already landed in local state regardless of
+        // outcome — a failed PUT here means the UI can be showing an edit
+        // the server never persisted, silently, with nothing to tell the
+        // user their change didn't stick (see 2026-09-08 incident: writes
+        // occasionally 500 transiently with no corresponding DB error).
+        .catch(err => { console.error(err); setSaveError(true); });
     }, 300);
   }, []);
 
@@ -386,6 +394,17 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
             className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all"
           >
             Réessayer
+          </button>
+        </div>
+      )}
+      {saveError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300">
+          <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez pour vérifier l'état réel avant de reprendre votre saisie.</span>
+          <button
+            onClick={() => { setSaveError(false); fetchObservations(); }}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all"
+          >
+            Rafraîchir
           </button>
         </div>
       )}

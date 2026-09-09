@@ -72,6 +72,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [fetchedWeather, setFetchedWeather] = useState<{ meteo: string; temperature: number | null } | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   const selectedReport = useMemo(
     () => reports.find(r => r.id === selectedReportId) || null,
@@ -225,11 +226,22 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 
   const saveObservationField = async (obsId: string, field: string, value: any) => {
     setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, [field]: value } : o)));
-    await fetch(`/api/observations/${obsId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: value }),
-    });
+    try {
+      const res = await fetch(`/api/observations/${obsId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSaveError(false);
+    } catch (err) {
+      // The optimistic update above already landed locally regardless of
+      // outcome — a failed PUT here silently leaves the UI showing an edit
+      // the server never persisted (see 2026-09-08 incident: writes
+      // occasionally 500 transiently with no corresponding DB error).
+      console.error(err);
+      setSaveError(true);
+    }
     fetchAllObservations();
   };
 
@@ -519,6 +531,17 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                       </button>
                     }
                   >
+                    {saveError && (
+                      <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                        <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez avant de reprendre votre saisie.</span>
+                        <button
+                          onClick={() => { setSaveError(false); fetchReportObservations(); }}
+                          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold transition-all"
+                        >
+                          Rafraîchir
+                        </button>
+                      </div>
+                    )}
                     {observationsByLot.length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-4 text-center">Aucune observation pour ce compte-rendu.</p>
                     )}
