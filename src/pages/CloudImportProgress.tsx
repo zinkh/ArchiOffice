@@ -2,42 +2,112 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconCommand } from '@tabler/icons-react';
-import { getImportProgress, ImportJobStatus } from '../lib/cloudSync';
+import { getImportProgress, getExportProgress, ImportJobStatus, ExportJobStatus } from '../lib/cloudSync';
+
+type Phase = 'export' | 'import';
+
+// Shared shape between ImportJobStatus and ExportJobStatus — enough to drive
+// the progress bar regardless of which phase is currently polling.
+interface ProgressLike {
+  status: 'running' | 'done' | 'error';
+  tablesDone: number;
+  tablesTotal: number;
+  currentTable: string | null;
+  error: string | null;
+}
 
 export default function CloudImportProgress() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get('jobId');
-  const [status, setStatus] = useState<ImportJobStatus | null>(null);
+  const exportJobId = searchParams.get('exportJobId');
+  const importJobId = searchParams.get('importJobId');
+  const isUpgradeFlow = !!(exportJobId && importJobId);
+
+  const [status, setStatus] = useState<ProgressLike | null>(null);
+  const [phase, setPhase] = useState<Phase>('export');
+  const [conflicts, setConflicts] = useState<ExportJobStatus['conflicts']>([]);
+  const [finished, setFinished] = useState(false);
 
   useEffect(() => {
-    if (!jobId) {
+    if (!jobId && !isUpgradeFlow) {
       navigate('/login');
       return;
     }
     let cancelled = false;
-    const poll = async () => {
+
+    // Plain first-run import (server/cloudLinkRoutes.ts) — single job, then
+    // a full reload straight into the app, unchanged from before.
+    const pollImportOnly = async () => {
       try {
-        const job = await getImportProgress(jobId);
+        const job: ImportJobStatus = await getImportProgress(jobId!);
         if (cancelled) return;
         setStatus(job);
         if (job.status === 'done') {
           window.location.href = '/';
           return;
         }
-        if (job.status !== 'error') {
-          setTimeout(poll, 1000);
-        }
+        if (job.status !== 'error') setTimeout(pollImportOnly, 1000);
       } catch {
-        if (!cancelled) setTimeout(poll, 1000);
+        if (!cancelled) setTimeout(pollImportOnly, 1000);
       }
     };
-    poll();
+
+    // Local → cloud upgrade (server/localCloudUpgrade.ts): push local data up
+    // first, then pull down whatever the cloud tenant already had. Any
+    // conflicts the export phase reports are shown once both phases finish,
+    // instead of being silently lost behind the reload.
+    const pollExport = async () => {
+      try {
+        const job: ExportJobStatus = await getExportProgress(exportJobId!);
+        if (cancelled) return;
+        setStatus(job);
+        if (job.status === 'done') {
+          setConflicts(job.conflicts);
+          setPhase('import');
+          setTimeout(pollImport, 300);
+          return;
+        }
+        if (job.status !== 'error') setTimeout(pollExport, 1000);
+      } catch {
+        if (!cancelled) setTimeout(pollExport, 1000);
+      }
+    };
+
+    const pollImport = async () => {
+      try {
+        const job: ImportJobStatus = await getImportProgress(importJobId!);
+        if (cancelled) return;
+        setStatus(job);
+        if (job.status === 'done') {
+          setFinished(true);
+          return;
+        }
+        if (job.status !== 'error') setTimeout(pollImport, 1000);
+      } catch {
+        if (!cancelled) setTimeout(pollImport, 1000);
+      }
+    };
+
+    if (isUpgradeFlow) pollExport();
+    else pollImportOnly();
+
     return () => { cancelled = true; };
-  }, [jobId, navigate]);
+  }, [jobId, exportJobId, importJobId, isUpgradeFlow, navigate]);
+
+  // Once both phases are done, auto-continue only when nothing needs the
+  // user's attention — a conflict list stays on screen until acknowledged.
+  useEffect(() => {
+    if (finished && conflicts.length === 0) {
+      window.location.href = '/';
+    }
+  }, [finished, conflicts]);
 
   const percent = status && status.tablesTotal > 0 ? Math.round((status.tablesDone / status.tablesTotal) * 100) : 0;
+  const titleKey = isUpgradeFlow
+    ? phase === 'export' ? 'cloud_upgrade_export_title' : 'cloud_upgrade_import_title'
+    : 'import_progress_title';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
@@ -48,11 +118,29 @@ export default function CloudImportProgress() {
           </div>
         </div>
         <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-6">
-          {t('import_progress_title')}
+          {t(titleKey)}
         </h2>
 
         {status?.status === 'error' ? (
           <p className="text-sm text-red-500 text-center">{status.error}</p>
+        ) : finished && conflicts.length > 0 ? (
+          <div className="space-y-4">
+            <p className="text-sm text-center text-amber-600 dark:text-amber-400">
+              {t('cloud_upgrade_conflicts_intro', { count: conflicts.length })}
+            </p>
+            <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-40 overflow-y-auto">
+              {conflicts.map((c) => (
+                <li key={c.table}>{t('cloud_upgrade_conflict_row', { table: c.table, count: c.rowCount })}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/'; }}
+              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+            >
+              {t('cloud_upgrade_conflicts_continue')}
+            </button>
+          </div>
         ) : (
           <>
             <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mb-3">
