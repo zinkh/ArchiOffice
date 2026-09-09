@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
@@ -7,12 +7,13 @@ import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
   IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
-  IconArchive
+  IconArchive, IconCloud
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { getAccessToken } from '../lib/authToken';
+import { getAccessToken, isOfflineBuild } from '../lib/authToken';
+import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
 import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
@@ -239,6 +240,7 @@ export default function Settings() {
   const { t, i18n } = useTranslation();
   const { currentUser, setCurrentUser } = useUser();
   const location = useLocation();
+  const navigate = useNavigate();
   const [settings, setSettings] = useState({
     id: 'general',
     agencyName: '',
@@ -344,6 +346,15 @@ export default function Settings() {
   const [isCancelingDeletion, setIsCancelingDeletion] = useState(false);
   const [isExportingTenant, setIsExportingTenant] = useState(false);
 
+  // Client Electron "compte local" — bascule vers un compte cloud existant
+  const [cloudLinked, setCloudLinked] = useState<boolean | null>(null);
+  const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
+  const [cloudUpgradeEmail, setCloudUpgradeEmail] = useState('');
+  const [cloudUpgradePassword, setCloudUpgradePassword] = useState('');
+  const [cloudUpgradeConfirmed, setCloudUpgradeConfirmed] = useState(false);
+  const [isUpgradingToCloud, setIsUpgradingToCloud] = useState(false);
+  const [cloudUpgradeError, setCloudUpgradeError] = useState<string | null>(null);
+
   // Chorus Pro
   const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
   const [isTestingChorusPro, setIsTestingChorusPro] = useState(false);
@@ -438,6 +449,11 @@ export default function Settings() {
         .then((s: any) => setTenantDeletion(s))
         .catch(() => {});
       fetchProjectCategories();
+      if (isOfflineBuild()) {
+        checkCloudLinkStatus()
+          .then((s) => setCloudLinked(s.linked))
+          .catch(() => setCloudLinked(null));
+      }
     }
     if (currentUser) {
       setUserSettings({
@@ -828,6 +844,20 @@ export default function Settings() {
       alert(err?.message || "Échec de l'annulation.");
     } finally {
       setIsCancelingDeletion(false);
+    }
+  };
+
+  const handleUpgradeToCloud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cloudUpgradeConfirmed) return;
+    setCloudUpgradeError(null);
+    setIsUpgradingToCloud(true);
+    try {
+      const result = await upgradeToCloud(cloudUpgradeEmail, cloudUpgradePassword);
+      navigate(`/cloud-import-progress?phase=export&exportJobId=${result.exportJobId}&importJobId=${result.importJobId}`);
+    } catch (err: any) {
+      setCloudUpgradeError(err?.message || 'Échec de la bascule vers le cloud.');
+      setIsUpgradingToCloud(false);
     }
   };
 
@@ -2275,6 +2305,86 @@ export default function Settings() {
               {isExportingTenant ? 'Génération de l\'archive...' : 'Exporter toutes les données du cabinet'}
             </button>
           </div>
+
+          {/* ── Client Electron "compte local" — bascule vers un compte cloud ── */}
+          {isOfflineBuild() && cloudLinked === false && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconCloud size={15} /> Passer au cloud
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste fonctionne aujourd'hui en compte local, sans aucune synchronisation. Vous pouvez le relier à un
+                compte cloud existant : toutes les données déjà saisies ici (projets, factures, documents...) seront
+                envoyées vers ce compte, puis ce poste restera synchronisé automatiquement dès que vous êtes en ligne.
+              </p>
+              {!showCloudUpgradeForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCloudUpgradeForm(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors"
+                  style={{ background: 'var(--tblr-primary)' }}
+                >
+                  <IconCloud size={13} /> Relier ce poste à un compte cloud
+                </button>
+              ) : (
+                <form onSubmit={handleUpgradeToCloud} className="space-y-3 max-w-sm">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>Email du compte cloud</label>
+                    <input
+                      type="email"
+                      value={cloudUpgradeEmail}
+                      onChange={(e) => setCloudUpgradeEmail(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>Mot de passe</label>
+                    <input
+                      type="password"
+                      value={cloudUpgradePassword}
+                      onChange={(e) => setCloudUpgradePassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      required
+                    />
+                  </div>
+                  <label className="flex items-start gap-2 text-xs" style={{ color: 'var(--tblr-text)' }}>
+                    <input
+                      type="checkbox"
+                      checked={cloudUpgradeConfirmed}
+                      onChange={(e) => setCloudUpgradeConfirmed(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    Toutes les données de ce poste seront envoyées vers ce compte cloud. Cette action ne peut pas être
+                    annulée depuis l'application.
+                  </label>
+                  {cloudUpgradeError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudUpgradeError}</p>}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isUpgradingToCloud || !cloudUpgradeConfirmed}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-primary)' }}
+                    >
+                      {isUpgradingToCloud ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                      Confirmer la bascule
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCloudUpgradeForm(false)}
+                      disabled={isUpgradingToCloud}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
 
           {/* ── Zone dangereuse — RGPD : fermeture du cabinet ── */}
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-danger, #e03131)', boxShadow: 'var(--tblr-shadow)' }}>

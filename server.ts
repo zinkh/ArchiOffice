@@ -273,15 +273,35 @@ export async function createApp() {
     const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
     app.use('/api/auth', createCloudLinkRouter(supabaseAdmin));
 
-    // If already linked, start the background sync engine (server/cloudSync.ts).
+    // Mounts the background sync engine (server/cloudSync.ts) and its
+    // /api/sync status/trigger routes for the rest of this process's life.
+    // Called once at boot below when already linked, and once more, live,
+    // by server/localCloudUpgrade.ts right after a same-session upgrade from
+    // a local-only account — so a freshly-linked install doesn't need an app
+    // restart to start syncing. Guarded so a second call (there shouldn't be
+    // one — the two callers are mutually exclusive within one process's
+    // life) never tries to mount /api/sync twice.
+    let cloudSyncActivated = false;
+    const activateCloudSync = async (linkState: import('./server/cloudLinkState').CloudLinkState) => {
+      if (cloudSyncActivated) return;
+      const { startCloudSync } = await import('./server/cloudSync');
+      const { createCloudSyncRouter } = await import('./server/cloudSyncRoutes');
+      const cloudSync = await startCloudSync(supabaseAdmin, linkState);
+      app.use('/api/sync', createCloudSyncRouter(cloudSync));
+      cloudSyncActivated = true;
+    };
+
+    // Lets an already-configured local-only install switch to cloud-linked
+    // without losing its data — see server/localCloudUpgrade.ts.
+    const { createLocalCloudUpgradeRouter } = await import('./server/localCloudUpgrade');
+    app.use('/api/auth', createLocalCloudUpgradeRouter(supabaseAdmin, activateCloudSync));
+
+    // If already linked, start the background sync engine.
     const { readCloudLinkState } = await import('./server/cloudLinkState');
     const linkState = readCloudLinkState();
     if (linkState?.importCompleted) {
       try {
-        const { startCloudSync } = await import('./server/cloudSync');
-        const { createCloudSyncRouter } = await import('./server/cloudSyncRoutes');
-        const cloudSync = await startCloudSync(supabaseAdmin, linkState);
-        app.use('/api/sync', createCloudSyncRouter(cloudSync));
+        await activateCloudSync(linkState);
       } catch (err: any) {
         // A cloud-sync startup failure (e.g. the stored refresh token is no
         // longer valid, or the machine is offline right now) shouldn't take
@@ -541,6 +561,10 @@ export async function createApp() {
     "/api/health", "/api/public", "/api/billing/webhook",
     "/api/auth/local-status", "/api/auth/local-setup", "/api/auth/local-login",
     "/api/auth/cloud-link-status", "/api/auth/cloud-link", "/api/auth/cloud-link-import",
+    // server/localCloudUpgrade.ts authenticates the caller itself (a valid
+    // local-account JWT, checked inline) rather than via this middleware —
+    // same reasoning as the cloud-link-* entries above.
+    "/api/auth/cloud-link-upgrade", "/api/auth/cloud-link-upgrade-export",
     // Zoho's and Google's OAuth redirects back to us are a bare browser
     // navigation — they can't carry our app's JWT. These recover the
     // tenant (and, for Google Calendar, the user) from a one-time state
