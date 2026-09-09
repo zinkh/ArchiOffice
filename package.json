@@ -2,7 +2,7 @@
   "name": "archioffice",
   "productName": "ArchiOffice Client",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Gestion de cabinet d'architecture : projets, propositions, factures et équipe.",
   "author": "ArchiOffice",
   "type": "module",
