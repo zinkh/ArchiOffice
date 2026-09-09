@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS tender_specialties (
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  title TEXT NOT NULL, client_id TEXT, amount NUMERIC, status TEXT NOT NULL,
+  title TEXT NOT NULL, client_id TEXT REFERENCES contacts(id), amount NUMERIC, status TEXT NOT NULL,
   description TEXT, created_at TEXT, reference TEXT, projet_detail TEXT,
   is_entreprise INTEGER DEFAULT 0, nom_societe TEXT, rcs TEXT,
   representant TEXT, qualite TEXT, adresse_client TEXT, cp_client TEXT,
