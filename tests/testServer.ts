@@ -46,14 +46,44 @@ export function makeTenant(overrides: Record<string, any> = {}) {
   return id;
 }
 
-/** Seeds a profile row + auth token for a user belonging to `tenantId`, and returns { userId, token }. */
+/**
+ * Seeds a profile row, its tenant membership + an auth token for a user
+ * belonging to `tenantId`, and returns { userId, token }.
+ *
+ * The membership row mirrors a migrated instance (see
+ * supabase/migrate_tenant_memberships.sql): `profiles.tenant_id` is only the
+ * default cabinet, `tenant_memberships` is what says where someone actually
+ * works. Seed a profile without a membership — as tests/tenantMemberships.test.ts
+ * does on purpose — to exercise the compatibility fallback instead.
+ */
 export function makeUser(tenantId: string, systemRole: 'admin' | 'manager' | 'pm' | 'user' = 'user') {
   const userId = uniqueId('user');
   const email = `${userId}@example.test`;
   const token = uniqueId('token');
   fakeSupabaseAdmin.seed('profiles', [{ id: userId, tenant_id: tenantId, email, system_role: systemRole }]);
+  fakeSupabaseAdmin.seed('tenant_memberships', [{
+    id: uniqueId('membership'), user_id: userId, tenant_id: tenantId,
+    role: 'Member', system_role: systemRole, manager_id: null, is_default: true,
+  }]);
   fakeSupabaseAdmin.registerUser(token, { id: userId, email });
   return { userId, token };
+}
+
+/** Rattache un utilisateur déjà créé à un cabinet DE PLUS (jamais son défaut). */
+export function addMembership(
+  userId: string, tenantId: string,
+  systemRole: 'admin' | 'manager' | 'pm' | 'user' = 'user',
+  overrides: Record<string, any> = {},
+) {
+  fakeSupabaseAdmin.seed('tenant_memberships', [{
+    id: uniqueId('membership'), user_id: userId, tenant_id: tenantId,
+    role: 'Member', system_role: systemRole, manager_id: null, is_default: false, ...overrides,
+  }]);
+}
+
+/** L'en-tête par lequel le client désigne le cabinet sur lequel il travaille. */
+export function tenantHeader(tenantId: string) {
+  return { 'X-Tenant-Id': tenantId };
 }
 
 export function authHeader(token: string) {

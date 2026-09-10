@@ -3,6 +3,7 @@
 // needs the same storage helpers + multer instance as Meetings.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { findMembership, listTenantMemberIds } from '../tenantMemberships';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
 import { parseStorageRef } from '../storagePaths';
@@ -20,7 +21,16 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { userId } = req.params;
 
-      const { data: profile, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
+      // Le profil est une donnée d'identité : une seule ligne par personne,
+      // dont le `tenant_id` ne dit que le cabinet par défaut. C'est donc
+      // l'appartenance au cabinet courant qui décide de la visibilité, pas
+      // cette colonne — sinon un collègue exerçant aussi ailleurs deviendrait
+      // introuvable ici (et lui-même ne verrait plus son propre profil depuis
+      // son second cabinet).
+      if (!(await findMembership(supabaseAdmin, userId, tenantId))) {
+        return res.status(404).json({ error: "Profil introuvable" });
+      }
+      const { data: profile, error } = await supabaseAdmin.from('profiles')
         .select('id, name, email, role, job_title, department, phone, address, avatar, bio, cv_url, cv_filename')
         .eq('id', userId)
         .maybeSingle();
@@ -55,7 +65,10 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { bio, job_title, department } = req.body;
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
+      // Filtré sur l'identifiant seul : l'appelant est par construction membre
+      // du cabinet courant, et son profil n'a qu'une ligne, quel que soit le
+      // nombre de cabinets où il exerce.
+      const { error } = await supabaseAdmin.from('profiles')
         .update({ bio, job_title, department })
         .eq('id', req.user.id);
       if (error) throw error;
@@ -73,7 +86,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       const storagePath = `${tenantId}/${req.user.id}/${Date.now()}-${sanitizeFilename(file.originalname)}`;
       const url = await uploadToStorage('cv', storagePath, file.buffer, file.mimetype);
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').update({ cv_url: url, cv_filename: file.originalname }).eq('id', req.user.id);
+      await supabaseAdmin.from('profiles').update({ cv_url: url, cv_filename: file.originalname }).eq('id', req.user.id);
       res.json({ url, filename: file.originalname });
     } catch (e: any) {
       console.error(e);
@@ -84,8 +97,8 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
   app.delete("/api/profile/cv", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: profile } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('cv_url').eq('id', req.user.id).maybeSingle();
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').update({ cv_url: null, cv_filename: null }).eq('id', req.user.id);
+      const { data: profile } = await supabaseAdmin.from('profiles').select('cv_url').eq('id', req.user.id).maybeSingle();
+      await supabaseAdmin.from('profiles').update({ cv_url: null, cv_filename: null }).eq('id', req.user.id);
       if ((profile as any)?.cv_url) deleteFromStorage('cv', (profile as any).cv_url).catch(() => {});
       res.json({ success: true });
     } catch (e: any) {
@@ -161,7 +174,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const userId = req.user.id;
       const [{ data: profile }, { data: education }, { data: experience }, authUserRes] = await Promise.all([
-        tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('profiles').select('*').eq('id', userId).maybeSingle(),
         tenantScopedFrom(supabaseAdmin, tenantId, 'profile_education').select('*').eq('user_id', userId),
         tenantScopedFrom(supabaseAdmin, tenantId, 'profile_experience').select('*').eq('user_id', userId),
         supabaseAdmin.auth.admin.getUserById(userId),
@@ -204,12 +217,14 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const userId = req.user.id;
 
-      const { count } = await supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId);
-      if ((count || 0) <= 1) {
+      // Compté sur les adhésions : la question est « reste-t-il quelqu'un
+      // dans ce cabinet ? », pas « qui l'a en cabinet par défaut ? ».
+      const count = (await listTenantMemberIds(supabaseAdmin, tenantId)).length;
+      if (count <= 1) {
         return res.status(409).json({ error: "Vous êtes le seul compte de ce cabinet. Utilisez la fermeture de cabinet dans Réglages > Zone dangereuse pour supprimer l'ensemble des données du cabinet." });
       }
 
-      const { data: profile } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('cv_url, avatar').eq('id', userId).maybeSingle();
+      const { data: profile } = await supabaseAdmin.from('profiles').select('cv_url, avatar').eq('id', userId).maybeSingle();
       const p = profile as any;
       if (p?.cv_url) await deleteFromStorage('cv', p.cv_url).catch(() => {});
       if (p?.avatar) await deleteFromStorage('logos', p.avatar).catch(() => {});
@@ -218,7 +233,7 @@ export function registerProfileRoutes(app: Express, { supabaseAdmin, getTenantId
       // Deleted explicitly rather than relying solely on the
       // `profiles.id REFERENCES auth.users(id) ON DELETE CASCADE` FK, so the
       // row is gone even if the auth user delete below partially fails.
-      await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').delete().eq('id', userId);
+      await supabaseAdmin.from('profiles').delete().eq('id', userId);
 
       const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
       if (error) throw error;

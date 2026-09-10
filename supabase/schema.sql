@@ -60,6 +60,31 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Appartenance aux cabinets — un architecte peut exercer dans plusieurs
+-- structures (la sienne et une SCPA, un groupement...). `profiles` porte
+-- l'identité (une ligne par personne, clé = compte auth) ; l'appartenance et
+-- le rôle tenu, eux, sont par cabinet. Voir migrate_tenant_memberships.sql.
+-- `profiles.tenant_id` reste le cabinet PAR DÉFAUT (celui sur lequel une
+-- session s'ouvre), tenu synchrone avec `is_default` par
+-- server/tenantMemberships.ts.
+CREATE TABLE IF NOT EXISTS tenant_memberships (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role        TEXT DEFAULT 'Member',
+  system_role TEXT DEFAULT 'user',
+  manager_id  UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, tenant_id)
+);
+
+-- Au plus un cabinet par défaut par personne, sans en imposer un.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_memberships_default
+  ON tenant_memberships(user_id) WHERE is_default = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant ON tenant_memberships(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user   ON tenant_memberships(user_id);
+
 -- Créer automatiquement un profil à l'inscription
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -591,6 +616,7 @@ CREATE INDEX IF NOT EXISTS idx_custom_references_tenant_id ON custom_references(
 -- Activer RLS sur toutes les tables métier
 ALTER TABLE tenants              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_memberships   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contacts             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contact_categories   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_categories   ENABLE ROW LEVEL SECURITY;
@@ -645,7 +671,24 @@ ALTER TABLE project_members      ENABLE ROW LEVEL SECURITY;
 -- JWT de l'appelant, donc aucune isolation multi-tenant n'est affaiblie.
 CREATE OR REPLACE FUNCTION my_tenant_id()
 RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT tenant_id FROM profiles WHERE id = auth.uid()
+  SELECT COALESCE(
+    (SELECT tenant_id FROM profiles WHERE id = auth.uid()),
+    (SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid() AND is_default LIMIT 1),
+    (SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid() ORDER BY created_at LIMIT 1)
+  )
+$$;
+
+-- L'ENSEMBLE des cabinets de la personne connectée. Les policies
+-- "tenant_isolation" ci-dessous gardent volontairement `my_tenant_id()` : le
+-- client ne requête aucune table directement (tout passe par l'API, qui
+-- tranche le cabinet actif par requête — server/tenantContext.ts), et une
+-- policy en `IN (...)` mélangerait au contraire les lignes des deux cabinets
+-- dans une même vue. Cette fonction sert aux vérifications d'appartenance.
+CREATE OR REPLACE FUNCTION my_tenant_ids()
+RETURNS SETOF UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid()
+  UNION
+  SELECT tenant_id FROM profiles WHERE id = auth.uid() AND tenant_id IS NOT NULL
 $$;
 
 -- Politique générique : chaque user ne voit que les données de son tenant
@@ -735,6 +778,11 @@ CREATE POLICY "tenant_isolation" ON project_team
 -- Profiles : chaque user voit son propre profil + ceux de son tenant
 CREATE POLICY "own_profile" ON profiles
   USING (id = auth.uid() OR tenant_id = my_tenant_id());
+
+-- Adhésions : les siennes, plus celles des personnes du cabinet courant
+-- (c'est ce que la page Équipe affiche).
+CREATE POLICY "own_memberships" ON tenant_memberships
+  USING (user_id = auth.uid() OR tenant_id = my_tenant_id());
 
 -- Tenants : visible par ses membres uniquement
 CREATE POLICY "own_tenant" ON tenants

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconBuilding, IconUsersGroup, IconSearch, IconClock, IconX, IconArrowLeft } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { apiFetch } from '../lib/api';
@@ -12,7 +12,14 @@ interface TenantResult { id: string; name: string }
 
 export default function AgencySetup() {
   const navigate = useNavigate();
-  const { currentUser, isLoading, signOut } = useUser();
+  // `?add=1` : la même page, atteinte volontairement depuis le sélecteur de
+  // cabinet par quelqu'un qui en a déjà un et veut en créer ou en rejoindre
+  // un second. Sans ce drapeau, la page renvoie vers l'accueil dès qu'un
+  // cabinet existe — ce qui reste le bon comportement pour une arrivée
+  // accidentelle après une inscription.
+  const [searchParams] = useSearchParams();
+  const addingAnother = searchParams.get('add') === '1';
+  const { currentUser, isLoading, signOut, switchTenant } = useUser();
   const [checking, setChecking] = useState(true);
   const [pending, setPending] = useState<PendingRequest | null>(null);
   const [mode, setMode] = useState<Mode>('choice');
@@ -34,7 +41,18 @@ export default function AgencySetup() {
   useEffect(() => {
     if (isLoading) return;
     if (!currentUser) { navigate('/login', { replace: true }); return; }
-    if (currentUser.tenantId) { navigate('/', { replace: true }); return; }
+    if (currentUser.tenantId && !addingAnother) { navigate('/', { replace: true }); return; }
+
+    if (addingAnother) {
+      // Une demande de rattachement en cours reste affichée (on n'en dépose
+      // qu'une à la fois), mais le fait d'avoir déjà un cabinet ne renvoie
+      // plus vers l'accueil.
+      apiFetch<{ hasTenant: boolean; pendingRequest: PendingRequest | null }>('/api/agency-setup/status')
+        .then(status => setPending(status.pendingRequest))
+        .catch(() => {})
+        .finally(() => setChecking(false));
+      return;
+    }
 
     apiFetch<{ hasTenant: boolean; pendingRequest: PendingRequest | null }>('/api/agency-setup/status')
       .then(status => {
@@ -43,7 +61,7 @@ export default function AgencySetup() {
       })
       .catch(() => {})
       .finally(() => setChecking(false));
-  }, [isLoading, currentUser, navigate]);
+  }, [isLoading, currentUser, navigate, addingAnother]);
 
   useEffect(() => {
     if (mode !== 'join') { setResults([]); return; }
@@ -65,10 +83,17 @@ export default function AgencySetup() {
     setError(null);
     setSaving(true);
     try {
-      await apiFetch('/api/agency-setup/create', {
+      const created = await apiFetch<{ tenantId: string }>('/api/agency-setup/create', {
         method: 'POST',
         body: JSON.stringify({ agencyName, address, phone, email }),
       });
+      if (addingAnother && created?.tenantId) {
+        // Le cabinet qu'on vient de créer devient celui sur lequel on
+        // travaille : switchTenant pose l'en-tête, vide le cache hors-ligne
+        // du cabinet précédent et recharge.
+        await switchTenant(created.tenantId);
+        return;
+      }
       // Full reload so UserContext re-fetches /api/me with the new tenant.
       window.location.href = '/';
     } catch (err: any) {
@@ -111,9 +136,15 @@ export default function AgencySetup() {
       <div className="w-full max-w-lg">
         <div className="flex flex-col items-center mb-8">
           <ArchiOfficeLogo size={48} />
-          <h1 className="mt-3 text-2xl font-bold text-zinc-900 dark:text-white">Bienvenue sur ArchiOffice</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            {pending ? 'Votre demande est en cours de traitement' : 'Rattachez votre compte à une agence pour continuer'}
+          <h1 className="mt-3 text-2xl font-bold text-zinc-900 dark:text-white">
+            {addingAnother ? 'Ajouter un cabinet' : 'Bienvenue sur ArchiOffice'}
+          </h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 text-center">
+            {pending
+              ? 'Votre demande est en cours de traitement'
+              : addingAnother
+                ? "Créez une seconde structure ou demandez à rejoindre celle d'un confrère. Vous basculerez de l'une à l'autre depuis votre menu."
+                : 'Rattachez votre compte à une agence pour continuer'}
           </p>
         </div>
 
@@ -137,9 +168,15 @@ export default function AgencySetup() {
                 Annuler la demande
               </button>
               <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                <button type="button" onClick={() => signOut().then(() => navigate('/login'))} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
-                  Se déconnecter
-                </button>
+                {addingAnother ? (
+                  <button type="button" onClick={() => navigate('/')} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    Retour à l'application
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => signOut().then(() => navigate('/login'))} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    Se déconnecter
+                  </button>
+                )}
               </div>
             </div>
           ) : mode === 'choice' ? (
@@ -167,9 +204,15 @@ export default function AgencySetup() {
                 </div>
               </button>
               <div className="pt-2 text-center">
-                <button type="button" onClick={() => signOut().then(() => navigate('/login'))} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
-                  Se déconnecter
-                </button>
+                {addingAnother ? (
+                  <button type="button" onClick={() => navigate('/')} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    Retour à l'application
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => signOut().then(() => navigate('/login'))} className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    Se déconnecter
+                  </button>
+                )}
               </div>
             </div>
           ) : mode === 'create' ? (

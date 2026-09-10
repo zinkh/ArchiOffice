@@ -1,4 +1,5 @@
 import { getAccessToken, isOfflineBuild, isSessionDefinitelyGone } from './authToken';
+import { applyTenantHeader } from './activeTenant';
 import { supabase } from './supabase';
 
 /**
@@ -34,6 +35,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       if (!headers.has('Authorization')) {
         headers.set('Authorization', `Bearer ${token}`);
       }
+      // Le cabinet sur lequel cette session travaille — sans cet en-tête, le
+      // serveur sert le cabinet par défaut du compte, qui n'est pas forcément
+      // celui affiché à l'écran (src/lib/activeTenant.ts).
+      applyTenantHeader(headers);
       return rawFetch(input, { ...init, headers });
     }
   }

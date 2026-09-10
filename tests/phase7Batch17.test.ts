@@ -153,11 +153,21 @@ describe('Agency setup', () => {
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.agency_name).toBe('Nouveau Cabinet');
   });
 
-  it('refuses to create a second agency for an already-attached account', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+  // Un architecte qui monte une seconde structure reste la même personne :
+  // le second cabinet s'ajoute au premier, il ne le remplace pas, et c'est
+  // le nouveau qui devient celui sur lequel la session travaille.
+  it('creates a second agency for an already-attached account', async () => {
+    const firstTenantId = makeTenant();
+    const { token, userId } = makeUser(firstTenantId);
     const res = await request(app).post('/api/agency-setup/create').set(authHeader(token)).send({ agencyName: 'Autre Cabinet' });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    const secondTenantId = res.body.tenantId;
+    expect(secondTenantId).not.toBe(firstTenantId);
+
+    const memberships = fakeSupabaseAdmin.getTable('tenant_memberships').filter(m => m.user_id === userId);
+    expect(memberships.map(m => m.tenant_id).sort()).toEqual([firstTenantId, secondTenantId].sort());
+    expect(memberships.find(m => m.tenant_id === secondTenantId)?.is_default).toBe(true);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.tenant_id).toBe(secondTenantId);
   });
 
   it('files a join request against an existing tenant', async () => {

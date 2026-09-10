@@ -477,6 +477,27 @@ export interface TeamMember {
   // server/superAdminAuth.ts). Only ever set on the current user's own
   // profile via GET /api/me, never on other TeamMember rows.
   isSuperAdmin?: boolean;
+  /**
+   * Les cabinets où cette personne exerce — servi par GET /api/me pour le
+   * seul compte courant, jamais sur les autres lignes d'équipe. Presque
+   * toujours un seul élément ; plusieurs pour un architecte associé à
+   * plusieurs structures (voir supabase/migrate_tenant_memberships.sql).
+   */
+  tenants?: TenantMembership[];
+}
+
+/** Une adhésion : un cabinet, et le rôle qu'on y tient. */
+export interface TenantMembership {
+  tenantId: string;
+  name: string | null;
+  /** Rôle métier libre, tel qu'affiché (« Architecte associé »...). */
+  role: string | null;
+  /** Rôle système, qui décide des droits DANS ce cabinet. */
+  systemRole: string | null;
+  /** Le cabinet sur lequel une session s'ouvre par défaut. */
+  isDefault: boolean;
+  /** Le cabinet servi à la requête en cours. */
+  isActive: boolean;
 }
 
 export interface Milestone {

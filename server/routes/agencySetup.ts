@@ -7,6 +7,7 @@
 // of the deferred auth/team cluster).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { addMembership, findMembership, listMemberships, listTenantAdminIds } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -14,11 +15,11 @@ export interface RouteDeps {
 
 async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subject: string, html: string) {
   try {
-    const { data: admins } = await supabaseAdmin
-      .from('profiles')
-      .select('email')
-      .eq('tenant_id', tenantId)
-      .eq('system_role', 'admin');
+    // Les administrateurs se lisent sur les adhésions : un gérant qui a ce
+    // cabinet en second n'en est pas moins celui qui doit être prévenu.
+    const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
+    if (!adminIds.length) return;
+    const { data: admins } = await supabaseAdmin.from('profiles').select('email').in('id', adminIds);
     const recipients = (admins || []).map((a: any) => a.email).filter(Boolean);
     if (!recipients.length) return;
     const smtpHost = process.env.SMTP_HOST;
@@ -40,8 +41,8 @@ async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subj
 export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
   app.get("/api/agency-setup/status", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.json({ hasTenant: true, pendingRequest: null });
+      const memberships = await listMemberships(supabaseAdmin, req.user.id);
+      if (memberships.length) return res.json({ hasTenant: true, pendingRequest: null });
 
       const { data: pending } = await supabaseAdmin
         .from('join_requests')
@@ -76,9 +77,9 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
 
   app.post("/api/agency-setup/create", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
-
+      // Un compte déjà rattaché peut créer un cabinet DE PLUS : un architecte
+      // qui monte une seconde structure (SCPA, groupement) reste la même
+      // personne, avec le même compte.
       const agencyName = String(req.body?.agencyName || '').trim();
       if (!agencyName) return res.status(400).json({ error: "Le nom de l'agence est requis" });
       const address = req.body?.address ? String(req.body.address) : null;
@@ -98,10 +99,17 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(req.user.id);
       const displayName = authUser?.user?.user_metadata?.name || req.user.email?.split('@')[0] || agencyName;
 
+      // Le cabinet qu'on vient de créer devient celui sur lequel on travaille
+      // (et donc le cabinet par défaut du profil) : c'est ce qu'on attend
+      // juste après l'avoir créé, y compris quand ce n'est pas le premier.
       const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
         id: req.user.id, tenant_id: tenant.id, name: displayName, email: req.user.email, role: 'admin', system_role: 'admin',
       });
       if (profileErr) return res.status(500).json({ error: profileErr.message });
+
+      await addMembership(supabaseAdmin, {
+        userId: req.user.id, tenantId: tenant.id, role: 'admin', systemRole: 'admin', makeDefault: true,
+      });
 
       if (address || phone || email) {
         await supabaseAdmin.from('settings').upsert({ tenant_id: tenant.id, agency_name: agencyName, address, phone, email });
@@ -117,13 +125,16 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
 
   app.post("/api/agency-setup/join", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
-
       const tenantId = String(req.body?.tenantId || '');
       if (!tenantId) return res.status(400).json({ error: 'Agence requise' });
       const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name').eq('id', tenantId).single();
       if (!tenant) return res.status(404).json({ error: 'Agence introuvable' });
+
+      // Demander à rejoindre un cabinet dont on fait déjà partie n'a pas
+      // d'objet — demander à en rejoindre un second, si.
+      if (await findMembership(supabaseAdmin, req.user.id, tenantId)) {
+        return res.status(409).json({ error: 'Vous appartenez déjà à ce cabinet' });
+      }
 
       // Une seule demande en attente à la fois : on remplace l'ancienne si elle vise une autre agence.
       await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');

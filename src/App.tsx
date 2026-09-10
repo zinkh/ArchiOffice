@@ -12,6 +12,7 @@ import {
   IconLogout,
   IconMessageCircle,
   IconUser,
+  IconBuilding,
   IconShieldLock,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
@@ -59,6 +60,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const AgencySetup = lazy(() => import('./pages/AgencySetup'));
+import { TenantSwitcher } from './components/TenantSwitcher';
 const Landing = lazy(() => import('./pages/Landing'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfUse = lazy(() => import('./pages/TermsOfUse'));
@@ -177,7 +179,7 @@ function SyncStatus() {
 function Header() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
-  const { currentUser, headerTitle, setHeaderTitle, signOut } = useUser();
+  const { currentUser, headerTitle, setHeaderTitle, signOut, tenants, activeTenantId } = useUser();
   const { settings } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
@@ -320,6 +322,20 @@ function Header() {
           >
             {headerTitle}
           </h1>
+          {/* Le cabinet courant, affiché en permanence dès qu'il y en a
+              plusieurs : savoir dans quelle structure on écrit compte plus
+              que la place que prend cette mention. Un compte à cabinet
+              unique, lui, ne voit rien de nouveau. */}
+          {tenants.length > 1 && (
+            <span
+              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium truncate max-w-[220px]"
+              style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+              title={t('tenant_switcher_current')}
+            >
+              <IconBuilding size={12} />
+              {tenants.find(tenant => tenant.tenantId === activeTenantId)?.name || ''}
+            </span>
+          )}
         </div>
 
         {/* Right: sync, search, theme, notifications, avatar */}
@@ -511,7 +527,7 @@ function Header() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
                     transition={{ duration: 0.12 }}
-                    className="absolute right-0 mt-1 w-52 z-50 overflow-hidden"
+                    className="absolute right-0 mt-1 w-60 z-50 overflow-hidden"
                     style={{
                       background: 'var(--tblr-surface)',
                       border: '1px solid var(--tblr-border)',
@@ -539,6 +555,7 @@ function Header() {
                         </div>
                       </div>
                     </div>
+                    <TenantSwitcher onNavigate={() => setIsUserMenuOpen(false)} />
                     <div className="p-1">
                       <button
                         onClick={() => { navigate('/profile'); setIsUserMenuOpen(false); }}
