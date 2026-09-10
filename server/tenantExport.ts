@@ -8,7 +8,7 @@
 // rest of the cabinet's activity survive the eventual purge as an archive.
 import type { Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import archiver from 'archiver';
+import { ZipArchive, type Archiver } from 'archiver';
 import { SYNC_TABLES } from './syncTables';
 
 // Every table scoped by tenant_id that represents real cabinet activity.
@@ -108,7 +108,7 @@ async function fetchAllRows(supabaseAdmin: SupabaseClient, table: string, tenant
 
 async function addStorageFolder(
   supabaseAdmin: SupabaseClient,
-  archive: archiver.Archiver,
+  archive: Archiver,
   bucket: string,
   tenantId: string,
   relPrefix = '',
@@ -146,7 +146,7 @@ export async function streamTenantExport(
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-  const archive = archiver('zip', { zlib: { level: 6 } });
+  const archive = new ZipArchive({ zlib: { level: 6 } });
   archive.on('warning', (err) => console.warn('[tenantExport] archiver warning:', err.message));
   archive.on('error', (err) => { console.error('[tenantExport] archiver error:', err.message); res.destroy(err); });
   archive.pipe(res);
