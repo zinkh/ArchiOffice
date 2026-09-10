@@ -8,19 +8,65 @@
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import { addMembership, findMembership, listMemberships, listTenantAdminIds } from '../tenantMemberships';
+import { notifyUsers } from '../push';
 
 export interface RouteDeps {
   supabaseAdmin: any;
 }
 
-async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subject: string, html: string) {
+/**
+ * Les adresses des administrateurs du cabinet.
+ *
+ * `profiles.email` n'est renseigné que par certains chemins de création
+ * (invitation depuis la page Équipe, back-office plateforme) : un compte né
+ * d'une inscription ou d'une connexion Google a cette colonne vide, et son
+ * adresse ne vit que dans `auth.users`. Une demande de rattachement visant un
+ * cabinet dont l'administrateur est dans ce cas ne partait donc à personne,
+ * alors que l'écran annonçait « votre demande a été transmise ». D'où le repli
+ * sur l'adresse du compte d'authentification.
+ */
+async function adminRecipients(supabaseAdmin: any, adminIds: string[]): Promise<string[]> {
+  if (!adminIds.length) return [];
+  const { data: admins } = await supabaseAdmin.from('profiles').select('id, email').in('id', adminIds);
+  const profileEmails = new Map<string, string | null>((admins || []).map((a: any) => [a.id, a.email ?? null]));
+  const recipients: string[] = [];
+  for (const id of adminIds) {
+    const fromProfile = profileEmails.get(id);
+    if (fromProfile) { recipients.push(fromProfile); continue; }
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+      const authEmail = data?.user?.email;
+      if (authEmail) recipients.push(authEmail);
+    } catch {
+      // Un compte d'authentification illisible ne doit pas priver les autres
+      // administrateurs de la notification.
+    }
+  }
+  return [...new Set(recipients)];
+}
+
+async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subject: string, html: string, inApp?: { title: string; body: string }) {
   try {
     // Les administrateurs se lisent sur les adhésions : un gérant qui a ce
     // cabinet en second n'en est pas moins celui qui doit être prévenu.
     const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
     if (!adminIds.length) return;
-    const { data: admins } = await supabaseAdmin.from('profiles').select('email').in('id', adminIds);
-    const recipients = (admins || []).map((a: any) => a.email).filter(Boolean);
+
+    // Le canal système d'abord : il ne dépend d'aucun SMTP configuré, et il
+    // dépose la notification dans l'application (et sur le poste de travail)
+    // là où l'administrateur peut agir. Le mail reste utile quand personne
+    // n'a l'application ouverte.
+    if (inApp) {
+      await notifyUsers(supabaseAdmin, tenantId, adminIds, {
+        title: inApp.title,
+        body: inApp.body,
+        url: '/team',
+        category: 'Équipe',
+        tag: `join-request:${tenantId}`,
+      });
+    }
+
+    const recipients = await adminRecipients(supabaseAdmin, adminIds);
     if (!recipients.length) return;
     const smtpHost = process.env.SMTP_HOST;
     const smtpUser = process.env.SMTP_USER;
@@ -151,7 +197,11 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
         supabaseAdmin,
         tenantId,
         'Nouvelle demande de rattachement — ArchiOffice',
-        `<p>${name || req.user.email} (${req.user.email}) demande à rejoindre votre agence <strong>${tenant.name}</strong> sur ArchiOffice.</p><p>Rendez-vous sur la page Équipe pour approuver ou refuser cette demande.</p>`
+        `<p>${name || req.user.email} (${req.user.email}) demande à rejoindre votre agence <strong>${tenant.name}</strong> sur ArchiOffice.</p><p>Rendez-vous sur la page Équipe pour approuver ou refuser cette demande.</p>`,
+        {
+          title: 'Demande de rattachement',
+          body: `${name || req.user.email} demande à rejoindre ${tenant.name}. À valider depuis la page Équipe.`,
+        }
       );
 
       res.json({ success: true, requestId: request.id, tenantName: tenant.name });

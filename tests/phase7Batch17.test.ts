@@ -170,6 +170,27 @@ describe('Agency setup', () => {
     expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.tenant_id).toBe(secondTenantId);
   });
 
+  // Le demandeur lit « votre demande a été transmise à l'administrateur » :
+  // encore faut-il qu'elle lui parvienne. `profiles.email` est vide pour un
+  // compte né d'une inscription ou d'une connexion Google — l'adresse ne vit
+  // alors que dans auth.users — et la notification ne partait à personne.
+  it('prévient l\'administrateur dans l\'application, même sans email sur son profil', async () => {
+    const targetTenantId = makeTenant({ name: 'Cabinet Sans Email' });
+    const { userId: adminId } = makeUser(targetTenantId, 'admin');
+    const adminProfile = fakeSupabaseAdmin.getTable('profiles').find(p => p.id === adminId)!;
+    adminProfile.email = null;
+
+    const { token } = makeTenantlessUser();
+    const res = await request(app).post('/api/agency-setup/join').set(authHeader(token))
+      .send({ tenantId: targetTenantId });
+    expect(res.status).toBe(200);
+
+    const notifications = fakeSupabaseAdmin.getTable('notification_outbox').filter(n => n.user_id === adminId);
+    expect(notifications).toHaveLength(1);
+    // Le lien mène là où la demande se valide.
+    expect(notifications[0].url).toBe('/team');
+  });
+
   it('files a join request against an existing tenant', async () => {
     const targetTenantId = makeTenant({ name: 'Cabinet Cible' });
     const { token, userId } = makeTenantlessUser();

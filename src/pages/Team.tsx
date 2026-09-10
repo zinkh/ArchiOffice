@@ -6,6 +6,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
+import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
 import { useUser } from '../UserContext';
 
 export default function Team() {
@@ -48,6 +49,9 @@ export default function Team() {
     try {
       await decideJoinRequest(id, decision);
       setJoinRequests(prev => prev.filter(r => r.id !== id));
+      // Fait retomber le compteur du menu latéral, qui vit dans un autre
+      // composant sans état partagé avec celui-ci.
+      window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
       if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
     } catch (err: any) {
       alert(err.message || 'Erreur lors du traitement de la demande.');
