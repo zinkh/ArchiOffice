@@ -130,6 +130,13 @@ const NAV_SECTIONS = [
 
 const STORAGE_KEY = 'sidebar_collapsed_sections';
 
+/**
+ * Émis par la page Équipe quand une demande de rattachement est approuvée ou
+ * refusée, pour que le compteur du menu se mette à jour sans attendre un
+ * rechargement (les deux vues ne partagent aucun état).
+ */
+export const JOIN_REQUESTS_CHANGED = 'archioffice:join-requests-changed';
+
 function loadCollapsed(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -147,6 +154,11 @@ export function Sidebar() {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // Demandes de rattachement en attente. Elles ne se valident que depuis la
+  // page Équipe : sans ce compteur, un administrateur qui ne pense pas à
+  // ouvrir cette page ne sait pas qu'on attend sa réponse — le demandeur, lui,
+  // a bien lu « votre demande a été transmise ».
+  const [pendingJoinRequests, setPendingJoinRequests] = useState(0);
   const [superpdpConnected, setSuperpdpConnected] = useState(false);
   const [chorusProConnected, setChorusProConnected] = useState(false);
 
@@ -166,6 +178,22 @@ export function Sidebar() {
       .then(r => setChorusProConnected(!!r.connected))
       .catch(() => {});
   }, [currentUser?.email]);
+
+  const isTenantAdmin = currentUser?.system_role === 'admin';
+
+  useEffect(() => {
+    if (!isTenantAdmin) { setPendingJoinRequests(0); return; }
+    const load = () => {
+      apiFetch<{ id: string }[]>('/api/team/join-requests')
+        .then(rows => setPendingJoinRequests(rows.length))
+        .catch(() => setPendingJoinRequests(0));
+    };
+    load();
+    // La page Équipe émet cet événement après une approbation ou un refus :
+    // le compteur retombe tout de suite, sans interroger l'API en boucle.
+    window.addEventListener(JOIN_REQUESTS_CHANGED, load);
+    return () => window.removeEventListener(JOIN_REQUESTS_CHANGED, load);
+  }, [isTenantAdmin]);
 
   const mafEnabled = !!(settings as any)?.maf_enabled;
 
@@ -259,7 +287,16 @@ export function Sidebar() {
                           size={16}
                           className={isActive ? 'text-[var(--tblr-primary)]' : ''}
                         />
-                        <span>{t(item.name)}</span>
+                        <span className="flex-1">{t(item.name)}</span>
+                        {item.path === '/team' && pendingJoinRequests > 0 && (
+                          <span
+                            className="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center leading-none text-white"
+                            style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                            title={t('team_join_requests_title') as string}
+                          >
+                            {pendingJoinRequests}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
