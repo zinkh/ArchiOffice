@@ -124,7 +124,8 @@ The schema lives in `supabase/schema.sql`. Key tables:
 | Table | Description |
 |---|---|
 | `tenants` | Multi-tenant root — each cabinet d'architecture is one tenant |
-| `profiles` | User accounts linked to `auth.users` |
+| `profiles` | User accounts linked to `auth.users` — l'identité (une ligne par personne) |
+| `tenant_memberships` | Appartenance personne × cabinet et rôle tenu dans ce cabinet — un architecte peut exercer dans plusieurs structures |
 | `projects` | Architectural projects |
 | `proposals` | Client proposals (devis) |
 | `tenders` | Market opportunities (appels d'offres) |
@@ -140,7 +141,7 @@ The schema lives in `supabase/schema.sql`. Key tables:
 | `tasks` | Milestone & Gantt tasks |
 | `billing_events` | Payment tracking (Stancer/Stripe) |
 
-All data is scoped to `tenant_id`. RLS policies enforce isolation. The backend uses `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS) for trusted operations.
+All data is scoped to `tenant_id`. RLS policies enforce isolation. The backend uses `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS) for trusted operations. Le cabinet servi à une requête est celui de l'en-tête `X-Tenant-Id`, validé contre `tenant_memberships` (voir « Plusieurs cabinets pour une même personne »), à défaut le cabinet par défaut du profil.
 
 Apply migrations sequentially in filename order when setting up a new instance.
 
@@ -580,6 +581,71 @@ l'autosave du document n'efface pas un import fait entre-temps.
 (`` `dpgf:<offreId>:<ligneId>` `` vs `` `bpu:<offreId>:<ligneId>` ``, porté
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
+
+### Plusieurs cabinets pour une même personne
+
+Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un
+groupement, une agence associée). `profiles` porte une ligne par personne, clé
+primaire = compte auth, donc un seul `tenant_id` : il fallait jusqu'ici un
+second compte, avec une autre adresse, pour le second cabinet — deux
+identités, deux mots de passe, deux boîtes mail connectées pour une seule
+personne.
+
+`tenant_memberships` (`supabase/migrate_tenant_memberships.sql`) sépare
+**l'identité** (`profiles`, une ligne par personne) de **l'appartenance** (une
+ligne par couple personne × cabinet), avec le rôle tenu DANS ce cabinet : on
+est souvent gérant du sien et simple collaborateur de l'autre, et
+`system_role` ne peut donc plus être une colonne de `profiles`. Même principe
+d'`is_default` + index unique **partiel** que `document_templates` et
+`email_connections` : au plus un cabinet par défaut, sans en imposer un.
+
+**`profiles.tenant_id` reste, et n'est pas décoratif** : c'est le cabinet par
+défaut, celui sur lequel une session s'ouvre, et c'est le **repli complet** de
+`server/tenantMemberships.ts` — une instance dont la base n'a pas encore joué
+la migration fonctionne à l'identique. C'est ce repli, pas la migration, qui
+rend la mise à jour du code sûre ; il est verrouillé par un test
+(`tests/tenantMemberships.test.ts`, « instances non migrées »).
+
+**Le cabinet actif voyage par en-tête.** Le jeton dit qui parle, plus où :
+chaque requête `/api` porte `X-Tenant-Id` (`src/lib/activeTenant.ts`, posé par
+l'intercepteur `window.fetch` ET par `apiFetch`, qui le court-circuite). Le
+middleware d'authentification le valide contre les adhésions — un cabinet dont
+on n'est pas membre est refusé en `403 TENANT_NOT_MEMBER`, jamais remplacé en
+silence par un autre — puis le dépose dans un `AsyncLocalStorage`
+(`server/tenantContext.ts`) que `getTenantId()` relit. C'est ce détour qui
+évite de propager un paramètre de plus dans les quelque soixante fichiers de
+routes qui appellent tous `getTenantId(req.user.id)`.
+
+Trois conséquences à ne pas défaire :
+
+1. **Le rôle se lit sur l'adhésion, jamais sur `profiles`** pour un autre
+   cabinet que le sien (`getMemberRole`). Sinon un collaborateur d'un cabinet
+   y hériterait de son rôle d'administrateur de l'autre.
+2. **« Les gens du cabinet » se listent sur les adhésions**
+   (`listTenantMemberIds` / `listTenantProfiles`), pas par
+   `.eq('tenant_id', …)` sur `profiles` : ce filtre ne voit que ceux dont
+   c'est le cabinet PAR DÉFAUT, et faisait disparaître des listes (équipe,
+   mentions, notifications, congés, quotas) quiconque exerce aussi ailleurs.
+3. **Fermer un cabinet ne supprime que les comptes qui n'en ont pas d'autre**
+   (`listUsersOnlyIn`, utilisé par `server/tenantPurge.ts` et le back-office).
+   La boucle « supprimer l'auth user de chaque profil du tenant » d'avant
+   aurait effacé le compte d'une personne encore en activité dans l'autre
+   structure.
+
+Les appels internes des agents portent le même en-tête
+(`packages/archioffice-agents/src/server/internalApi.ts`) : les outils
+rappellent l'API en boucle locale avec le jeton de l'utilisateur, et sans lui
+un agent sollicité depuis le second cabinet écrirait dans le premier.
+
+Côté client, `switchTenant()` (`src/UserContext.tsx`) enregistre le choix,
+appelle `POST /api/tenants/switch` (qui n'a qu'un rôle : fixer le cabinet par
+défaut, pour qu'un autre poste rouvre au même endroit), **vide le cache
+Dexie** puis recharge sur `/`. Le rechargement n'est pas une facilité : chaque
+écran garde en mémoire les affaires, contacts et réglages du cabinet quitté,
+et l'adresse courante vise souvent une affaire qui n'existe pas dans l'autre.
+Le sélecteur (`src/components/TenantSwitcher.tsx`) n'apparaît qu'à partir de
+deux cabinets ; un compte à cabinet unique ne voit rien changer, hormis
+l'entrée « Rejoindre ou créer un cabinet » qui mène à `/agency-setup?add=1`.
 
 ### Multi-comptes mail et multi-calendriers
 

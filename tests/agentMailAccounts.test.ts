@@ -31,25 +31,25 @@ function stubAccountsFetch(accounts = ACCOUNTS, extra?: (url: string, opts: any)
 describe('resolveMailAccount', () => {
   it("choisit le défaut quand aucun compte n'est nommé", async () => {
     stubAccountsFetch();
-    const account = await resolveMailAccount('http://local', 'Bearer t', undefined);
+    const account = await resolveMailAccount('http://local', { authorization: 'Bearer t' }, undefined);
     expect(account?.id).toBe('acc-agence');
   });
 
   it('choisit le compte dont l\'adresse ou le nom correspond à l\'indice', async () => {
     stubAccountsFetch();
-    const account = await resolveMailAccount('http://local', 'Bearer t', 'perso@gmail.test');
+    const account = await resolveMailAccount('http://local', { authorization: 'Bearer t' }, 'perso@gmail.test');
     expect(account?.id).toBe('acc-perso');
   });
 
   it('retombe sur le défaut si l\'indice ne correspond à rien', async () => {
     stubAccountsFetch();
-    const account = await resolveMailAccount('http://local', 'Bearer t', 'inconnu@example.test');
+    const account = await resolveMailAccount('http://local', { authorization: 'Bearer t' }, 'inconnu@example.test');
     expect(account?.id).toBe('acc-agence');
   });
 
   it('renvoie null sans aucun compte connecté', async () => {
     stubAccountsFetch([]);
-    const account = await resolveMailAccount('http://local', 'Bearer t');
+    const account = await resolveMailAccount('http://local', { authorization: 'Bearer t' });
     expect(account).toBeNull();
   });
 });
@@ -61,7 +61,7 @@ describe('executeMailTool — search_emails / list_emails passent accountId au c
       if (u.includes('/api/mail/imap/search')) { calledUrl = u; return { ok: true, json: async () => [] } as any; }
       return null;
     });
-    const outcome = await executeMailTool('http://local', 'Bearer t', 'search_emails', { query: 'devis' }, false);
+    const outcome = await executeMailTool('http://local', { authorization: 'Bearer t' }, 'search_emails', { query: 'devis' }, false);
     expect(calledUrl).toContain('accountId=acc-agence');
     expect((outcome.response as any).compte).toBe('contact@aazs.fr');
   });
@@ -72,7 +72,7 @@ describe('executeMailTool — search_emails / list_emails passent accountId au c
       if (u.includes('/api/gmail/messages')) { calledUrl = u; return { ok: true, json: async () => ({ messages: [], nextPageToken: null }) } as any; }
       return null;
     });
-    const outcome = await executeMailTool('http://local', 'Bearer t', 'list_emails', { compte: 'perso' }, false);
+    const outcome = await executeMailTool('http://local', { authorization: 'Bearer t' }, 'list_emails', { compte: 'perso' }, false);
     expect(calledUrl).toContain('accountId=acc-perso');
     expect((outcome.response as any).compte).toBe('perso@gmail.test');
   });
@@ -81,7 +81,7 @@ describe('executeMailTool — search_emails / list_emails passent accountId au c
 describe('executeMailTool — send_email', () => {
   it('le brouillon de confirmation nomme le compte résolu', async () => {
     stubAccountsFetch();
-    const outcome = await executeMailTool('http://local', 'Bearer t', 'send_email', { to: 'x@y.z', subject: 'S', body: 'B' }, true);
+    const outcome = await executeMailTool('http://local', { authorization: 'Bearer t' }, 'send_email', { to: 'x@y.z', subject: 'S', body: 'B' }, true);
     expect((outcome.response as any).draft.from).toBe('contact@aazs.fr');
   });
 
@@ -92,7 +92,7 @@ describe('executeMailTool — send_email', () => {
       if (u.endsWith('/api/send-email')) { calledUrl = u; calledBody = JSON.parse(opts.body); return { ok: true, json: async () => ({ id: 'sent-1' }) } as any; }
       return null;
     });
-    const outcome = await executeMailTool('http://local', 'Bearer t', 'send_email', { to: 'x@y.z', subject: 'S', body: 'B', confirm: true }, true);
+    const outcome = await executeMailTool('http://local', { authorization: 'Bearer t' }, 'send_email', { to: 'x@y.z', subject: 'S', body: 'B', confirm: true }, true);
     expect(calledUrl).toContain('/api/send-email');
     expect(calledBody.accountId).toBe('acc-agence');
     expect((outcome.response as any).success).toBe(true);
@@ -100,7 +100,7 @@ describe('executeMailTool — send_email', () => {
 
   it('refuse sans capacité mailSend même avec confirm', async () => {
     stubAccountsFetch();
-    const outcome = await executeMailTool('http://local', 'Bearer t', 'send_email', { to: 'x@y.z', subject: 'S', body: 'B', confirm: true }, false);
+    const outcome = await executeMailTool('http://local', { authorization: 'Bearer t' }, 'send_email', { to: 'x@y.z', subject: 'S', body: 'B', confirm: true }, false);
     expect((outcome.response as any).error).toMatch(/pas activé/i);
   });
 });

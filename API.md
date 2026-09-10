@@ -22,7 +22,15 @@ The server verifies the token by calling `supabaseAdmin.auth.getUser(token)` aga
 
 ### Multi-tenancy
 
-Every authenticated user belongs to exactly one tenant (`profiles.tenant_id`). You never pass a tenant ID — the server resolves it from your token via `getTenantId(req.user.id)` and scopes every query to it. A token for a user with no tenant yet gets a `409 { error: "NO_TENANT" }` until the account completes `/api/agency-setup/*`.
+A user belongs to **one or more** tenants (`tenant_memberships`; an architect practising in two firms is one account with two memberships). Every request is served by exactly one of them:
+
+```
+X-Tenant-Id: <tenant-uuid>     # optional
+```
+
+Omit the header and the server serves the user's **default** tenant (`profiles.tenant_id`, mirrored by `tenant_memberships.is_default`). Send it and the server serves that tenant instead — after checking the membership: a tenant the caller doesn't belong to is refused with `403 { error, code: "TENANT_NOT_MEMBER" }`, never silently swapped for another. The resolved tenant scopes every query and every role check (`system_role` is held per membership: admin in one firm, plain member in the other).
+
+`GET /api/tenants/mine` lists the caller's tenants and says which one is serving the request. A token for a user with no tenant at all gets a `409 { error, code: "NO_TENANT" }` until the account completes `/api/agency-setup/*`.
 
 ### Routes reachable without a token
 
@@ -53,7 +61,11 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `POST /api/public/register`, `POST /api/public/resend-confirmation`, `POST /api/public/forgot-password`, `GET /api/public/tenant/:slug` — signup flow, no auth required.
 - `POST /api/auth/google/token` — exchange a Google OAuth code for a session.
 - `GET /api/me` — current user's profile.
-- `GET /api/agency-setup/status`, `GET /api/agency-setup/search`, `POST /api/agency-setup/create`, `POST /api/agency-setup/join`, `DELETE /api/agency-setup/join` — attach a tenant-less account to a new or existing agency.
+- `GET /api/agency-setup/status`, `GET /api/agency-setup/search`, `POST /api/agency-setup/create`, `POST /api/agency-setup/join`, `DELETE /api/agency-setup/join` — attach an account to a new or existing agency. `create` and `join` also serve an account that already has one, to add a second.
+- `GET /api/tenants/mine` — the caller's tenants, with the role held in each and which one serves this request.
+- `GET /api/tenants/active` — just the tenant serving this request (name, plan, role).
+- `POST /api/tenants/switch` `{ tenantId }` — record a tenant as the caller's default. The switch itself is the `X-Tenant-Id` header; this only decides where a fresh session opens.
+- `DELETE /api/tenants/:tenantId/membership` — leave a tenant. Refused (`409`) for the caller's only tenant, or one where they are the last admin.
 
 ### Team & profiles
 - `GET/POST /api/team`, `PUT /api/team/:id`, `PUT /api/team/:id/role`, `PUT /api/team/:id/manager` — team CRUD, role and manager assignment.

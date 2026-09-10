@@ -50,11 +50,11 @@ describe('périmètre des outils selon les capacités', () => {
 
   it('refuse un appel dont la capacité est éteinte, même si le modèle le tente', async () => {
     const caps = capabilitiesFromAgent(NO_CAPS);
-    const mail = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'send_email', args: { to: 'a@b.fr' } });
+    const mail = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'send_email', args: { to: 'a@b.fr' } });
     expect(String(mail.response.error)).toMatch(/messagerie/i);
-    const geo = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'get_zone_plu', args: {} });
+    const geo = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'get_zone_plu', args: {} });
     expect(String(geo.response.error)).toMatch(/cartographique/i);
-    const docs = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'read_cctp', args: {} });
+    const docs = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'read_cctp', args: {} });
     expect(String(docs.response.error)).toMatch(/CCTP/i);
   });
 
@@ -498,7 +498,7 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
       } as any;
     }));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'create_record',
       args: { resource: 'proposals', data: { title: 'Surélévation', status: 'En cours' }, confirm: true },
     });
@@ -520,7 +520,7 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
       json: async () => (init?.method === 'POST' ? { id: 'prop-1' } : []),
     } as any)));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'create_record',
       args: {
         resource: 'proposals',

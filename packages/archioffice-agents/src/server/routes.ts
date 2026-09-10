@@ -561,13 +561,20 @@ export function registerAgentRoutes(
       const MAX_FUNCTION_ROUNDS = 4;
       let round = 0;
       if (tools.length > 0 && billing?.baseUrl) {
-        const authHeader = req.headers.authorization as string | undefined;
+        // Le jeton de la personne ET le cabinet sur lequel elle travaille :
+        // les outils rappellent l'API en boucle locale, et sans l'en-tête de
+        // cabinet un agent sollicité depuis le second cabinet écrirait dans
+        // le premier (voir server/internalApi.ts).
+        const authorization = req.headers.authorization as string | undefined;
+        const auth = authorization
+          ? { authorization, tenantId: req.activeTenantId ?? tenantId }
+          : undefined;
         while (result.toolCalls.length > 0 && round < MAX_FUNCTION_ROUNDS) {
           round++;
           messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
           const results: LlmToolResult[] = [];
           for (const call of result.toolCalls) {
-            const { response, summary, consulted } = await executeAgentAction(billing.baseUrl, authHeader, caps, call, { id: agentId, name: (agent as any).name });
+            const { response, summary, consulted } = await executeAgentAction(billing.baseUrl, auth, caps, call, { id: agentId, name: (agent as any).name });
             if (summary) actionSummaries.push(summary);
             if (consulted) consultedAgents.set(consulted.id, consulted.name);
             results.push({ id: call.id, name: call.name, response });

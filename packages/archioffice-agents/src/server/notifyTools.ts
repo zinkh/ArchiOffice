@@ -9,6 +9,7 @@
 // Aucun nouveau canal : un agent qui « envoie un message à un utilisateur »
 // écrit au même endroit que ses collègues humains, sous son propre nom.
 import type { FunctionDeclarationLike, ToolOutcome } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 export const NOTIFY_TOOL_NAMES = ['publier_flux_activite'];
 
@@ -35,7 +36,7 @@ export function buildNotifyTools(): FunctionDeclarationLike[] {
 
 export async function executeNotifyTool(
   baseUrl: string,
-  authHeader: string,
+  auth: InternalAuth,
   name: string,
   args: Record<string, unknown>,
   selfAgentId: string,
@@ -51,7 +52,7 @@ export async function executeNotifyTool(
   try {
     const res = await fetch(baseUrl + '/api/feed/posts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      headers: internalHeaders(auth, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ content: message, as_agent_id: selfAgentId }),
     });
     const data = await res.json().catch(() => ({}));

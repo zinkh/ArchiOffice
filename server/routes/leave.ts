@@ -3,6 +3,7 @@
 // RBAC helpers shared with still-inline routes.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { listTenantProfiles } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -141,7 +142,7 @@ export function registerLeaveRoutes(app: Express, { supabaseAdmin, getTenantId, 
     try {
       const tenantId = await requireTenantAdmin(req.user.id);
       const targetYear = parseInt((req.query.year as string) || String(new Date().getFullYear()), 10);
-      const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name');
+      const profiles = await listTenantProfiles(supabaseAdmin, tenantId, 'id, name');
       const { data: settings } = await tenantScopedFrom(supabaseAdmin, tenantId, 'settings').select('default_leave_days_conges_payes, default_leave_days_rtt').maybeSingle();
       const { data: overrides } = await tenantScopedFrom(supabaseAdmin, tenantId, 'leave_balances').select('*').eq('year', targetYear);
       const { data: approvedRequests } = await tenantScopedFrom(supabaseAdmin, tenantId, 'leave_requests').select('user_id, leave_type, business_days, start_date').eq('status', 'approved');

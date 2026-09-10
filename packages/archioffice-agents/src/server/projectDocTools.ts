@@ -9,14 +9,15 @@
 // lui-même sa profondeur de lecture, au lieu de tout recevoir à chaque
 // message comme le fait le référentiel firm_knowledge.
 import type { FunctionDeclarationLike, ToolOutcome } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 const MAX_ARTICLE_CHARS = 1200;
 const MAX_ARTICLES_PER_LOT = 60;
 const MAX_LIGNES_PER_LOT = 120;
 
-async function getJson(baseUrl: string, path: string, authHeader: string): Promise<{ status: number; data: any }> {
+async function getJson(baseUrl: string, path: string, auth: InternalAuth): Promise<{ status: number; data: any }> {
   try {
-    const res = await fetch(baseUrl + path, { headers: { Authorization: authHeader } });
+    const res = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
     const data = await res.json().catch(() => null);
     return { status: res.status, data };
   } catch (e: any) {
@@ -245,7 +246,7 @@ export function buildProjectDocTools(): FunctionDeclarationLike[] {
 
 export async function executeProjectDocTool(
   baseUrl: string,
-  authHeader: string,
+  auth: InternalAuth,
   name: string,
   args: Record<string, unknown>
 ): Promise<ToolOutcome> {
@@ -255,7 +256,7 @@ export async function executeProjectDocTool(
 
   const kind = KIND_BY_TOOL[name];
   if (!kind) return { response: { error: `Outil inconnu : ${name}.` } };
-  const { status, data } = await getJson(baseUrl, `/api/projects/${encodeURIComponent(projectId)}/${kind}`, authHeader);
+  const { status, data } = await getJson(baseUrl, `/api/projects/${encodeURIComponent(projectId)}/${kind}`, auth);
 
   // Le CCTP et le DPGF répondent 404 quand ils n'existent pas ; la route du BPU
   // répond 200 avec null. Les deux veulent la même réponse à l'utilisateur.

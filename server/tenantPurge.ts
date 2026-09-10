@@ -8,6 +8,7 @@
 // business table via their `tenant_id ... ON DELETE CASCADE` foreign key.
 // Same setInterval-on-boot pattern as server/tenderRssPoller.ts.
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { listUsersOnlyIn } from './tenantMemberships';
 
 const GRACE_PERIOD_DAYS = 30;
 const DEFAULT_CHECK_INTERVAL_HOURS = 24;
@@ -30,10 +31,13 @@ async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: st
 }
 
 async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
-  const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
-  for (const profile of (profiles || []) as { id: string }[]) {
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(profile.id);
-    if (error) console.error(`[tenantPurge] Failed to delete auth user ${profile.id}:`, error.message);
+  // Seuls les comptes dont c'est le SEUL cabinet sont supprimés : une
+  // personne qui exerce aussi ailleurs garde le sien, sinon fermer une
+  // structure la déconnecterait de l'autre (server/tenantMemberships.ts).
+  const exclusiveUserIds = await listUsersOnlyIn(supabaseAdmin, tenantId);
+  for (const userId of exclusiveUserIds) {
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error) console.error(`[tenantPurge] Failed to delete auth user ${userId}:`, error.message);
   }
 
   await purgeStorageForTenant(supabaseAdmin, tenantId);

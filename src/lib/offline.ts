@@ -29,3 +29,22 @@ export async function getOfflineFirst<T>(
     }
   }
 }
+
+/**
+ * Vide le cache hors-ligne (IndexedDB).
+ *
+ * Appelé à la bascule d'un cabinet à l'autre : les tables Dexie ci-dessus
+ * gardent projets, contacts, factures... sans mention du cabinet dont ils
+ * viennent. Sans ce nettoyage, le premier rendu après la bascule afficherait
+ * les affaires du cabinet précédent, le temps que l'API réponde — et
+ * durablement si la connexion est coupée.
+ */
+export async function clearOfflineCache(): Promise<void> {
+  try {
+    await Promise.all(db.tables.map(table => table.clear()));
+  } catch (error) {
+    // Un cache qu'on n'a pas pu vider ne doit pas empêcher la bascule :
+    // l'application repart de toute façon sur les données de l'API.
+    console.error('[offline] Vidage du cache impossible :', error);
+  }
+}

@@ -4,6 +4,10 @@ import type { TeamMember as UserProfile } from './types';
 import { supabase } from './lib/supabase';
 import { isOfflineBuild, getStoredLocalSession, clearLocalSession, AUTH_TIMEOUT_MS } from './lib/authToken';
 import { rawFetch } from './lib/authInterceptor';
+import { getActiveTenantId, setActiveTenantId } from './lib/activeTenant';
+import { apiFetch } from './lib/api';
+import { clearOfflineCache } from './lib/offline';
+import type { TenantMembership } from './types';
 
 // Structurally compatible with both a real Supabase Session/User and our
 // locally-signed offline session (src/lib/authToken.ts) — the functions below
@@ -47,9 +51,31 @@ interface UserContextType {
    * guard also cover the OAuth path for free.
    */
   mfaRequired: boolean;
+  /**
+   * Les cabinets où la personne exerce. Presque toujours un seul ; deux ou
+   * plus pour un architecte associé à plusieurs structures (voir
+   * supabase/migrate_tenant_memberships.sql). Le sélecteur de cabinet ne
+   * s'affiche qu'au-delà d'un.
+   */
+  tenants: TenantMembership[];
+  /** Le cabinet sur lequel cette session travaille. */
+  activeTenantId: string | null;
+  /**
+   * Bascule de cabinet : enregistre le choix, vide le cache hors-ligne et
+   * recharge l'application. Le rechargement n'est pas une facilité — chaque
+   * écran garde en mémoire les affaires, contacts et réglages du cabinet
+   * quitté, et il n'existe pas d'endroit unique où les invalider.
+   */
+  switchTenant: (tenantId: string) => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
+
+/** L'en-tête de cabinet, pour les appels qui n'empruntent pas l'intercepteur. */
+function tenantHeader(): Record<string, string> {
+  const tenantId = getActiveTenantId();
+  return tenantId ? { 'X-Tenant-Id': tenantId } : {};
+}
 
 function mapSupabaseUser(user: MinimalUser): UserProfile {
   return {
@@ -71,7 +97,13 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
     // nothing for the auth interceptor to add — and going through it would make
     // this call wait on the Supabase auth lock for no reason.
     const res = await rawFetch('/api/me', {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        // rawFetch court-circuite l'intercepteur : le cabinet actif doit
+        // être posé à la main, sinon /api/me décrirait le cabinet par défaut
+        // alors que le reste de l'application travaille sur l'autre.
+        ...tenantHeader(),
+      },
     });
     if (!res.ok) return base;
     const profile = await res.json();
@@ -96,6 +128,7 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
       // offline builds have no /api/me tenantId field, so this stays undefined there.
       tenantId: profile.tenantId ?? null,
       isSuperAdmin: profile.isSuperAdmin ?? false,
+      tenants: Array.isArray(profile.tenants) ? profile.tenants : [],
     };
   } catch {
     return base;
@@ -105,7 +138,7 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
 async function loadBillingStatus(session: MinimalSession): Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }> {
   try {
     const res = await rawFetch('/api/billing/status', {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${session.access_token}`, ...tenantHeader() },
     });
     if (!res.ok) return { plan: 'trial', trial_ends_at: null, is_expired: false };
     const data = await res.json();
@@ -127,7 +160,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [isTrialExpired, setIsTrialExpired] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
+  const [tenants, setTenants] = useState<TenantMembership[]>([]);
+  const [activeTenantId, setActiveTenantIdState] = useState<string | null>(getActiveTenantId());
   const sessionRef = React.useRef<MinimalSession | null>(null);
+
+  // Le cabinet servi est celui que le serveur a retenu (/api/me), pas celui
+  // gardé localement : le second peut être périmé (départ du cabinet, session
+  // ouverte pour un autre compte sur ce navigateur). Le realigner ici évite
+  // que le sélecteur affiche un cabinet et que l'API en serve un autre.
+  const applyProfileTenants = React.useCallback((user: UserProfile | null) => {
+    const list = user?.tenants ?? [];
+    setTenants(list);
+    const served = list.find(t => t.isActive)?.tenantId ?? user?.tenantId ?? null;
+    setActiveTenantIdState(served);
+    setActiveTenantId(list.length > 1 ? served : null);
+  }, []);
 
   const refreshBillingStatus = React.useCallback(async () => {
     if (!sessionRef.current) return;
@@ -147,6 +194,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         sessionRef.current = local;
         Promise.all([loadFullProfile(local), loadBillingStatus(local)]).then(([user, billing]) => {
           setCurrentUser(user);
+          applyProfileTenants(user);
           setTenantPlan(billing.plan);
           setTrialEndsAt(billing.trial_ends_at);
           setIsTrialExpired(billing.is_expired);
@@ -174,6 +222,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (!session) {
         loadedUserId = null;
         setCurrentUser(null);
+        applyProfileTenants(null);
         setMfaRequired(false);
         setIsLoading(false);
         return;
@@ -206,6 +255,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
       if (cancelled) return;
       setCurrentUser(user);
+      applyProfileTenants(user);
       setTenantPlan(billing.plan);
       setTrialEndsAt(billing.trial_ends_at);
       setIsTrialExpired(billing.is_expired);
@@ -262,6 +312,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    // Le cabinet sélectionné est oublié à la déconnexion : le compte suivant
+    // sur ce navigateur n'a aucune raison d'en être membre, et le serveur
+    // refuserait alors chacune de ses requêtes (403 TENANT_NOT_MEMBER).
+    setActiveTenantId(null);
+    setActiveTenantIdState(null);
+    setTenants([]);
     if (isOfflineBuild()) {
       clearLocalSession();
       setCurrentUser(null);
@@ -270,6 +326,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setCurrentUser(null);
   };
+
+  const switchTenant = React.useCallback(async (tenantId: string) => {
+    if (!tenantId || tenantId === activeTenantId) return;
+    setActiveTenantId(tenantId);
+    try {
+      // Enregistré comme cabinet par défaut, pour qu'un autre poste rouvre
+      // l'application sur le même. Un échec ici ne doit pas empêcher la
+      // bascule : l'en-tête posé juste au-dessus suffit à cette session.
+      await apiFetch('/api/tenants/switch', {
+        method: 'POST',
+        body: JSON.stringify({ tenantId }),
+      });
+    } catch {
+      // sans effet sur la suite — voir ci-dessus
+    }
+    await clearOfflineCache();
+    // Retour à l'accueil plutôt que rechargement de la page courante :
+    // l'adresse affichée vise souvent une affaire, une facture ou un document
+    // du cabinet qu'on vient de quitter, introuvable dans l'autre.
+    window.location.assign('/');
+  }, [activeTenantId]);
 
   return (
     <UserContext.Provider value={{
@@ -285,6 +362,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isTrialExpired,
       refreshBillingStatus,
       mfaRequired,
+      tenants,
+      activeTenantId,
+      switchTenant,
     }}>
       {children}
     </UserContext.Provider>

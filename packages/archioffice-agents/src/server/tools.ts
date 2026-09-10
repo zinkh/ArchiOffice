@@ -6,6 +6,7 @@ import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES } f
 import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
 import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 export type { FunctionDeclarationLike };
 
@@ -244,10 +245,10 @@ function getRecordIdentity(resourceKey: string, resource: AgentResourceDef, reco
   return field && record[field] ? String(record[field]).trim() : '';
 }
 
-async function fetchResourceList(baseUrl: string, authHeader: string, resource: AgentResourceDef): Promise<Record<string, unknown>[]> {
+async function fetchResourceList(baseUrl: string, auth: InternalAuth, resource: AgentResourceDef): Promise<Record<string, unknown>[]> {
   if (!resource.list) return [];
   try {
-    const res = await fetch(baseUrl + resource.basePath, { headers: { Authorization: authHeader } });
+    const res = await fetch(baseUrl + resource.basePath, { headers: internalHeaders(auth) });
     if (!res.ok) return [];
     const json = await res.json().catch(() => []);
     return Array.isArray(json) ? json : [];
@@ -278,7 +279,7 @@ function checkSuspiciousDate(resourceKey: string, record: Record<string, unknown
 
 export async function executeAgentAction(
   baseUrl: string,
-  authHeader: string | undefined,
+  auth: InternalAuth | undefined,
   caps: AgentCapabilities,
   call: AgentActionCall,
   /** L'agent qui exécute cette action — seul publier_flux_activite s'en sert
@@ -316,33 +317,33 @@ export async function executeAgentAction(
   // si buildAgentTools ne déclare pas l'outil quand la capacité est éteinte.
   if (name && MAIL_TOOL_NAMES.includes(name)) {
     if (!caps.mailRead) return { response: { error: "L'accès à la messagerie n'est pas activé pour cet agent." } };
-    if (!authHeader) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
-    return executeMailTool(baseUrl, authHeader, name, args, caps.mailSend);
+    if (!auth) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
+    return executeMailTool(baseUrl, auth, name, args, caps.mailSend);
   }
 
   if (name && GEO_TOOL_NAMES.includes(name)) {
     if (!caps.geo) return { response: { error: "L'accès aux modules cartographiques n'est pas activé pour cet agent." } };
-    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
-    return executeGeoTool(baseUrl, authHeader, name, args);
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeGeoTool(baseUrl, auth, name, args);
   }
 
   if (name && PROJECT_DOC_TOOL_NAMES.includes(name)) {
     if (!caps.docsRead) return { response: { error: "La lecture du CCTP et du DPGF n'est pas activée pour cet agent." } };
-    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
-    return executeProjectDocTool(baseUrl, authHeader, name, args);
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeProjectDocTool(baseUrl, auth, name, args);
   }
 
   if (name && DELEGATE_TOOL_NAMES.includes(name)) {
     if (!caps.delegate) return { response: { error: "La consultation d'un collègue n'est pas activée pour cet agent." } };
-    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
-    return executeDelegateTool(baseUrl, authHeader, name, args);
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeDelegateTool(baseUrl, auth, name, args);
   }
 
   if (name && NOTIFY_TOOL_NAMES.includes(name)) {
     if (!caps.notifyUsers) return { response: { error: "La publication dans le flux d'activité n'est pas activée pour cet agent." } };
-    if (!authHeader) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
-    return executeNotifyTool(baseUrl, authHeader, name, args, selfAgent.id);
+    return executeNotifyTool(baseUrl, auth, name, args, selfAgent.id);
   }
 
   const resourceKey = String(args.resource || '');
@@ -351,7 +352,7 @@ export async function executeAgentAction(
   if (!resource || !actionScopes.includes(resourceKey)) {
     return { response: { error: `Ressource "${resourceKey}" non autorisée pour cet agent.` } };
   }
-  if (!authHeader) {
+  if (!auth) {
     return { response: { error: 'Session non authentifiée — action impossible.' } };
   }
 
@@ -361,7 +362,7 @@ export async function executeAgentAction(
     }
     const q = String(args.query || '').toLowerCase().trim();
     if (!q) return { response: { error: 'query est requis.' } };
-    const list = await fetchResourceList(baseUrl, authHeader, resource);
+    const list = await fetchResourceList(baseUrl, auth, resource);
     const matches = list
       .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
       .filter(r => r.identity && r.identity.toLowerCase().includes(q))
@@ -393,7 +394,7 @@ export async function executeAgentAction(
     const hasIdentity = resourceKey === 'contacts' || !!resource.identityField;
     const identity = getRecordIdentity(resourceKey, resource, body);
     if (resource.list && hasIdentity && identity && args.confirm !== true) {
-      const list = await fetchResourceList(baseUrl, authHeader, resource);
+      const list = await fetchResourceList(baseUrl, auth, resource);
       const duplicates = list
         .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
         .filter(r => r.identity && r.identity.toLowerCase() === identity.toLowerCase())
@@ -432,7 +433,7 @@ export async function executeAgentAction(
       // explicit go-ahead before the DELETE actually fires.
       let identity = id;
       if (resource.list) {
-        const list = await fetchResourceList(baseUrl, authHeader, resource);
+        const list = await fetchResourceList(baseUrl, auth, resource);
         const match = list.find(r => String((r as any).id) === id);
         if (match) identity = getRecordIdentity(resourceKey, resource, match) || id;
       }
@@ -455,10 +456,7 @@ export async function executeAgentAction(
   try {
     const res = await fetch(baseUrl + path, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authHeader,
-      },
+      headers: internalHeaders(auth, { 'Content-Type': 'application/json' }),
       body: method === 'DELETE' ? undefined : JSON.stringify(body),
     });
 
@@ -499,7 +497,7 @@ export async function executeAgentAction(
       // just what it asked to save.
       const recordId = name === 'update_record' ? String(args.id) : String(json?.id || '');
       if (recordId) {
-        const list = await fetchResourceList(baseUrl, authHeader, resource);
+        const list = await fetchResourceList(baseUrl, auth, resource);
         savedRecord = list.find(r => String((r as any).id) === recordId);
       }
       dateWarning = checkSuspiciousDate(resourceKey, savedRecord || body || {});

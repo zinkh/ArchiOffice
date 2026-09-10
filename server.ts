@@ -60,6 +60,9 @@ import { registerChorusProRoutes } from "./server/routes/chorusPro";
 import { registerRegistrationRoutes } from "./server/routes/registration";
 import { registerAgencySetupRoutes } from "./server/routes/agencySetup";
 import { registerTeamRoutes } from "./server/routes/team";
+import { registerTenantMembershipRoutes } from "./server/routes/tenantMemberships";
+import { runWithTenantContext, activeTenantFor, TENANT_HEADER } from "./server/tenantContext";
+import { getMemberRole, listMemberships, listTenantMemberIds, resolveActiveTenantId, tenantMembershipsByUser } from "./server/tenantMemberships";
 import { registerProposalRoutes } from "./server/routes/proposals";
 import { registerInvoiceRoutes } from "./server/routes/invoices";
 import { registerOrdresDeServiceRoutes } from "./server/routes/ordresDeService";
@@ -317,6 +320,14 @@ export async function createApp() {
   // passer par /api/agency-setup (créer ou rejoindre une agence) — voir
   // src/pages/AgencySetup.tsx et la garde dans ProtectedLayout (src/App.tsx).
   async function getTenantId(userId: string): Promise<string> {
+    // Le cabinet actif de la requête, quand elle en désigne un (en-tête
+    // X-Tenant-Id, validé contre les adhésions par le middleware
+    // d'authentification plus bas). Une personne pouvant exercer dans
+    // plusieurs cabinets, `profiles.tenant_id` ne dit plus que son cabinet
+    // par défaut — voir server/tenantContext.ts.
+    const active = activeTenantFor(userId);
+    if (active) return active;
+
     const { data } = await supabaseAdmin
       .from('profiles')
       .select('tenant_id')
@@ -325,15 +336,24 @@ export async function createApp() {
 
     if (data?.tenant_id) return data.tenant_id;
 
+    // Pas de cabinet par défaut sur le profil : il reste l'adhésion la plus
+    // ancienne, cas d'un compte rattaché uniquement côté adhésions.
+    const memberships = await listMemberships(supabaseAdmin, userId);
+    if (memberships.length) return memberships[0].tenantId;
+
     const err: any = new Error("Ce compte n'est rattaché à aucune agence. Veuillez d'abord créer ou rejoindre une agence.");
     err.status = 409;
     err.code = 'NO_TENANT';
     throw err;
   }
 
+  // Le rôle système est celui tenu DANS ce cabinet : gérant du sien, simple
+  // collaborateur de l'autre. C'est l'adhésion qui fait foi (`profiles` ne
+  // sert plus que de repli, pour son propre cabinet) — voir
+  // server/tenantMemberships.ts.
   async function getSystemRole(tenantId: string, userId: string): Promise<string | null> {
-    const { data } = await supabaseAdmin.from('profiles').select('system_role').eq('id', userId).eq('tenant_id', tenantId).single();
-    return (data as any)?.system_role ?? null;
+    const membership = await getMemberRole(supabaseAdmin, tenantId, userId);
+    return membership?.systemRole ?? null;
   }
 
   // Centralized route guard for admin-only endpoints — checks the caller's
@@ -468,8 +488,9 @@ export async function createApp() {
       const { count: c } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
       count = c ?? 0;
     } else if (resource === 'users') {
-      const { count: c } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
-      count = c ?? 0;
+      // Compté sur les adhésions : une personne rattachée à ce cabinet sans
+      // l'avoir en cabinet par défaut compte tout autant.
+      count = (await listTenantMemberIds(supabaseAdmin, tenantId)).length;
     } else if (resource === 'documents') {
       const { count: c } = await supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
       count = c ?? 0;
@@ -593,7 +614,27 @@ export async function createApp() {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
     if (error || !user) return res.status(401).json({ error: "Token invalide" });
     req.user = user;
-    next();
+
+    // Cabinet actif de la requête. L'en-tête n'est jamais cru sur parole :
+    // il n'est retenu que s'il correspond à une adhésion réelle, sinon la
+    // requête est refusée en 403 TENANT_NOT_MEMBER — ce qui permet au client
+    // d'effacer un cabinet resté sélectionné après un départ (voir
+    // src/lib/activeTenant.ts) plutôt que de basculer silencieusement sur un
+    // autre cabinet que celui affiché à l'écran.
+    const requestedTenantId = (req.headers[TENANT_HEADER] as string | undefined)?.trim() || null;
+    let activeTenantId: string | null = null;
+    if (requestedTenantId) {
+      try {
+        activeTenantId = await resolveActiveTenantId(supabaseAdmin, user.id, requestedTenantId);
+      } catch (e: any) {
+        return res.status(e.status || 403).json({ error: e.message, code: e.code });
+      }
+    }
+    req.activeTenantId = activeTenantId;
+    // `next()` (et toute la suite asynchrone de la requête) s'exécute dans ce
+    // contexte : c'est ainsi que getTenantId() le retrouve sans que chaque
+    // route ait à le transporter.
+    runWithTenantContext({ userId: user.id, tenantId: activeTenantId }, next);
   });
 
   app.get("/api/health", (req, res) => {
@@ -617,10 +658,11 @@ export async function createApp() {
   // Allows: the person themselves, a tenant admin, or the target's direct manager (profiles.manager_id).
   async function requireManagerOf(tenantId: string, targetUserId: string, actingUserId: string): Promise<void> {
     if (targetUserId === actingUserId) return;
-    const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', actingUserId).eq('tenant_id', tenantId).single();
-    if (acting?.system_role === 'admin') return;
-    const { data: target } = await supabaseAdmin.from('profiles').select('manager_id').eq('id', targetUserId).eq('tenant_id', tenantId).single();
-    if (target?.manager_id === actingUserId) return;
+    if (await isAdmin(tenantId, actingUserId)) return;
+    // Le supérieur hiérarchique se lit sur l'adhésion : il n'est pas le même
+    // d'un cabinet à l'autre.
+    const target = await getMemberRole(supabaseAdmin, tenantId, targetUserId);
+    if (target?.managerId === actingUserId) return;
     const err: any = new Error("Réservé au manager de cette personne ou à un administrateur");
     err.status = 403;
     throw err;
@@ -629,15 +671,20 @@ export async function createApp() {
   // Resolves the set of profile ids that report to `managerId` (direct reports only).
   // If `includeAllForAdmin` is true and the manager is a tenant admin, returns every profile in the tenant instead.
   async function resolveReportIds(tenantId: string, managerId: string, includeAllForAdmin: boolean): Promise<string[]> {
-    if (includeAllForAdmin) {
-      const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', managerId).eq('tenant_id', tenantId).single();
-      if (acting?.system_role === 'admin') {
-        const { data: all } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
-        return (all || []).map((p: any) => p.id);
-      }
+    if (includeAllForAdmin && await isAdmin(tenantId, managerId)) {
+      return listTenantMemberIds(supabaseAdmin, tenantId);
     }
-    const { data: reports } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', managerId);
-    return (reports || []).map((p: any) => p.id);
+    // Le rattachement hiérarchique se lit d'abord sur l'adhésion (il diffère
+    // d'un cabinet à l'autre), et sur `profiles` pour les comptes qu'aucune
+    // adhésion ne couvre encore. Deux requêtes, pas une par personne.
+    const [memberships, { data: profileReports }] = await Promise.all([
+      tenantMembershipsByUser(supabaseAdmin, tenantId),
+      supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', managerId),
+    ]);
+    const reports = new Set<string>();
+    memberships.forEach((m, userId) => { if (m.managerId === managerId) reports.add(userId); });
+    (profileReports || []).forEach((p: any) => { if (!memberships.has(p.id)) reports.add(p.id); });
+    return [...reports];
   }
 
   // Callers are expected to reject implausible ranges before this point (see
@@ -688,7 +735,10 @@ export async function createApp() {
   const getUserName = async (tenantId: string, userId: string, email?: string): Promise<string> => {
     // profiles is the live source of truth for a user's display name — team_members
     // is no longer written to anywhere (POST/PUT /api/team both write to profiles).
-    const { data: me } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).eq('tenant_id', tenantId).maybeSingle();
+    // Sans filtre sur le cabinet : le nom est une donnée d'identité, la même
+    // dans les deux cabinets d'une personne qui en a deux, alors que
+    // `profiles.tenant_id` ne pointe que sur son cabinet par défaut.
+    const { data: me } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).maybeSingle();
     return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
@@ -765,6 +815,7 @@ export async function createApp() {
   registerRegistrationRoutes(app, { supabaseAdmin });
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
+  registerTenantMembershipRoutes(app, { supabaseAdmin, getTenantId });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

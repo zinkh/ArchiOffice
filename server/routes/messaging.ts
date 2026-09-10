@@ -15,7 +15,7 @@ export interface RouteDeps {
 
 export function registerMessagingRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage }: RouteDeps) {
   const getProfileDisplayName = async (tenantId: string, userId: string): Promise<string> => {
-    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('name').eq('id', userId).maybeSingle();
+    const { data } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).maybeSingle();
     return (data as any)?.name || 'Utilisateur';
   };
 

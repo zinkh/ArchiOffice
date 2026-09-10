@@ -11,6 +11,7 @@ import type { Express } from 'express';
 import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { sendPlatformMail } from '../mailer';
+import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -67,15 +68,21 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         .order('created_at', { ascending: false });
       if (error) throw error;
       const enriched = await Promise.all((tenants ?? []).map(async (t) => {
-        const [profilesRes, projectsRes, ownerRes] = await Promise.all([
-          supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
+        // Effectif et gérant se lisent sur les adhésions : une personne qui
+        // exerce dans deux cabinets compte dans les deux, alors que
+        // `profiles.tenant_id` ne la rattache qu'à son cabinet par défaut.
+        const [memberIds, projectsRes, adminIds] = await Promise.all([
+          listTenantMemberIds(supabaseAdmin, t.id),
           supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id),
-          supabaseAdmin.from('profiles').select('email, name').eq('tenant_id', t.id).eq('system_role', 'admin').limit(1),
+          listTenantAdminIds(supabaseAdmin, t.id),
         ]);
-        const owner = ownerRes.data?.[0];
+        const { data: ownerRows } = adminIds.length
+          ? await supabaseAdmin.from('profiles').select('email, name').in('id', adminIds).limit(1)
+          : { data: [] as any[] };
+        const owner = ownerRows?.[0];
         return {
           ...t,
-          user_count: profilesRes.count ?? 0,
+          user_count: memberIds.length,
           project_count: projectsRes.count ?? 0,
           owner_email: owner?.email ?? null,
           owner_name: owner?.name ?? null,
@@ -97,13 +104,12 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         .single();
       if (error || !tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
 
-      const [membersRes, projectsRes, billingRes, auditRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('id, name, email, role, system_role, created_at').eq('tenant_id', id).order('created_at', { ascending: true }),
+      const [members, projectsRes, billingRes, auditRes] = await Promise.all([
+        listTenantProfiles(supabaseAdmin, id, 'id, name, email, role, system_role, created_at'),
         supabaseAdmin.from('projects').select('id, name, status, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(20),
         supabaseAdmin.from('billing_events').select('id, event_type, plan_id, amount, status, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(50),
         supabaseAdmin.from('admin_audit_log').select('id, actor_email, action, details, created_at').eq('target_tenant_id', id).order('created_at', { ascending: false }).limit(50),
       ]);
-      const members = membersRes.data ?? [];
       const owner = members.find((m: any) => m.system_role === 'admin');
 
       res.json({
@@ -134,7 +140,12 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       const { id: tenantId } = req.params;
       const { user_id } = req.body;
       if (!user_id) return res.status(400).json({ error: 'user_id requis' });
-      const { data: member } = await supabaseAdmin.from('profiles').select('id, email, name').eq('id', user_id).eq('tenant_id', tenantId).maybeSingle();
+      // L'appartenance décide, pas `profiles.tenant_id` : le membre visé peut
+      // exercer aussi ailleurs.
+      if (!(await findMembership(supabaseAdmin, user_id, tenantId))) {
+        return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      }
+      const { data: member } = await supabaseAdmin.from('profiles').select('id, email, name').eq('id', user_id).maybeSingle();
       if (!member || !(member as any).email) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
 
       const appUrl = process.env.APP_URL || 'http://localhost:3000';
@@ -170,12 +181,15 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       let recipients: string[];
       if (recipient === 'member') {
         if (!user_id) return res.status(400).json({ error: 'user_id requis' });
-        const { data: member } = await supabaseAdmin.from('profiles').select('email').eq('id', user_id).eq('tenant_id', tenantId).maybeSingle();
+        if (!(await findMembership(supabaseAdmin, user_id, tenantId))) {
+          return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+        }
+        const { data: member } = await supabaseAdmin.from('profiles').select('email').eq('id', user_id).maybeSingle();
         if (!(member as any)?.email) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
         recipients = [(member as any).email];
       } else {
-        const { data: members } = await supabaseAdmin.from('profiles').select('email').eq('tenant_id', tenantId);
-        recipients = ((members || []) as { email: string | null }[]).map(m => m.email).filter(Boolean) as string[];
+        const members = await listTenantProfiles(supabaseAdmin, tenantId, 'email');
+        recipients = (members as { email: string | null }[]).map(m => m.email).filter(Boolean) as string[];
         if (!recipients.length) return res.status(404).json({ error: 'Aucun membre avec une adresse email dans ce cabinet' });
       }
 
@@ -279,6 +293,9 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         id: authData.user.id, tenant_id: tenantId, name: adminName, email: adminEmail,
         role: 'Admin', system_role: 'admin',
       });
+      await addMembership(supabaseAdmin, {
+        userId: authData.user.id, tenantId, role: 'Admin', systemRole: 'admin', makeDefault: true,
+      });
 
       await logAdminAction(supabaseAdmin, req.user, 'tenant.created', tenantId, { name, slug: cleanSlug, plan, adminEmail });
       res.status(201).json({ tenantId, slug: cleanSlug, tempPassword });
@@ -290,9 +307,11 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
     try {
       const { id } = req.params;
       const { data: tenant } = await supabaseAdmin.from('tenants').select('name, slug').eq('id', id).maybeSingle();
-      const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', id);
-      for (const p of profiles ?? []) {
-        await supabaseAdmin.auth.admin.deleteUser(p.id).catch(() => {});
+      // Seuls les comptes dont c'est le SEUL cabinet : quelqu'un qui exerce
+      // aussi ailleurs garde le sien (server/tenantMemberships.ts).
+      const exclusiveUserIds = await listUsersOnlyIn(supabaseAdmin, id);
+      for (const userId of exclusiveUserIds) {
+        await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
       }
       const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
       if (error) throw error;

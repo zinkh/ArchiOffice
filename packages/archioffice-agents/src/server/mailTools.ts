@@ -17,6 +17,7 @@
 // choisit un compte précis si l'agent en nomme un (`compte`), sinon le
 // défaut de l'utilisateur.
 import type { FunctionDeclarationLike } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 // Vocabulaire aligné sur celui de la base (email_connections.provider) et du
 // frontend — 'microsoft'/'infomaniak', pas 'outlook'/'imap' comme avant ce
@@ -36,9 +37,9 @@ export interface MailAccount {
 const MAIL_LIST_LIMIT = 15;
 const MAIL_BODY_MAX_CHARS = 8000;
 
-async function getJson(baseUrl: string, path: string, authHeader: string): Promise<any | null> {
+async function getJson(baseUrl: string, path: string, auth: InternalAuth): Promise<any | null> {
   try {
-    const res = await fetch(baseUrl + path, { headers: { Authorization: authHeader } });
+    const res = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -52,8 +53,8 @@ async function getJson(baseUrl: string, path: string, authHeader: string): Promi
  * l'utilisateur en a nommé un dans sa demande ; sinon le défaut de
  * l'utilisateur, sinon le premier compte listé.
  */
-export async function resolveMailAccount(baseUrl: string, authHeader: string, hint?: string): Promise<MailAccount | null> {
-  const accounts = await getJson(baseUrl, '/api/mail/accounts', authHeader) as MailAccount[] | null;
+export async function resolveMailAccount(baseUrl: string, auth: InternalAuth, hint?: string): Promise<MailAccount | null> {
+  const accounts = await getJson(baseUrl, '/api/mail/accounts', auth) as MailAccount[] | null;
   if (!accounts || accounts.length === 0) return null;
   if (hint) {
     const needle = hint.trim().toLowerCase();
@@ -182,12 +183,12 @@ export interface MailToolOutcome {
 
 export async function executeMailTool(
   baseUrl: string,
-  authHeader: string,
+  auth: InternalAuth,
   name: string,
   args: Record<string, unknown>,
   canSend: boolean
 ): Promise<MailToolOutcome> {
-  const account = await resolveMailAccount(baseUrl, authHeader, args.compte ? String(args.compte) : undefined);
+  const account = await resolveMailAccount(baseUrl, auth, args.compte ? String(args.compte) : undefined);
   if (!account) {
     return {
       response: {
@@ -216,7 +217,7 @@ export async function executeMailTool(
       account.provider === 'google' ? `/api/gmail/search?${params}&${accountParam}`
       : account.provider === 'microsoft' ? `/api/outlook/search?${params}&${accountParam}`
       : `/api/mail/imap/search?${params}&${accountParam}`;
-    const data = await getJson(baseUrl, path, authHeader);
+    const data = await getJson(baseUrl, path, auth);
     if (data === null) return { response: { error: 'La recherche dans la messagerie a échoué.' } };
     const messages = normalizeList(account.provider, Array.isArray(data) ? data : data.messages || []);
     return {
@@ -233,7 +234,7 @@ export async function executeMailTool(
         : account.provider === 'microsoft'
           ? `/api/outlook/messages?maxResults=${limit}&${accountParam}${folder ? `&folderId=${encodeURIComponent(folder)}` : ''}`
           : `/api/mail/imap/messages?limit=${limit}&${accountParam}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`;
-    const data = await getJson(baseUrl, path, authHeader);
+    const data = await getJson(baseUrl, path, auth);
     if (data === null) return { response: { error: 'La lecture de la boîte de réception a échoué.' } };
     const messages = normalizeList(account.provider, Array.isArray(data) ? data : data.messages || []);
     return {
@@ -253,7 +254,7 @@ export async function executeMailTool(
     } else {
       path = `/api/${account.provider === 'google' ? 'gmail' : 'outlook'}/messages/${encodeURIComponent(id)}?${accountParam}`;
     }
-    const message = await getJson(baseUrl, path, authHeader);
+    const message = await getJson(baseUrl, path, auth);
     if (!message) return { response: { error: "Message introuvable ou illisible." } };
     const body: string = message.bodyText || message.bodyHtml || '';
     return {
@@ -307,7 +308,7 @@ export async function executeMailTool(
     try {
       const res = await fetch(baseUrl + path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: internalHeaders(auth, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ to, cc: cc || undefined, subject, text: bodyText, accountId: account.id }),
       });
       const json: any = await res.json().catch(() => ({}));
