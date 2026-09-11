@@ -341,6 +341,34 @@ export default function ProjectDetail() {
     });
   }, [linkedContratsMoe, id]);
 
+  // Rapatrie les honoraires initiaux et le coût travaux prévisionnel depuis le
+  // contrat MOE signé lié au projet, plutôt que de laisser ces montants — déjà
+  // saisis dans le contrat — à ressaisir manuellement ici. Ne renseigne que ce
+  // qui est encore vide côté projet : un montant déjà défini (ajusté à la main,
+  // ou par un avenant) n'est jamais écrasé par une resynchronisation ultérieure.
+  useEffect(() => {
+    if (!project) return;
+    const contratSigne = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
+    if (!contratSigne) return;
+
+    setProject(prev => {
+      if (!prev) return prev;
+      // En mode pourcentage, le budget travaux du contrat prime, mais un coût
+      // travaux déjà saisi côté projet (avant même la liaison au contrat)
+      // reste utilisable pour calculer le montant tant que le contrat n'en
+      // porte pas un lui-même.
+      const budgetTravaux = contratSigne.budget_previsionnel || prev.construction_cost;
+      const honorairesContrat = contratSigne.mode_honoraires === 'forfait'
+        ? contratSigne.montant_honoraires
+        : (budgetTravaux && contratSigne.taux_honoraires ? budgetTravaux * contratSigne.taux_honoraires / 100 : undefined);
+
+      const patch: Partial<Project> = {};
+      if (!prev.remuneration && honorairesContrat) patch.remuneration = honorairesContrat;
+      if (!prev.construction_cost && contratSigne.budget_previsionnel) patch.construction_cost = contratSigne.budget_previsionnel;
+      return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
+    });
+  }, [linkedContratsMoe, project?.id]);
+
   useEffect(() => {
     if (activeTab === 'HONOS' && id) {
       fetch(`/api/notes_honoraires?project_id=${id}`)
