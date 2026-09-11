@@ -1931,20 +1931,70 @@ export default function ProjectDetail() {
                     status: 'Brouillon',
                     tva_rate: 20,
                     phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
-                    cotraitants_facturation: cotraitants.map((ct: any) => ({ contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0 })),
-                    sous_traitants_facturation: sousTraitants.map((st: any) => ({ contact_id: st.contact_id, nom: st.contact_name || st.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa })),
+                    cotraitants_facturation: cotraitants.map((ct: any) => ({
+                      contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '',
+                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                      montant_ht: 0, tva_rate: 20, montant_ttc: 0,
+                    })),
+                    sous_traitants_facturation: sousTraitants.map((st: any) => ({
+                      contact_id: st.contact_id, nom: st.contact_name || st.specialty || '',
+                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                      montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa,
+                    })),
                     notes: '',
                   });
 
                   const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
                   const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
 
+                  // Ventilation par mission d'un cotraitant/sous-traitant : trouve (ou
+                  // crée à la volée) l'entrée de la mission dans son tableau `phases`
+                  // et recalcule son total HT/TTC — même principe que la ventilation
+                  // agence, mais un niveau plus bas (par intervenant).
+                  const updateIntervenantPhase = (
+                    group: 'cotraitants_facturation' | 'sous_traitants_facturation',
+                    intervenantIdx: number,
+                    phaseId: string,
+                    phaseName: string,
+                    patch: Partial<{ avancement_pct: number; montant_phase: number }>,
+                  ) => {
+                    const list = [...(noteForm[group] || [])];
+                    const intervenant = { ...list[intervenantIdx] };
+                    const phasesArr = [...(intervenant.phases || [])];
+                    let pIdx = phasesArr.findIndex((p: any) => p.phase_id === phaseId);
+                    if (pIdx === -1) {
+                      phasesArr.push({ phase_id: phaseId, phase_name: phaseName, avancement_pct: 0, montant_phase: 0 });
+                      pIdx = phasesArr.length - 1;
+                    }
+                    phasesArr[pIdx] = { ...phasesArr[pIdx], ...patch };
+                    const montant_ht = phasesArr.reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                    intervenant.phases = phasesArr;
+                    intervenant.montant_ht = montant_ht;
+                    intervenant.montant_ttc = parseFloat((montant_ht * (1 + (intervenant.tva_rate || 20) / 100)).toFixed(2));
+                    list[intervenantIdx] = intervenant;
+                    setNoteForm({ ...noteForm, [group]: list });
+                  };
+
                   const saveNote = async () => {
                     if (!noteForm || !id) return;
                     const montant_ht = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
                     const montant_tva = montant_ht * (noteForm.tva_rate || 20) / 100;
                     const montant_ttc = montant_ht + montant_tva;
-                    const payload = { ...noteForm, project_id: id, contrat_id: contrat?.id || null, montant_ht, montant_tva, montant_ttc };
+                    // Instantané du cumul agence, exactement comme "Montant des
+                    // Honoraires Cumulés HT" / "Montant à l'Acompte Précédent HT" sur
+                    // le modèle papier — pris au moment de l'enregistrement pour ne
+                    // pas bouger rétroactivement si une note antérieure est éditée.
+                    const contratId = contrat?.id || null;
+                    const priorNotes = notesHonoraires.filter((n: any) =>
+                      n.contrat_id === contratId && n.id !== editingNote?.id
+                      && (!n.date || !noteForm.date || n.date <= noteForm.date));
+                    const montant_cumule_precedent_ht = priorNotes.reduce((s: number, n: any) => s + (Number(n.montant_ht) || 0), 0);
+                    const montant_cumule_ht = montant_cumule_precedent_ht + montant_ht;
+                    const pct_facturation_cumule = honRevises > 0 ? Math.min(100, parseFloat((montant_cumule_ht / honRevises * 100).toFixed(2))) : 0;
+                    const payload = {
+                      ...noteForm, project_id: id, contrat_id: contratId, montant_ht, montant_tva, montant_ttc,
+                      montant_cumule_precedent_ht, montant_cumule_ht, pct_facturation_cumule,
+                    };
                     if (editingNote?.id) {
                       await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     } else {
@@ -1961,6 +2011,23 @@ export default function ProjectDetail() {
                     if (!confirm('Supprimer cette note d\'honoraires ?')) return;
                     await fetch(`/api/notes_honoraires/${noteId}`, { method: 'DELETE' });
                     setNotesHonoraires(notesHonoraires.filter((n: any) => n.id !== noteId));
+                  };
+
+                  const exportNotePdf = async (note: any) => {
+                    const { exportNoteHonorairesToPDF } = await import('../lib/noteHonorairesExport');
+                    await exportNoteHonorairesToPDF(
+                      note, contrat,
+                      { name: project.name, client: project.client, construction_cost: project.construction_cost },
+                      settings ?? {},
+                    );
+                  };
+
+                  const createFactureFromNote = async (note: any) => {
+                    if (note.invoice_id) return;
+                    const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
+                    if (!res.ok) { alert('Échec de la création de la facture brouillon.'); return; }
+                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
+                    setNotesHonoraires(data || []);
                   };
 
                   const STATUS_NOTE_COLORS: Record<string, string> = {
@@ -2042,110 +2109,149 @@ export default function ProjectDetail() {
                               placeholder="ex : Acompte sur honoraires ESQ + APS" />
                           </div>
 
-                          {/* Avancement par phase */}
+                          {/* Ventilation par mission — agence, cotraitants et sous-traitants */}
                           <div>
-                            <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Avancement par phase — Agence</p>
-                            <div className="space-y-2">
-                              {(noteForm.phases || []).map((phase: any, idx: number) => {
-                                const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
-                                const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
-                                const montantPhaseBase = honRevises * phasePct / 100;
-                                const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
-                                return (
-                                  <div key={phase.phase_id} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 w-48 flex-shrink-0">{basePhase?.name || phase.phase_name}</span>
-                                    <div className="flex items-center gap-2 flex-shrink-0">
-                                      <input type="number" min={0} max={100} step={5}
-                                        className="w-16 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-center outline-none focus:ring-2 focus:ring-blue-500"
-                                        value={phase.avancement_pct}
-                                        onChange={e => {
-                                          const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                                          const newPhases = [...noteForm.phases];
-                                          const mp = montantPhaseBase * pct / 100;
-                                          newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
-                                          setNoteForm({ ...noteForm, phases: newPhases });
-                                        }} />
-                                      <span className="text-xs text-[var(--tblr-muted)]">%</span>
-                                    </div>
-                                    <div className="flex items-center gap-1 text-xs text-[var(--tblr-muted)] flex-shrink-0">
-                                      <span>→</span>
-                                      <input type="number" min={0}
-                                        className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                        value={phase.montant_phase}
-                                        onChange={e => {
-                                          const newPhases = [...noteForm.phases];
-                                          newPhases[idx] = { ...phase, montant_phase: parseFloat(e.target.value) || 0 };
-                                          setNoteForm({ ...noteForm, phases: newPhases });
-                                        }} />
-                                      <span>€ HT</span>
-                                    </div>
-                                    {montantAvancement > 0 && phase.montant_phase === 0 && (
-                                      <button type="button" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
-                                        const newPhases = [...noteForm.phases];
-                                        newPhases[idx] = { ...phase, montant_phase: parseFloat(montantAvancement.toFixed(2)) };
-                                        setNoteForm({ ...noteForm, phases: newPhases });
-                                      }}>Auto</button>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                            <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Ventilation par mission</p>
+                            <div className="overflow-x-auto rounded-lg border border-[var(--tblr-border)]">
+                              <table className="w-full text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-[var(--tblr-surface-2)]">
+                                    <th className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Mission</th>
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>Agence</th>
+                                    {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
+                                      <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ct.nom || 'Cotraitant'}</th>
+                                    ))}
+                                    {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
+                                      <th key={`st-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">
+                                        {st.nom || 'Sous-traitant'}
+                                        {st.paiement_direct_moa && <span className="block text-[9px] font-normal normal-case text-amber-600">paiement direct MOA</span>}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(noteForm.phases || []).map((phase: any, idx: number) => {
+                                    const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
+                                    const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
+                                    const montantPhaseBase = honRevises * phasePct / 100;
+                                    const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
+                                    return (
+                                      <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
+                                        <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">{basePhase?.name || phase.phase_name}</td>
+                                        <td className="p-1 border-l border-[var(--tblr-border)]">
+                                          <div className="flex items-center gap-1">
+                                            <input type="number" min={0} max={100} step={5}
+                                              className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                              value={phase.avancement_pct}
+                                              onChange={e => {
+                                                const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+                                                const newPhases = [...noteForm.phases];
+                                                const mp = montantPhaseBase * pct / 100;
+                                                newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
+                                                setNoteForm({ ...noteForm, phases: newPhases });
+                                              }} />
+                                            <span className="text-[var(--tblr-muted)]">%</span>
+                                          </div>
+                                        </td>
+                                        <td className="p-1">
+                                          <div className="flex items-center gap-1">
+                                            <input type="number" min={0}
+                                              className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                              value={phase.montant_phase}
+                                              onChange={e => {
+                                                const newPhases = [...noteForm.phases];
+                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(e.target.value) || 0 };
+                                                setNoteForm({ ...noteForm, phases: newPhases });
+                                              }} />
+                                            {montantAvancement > 0 && phase.montant_phase === 0 ? (
+                                              <button type="button" title="Reprendre le montant calculé depuis le %" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
+                                                const newPhases = [...noteForm.phases];
+                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(montantAvancement.toFixed(2)) };
+                                                setNoteForm({ ...noteForm, phases: newPhases });
+                                              }}>Auto</button>
+                                            ) : <span className="text-[var(--tblr-muted)]">€</span>}
+                                          </div>
+                                        </td>
+                                        {(noteForm.cotraitants_facturation || []).map((ct: any, ctIdx: number) => {
+                                          const ctPhase = (ct.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
+                                          return (
+                                            <React.Fragment key={`ct-${ctIdx}`}>
+                                              <td className="p-1 border-l border-[var(--tblr-border)]">
+                                                <div className="flex items-center gap-1">
+                                                  <input type="number" min={0} max={100} step={5}
+                                                    className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                                    value={ctPhase.avancement_pct}
+                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { avancement_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+                                                  <span className="text-[var(--tblr-muted)]">%</span>
+                                                </div>
+                                              </td>
+                                              <td className="p-1">
+                                                <input type="number" min={0}
+                                                  className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                                  value={ctPhase.montant_phase}
+                                                  onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(e.target.value) || 0 })} />
+                                              </td>
+                                            </React.Fragment>
+                                          );
+                                        })}
+                                        {(noteForm.sous_traitants_facturation || []).map((st: any, stIdx: number) => {
+                                          const stPhase = (st.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
+                                          return (
+                                            <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
+                                              <input type="number" min={0}
+                                                className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                                value={stPhase.montant_phase}
+                                                onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(e.target.value) || 0 })} />
+                                            </td>
+                                          );
+                                        })}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
+                                    <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
+                                    <td className="p-2 border-l border-[var(--tblr-border)]"></td>
+                                    <td className="p-2 text-right text-blue-600 whitespace-nowrap">
+                                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}
+                                    </td>
+                                    {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
+                                      <td key={`ct-tot-${i}`} className="p-2 text-right whitespace-nowrap border-l border-[var(--tblr-border)]" colSpan={2}>
+                                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(ct.montant_ht || 0)}
+                                      </td>
+                                    ))}
+                                    {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
+                                      <td key={`st-tot-${i}`} className="p-2 text-right whitespace-nowrap border-l border-[var(--tblr-border)]">
+                                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(st.montant_ht || 0)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                </tfoot>
+                              </table>
                             </div>
-                            <div className="mt-2 flex items-center justify-between text-xs font-bold text-zinc-700 dark:text-zinc-300 px-2">
-                              <span>Total agence HT</span>
-                              <span className="text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}</span>
-                            </div>
+                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Les montants cotraitants et sous-traitants restent hors comptabilité agence : seule la colonne Agence alimente la facture brouillon.</p>
                           </div>
 
-                          {/* Cotraitants */}
-                          {(noteForm.cotraitants_facturation || []).length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Cotraitants (hors comptabilité agence)</p>
-                              <div className="space-y-2">
-                                {(noteForm.cotraitants_facturation || []).map((ct: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{ct.nom || 'Cotraitant'}</span>
-                                    <input type="number" min={0}
-                                      className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                      value={ct.montant_ht}
-                                      onChange={e => {
-                                        const ht = parseFloat(e.target.value) || 0;
-                                        const newCts = [...noteForm.cotraitants_facturation];
-                                        newCts[idx] = { ...ct, montant_ht: ht, montant_ttc: ht * (1 + ct.tva_rate / 100) };
-                                        setNoteForm({ ...noteForm, cotraitants_facturation: newCts });
-                                      }} />
-                                    <span className="text-xs text-[var(--tblr-muted)]">€ HT</span>
-                                  </div>
-                                ))}
+                          {/* Suivi du pourcentage de facturation */}
+                          {honRevises > 0 && (() => {
+                            const montant_ht_preview = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                            const contratId = contrat?.id || null;
+                            const priorNotes = notesHonoraires.filter((n: any) => n.contrat_id === contratId && n.id !== editingNote?.id);
+                            const cumulPrecedent = priorNotes.reduce((s: number, n: any) => s + (Number(n.montant_ht) || 0), 0);
+                            const pct = Math.min(100, (cumulPrecedent + montant_ht_preview) / honRevises * 100);
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[10px] font-bold text-[var(--tblr-muted)] uppercase">
+                                  <span>Avancement cumulé de la facturation (agence)</span>
+                                  <span className="text-zinc-700 dark:text-zinc-300">{pct.toFixed(1)} %</span>
+                                </div>
+                                <div className="h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden">
+                                  <div className="h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+                                </div>
                               </div>
-                            </div>
-                          )}
-
-                          {/* Sous-traitants */}
-                          {(noteForm.sous_traitants_facturation || []).length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Sous-traitants</p>
-                              <div className="space-y-2">
-                                {(noteForm.sous_traitants_facturation || []).map((st: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{st.nom || 'Sous-traitant'}</span>
-                                    <input type="number" min={0}
-                                      className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                      value={st.montant_ht}
-                                      onChange={e => {
-                                        const ht = parseFloat(e.target.value) || 0;
-                                        const newSts = [...noteForm.sous_traitants_facturation];
-                                        newSts[idx] = { ...st, montant_ht: ht, montant_ttc: ht * (1 + st.tva_rate / 100) };
-                                        setNoteForm({ ...noteForm, sous_traitants_facturation: newSts });
-                                      }} />
-                                    <span className="text-xs text-[var(--tblr-muted)]">€ HT</span>
-                                    {st.paiement_direct_moa && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold flex-shrink-0">Paiement direct MOA</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
                             <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
@@ -2187,9 +2293,24 @@ export default function ProjectDetail() {
                                     <div className="flex gap-4 mt-1 text-xs text-[var(--tblr-muted)]">
                                       <span className="font-bold text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ht)} HT</span>
                                       <span>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ttc)} TTC</span>
+                                      {note.pct_facturation_cumule != null && (
+                                        <span className="flex items-center gap-1">
+                                          <span className="inline-block w-16 h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden align-middle">
+                                            <span className="block h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, note.pct_facturation_cumule))}%` }} />
+                                          </span>
+                                          {note.pct_facturation_cumule.toFixed(1)} % cumulé
+                                        </span>
+                                      )}
+                                      {note.invoice_id && <span className="text-green-600 font-bold">Facture créée</span>}
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button title="Exporter en PDF" onClick={() => exportNotePdf(note)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
+                                    <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
+                                      onClick={() => createFactureFromNote(note)}
+                                      className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
+                                      <IconFileInvoice size={14} />
+                                    </button>
                                     <button onClick={() => {
                                       setEditingNote(note);
                                       setNoteForm({ ...note });

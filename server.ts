@@ -867,7 +867,7 @@ export async function createApp() {
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
-  registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
+  registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber, getUserName, logActivity });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext });
   registerPushRoutes(app, { supabaseAdmin, getTenantId });

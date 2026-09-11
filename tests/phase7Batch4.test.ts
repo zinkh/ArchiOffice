@@ -164,6 +164,41 @@ describe('Notes d\'honoraires', () => {
     await request(app).put(`/api/notes_honoraires/${id}`).set(authHeader(token)).send({ montant: 1 });
     expect(fakeSupabaseAdmin.getTable('notes_honoraires').find(n => n.id === id)?.montant).toBe('SECRET');
   });
+
+  it('creates a draft invoice from a note, agence amounts only, and is idempotent', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'proj-nh', tenant_id: tenantId, name: 'Villa Dupont', project_code: '26099' }]);
+
+    const created = await request(app).post('/api/notes_honoraires').set(authHeader(token)).send({
+      project_id: 'proj-nh', numero: 'NH-2026-001', objet: 'Acompte ESQ + APS',
+      montant_ht: 5000, tva_rate: 20, montant_tva: 1000, montant_ttc: 6000,
+      cotraitants_facturation: [{ nom: 'BET Structure', montant_ht: 2000, tva_rate: 20, montant_ttc: 2400 }],
+    });
+    expect(created.status).toBe(201);
+    const noteId = created.body.id;
+
+    const facture = await request(app).post(`/api/notes_honoraires/${noteId}/facture`).set(authHeader(token));
+    expect(facture.status).toBe(201);
+    expect(facture.body.already_existed).toBe(false);
+    const invoice = facture.body.invoice;
+    // Agence uniquement : le montant cotraitant (2000) ne doit jamais apparaître ici.
+    expect(invoice.amount).toBe(5000);
+    expect(invoice.total_amount).toBe(6000);
+    expect(invoice.invoice_type).toBe('acompte');
+    expect(invoice.project_id).toBe('proj-nh');
+    expect(invoice.affaire_invoice_number).toBe('26099-ACO-01');
+
+    const noteAfter = fakeSupabaseAdmin.getTable('notes_honoraires').find(n => n.id === noteId);
+    expect(noteAfter?.invoice_id).toBe(invoice.id);
+
+    // Rappeler la route ne doit pas créer une deuxième facture.
+    const factureAgain = await request(app).post(`/api/notes_honoraires/${noteId}/facture`).set(authHeader(token));
+    expect(factureAgain.status).toBe(200);
+    expect(factureAgain.body.already_existed).toBe(true);
+    expect(factureAgain.body.invoice.id).toBe(invoice.id);
+    expect(fakeSupabaseAdmin.getTable('invoices').filter(i => i.project_id === 'proj-nh').length).toBe(1);
+  });
 });
 
 describe('Profile', () => {
