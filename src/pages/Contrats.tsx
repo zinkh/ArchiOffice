@@ -330,6 +330,13 @@ function ContratModal({
     { id: 'clauses', label: 'Clauses' },
   ] as const;
 
+  // Montant total des honoraires du contrat (base de calcul de la part de
+  // chaque cotraitant) : le montant forfaitaire saisi, ou le budget travaux
+  // prévisionnel appliqué au taux, selon le mode choisi dans l'onglet Honoraires.
+  const totalHonorairesContrat = form.mode_honoraires === 'forfait'
+    ? (form.montant_honoraires || 0)
+    : ((form.budget_previsionnel || 0) * (form.taux_honoraires || 0) / 100);
+
   // Helpers équipe MOE
   const addCotraitant = () => {
     const newC: ContratCotraitant = { id: crypto.randomUUID(), contact_name: '', specialty: '', fee_pct: 0, montant_honoraires: 0 };
@@ -338,6 +345,20 @@ function ContratModal({
   const updateCotraitant = (id: string, key: keyof ContratCotraitant, val: any) => {
     setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).map(c => c.id === id ? { ...c, [key]: val } : c) }));
   };
+  // Le montant HT de chaque cotraitant n'est jamais saisi : il se déduit de sa
+  // part (%) sur le total des honoraires du contrat, recalculé à chaque
+  // changement de part ou de montant/taux global — sinon la valeur persistée
+  // se figeait à sa dernière saisie manuelle et divergeait du total affiché.
+  useEffect(() => {
+    setForm(f => {
+      const list = f.cotraitants || [];
+      if (list.length === 0) return f;
+      const next = list.map(c => ({ ...c, montant_honoraires: totalHonorairesContrat * (c.fee_pct || 0) / 100 }));
+      const unchanged = next.every((c, i) => c.montant_honoraires === list[i].montant_honoraires);
+      return unchanged ? f : { ...f, cotraitants: next };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalHonorairesContrat, JSON.stringify((form.cotraitants || []).map(c => c.fee_pct))]);
   const removeCotraitant = (id: string) => {
     setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).filter(c => c.id !== id) }));
   };
@@ -631,8 +652,8 @@ function ContratModal({
                                 <td className="px-2 py-1.5">
                                   <input type="number" min={0} max={100} step={0.5} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.fee_pct ?? ''} onChange={e => updateCotraitant(ct.id, 'fee_pct', parseFloat(e.target.value) || 0)} />
                                 </td>
-                                <td className="px-2 py-1.5">
-                                  <input type="number" min={0} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.montant_honoraires ?? ''} onChange={e => updateCotraitant(ct.id, 'montant_honoraires', parseFloat(e.target.value) || 0)} />
+                                <td className="px-2 py-1.5 text-right font-medium" style={{ color: 'var(--tblr-text)' }} title="Calculé automatiquement : part (%) × total des honoraires du contrat">
+                                  {fmt(totalHonorairesContrat * (ct.fee_pct || 0) / 100)}
                                 </td>
                                 <td className="px-1 py-1.5 text-center">
                                   <button type="button" onClick={() => removeCotraitant(ct.id)} className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
