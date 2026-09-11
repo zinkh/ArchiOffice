@@ -21,10 +21,11 @@ export default function GoogleAuthCallback() {
         if (error) throw new Error(error);
         if (!code) throw new Error('Code d\'autorisation manquant');
 
-        const savedState = sessionStorage.getItem('google_oauth_state');
-        const verifier = sessionStorage.getItem('google_oauth_verifier');
-        sessionStorage.removeItem('google_oauth_state');
-        sessionStorage.removeItem('google_oauth_verifier');
+        // See googleAuth.ts for why this is localStorage and not sessionStorage.
+        const savedState = localStorage.getItem('google_oauth_state');
+        const verifier = localStorage.getItem('google_oauth_verifier');
+        localStorage.removeItem('google_oauth_state');
+        localStorage.removeItem('google_oauth_verifier');
 
         if (state !== savedState) throw new Error('State invalide (CSRF)');
         if (!verifier) throw new Error('Verifier PKCE manquant');
