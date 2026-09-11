@@ -309,6 +309,64 @@ sont pas la même faille : c'est l'identifiant RÉFÉRENCÉ depuis le corps
 d'une requête qui manquait de contrôle, pas celui de la ressource visée par
 l'URL elle-même.
 
+### Facturation IA atomique (réserve → exécute → règle)
+
+Le solde IA prépayé (`tenants.ai_credit_balance_eur_cents`) était jusqu'ici lu
+une fois avant l'appel au modèle — potentiellement long, plusieurs secondes,
+surtout sur une boucle d'appel d'outils (`POST /api/agents/:id/chat` peut
+enchaîner jusqu'à six appels au modèle : initial, jusqu'à
+`MAX_FUNCTION_ROUNDS` tours d'outils, un tour de clarification) — puis déduit
+une seule fois à la toute fin, plafonné à zéro. Une rafale de requêtes
+concurrentes contre un solde faible passait donc toutes le contrôle initial
+et déclenchait chacune un vrai appel, facturé par le fournisseur, avant
+qu'aucune déduction n'ait eu lieu.
+
+**`server.ts` : `reserveAiCredit()` / `settleAiCredit()` / `refundAiCredit()`**
+remplacent ce lire-puis-écrire par réserve → exécute → règle, câblés dans
+`timedChat()` (`packages/archioffice-agents/src/server/routes.ts`) : CHAQUE
+appel au modèle, pas la requête entière, réserve un coût pessimiste avant de
+s'exécuter et règle contre l'usage réel juste après.
+
+- **`reserve_ai_credit(tenant_id, montant)`** (SQL,
+  `supabase/migrate_ai_billing_atomicity.sql`) fait le contrôle ET l'écriture
+  dans la même instruction — sous verrou de ligne Postgres, deux appels
+  concurrents contre un solde qui ne couvre pas les deux ne peuvent plus tous
+  les deux réussir. Renvoie faux sans jamais avoir appelé le modèle.
+- Le montant réservé est pessimiste : `RESERVE_MAX_OUTPUT_TOKENS` (16000,
+  aligné sur le `max_tokens` déjà imposé aux adaptateurs Anthropic/Mistral —
+  Gemini n'a pas d'équivalent en code, donc c'est ici une hypothèse pour le
+  calcul de réserve, jamais une limite réellement appliquée à cet appel) et
+  une estimation grossière des jetons d'entrée (longueur des messages / 4).
+- **`settle_ai_credit(tenant_id, delta)`** régularise ensuite contre le coût
+  réel une fois l'usage connu : remboursement du surplus réservé (le cas
+  courant), ou complément si le réel dépasse la réservation — toujours
+  plafonné à zéro.
+- Un appel qui échoue (réseau, timeout) est intégralement remboursé via
+  `refundAiCredit()`, volontairement distinct de `settleAiCredit()` : cette
+  dernière passe par `priceEurCents()`, qui plancher même un appel à zéro
+  jeton à 1 centime — l'utiliser pour un remboursement aurait laissé un
+  centime fantôme sur un appel qui n'a jamais réellement eu lieu.
+
+**Recharge mensuelle du forfait**, même faille : l'ancien
+`maybeRefreshMonthlyCredits()` lisait `ai_credit_last_refresh`, puis créditait
+si absent/périmé — deux premiers appels du mois exécutés en même temps
+lisaient tous les deux l'ancienne date et créditaient tous les deux le
+montant mensuel. **`refresh_monthly_ai_credits(tenant_id, montant)`** fait la
+vérification et l'écriture dans la même instruction, remplaçant le
+lire-puis-écrire.
+
+**Le mode postpaid n'a pas ce garde-fou** — sans solde à protéger contre un
+dépassement, `POST /api/agents/:id/chat` y garde l'ancienne comptabilité
+globale a posteriori (`deductAiCredit()`, inchangée) plutôt que de réserver
+par appel. `POST /api/agents/transcribe`, `POST /api/agents/speak` et
+`POST /api/ai/suggest-articles` ne sont pas passés au modèle réserve/règle :
+leur coût dépend d'un volume audio dont la conversion en jetons avant l'appel
+n'a pas de formule fiable à documenter honnêtement (contrairement au texte,
+où `chars/4` est une approximation usuelle) — plutôt que d'inventer un
+facteur de conversion, ils gardent le lire-puis-déduire existant, dont
+l'exposition financière par appel reste bornée (audio ≤ 10 Mo, texte de
+synthèse ≤ `MAX_SPEECH_CHARS`).
+
 ### AI (provider abstraction)
 
 AI features (agent chat, CCTP generation) are called from the backend only — the frontend never talks to a model provider directly.

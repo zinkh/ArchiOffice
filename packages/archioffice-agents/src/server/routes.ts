@@ -24,8 +24,32 @@ type DeductAiCreditFn = (params: {
   audioInputTokens?: number;
 }) => Promise<{ newBalance: number; costCents: number }>;
 
+/** Reserves a conservative worst-case cost BEFORE the model call runs — the
+ *  atomic gate that closes the "N concurrent calls all pass a stale balance
+ *  check" race. Returns false when the balance can't cover it; the caller
+ *  must 402 without ever invoking the model. */
+type ReserveAiCreditFn = (tenantId: string, estimateCents: number) => Promise<boolean>;
+/** Reconciles a prior reserveAiCreditFn() call against the real cost once
+ *  usage is known — refunds the unused reservation, or charges the (rare)
+ *  difference when actual cost exceeds it. Records the usage row. */
+type SettleAiCreditFn = (params: {
+  tenantId: string; userId: string;
+  agentId: string | null; conversationId: string | null;
+  endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+  provider: string; model: string;
+  reservedCents: number;
+  inputTokens: number; outputTokens: number;
+  audioInputTokens?: number;
+}) => Promise<{ newBalance: number; costCents: number }>;
+
 interface BillingHelpers {
   deductAiCredit: DeductAiCreditFn;
+  reserveAiCredit: ReserveAiCreditFn;
+  settleAiCredit: SettleAiCreditFn;
+  /** Refunds a reservation in full when the call never completed — no usage
+   *  row, no priceEurCents 1-cent floor, just credit the reservation back. */
+  refundAiCredit: (tenantId: string, cents: number) => Promise<void>;
+  estimateReserveCents: (provider: string, model: string, inputTokens: number, audioInputTokens?: number) => Promise<number>;
   maybeRefreshMonthlyCredits: (tenantId: string, plan: string) => Promise<void>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
   // Base URL the agent action tools call back into (e.g. http://127.0.0.1:PORT)
@@ -529,18 +553,57 @@ export function registerAgentRoutes(
       // call is visible in logs, not just an eventual timeout — see the
       // comment on chatRequestStart above. Reads `messages` at call time, so
       // each round sends whatever the loop has appended since the last one.
+      //
+      // In prepaid mode, each call also reserves a conservative worst-case
+      // cost BEFORE running and settles it against the real usage right
+      // after — not once for the whole request. A tool-calling exchange can
+      // run the model up to six times (initial + up to MAX_FUNCTION_ROUNDS +
+      // the clarification round) before this function used to deduct once at
+      // the very end; gating only the total let a burst of concurrent
+      // requests each run several of those calls — real cost against our own
+      // provider bill — before any of them touched the balance (security
+      // audit finding). Postpaid tenants have no balance to protect against
+      // overspend, so they keep the simpler post-hoc accounting below.
+      let totalCostCents = 0;
+      let latestBalance = balance;
       let llmCallCount = 0;
       const timedChat = async () => {
         llmCallCount++;
         const callIndex = llmCallCount;
         const callStart = Date.now();
         const label = `${provider.id}/${provider.model}`;
+        const useReserve = !!billing && billingMode === 'prepaid';
+        let reservedCents = 0;
+        if (useReserve) {
+          // Deliberately rough (chars/4) — this only sizes the atomic
+          // reservation gate, not the real charge, which comes from the
+          // provider's own reported usage once the call returns.
+          const estimatedInputTokens = Math.ceil(JSON.stringify(messages).length / 4);
+          reservedCents = await billing!.estimateReserveCents(provider.id, provider.model, estimatedInputTokens);
+          const ok = await billing!.reserveAiCredit(tenantId, reservedCents);
+          if (!ok) {
+            throw Object.assign(new Error('Crédit IA épuisé. Veuillez recharger votre compte.'), { code: 'NO_TOKENS' });
+          }
+        }
         try {
           const r = await withTimeout(provider.chat({ system: systemPrompt, messages, tools }));
           console.log(`[agent chat] llm call #${callIndex} (${label}) ok in ${Date.now() - callStart}ms conv=${convId} agent=${agentId}`);
+          if (useReserve) {
+            const settled = await billing!.settleAiCredit({
+              tenantId, userId: req.user.id, agentId, conversationId: convId, endpointType: 'agent',
+              provider: provider.id, model: provider.model, reservedCents,
+              inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens,
+            });
+            totalCostCents += settled.costCents;
+            latestBalance = settled.newBalance;
+          }
           return r;
         } catch (e: any) {
           console.log(`[agent chat] llm call #${callIndex} (${label}) failed after ${Date.now() - callStart}ms conv=${convId} agent=${agentId}: ${e?.code || e?.message}`);
+          // A failed call must not eat the reservation — refund it in full.
+          if (useReserve) {
+            await billing!.refundAiCredit(tenantId, reservedCents).catch(() => {});
+          }
           throw e;
         }
       };
@@ -650,7 +713,14 @@ export function registerAgentRoutes(
       let newBalance = balance;
       let costCents = 0;
 
-      if ((inputTokens + outputTokens) > 0 && billing) {
+      if (billing && billingMode === 'prepaid') {
+        // Already reserved and settled per LLM call inside timedChat() above
+        // — reporting the totals accumulated there, not deducting again.
+        newBalance = latestBalance;
+        costCents = totalCostCents;
+      } else if ((inputTokens + outputTokens) > 0 && billing) {
+        // Postpaid: no balance to protect against overspend, so the simpler
+        // post-hoc accounting this replaced for prepaid stays as-is here.
         const deducted = await billing.deductAiCredit({
           tenantId, userId: req.user.id,
           agentId, conversationId: convId,
@@ -694,6 +764,13 @@ export function registerAgentRoutes(
       // becoming a reported exception.
       if (e instanceof LlmNotConfiguredError) {
         return res.status(503).json({ error: e.message });
+      }
+      // Raised by timedChat()'s per-call reservation when the balance ran
+      // out partway through a multi-round tool-calling exchange — not an
+      // exception worth reporting to Sentry, same as the up-front balance
+      // check above.
+      if (e.code === 'NO_TOKENS') {
+        return res.status(402).json({ error: e.message, code: 'NO_TOKENS' });
       }
       console.error(`[agent chat error] ${e.message} (totalMs=${Date.now() - chatRequestStart})`);
       // Richer than captureConsoleIntegration's plain-string capture — tags

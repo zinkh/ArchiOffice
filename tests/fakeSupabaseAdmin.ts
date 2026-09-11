@@ -82,15 +82,39 @@ export class FakeSupabaseAdmin {
     },
   };
 
-  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — the two AI-credit
-  // functions are the only ones this codebase calls.
+  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — the AI-credit
+  // functions are the only ones this codebase calls. reserve_ai_credit and
+  // refresh_monthly_ai_credits mirror the real migration's single-statement
+  // check-and-write: both read and write the row synchronously here, same
+  // as Postgres would under a row lock, so the atomicity these functions
+  // exist for isn't something this in-memory fake can fail to reproduce.
   async rpc(fnName: string, params: Record<string, any>) {
+    const tenants = this.tables.get('tenants') || [];
+    const tenant = tenants.find(t => t.id === params.p_tenant_id);
     if (fnName === 'increment_ai_credits' || fnName === 'deduct_ai_credits') {
       const sign = fnName === 'increment_ai_credits' ? 1 : -1;
-      const tenants = this.tables.get('tenants') || [];
-      const tenant = tenants.find(t => t.id === params.p_tenant_id);
       if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + sign * params.p_amount_cents;
       return { data: null, error: null };
+    }
+    if (fnName === 'reserve_ai_credit') {
+      if (!tenant) return { data: false, error: null };
+      const balance = tenant.ai_credit_balance_eur_cents || 0;
+      if (balance < params.p_amount_cents) return { data: false, error: null };
+      tenant.ai_credit_balance_eur_cents = balance - params.p_amount_cents;
+      return { data: true, error: null };
+    }
+    if (fnName === 'settle_ai_credit') {
+      if (tenant) tenant.ai_credit_balance_eur_cents = Math.max(0, (tenant.ai_credit_balance_eur_cents || 0) + params.p_delta_cents);
+      return { data: null, error: null };
+    }
+    if (fnName === 'refresh_monthly_ai_credits') {
+      if (!tenant) return { data: false, error: null };
+      const lastRefresh = tenant.ai_credit_last_refresh;
+      const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      if (lastRefresh && lastRefresh >= firstOfMonth) return { data: false, error: null };
+      tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
+      tenant.ai_credit_last_refresh = new Date().toISOString();
+      return { data: true, error: null };
     }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
   }
