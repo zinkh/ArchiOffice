@@ -80,6 +80,7 @@ export async function requestGoogleAccessToken(): Promise<string> {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== 'google_oauth_token') return;
       window.removeEventListener('message', handler);
+      clearInterval(poll);
       if (event.data.error) {
         reject(new Error(event.data.error));
       } else {
