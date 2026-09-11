@@ -270,20 +270,15 @@ export async function createApp() {
     const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
     app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
 
-    // First-run "log into your existing cloud account" flow — see
-    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
-    // install picks one or the other, both routers coexist harmlessly).
-    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
-    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin));
-
     // Mounts the background sync engine (server/cloudSync.ts) and its
     // /api/sync status/trigger routes for the rest of this process's life.
-    // Called once at boot below when already linked, and once more, live,
-    // by server/localCloudUpgrade.ts right after a same-session upgrade from
-    // a local-only account — so a freshly-linked install doesn't need an app
-    // restart to start syncing. Guarded so a second call (there shouldn't be
-    // one — the two callers are mutually exclusive within one process's
-    // life) never tries to mount /api/sync twice.
+    // Called once at boot below when already linked, and live from three
+    // places right after they finish an import — server/cloudLinkRoutes.ts
+    // (first-run link, and its retry-after-failure route), and
+    // server/localCloudUpgrade.ts (a same-session upgrade from a local-only
+    // account) — so none of the three needs an app restart before syncing
+    // starts. Guarded so a second call (callers are mutually exclusive
+    // within one process's life) never tries to mount /api/sync twice.
     let cloudSyncActivated = false;
     const activateCloudSync = async (linkState: import('./server/cloudLinkState').CloudLinkState) => {
       if (cloudSyncActivated) return;
@@ -293,6 +288,12 @@ export async function createApp() {
       app.use('/api/sync', createCloudSyncRouter(cloudSync));
       cloudSyncActivated = true;
     };
+
+    // First-run "log into your existing cloud account" flow — see
+    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
+    // install picks one or the other, both routers coexist harmlessly).
+    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
+    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin, activateCloudSync));
 
     // Lets an already-configured local-only install switch to cloud-linked
     // without losing its data — see server/localCloudUpgrade.ts.
