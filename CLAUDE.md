@@ -255,14 +255,24 @@ récupération de mot de passe classique — et laisse la personne choisir
 elle-même son mot de passe avant d'entrer. Aucun secret ne transite donc en
 clair par e-mail ni ne reste dans les journaux d'un serveur SMTP.
 
-Point non traité ici, à garder en tête : `POST /api/team` retrouve un compte
-déjà existant via `profiles.eq('email', email)`. Un compte créé par
-inscription libre ou via un fournisseur externe peut avoir `profiles.email`
-vide alors que l'adresse existe bien côté Supabase Auth — l'ajout à un second
-cabinet le manquerait alors et tenterait de recréer un compte pour la même
-adresse. Un point de résolution centralisé (Auth d'abord, `profiles` en
-repli) fermerait ce cas sans devoir le refaire à chaque route qui cherche un
-utilisateur par e-mail.
+`POST /api/team` retrouve un compte déjà existant via `profiles.eq('email',
+email)` — ce qui suppose que `profiles.email` est fiable. Ce n'était pas
+toujours le cas : le trigger `handle_new_user()` (`supabase/schema.sql`) ne
+copiait que le nom depuis `auth.users` à la création d'un compte, jamais
+l'email. Un compte né d'une connexion Google (qui ne passe par aucune route
+applicative avant que ce trigger s'exécute) se retrouvait donc avec
+`profiles.email` vide alors que l'adresse existe bien côté Supabase Auth —
+`server/routes/agencySetup.ts::adminRecipients()` contournait déjà ce trou,
+mais pour un seul appelant (les notifications de demande de rattachement),
+pas pour toute recherche de compte par e-mail.
+
+`supabase/migrate_backfill_profile_email.sql` ferme ça à la source plutôt que
+d'ajouter un repli à chaque appelant : le trigger copie désormais
+`NEW.email`, avec `ON CONFLICT (id) DO UPDATE SET email = COALESCE(profiles
+.email, EXCLUDED.email)` — jamais `DO NOTHING`, pour qu'un profil déjà
+upserté plus richement par une route applicative avant l'exécution du
+trigger garde ses valeurs ; seul un email resté NULL est complété. La même
+migration corrige aussi les comptes déjà créés avant ce correctif.
 
 ### Références inter-locataires non validées
 

@@ -85,13 +85,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_memberships_default
 CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant ON tenant_memberships(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user   ON tenant_memberships(user_id);
 
--- Créer automatiquement un profil à l'inscription
+-- Créer automatiquement un profil à l'inscription. `email` est copié depuis
+-- auth.users : sans lui, un compte né d'une connexion Google (qui ne passe
+-- par aucune route applicative avant ce trigger) se retrouvait avec
+-- `profiles.email` vide alors que l'adresse existe bien côté Auth — voir
+-- server/routes/agencySetup.ts::adminRecipients(), qui contournait déjà ce
+-- trou pour un seul appelant plutôt que de le fermer à la source.
+-- `DO UPDATE ... COALESCE` (pas DO NOTHING) : une route applicative qui a
+-- déjà upserté un profil plus riche avant que ce trigger s'exécute (course
+-- possible entre l'INSERT dans auth.users et le retour de l'appel) garde ses
+-- valeurs ; seul un email resté NULL est complété.
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
-  INSERT INTO profiles (id, name)
-  VALUES (NEW.id, NEW.raw_user_meta_data->>'name')
-  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO profiles (id, name, email)
+  VALUES (NEW.id, NEW.raw_user_meta_data->>'name', NEW.email)
+  ON CONFLICT (id) DO UPDATE SET email = COALESCE(profiles.email, EXCLUDED.email);
   RETURN NEW;
 END;
 $$;
