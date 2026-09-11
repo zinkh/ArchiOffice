@@ -1,0 +1,17 @@
+-- Migration: ordres_de_service.type manquante en production
+--
+-- schema.sql déclare `type TEXT DEFAULT 'travaux'` sur ordres_de_service
+-- depuis toujours dans son `CREATE TABLE IF NOT EXISTS`, mais cette clause
+-- ne rejoue rien sur une table déjà existante : sur une base dont la table
+-- avait été créée avant que la colonne `type` ne figure dans ce fichier,
+-- elle est restée absente, sans qu'aucune migration ALTER TABLE ne l'ait
+-- jamais ajoutée après coup.
+--
+-- C'est cette colonne qui distingue un OS "travaux" (marché entreprise, la
+-- valeur par défaut) d'un OS "contrat_moe" (avenant au contrat de maîtrise
+-- d'œuvre, onglet Honoraires de la fiche projet) — src/pages/ProjectDetail.tsx
+-- filtre `ordresDeService` dessus pour construire `moeAvenants`. Son
+-- absence faisait échouer POST /api/ordres_de_service pour les deux types
+-- avec "Could not find the 'type' column of 'ordres_de_service' in the
+-- schema cache".
+ALTER TABLE ordres_de_service ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'travaux';
