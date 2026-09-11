@@ -71,35 +71,6 @@ describe('Situations (+ detail lines)', () => {
   });
 });
 
-describe('CCTPs', () => {
-  it('updates and deletes a CCTP within one tenant', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    const cctpId = 'cctp-1';
-    fakeSupabaseAdmin.seed('cctps', [{ id: cctpId, tenant_id: tenantId, title: 'Lot 1' }]);
-
-    const updated = await request(app).put(`/api/cctps/${cctpId}`).set(authHeader(token)).send({ title: 'Lot 1 (révisé)' });
-    expect(updated.status).toBe(200);
-    expect(updated.body.title).toBe('Lot 1 (révisé)');
-
-    const deleted = await request(app).delete(`/api/cctps/${cctpId}`).set(authHeader(token));
-    expect(deleted.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('cctps').find(c => c.id === cctpId)).toBeUndefined();
-  });
-
-  it('never lets a caller update another tenant\'s CCTP', async () => {
-    const tenantB = makeTenant();
-    const cctpId = 'cctp-b';
-    fakeSupabaseAdmin.seed('cctps', [{ id: cctpId, tenant_id: tenantB, title: 'SECRET-CCTP-B' }]);
-
-    const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
-
-    await request(app).put(`/api/cctps/${cctpId}`).set(authHeader(token)).send({ title: 'Hacked' });
-    expect(fakeSupabaseAdmin.getTable('cctps').find(c => c.id === cctpId)?.title).toBe('SECRET-CCTP-B');
-  });
-});
-
 describe('Custom References', () => {
   it('creates, lists, updates, and deletes a reference within one tenant', async () => {
     const tenantId = makeTenant();

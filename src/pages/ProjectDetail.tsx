@@ -53,7 +53,7 @@ import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
-import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
@@ -172,7 +172,6 @@ export default function ProjectDetail() {
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [specifications, setSpecifications] = useState<Specification[]>([]);
   const [visas, setVisas] = useState<Visa[]>([]);
   const [receptions, setReceptions] = useState<Reception[]>([]);
   const [reserves, setReserves] = useState<Reserve[]>([]);
@@ -243,8 +242,6 @@ export default function ProjectDetail() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
-  const [isAddingSpec, setIsAddingSpec] = useState(false);
-  const [newSpecTitle, setNewSpecTitle] = useState('');
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
   const [isAddingRfi, setIsAddingRfi] = useState(false);
@@ -465,7 +462,6 @@ export default function ProjectDetail() {
         });
         setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
         setInvoices(data.invoices);
-        setSpecifications(data.specifications);
         setOrdresDeService(data.ordres_de_service);
         setVisas(data.visas);
         setReceptions(data.receptions);
@@ -680,18 +676,6 @@ export default function ProjectDetail() {
     }
   };
 
-  const fetchSpecifications = async () => {
-    try {
-      const res = await fetch(`/api/specifications?project_id=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(data.map((s: any) => ({ ...s, is_template: !!s.is_template })));
-      }
-    } catch (err) {
-      console.error('Failed to fetch specifications:', err);
-    }
-  };
-
   const fetchCategories = async () => {
     try {
       const res = await fetch('/api/project_categories');
@@ -769,37 +753,6 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const handleCreateSpec = async () => {
-    if (!id || !newSpecTitle) return;
-    try {
-      const newSpecId = `spec-${Date.now()}`;
-      const res = await fetch('/api/specifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newSpecId,
-          project_id: id,
-          title: newSpecTitle,
-          content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
-          last_updated: new Date().toISOString()
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title: newSpecTitle, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated }]);
-        setNewSpecTitle('');
-        setIsAddingSpec(false);
-      } else {
-        const errorText = await res.text();
-        console.error('Failed to create specification:', res.status, errorText);
-        alert(`Erreur lors de la création du cahier des charges: ${errorText}`);
-      }
-    } catch (err) {
-      console.error('Error creating specification:', err);
-      alert('Une erreur est survenue lors de la création du cahier des charges.');
     }
   };
 

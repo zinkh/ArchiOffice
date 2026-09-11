@@ -292,11 +292,19 @@ describe('documents produits par un agent', () => {
 
 // ── Lecture CCTP / DPGF ────────────────────────────────────────────────────
 describe('lecture du CCTP et du DPGF', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // Le CCTP n'est plus un document séparé : summarizeCctp lit le même arbre
+  // que le DPGF (lots > chapitres > lignes), et en tire le texte porté par
+  // `cctpDescription` — voir CCTPEditor.tsx et CLAUDE.md.
   const cctp = {
     titre: 'CCTP', version: '1', statut: 'draft',
     lots: [{
-      numero: '01', titre: 'Gros œuvre', description: '',
-      chapitres: [{ numero: '1.1', titre: 'Fondations', articles: [{ numero: '1.1.1', designation: 'Semelles', description: 'Béton', unite: 'm3', normes: 'NF' }] }],
+      numero: '01', titre: 'Gros œuvre', cctpDescription: '',
+      chapitres: [{
+        numero: '1.1', titre: 'Fondations', cctpDescription: '',
+        lignes: [{ numero: '1.1.1', designation: 'Semelles', unite: 'm3', cctpDescription: 'Béton NF', type: 'ouvrage' }],
+      }],
     }],
   };
 
@@ -307,8 +315,31 @@ describe('lecture du CCTP et du DPGF', () => {
   });
 
   it('détaille le lot demandé, par numéro comme par titre', () => {
-    expect((summarizeCctp(cctp, '01') as any).lot.chapitres[0].articles[0].designation).toBe('Semelles');
+    expect((summarizeCctp(cctp, '01') as any).lot.chapitres[0].articles[0].contenu).toBe('Béton NF');
     expect((summarizeCctp(cctp, 'gros œuvre') as any).lot.numero).toBe('01');
+  });
+
+  it('read_cctp lit la route /dpgf, pas un endpoint /cctp séparé qui n\'existe plus', async () => {
+    // Régression : read_cctp appelait auparavant GET /api/projects/:id/cctp,
+    // une route morte adossée à une table (`cctps`) qu'aucun éditeur en
+    // production n'écrivait plus — l'outil rapportait donc systématiquement
+    // qu'aucun CCTP n'existait, quel que soit le projet. Le CCTP vit
+    // désormais sur le même document que le DPGF (voir CCTPEditor.tsx).
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () => (String(url).includes('/dpgf') ? cctp : null),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ docs_read_enabled: true });
+
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
+      name: 'read_cctp', args: { project_id: 'proj-1' },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/projects/proj-1/dpgf');
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('/cctp');
+    expect((result.response as any).lots[0].numero).toBe('01');
   });
 
   it('signale un lot inexistant au lieu d\'en inventer un', () => {

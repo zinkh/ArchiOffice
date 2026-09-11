@@ -1,7 +1,8 @@
 // Phase 7 extraction — moved out of server.ts's inline Specifications
-// (CCTP) CRUD section. Distinct from server/routes/cctps.ts, which handles
-// update/delete on a different table (`cctps`) — this one is the
-// `specifications` table.
+// (CCTP) CRUD section, for the `specifications` table. A separate `cctps`
+// table and its own CRUD route existed briefly for the same purpose
+// (server/routes/cctps.ts) but was never the table any live UI wrote to —
+// removed during the CCTP consolidation (see CLAUDE.md).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';

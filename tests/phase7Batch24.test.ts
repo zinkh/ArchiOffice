@@ -295,32 +295,7 @@ describe('Site reports (comptes-rendus de chantier)', () => {
   });
 });
 
-describe('CCTP / DPGF initial creation (project-scoped JSON blob)', () => {
-  it('404s when no CCTP exists yet for a project', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    const res = await request(app).get('/api/projects/p5/cctp').set(authHeader(token));
-    expect(res.status).toBe(404);
-  });
-
-  it('creates then updates a project\'s CCTP blob', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-
-    const created = await request(app).post('/api/projects/p6/cctp').set(authHeader(token)).send({ id: 'new', title: 'CCTP v1' });
-    expect(created.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('cctps').filter(c => c.project_id === 'p6').length).toBe(1);
-
-    const updated = await request(app).post('/api/projects/p6/cctp').set(authHeader(token)).send({ id: created.body.id, title: 'CCTP v2' });
-    expect(updated.status).toBe(200);
-    // Same project → upsert, not a second row.
-    expect(fakeSupabaseAdmin.getTable('cctps').filter(c => c.project_id === 'p6').length).toBe(1);
-
-    const fetched = await request(app).get('/api/projects/p6/cctp').set(authHeader(token));
-    expect(fetched.status).toBe(200);
-    expect(fetched.body.title).toBe('CCTP v2');
-  });
-
+describe('DPGF initial creation (project-scoped JSON blob)', () => {
   it('creates a project\'s DPGF blob, logging activity only on first creation', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

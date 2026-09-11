@@ -140,6 +140,47 @@ function summarizeCostHistory(rows: { designation: string; unite: string; prix_u
     .slice(0, MAX_COST_HISTORY_ROWS);
 }
 
+// Le CCTP n'est plus un document séparé (voir server/routes/dpgf.ts) : son
+// texte technique vit dans les champs `cctpDescription` portés par les lots,
+// chapitres et lignes du même arbre que le DPGF (src/components/pro/CCTPEditor.tsx).
+// Cette fonction rejoue donc, en miniature, la même marche que
+// projectDocTools.ts's summarizeCctp() pour en tirer un extrait par projet,
+// au lieu de lire l'ancienne table `specifications` — vidée de tout contenu
+// CCTP depuis que /specifications est devenue la bibliothèque d'ouvrages.
+function collectCctpText(lignes: any[]): string[] {
+  const out: string[] = [];
+  for (const l of lignes ?? []) {
+    if (l?.cctpDescription) out.push(String(l.cctpDescription));
+    if (Array.isArray(l?.children)) out.push(...collectCctpText(l.children));
+  }
+  return out;
+}
+
+function extractCctpExcerpt(dpgf: any): string | null {
+  const parts: string[] = [];
+  for (const lot of dpgf?.lots ?? []) {
+    if (lot?.cctpDescription) parts.push(String(lot.cctpDescription));
+    for (const chap of lot?.chapitres ?? []) {
+      if (chap?.cctpDescription) parts.push(String(chap.cctpDescription));
+      parts.push(...collectCctpText(chap?.lignes ?? []));
+    }
+  }
+  const text = parts.filter(Boolean).join('\n');
+  return text.trim().length > 0 ? text : null;
+}
+
+function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string; excerpt: string }[] {
+  const excerpts: { title: string; excerpt: string }[] = [];
+  for (const row of rows) {
+    if (excerpts.length >= MAX_CCTP_EXCERPTS) break;
+    const dpgf = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    const text = extractCctpExcerpt(dpgf);
+    if (!text) continue;
+    excerpts.push({ title: dpgf?.titre || 'CCTP sans titre', excerpt: text.slice(0, MAX_CCTP_EXCERPT_CHARS) });
+  }
+  return excerpts;
+}
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
@@ -287,15 +328,16 @@ export async function buildAgentContext(
         })
     );
     fetches.push(
-      supabaseAdmin.from('specifications').select('title, content, is_template')
-        .eq('tenant_id', tenantId).not('content', 'is', null)
-        .order('is_template', { ascending: false }).order('last_updated', { ascending: false })
-        .limit(MAX_CCTP_EXCERPTS)
+      // Un peu plus de lignes que MAX_CCTP_EXCERPTS : `dpgfs` n'a pas de
+      // colonne de dernière mise à jour à trier dessus (voir schema.sql), et
+      // toutes les lignes n'ont pas forcément de texte CCTP renseigné — la
+      // marge donne à summarizeCctpExcerpts de quoi en trouver malgré tout.
+      supabaseAdmin.from('dpgfs').select('data')
+        .eq('tenant_id', tenantId)
+        .limit(MAX_CCTP_EXCERPTS * 10)
         .then((r: any) => {
-          if (r.error) { console.warn('[agent context] firm_knowledge specifications fetch failed:', r.error.message); return; }
-          ctx.firmKnowledge.cctpExcerpts = ((r.data || []) as any[])
-            .filter((s: any) => s.content && String(s.content).trim().length > 0)
-            .map((s: any) => ({ title: s.title, excerpt: String(s.content).slice(0, MAX_CCTP_EXCERPT_CHARS) }));
+          if (r.error) { console.warn('[agent context] firm_knowledge dpgfs (cctp) fetch failed:', r.error.message); return; }
+          ctx.firmKnowledge.cctpExcerpts = summarizeCctpExcerpts((r.data || []) as any[]);
         })
     );
   }

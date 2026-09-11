@@ -12,7 +12,6 @@ import { registerBpuRoutes } from "./server/routes/bpu";
 import { registerPriceLibraryRoutes } from "./server/routes/priceLibrary";
 import { registerReferentielRoutes } from "./server/routes/referentiels";
 import { registerSituationRoutes } from "./server/routes/situations";
-import { registerCctpRoutes } from "./server/routes/cctps";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
@@ -848,7 +847,6 @@ export async function createApp() {
   registerPriceLibraryRoutes(app, { supabaseAdmin, getTenantId });
   registerReferentielRoutes(app, { supabaseAdmin });
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerCctpRoutes(app, { supabaseAdmin, getTenantId });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -921,8 +919,6 @@ export async function createApp() {
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
   // above alongside the other extracted domains.
-
-  // Phase 7: CCTPs update/delete now live in server/routes/cctps.ts.
 
   // Phase 7: Custom References now live in server/routes/customReferences.ts.
 

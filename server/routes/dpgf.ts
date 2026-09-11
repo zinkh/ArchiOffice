@@ -6,8 +6,17 @@
 // just never extracted alongside them. GET/POST /api/projects/:projectId/dpgf
 // joins in a later lot: a different route shape (one JSON blob per project,
 // upserted wholesale) than the per-field CRUD below, but the same `dpgfs`
-// table — same relationship as GET/POST /api/projects/:projectId/cctp to
-// server/routes/cctps.ts's per-field CCTP CRUD.
+// table.
+//
+// This is also, since the CCTP consolidation (see CLAUDE.md's "Le CCTP n'est
+// pas un document séparé" section), the ONLY document endpoint the CCTP
+// editor talks to: CCTPEditor.tsx writes `cctpDescription`/`cctpOnly` fields
+// straight onto this same lots/chapitres/lignes tree (« le CCTP partage le
+// même dpgf.lots ») rather than a separate document. There used to be a
+// parallel `cctps` table with its own GET/POST /api/projects/:projectId/cctp
+// route (server/routes/cctps.ts, now removed) that no production UI ever
+// wrote to through the live CCTPEditor — see that CLAUDE.md section for why
+// the table itself is left in place, unused, rather than dropped.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';

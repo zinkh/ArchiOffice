@@ -758,6 +758,55 @@ l'autosave du document n'efface pas un import fait entre-temps.
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
 
+### Le CCTP n'est pas un document séparé
+
+Le codebase a longtemps porté trois chemins parallèles pour le CCTP, dont
+deux morts ou cassés :
+
+1. **Le vrai** : `CCTPEditor.tsx` édite le même arbre que le DPGF
+   (`lots > chapitres > lignes`, `GET/POST /api/projects/:projectId/dpgf`,
+   `server/routes/dpgf.ts`) — chaque lot, chapitre et article porte un champ
+   `cctpDescription` (le texte technique) et un booléen `cctpOnly` (masqué du
+   DPGF). C'est la seule table réellement écrite en production.
+2. **Une table `cctps` séparée**, avec sa propre route
+   `GET/POST /api/projects/:projectId/cctp` (`server/routes/cctps.ts`, aussi
+   `PUT/DELETE /api/cctps/:id`, colonnes qui n'existaient même pas sur la
+   table) et son propre hook frontend (`src/hooks/useCCTP.ts`,
+   `src/types/cctp.ts`) — inutilisé par tout composant en production
+   (`CCTPEditor.tsx` ne l'importe pas), sauf UN outil d'agent : `read_cctp`
+   (`packages/archioffice-agents/src/server/projectDocTools.ts`) lisait
+   cette route morte et rapportait donc systématiquement qu'aucun CCTP
+   n'existait, quel que soit le projet demandé — un bug utilisateur réel,
+   pas seulement du code mort.
+3. **L'ancienne table `specifications`**, qui servait de CCTP avant que
+   `/specifications` ne devienne la bibliothèque d'ouvrages (voir plus bas) ;
+   `packages/archioffice-agents/src/server/context.ts`'s `firmKnowledge`
+   (scope `firm_knowledge`) y puisait encore ses `cctpExcerpts` — du contenu
+   qui ne reçoit plus d'écriture depuis ce changement, donc de plus en plus
+   périmé au fil du temps.
+
+**Correction : `read_cctp` lit maintenant la même route que `read_dpgf`**
+(`/api/projects/:projectId/dpgf`) et `summarizeCctp()` en extrait le texte
+`cctpDescription` au lieu des champs `description`/`prescriptionsTechniques`
+d'un type `Article` qui ne correspondait à aucune donnée réelle.
+`firmKnowledge.cctpExcerpts` lit désormais `dpgfs` de la même façon (une
+fonction dédiée, `extractCctpExcerpt()`, rejoue la même marche que
+`summarizeCctp()` en miniature) plutôt que la table `specifications`.
+
+**Le code mort a été supprimé** : `server/routes/cctps.ts` (et son
+enregistrement dans `server.ts`), `src/hooks/useCCTP.ts`, `src/types/cctp.ts`,
+et le code CCTP inatteignable de `ProjectDetail.tsx`
+(`fetchSpecifications`/`handleCreateSpec`, jamais appelés depuis un rendu, et
+l'état `specifications`/`isAddingSpec`/`newSpecTitle` qui allait avec).
+
+**La table `cctps` elle-même n'a pas été supprimée**, à dessein : une
+instance de production en porte une ligne, écrite par l'ancien hook mort —
+la retirer sans savoir si un cabinet compte dessus serait une perte de
+données pour gagner une ligne dans `schema.sql`. Elle reste donc dans
+`server/syncTables.ts` et `supabase/migrate_add_sync_infra.sql`, vide de
+toute route qui l'écrit ou la lit désormais — même traitement que la table
+`specifications` plus bas, conservée pour la même raison.
+
 ### Plusieurs cabinets pour une même personne
 
 Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un
