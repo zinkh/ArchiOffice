@@ -12,7 +12,7 @@ import type { ContratMOE, ContratMOEMission, ContratCotraitant, ContratSousTrait
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
-import { CONTACT_CATEGORY_CLIENT } from '../lib/contactCategories';
+import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_ENTREPRISE, CONTACT_CATEGORY_COTRAITANT } from '../lib/contactCategories';
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -270,12 +270,14 @@ function ContratModal({
   projects,
   onSave,
   onClose,
+  onContactCreated,
 }: {
   contrat: Partial<ContratMOE> | null;
   contacts: Contact[];
   projects: Project[];
   onSave: (c: Partial<ContratMOE>) => Promise<void>;
   onClose: () => void;
+  onContactCreated: (c: Contact) => void;
 }) {
   const [form, setForm] = useState<Partial<ContratMOE>>(() => contrat ? {
     ...contrat,
@@ -295,6 +297,7 @@ function ContratModal({
   });
   const [saving, setSaving] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [pendingContactTarget, setPendingContactTarget] = useState<{ type: 'cotraitant' | 'sous_traitant'; id: string } | null>(null);
   const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'equipe' | 'clauses'>('general');
 
   const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
@@ -620,7 +623,7 @@ function ContratModal({
                                     const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
                                     updateCotraitant(ct.id, 'contact_id', id);
                                     updateCotraitant(ct.id, 'contact_name', name);
-                                  }} onAddNew={() => {}} inputClassName="text-xs py-1" />
+                                  }} onAddNew={() => { setPendingContactTarget({ type: 'cotraitant', id: ct.id }); setShowContactModal(true); }} inputClassName="text-xs py-1" />
                                 </td>
                                 <td className="px-2 py-1.5">
                                   <input className="w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle} value={ct.specialty || ''} onChange={e => updateCotraitant(ct.id, 'specialty', e.target.value)} placeholder="ex : Structure" />
@@ -688,7 +691,7 @@ function ContratModal({
                                     const name = c ? (c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : '';
                                     updateSousTraitant(st.id, 'contact_id', id);
                                     updateSousTraitant(st.id, 'contact_name', name);
-                                  }} onAddNew={() => {}} inputClassName="text-xs py-1" />
+                                  }} onAddNew={() => { setPendingContactTarget({ type: 'sous_traitant', id: st.id }); setShowContactModal(true); }} inputClassName="text-xs py-1" />
                                 </td>
                                 <td className="px-2 py-1.5">
                                   <input className="w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400" style={inputStyle} value={st.specialty || ''} onChange={e => updateSousTraitant(st.id, 'specialty', e.target.value)} placeholder="ex : SPS" />
@@ -777,11 +780,26 @@ function ContratModal({
       {showContactModal && (
         <ContactModal
           isOpen={showContactModal}
-          initialCategory={CONTACT_CATEGORY_CLIENT}
-          onClose={() => setShowContactModal(false)}
+          initialCategory={
+            pendingContactTarget?.type === 'cotraitant' ? CONTACT_CATEGORY_COTRAITANT
+              : pendingContactTarget?.type === 'sous_traitant' ? CONTACT_CATEGORY_ENTREPRISE
+              : CONTACT_CATEGORY_CLIENT
+          }
+          onClose={() => { setShowContactModal(false); setPendingContactTarget(null); }}
           onSuccess={(c) => {
-            set('client_id', c.id);
+            onContactCreated(c);
+            const name = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+            if (pendingContactTarget?.type === 'cotraitant') {
+              updateCotraitant(pendingContactTarget.id, 'contact_id', c.id);
+              updateCotraitant(pendingContactTarget.id, 'contact_name', name);
+            } else if (pendingContactTarget?.type === 'sous_traitant') {
+              updateSousTraitant(pendingContactTarget.id, 'contact_id', c.id);
+              updateSousTraitant(pendingContactTarget.id, 'contact_name', name);
+            } else {
+              set('client_id', c.id);
+            }
             setShowContactModal(false);
+            setPendingContactTarget(null);
           }}
         />
       )}
@@ -1086,6 +1104,7 @@ export default function Contrats() {
             projects={projects}
             onSave={handleSave}
             onClose={closeModal}
+            onContactCreated={(c) => setContacts(prev => [...prev, c])}
           />
         )}
       </AnimatePresence>

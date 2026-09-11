@@ -158,6 +158,16 @@ export async function createApp() {
   //    resource (map tiles, Supabase Storage images) that doesn't send back
   //    a matching CORP/CORS header — this app relies on exactly that kind of
   //    loading, so COEP stays off.
+  //  - crossOriginOpenerPolicy: helmet's default ('same-origin') severs
+  //    `window.opener` the moment a popup THIS app opened navigates to a
+  //    different origin — exactly what the Google Contacts OAuth popup does
+  //    (src/lib/googleAuth.ts opens a popup that goes to accounts.google.com
+  //    and back). The popup's callback page then finds `window.opener` null
+  //    and its postMessage back to the opener silently no-ops, so the sync
+  //    never completes even though the popup itself reports success.
+  //    'same-origin-allow-popups' keeps the isolation this header is for
+  //    (protection from windows that open *this* page) while letting popups
+  //    *we* open keep their opener reference.
   app.use(helmet({
     contentSecurityPolicy: {
       useDefaults: false,
@@ -165,6 +175,7 @@ export async function createApp() {
     },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   }));
 
   // CORS headers — must run before any redirect so that redirect responses also
