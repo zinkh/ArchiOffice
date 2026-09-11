@@ -8,13 +8,10 @@
 // Ce fichier est chargé dans tous les cas ; il ne fait rien si le pont
 // Electron est absent, c'est-à-dire dans un navigateur.
 import { apiFetch } from './api';
+import { desktopBridge, isDesktopClient } from './desktopBridge';
 
-export interface DesktopBridge {
-  isDesktop: boolean;
-  notify: (payload: { title: string; body?: string; url?: string }) => Promise<boolean>;
-  setBadgeCount: (count: number) => Promise<boolean>;
-  onNotificationClick: (callback: (url: string) => void) => () => void;
-}
+export { desktopBridge, isDesktopClient };
+export type { DesktopBridge } from './desktopBridge';
 
 interface PendingNotification {
   id: string;
@@ -29,15 +26,6 @@ interface PendingNotification {
 // Assez court pour qu'une alerte reste utile, assez long pour rester
 // négligeable : une requête par minute sur une route qui lit un index.
 const POLL_INTERVAL_MS = 60 * 1000;
-
-export function desktopBridge(): DesktopBridge | null {
-  const bridge = (window as any).archiofficeDesktop;
-  return bridge?.isDesktop ? (bridge as DesktopBridge) : null;
-}
-
-export function isDesktopClient(): boolean {
-  return desktopBridge() !== null;
-}
 
 /**
  * Démarre le relevé périodique. Renvoie la fonction d'arrêt.

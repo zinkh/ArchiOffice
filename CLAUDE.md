@@ -149,6 +149,7 @@ Apply migrations sequentially in filename order when setting up a new instance.
 
 - `src/db.ts` — Dexie (IndexedDB) schema for offline caching and sync
 - `mcp-server.ts` — Uses `better-sqlite3` (`archimanager.db`) for local CLI tooling
+- `electron/dataLocation.cjs` — lets the desktop client choose where the local Postgres data and uploaded documents live (see « Emplacement des données (client Electron) » below)
 
 ## Architecture Conventions
 
@@ -775,6 +776,53 @@ soit la préférence d'envoi de mail de la règle) et les mentions `@` de
 `server/routes/activityFeed.ts`. Le filtrage propre au canal est personnel et
 non par cabinet : `profiles.notification_prefs` (`{ muted: [catégories] }`),
 réglé depuis `src/components/PushNotificationsCard.tsx`.
+
+### Emplacement des données (client Electron)
+
+Historiquement, la base Postgres embarquée (`pgdata/`) et les fichiers
+uploadés (`storage/<bucket>/…`) vivaient sous un seul dossier imposé par le
+système (`app.getPath('userData')`). `electron/dataLocation.cjs` laisse
+choisir les deux **séparément**, typiquement pour mettre les documents sur un
+disque réseau ou un dossier partagé pendant que la base reste locale.
+
+**Le choix n'est proposé qu'une seule fois, au tout premier lancement**,
+avant que la moindre donnée n'existe — le déplacer ensuite reviendrait à
+migrer un Postgres déjà peuplé (arrêt propre, copie intégrale vérifiée,
+reprise), volontairement hors périmètre. Un poste déjà installé avant
+l'existence de ce choix (repéré par un `pgdata/` déjà présent à l'emplacement
+historique) n'est donc jamais reposé la question : `resolveDataLocation()`
+lui réécrit silencieusement `data-location.json` sur son emplacement
+d'origine. Ce fichier-pointeur reste, lui, toujours à l'emplacement standard
+du système — il ne contient que deux chemins, rien qui justifie de le
+déplacer aussi.
+
+**La base de données doit rester sur un disque local.** Un Postgres dont le
+répertoire de données vit dans un dossier synchronisé (Drive, Dropbox,
+OneDrive…) ou sur un partage réseau s'expose à des écritures partielles et
+des verrous que ces systèmes ne respectent pas comme un disque local — un
+risque réel de base corrompue. Le dialogue de premier lancement le dit
+explicitement ; rien ne l'empêche techniquement (détecter un lecteur réseau
+de façon fiable, tous OS confondus, n'a pas de solution simple), c'est
+délibéré : mieux vaut prévenir que bloquer sur une détection qui se
+tromperait dans un sens ou dans l'autre. Les documents, eux, n'ont pas cette
+contrainte : ce sont de simples fichiers.
+
+`server/offlineAccount.ts::storageDir()` lit `OFFLINE_STORAGE_DIR`
+(repli sur `OFFLINE_DATA_DIR/storage` si absent — rétrocompatible avec un
+poste installé avant cette variable) ; tout le reste (compte local, secret
+JWT, état du lien cloud) continue de vivre sous `OFFLINE_DATA_DIR` via
+`getDataDir()`, inchangé. `server/offlineGateway.ts`'s `/storage/v1` passe
+uniformément par `storageDir(bucket)`, donc ce seul changement couvre tous
+les buckets (documents, logos, photos de réunion, CV…) sans les lister un
+par un.
+
+Les chemins choisis sont lus par le renderer via le pont IPC
+(`src/lib/desktopBridge.ts`, affiché en lecture seule dans Réglages), jamais
+via l'API HTTP : ce sont des chemins du poste, pas une donnée du cabinet.
+`openDataFolder(kind)` n'accepte que `'db' | 'storage'`, jamais un chemin
+fourni par le renderer — c'est `main.cjs` qui résout le chemin réel depuis sa
+propre variable interne, pour ne jamais ouvrir un chemin arbitraire à la
+demande du renderer.
 
 ### Maps
 

@@ -7,13 +7,14 @@ import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
   IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
-  IconArchive, IconCloud
+  IconArchive, IconCloud, IconFolder, IconFolderOpen
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
+import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
@@ -346,6 +347,11 @@ export default function Settings() {
   const [isCancelingDeletion, setIsCancelingDeletion] = useState(false);
   const [isExportingTenant, setIsExportingTenant] = useState(false);
 
+  // Client Electron — emplacement local de la base et des documents, choisi
+  // au premier lancement (electron/dataLocation.cjs). Lu via le pont IPC,
+  // pas l'API HTTP : ce sont des chemins du poste, pas une donnée du cabinet.
+  const [dataLocation, setDataLocation] = useState<{ dbDataDir: string; storageDataDir: string } | null>(null);
+
   // Client Electron "compte local" — bascule vers un compte cloud existant
   const [cloudLinked, setCloudLinked] = useState<boolean | null>(null);
   const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
@@ -453,6 +459,12 @@ export default function Settings() {
         checkCloudLinkStatus()
           .then((s) => setCloudLinked(s.linked))
           .catch(() => setCloudLinked(null));
+      }
+      const bridge = desktopBridge();
+      if (bridge) {
+        bridge.getDataLocation()
+          .then((loc) => { if (loc.dbDataDir && loc.storageDataDir) setDataLocation(loc); })
+          .catch(() => {});
       }
     }
     if (currentUser) {
@@ -2305,6 +2317,50 @@ export default function Settings() {
               {isExportingTenant ? 'Génération de l\'archive...' : 'Exporter toutes les données du cabinet'}
             </button>
           </div>
+
+          {/* ── Client Electron — emplacement local des données ── */}
+          {dataLocation && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconFolder size={15} /> Emplacement des données locales
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Choisi lors de l'installation de ce poste, une fois pour toutes. Pour en changer, réinstallez
+                l'application sur un poste neuf : déplacer une base de données déjà en service comporte un risque
+                réel de perte de données que l'application ne peut pas prendre en charge automatiquement.
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>Base de données</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }} title={dataLocation.dbDataDir}>{dataLocation.dbDataDir}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => desktopBridge()?.openDataFolder('db')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
+                    style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    <IconFolderOpen size={13} /> Ouvrir
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>Documents (devis, plans, photos…)</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }} title={dataLocation.storageDataDir}>{dataLocation.storageDataDir}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => desktopBridge()?.openDataFolder('storage')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
+                    style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    <IconFolderOpen size={13} /> Ouvrir
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Client Electron "compte local" — bascule vers un compte cloud ── */}
           {isOfflineBuild() && cloudLinked === false && (
