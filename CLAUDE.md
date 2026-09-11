@@ -273,10 +273,10 @@ pointer vers un projet d'un autre cabinet, tant que rien ne vérifie son
 appartenance avant l'écriture. `server/assertTenantEntity.ts` est le helper
 générique introduit pour ça (`assertTenantEntity(supabaseAdmin, table, id,
 tenantId): Promise<boolean>`) ; `server/routes/invoices.ts` l'utilise sur
-`project_id` en création et en modification. D'autres endroits acceptent une
-référence du même genre sans ce contrôle (`project_id` sur
-`server/routes/proposals.ts`, entre autres) — à traiter au fur et à mesure
-avec le même helper plutôt qu'en le dupliquant.
+`project_id` en création et en modification, et `server/routes/proposals.ts`
+sur `client_id` (un `contacts.id`) aux mêmes deux endroits. D'autres endroits
+acceptent une référence du même genre sans ce contrôle — à traiter au fur et
+à mesure avec le même helper plutôt qu'en le dupliquant.
 
 ### AI (provider abstraction)
 

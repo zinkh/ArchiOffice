@@ -240,9 +240,17 @@ export async function createApp() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Debug middleware for API routes
+  // Debug middleware for API routes — logs the path only, never the query
+  // string: OAuth callbacks (Zoho, Gmail, Outlook, Google Calendar) arrive as
+  // /api/.../callback?code=...&state=..., and logging req.originalUrl as-is
+  // put that authorization code and state nonce in plaintext server logs.
+  // req.path can't replace it here: this middleware mounts on "/api/*", and
+  // Express strips the matched prefix from req.path for a path-mounted
+  // app.use (see the AUTH_EXEMPT matching below for the same caveat) — it
+  // would log "/zoho/callback", not "/api/zoho/callback". Splitting
+  // req.originalUrl on "?" keeps the full path without the query string.
   app.use("/api/*", (req, res, next) => {
-    console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
+    console.log(`[API DEBUG] ${req.method} ${req.originalUrl.split("?")[0]}`);
     next();
   });
 

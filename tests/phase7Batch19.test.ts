@@ -47,6 +47,31 @@ describe('Proposals', () => {
     expect(specs.length).toBe(1);
   });
 
+  it('rejects creating a proposal against another tenant\'s client_id', async () => {
+    const otherTenant = makeTenant();
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-other', tenant_id: otherTenant, first_name: 'Autre', last_name: 'Cabinet' }]);
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/proposals').set(authHeader(token)).send({ title: 'Devis suspect', client_id: 'contact-other' });
+
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('proposals').some(pr => pr.client_id === 'contact-other')).toBe(false);
+  });
+
+  it('rejects re-attaching a proposal to another tenant\'s client_id on update', async () => {
+    const otherTenant = makeTenant();
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-other-2', tenant_id: otherTenant, first_name: 'Autre', last_name: 'Cabinet' }]);
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('proposals', [{ id: 'p-reparent', tenant_id: tenantId, title: 'Devis', status: 'Draft' }]);
+
+    const res = await request(app).put('/api/proposals/p-reparent').set(authHeader(token)).send({ title: 'Devis', client_id: 'contact-other-2' });
+
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('proposals').find(pr => pr.id === 'p-reparent')?.client_id).not.toBe('contact-other-2');
+  });
+
   it('creates a project (and copies specialties to cotraitants) when a proposal is accepted', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
