@@ -1190,6 +1190,8 @@ export interface NoteHonorairePhase {
 export interface NoteHonoraireCotraitant {
   contact_id?: string;
   nom: string;
+  /** Ventilation par mission (ESQ, APS...) — même détail que la ventilation agence. */
+  phases?: NoteHonorairePhase[];
   montant_ht: number;
   tva_rate: number;
   montant_ttc: number;
@@ -1198,6 +1200,8 @@ export interface NoteHonoraireCotraitant {
 export interface NoteHonoraireSousTraitant {
   contact_id?: string;
   nom: string;
+  /** Ventilation par mission (ESQ, APS...) — même détail que la ventilation agence. */
+  phases?: NoteHonorairePhase[];
   montant_ht: number;
   tva_rate: number;
   montant_ttc: number;
@@ -1296,6 +1300,14 @@ export interface NoteHonoraires {
   montant_ttc: number;
   cotraitants_facturation?: NoteHonoraireCotraitant[];
   sous_traitants_facturation?: NoteHonoraireSousTraitant[];
+  /** Cumul agence hors cette note, instantané pris à l'enregistrement. */
+  montant_cumule_precedent_ht?: number;
+  /** Cumul agence note comprise (montant_cumule_precedent_ht + montant_ht). */
+  montant_cumule_ht?: number;
+  /** % du contrat MOE (honoraires révisés) facturé par l'agence, note comprise. */
+  pct_facturation_cumule?: number;
+  /** Facture brouillon générée depuis cette note (agence uniquement), s'il y en a une. */
+  invoice_id?: string | null;
   notes?: string;
   created_at?: string;
   updated_at?: string;
