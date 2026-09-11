@@ -7,6 +7,15 @@
 // only the read lookups had never been extracted).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
+
+/** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
+async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
+  for (const item of list || []) {
+    if (item?.contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', item.contact_id, tenantId))) return false;
+  }
+  return true;
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -102,6 +111,11 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       // Generate project code — format PREFIX[-]YEAR[-]NNN, each dash and the
       // digit count of NNN independently configurable per tenant (Onboarding
       // wizard / Settings: num_prefix_affaire, num_affaire_sep_prefix,
@@ -185,6 +199,11 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       const { error: ue } = await supabaseAdmin.from('projects').update({
         name, client, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,

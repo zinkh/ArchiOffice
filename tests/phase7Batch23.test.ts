@@ -18,6 +18,7 @@ describe('Plans', () => {
   it('creates, lists, and deletes a plan', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/plans').set(authHeader(token))
       .field('project_id', 'p1').field('name', 'Plan RDC')
@@ -54,6 +55,7 @@ describe('Documents', () => {
   it('uploads a document, seeding its first version', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const res = await request(app).post('/api/documents').set(authHeader(token))
       .field('project_id', 'p1').field('name', 'CCTP Lot 01').field('category', 'CCTP')

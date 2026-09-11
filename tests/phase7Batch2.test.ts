@@ -18,6 +18,7 @@ describe('DPGF (items + parents)', () => {
   it('creates a DPGF and an item within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const dpgf = await request(app).post('/api/dpgfs').set(authHeader(token)).send({ project_id: 'p1', title: 'DPGF v1', version: '1' });
     expect(dpgf.status).toBe(201);
@@ -47,6 +48,7 @@ describe('Situations (+ detail lines)', () => {
   it('creates a situation and a detail line within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const situation = await request(app).post('/api/situations').set(authHeader(token)).send({ project_id: 'p1', numero: 1 });
     expect(situation.status).toBe(201);
@@ -142,6 +144,7 @@ describe('Project Members', () => {
   it('adds and removes a member within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tenant_memberships', [{ id: 'mem-u1', user_id: 'u1', tenant_id: tenantId, is_default: true }]);
 
     const added = await request(app).post('/api/projects/p1/members').set(authHeader(token)).send({ user_id: 'u1', role: 'lead' });
     expect(added.status).toBe(201);

@@ -10,6 +10,7 @@
 // server/routes/cctps.ts's per-field CCTP CRUD.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
 
 export interface RouteDeps {
@@ -204,6 +205,12 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (dpgf_id && !(await assertTenantEntity(supabaseAdmin, 'dpgfs', dpgf_id, tenantId))) {
+        return res.status(400).json({ error: "DPGF introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items')
         .insert({ id, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price })
@@ -247,6 +254,9 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, title, version } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgfs').insert({ id, project_id, title, version }).select().single();
       if (error) throw error;

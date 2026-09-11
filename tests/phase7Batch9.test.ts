@@ -246,6 +246,7 @@ describe('Milestones', () => {
   it('creates, filters by tender_id, updates, and deletes a milestone', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tenders', [{ id: 't1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/milestones').set(authHeader(token)).send({ tender_id: 't1', title: 'Dépôt du dossier', due_date: '2026-06-15' });
     expect(created.status).toBe(201);

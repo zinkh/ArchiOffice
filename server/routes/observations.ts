@@ -12,6 +12,7 @@
 // tenant before inserting the link row.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
@@ -51,6 +52,15 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { lot_id, contact_id, texte, statut, due_date, created_report_id, type, urgence } = req.body;
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (created_report_id && !(await assertTenantEntity(supabaseAdmin, 'site_reports', created_report_id, tenantId))) {
+        return res.status(400).json({ error: "Compte rendu introuvable pour ce cabinet." });
+      }
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
       const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
       const id = `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -78,6 +88,15 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { lot_id, contact_id, texte, statut, due_date, resolved_report_id, type, urgence, photos } = req.body;
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (statut === 'Levée' && resolved_report_id && !(await assertTenantEntity(supabaseAdmin, 'site_reports', resolved_report_id, tenantId))) {
+        return res.status(400).json({ error: "Compte rendu introuvable pour ce cabinet." });
+      }
       const update: any = {};
       if (lot_id !== undefined) update.lot_id = lot_id || null;
       if (contact_id !== undefined) update.contact_id = contact_id || null;

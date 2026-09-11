@@ -5,6 +5,7 @@
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -27,6 +28,12 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, title, date, status, comments, lot_id } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       let document_url = req.body.document_url || null;
       if (req.file) {
@@ -45,6 +52,9 @@ export function registerVisaRoutes(app: Express, { supabaseAdmin, getTenantId, u
     try {
       const tenantId = await getTenantId(req.user.id);
       const { title, date, status, comments, lot_id } = req.body;
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
       const updateFields: any = { title, date, status, comments, lot_id: lot_id || null };
       if (req.file) {
         const storagePath = `${tenantId}/${req.body.project_id || 'general'}/visas/${req.params.id}/${sanitizeFilename(req.file.originalname)}`;

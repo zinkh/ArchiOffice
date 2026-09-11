@@ -1,6 +1,7 @@
 // Phase 7 extraction — moved out of server.ts's "Reception Routes" section,
 // part of the "suivi de chantier" cluster (see ordresDeService.ts).
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -22,6 +23,9 @@ export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, date, type, has_reserves, reserves_count, document_url, reference_pv, lieu, signataires, observations, date_limite_levee, pv_valide } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await supabaseAdmin.from('receptions').insert({
         id: crypto.randomUUID(), tenant_id: tenantId, project_id, date, type, has_reserves: !!has_reserves, reserves_count: reserves_count || 0, document_url,
         reference_pv: reference_pv || null, lieu: lieu || null, signataires: signataires || null,

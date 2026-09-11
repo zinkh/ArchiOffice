@@ -3,6 +3,7 @@
 // mechanism as OPR `reserves` (server/routes/reserves.ts), kept in a
 // separate table since OPR and GPA reserves are distinct tracking sets.
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -31,6 +32,15 @@ export function registerGpaReserveRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (reception_id && !(await assertTenantEntity(supabaseAdmin, 'receptions', reception_id, tenantId))) {
+        return res.status(400).json({ error: "Réception introuvable pour ce cabinet." });
+      }
+      if (plan_id && !(await assertTenantEntity(supabaseAdmin, 'plans', plan_id, tenantId))) {
+        return res.status(400).json({ error: "Plan introuvable pour ce cabinet." });
+      }
       const { data: lastRow } = await supabaseAdmin.from('gpa_reserves').select('number').eq('tenant_id', tenantId).eq('project_id', project_id).order('number', { ascending: false }).limit(1).single();
       const nextNumber = ((lastRow as any)?.number || 0) + 1;
       const id = bodyId || crypto.randomUUID();
@@ -61,6 +71,9 @@ export function registerGpaReserveRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y } = req.body;
+      if (plan_id && !(await assertTenantEntity(supabaseAdmin, 'plans', plan_id, tenantId))) {
+        return res.status(400).json({ error: "Plan introuvable pour ce cabinet." });
+      }
       const { error } = await supabaseAdmin.from('gpa_reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y }).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y });

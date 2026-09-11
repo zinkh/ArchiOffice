@@ -5,6 +5,7 @@
 // left off every prior bilan's "remaining" list by oversight rather than
 // deliberate deferral.
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -38,6 +39,9 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       } = req.body || {};
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const { data, error } = await supabaseAdmin.from('ordres_de_service').insert({
         id, tenant_id: tenantId, project_id, os_number, march_number, title, date, description, lot,

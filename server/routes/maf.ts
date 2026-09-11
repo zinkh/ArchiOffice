@@ -5,6 +5,7 @@
 // self-contained: no dependency on any other route module.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -88,6 +89,9 @@ export function registerMafRoutes(app: Express, { supabaseAdmin, getTenantId }: 
   app.post('/api/maf/v1/entries', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (req.body?.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', req.body.project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'maf_project_data')
         .insert({ ...req.body })
         .select()
@@ -103,6 +107,9 @@ export function registerMafRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      if (req.body?.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', req.body.project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'maf_project_data')
         .update(req.body)
         .eq('id', id)

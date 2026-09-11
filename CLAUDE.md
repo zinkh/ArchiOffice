@@ -282,11 +282,32 @@ RÉFÉRENCER — un `project_id` accepté tel quel dans le corps d'une requête 
 pointer vers un projet d'un autre cabinet, tant que rien ne vérifie son
 appartenance avant l'écriture. `server/assertTenantEntity.ts` est le helper
 générique introduit pour ça (`assertTenantEntity(supabaseAdmin, table, id,
-tenantId): Promise<boolean>`) ; `server/routes/invoices.ts` l'utilise sur
-`project_id` en création et en modification, et `server/routes/proposals.ts`
-sur `client_id` (un `contacts.id`) aux mêmes deux endroits. D'autres endroits
-acceptent une référence du même genre sans ce contrôle — à traiter au fur et
-à mesure avec le même helper plutôt qu'en le dupliquant.
+tenantId): Promise<boolean>`).
+
+Balayage complet effectué sur `server/routes/*.ts` : tout `POST`/`PUT` qui
+acceptait un identifiant de clé étrangère depuis le corps de la requête
+(`project_id`, `contact_id`/`client_id`, `tender_id`, `proposal_id`,
+`reception_id`, `plan_id`, `situation_id`, `dpgf_item_id`, `dpgf_id`,
+`marche_id`, `assignee_id`/`user_id`) vérifie désormais son appartenance au
+cabinet avant l'écriture — `invoices.ts`, `proposals.ts`, `tenders.ts`,
+`timeTracking.ts`, `meetings.ts`, `observations.ts`, `visas.ts`,
+`specifications.ts`, `tasks.ts`, `reserves.ts`, `rfis.ts`, `situations.ts`,
+`projects.ts`, `receptions.ts`, `plans.ts`, `priceLibrary.ts`,
+`projectMembers.ts`, `ordresDeService.ts`, `permits.ts`, `maf.ts`,
+`marchesEntreprises.ts`, `meetingAttendees.ts`, `milestones.ts`,
+`gpaReserves.ts`, `documents.ts`, `dpgf.ts`. `assignee_id`/`user_id` (une
+personne, pas une ligne `tenant_id`-scopée comme les autres) se vérifie via
+`findMembership()` (`server/tenantMemberships.ts`), pas `assertTenantEntity`.
+
+Volontairement laissés de côté : les intégrations de synchro externe
+(`odoo.ts`, `zohoBooks.ts`, `zohoInvoice.ts`, `ragic.ts`, `gmailSync.ts`,
+`googleCalendarSync.ts`, `outlookSync.ts`) qui écrivent des FK à partir de
+leurs propres lignes locales déjà tenant-scopées — un risque différent, pas
+un oubli — et les cas où `project_id` vient d'un paramètre d'URL déjà validé
+en amont (routes imbriquées sous `/api/projects/:projectId/...`), qui ne
+sont pas la même faille : c'est l'identifiant RÉFÉRENCÉ depuis le corps
+d'une requête qui manquait de contrôle, pas celui de la ressource visée par
+l'URL elle-même.
 
 ### AI (provider abstraction)
 

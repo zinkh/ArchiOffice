@@ -18,6 +18,7 @@ describe('GET /api/storage/signed-url', () => {
   it('resolves a document belonging to the caller\'s own tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const uploaded = await request(app).post('/api/documents').set(authHeader(token))
       .field('project_id', 'p1').field('name', 'CCTP Lot 01').field('category', 'CCTP')
@@ -50,6 +51,7 @@ describe('GET /api/storage/signed-url', () => {
   it('refuses to resolve another tenant\'s document', async () => {
     const tenantA = makeTenant();
     const { token: tokenA } = makeUser(tenantA);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantA }]);
     const uploaded = await request(app).post('/api/documents').set(authHeader(tokenA))
       .field('project_id', 'p1').field('name', 'Secret').field('category', 'CCTP')
       .attach('file', Buffer.from('%PDF-fake'), 'secret.pdf');

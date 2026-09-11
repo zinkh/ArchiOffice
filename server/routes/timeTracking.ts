@@ -9,6 +9,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { listTenantProfiles } from '../tenantMemberships';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -33,6 +34,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, description } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data: open } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('id').eq('user_id', req.user.id).is('end_time', null).maybeSingle();
       if (open) return res.status(409).json({ error: 'Vous êtes déjà pointé(e)' });
       const id = crypto.randomUUID();
@@ -93,6 +97,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const { entry_date, start_time, end_time, project_id, description } = req.body;
       if (!entry_date || !start_time || !end_time) return res.status(400).json({ error: 'entry_date, start_time et end_time requis' });
       if (new Date(end_time) <= new Date(start_time)) return res.status(400).json({ error: "L'heure de fin doit être après l'heure de début" });
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').insert({
@@ -113,6 +120,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (!existing) return res.status(404).json({ error: 'Entrée introuvable' });
       await requireManagerOf(tenantId, existing.user_id, req.user.id);
       const { entry_date, start_time, end_time, project_id, description } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').update({
         entry_date, start_time, end_time: end_time || null, project_id: project_id || null,
         description: description || null, updated_at: new Date().toISOString(),

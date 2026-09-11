@@ -6,6 +6,7 @@
 // Project Phase History modules from the previous batch.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
@@ -51,6 +52,15 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (proposal_id && !(await assertTenantEntity(supabaseAdmin, 'proposals', proposal_id, tenantId))) {
+        return res.status(400).json({ error: "Devis introuvable pour ce cabinet." });
+      }
+      if (tender_id && !(await assertTenantEntity(supabaseAdmin, 'tenders', tender_id, tenantId))) {
+        return res.status(400).json({ error: "Appel d'offres introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });

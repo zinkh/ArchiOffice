@@ -32,6 +32,7 @@ describe('Tasks', () => {
   it('creates, updates, and deletes a task', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/tasks').set(authHeader(token)).send({ project_id: 'p1', title: 'Terrassement', start_date: '2026-01-01', end_date: '2026-01-05' });
     expect(created.status).toBe(201);
@@ -66,6 +67,8 @@ describe('Tasks', () => {
   it('applies a partial update without clearing the fields it was not given', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('tenant_memberships', [{ id: 'mem-u1', user_id: 'u1', tenant_id: tenantId, is_default: true }]);
 
     const created = await request(app).post('/api/tasks').set(authHeader(token)).send({
       project_id: 'p1', title: 'Terrassement', start_date: '2026-01-01', end_date: '2026-01-05',

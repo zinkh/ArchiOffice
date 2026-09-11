@@ -2,6 +2,7 @@
 // d'information)" section, part of the "suivi de chantier" cluster (see
 // ordresDeService.ts).
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -28,6 +29,9 @@ export function registerRfiRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, question, asked_by, asked_date, due_date, status, answer, answered_date } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await supabaseAdmin.from('rfis').insert({
         id: crypto.randomUUID(), tenant_id: tenantId, project_id, question,
         asked_by: asked_by || null, asked_date: asked_date || new Date().toISOString().split('T')[0],
