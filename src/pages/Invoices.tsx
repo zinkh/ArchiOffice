@@ -484,9 +484,18 @@ export default function Invoices() {
     }
   };
 
-  const handleOpenGenerator = (invoice: Invoice) => {
+  // La liste (GET /api/invoices) ne porte plus les lignes chiffrées — voir
+  // CLAUDE.md — donc ouvrir le générateur sur une facture existante va les
+  // chercher à part plutôt que de compter sur ce que la liste avait déjà.
+  const handleOpenGenerator = async (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setIsGeneratorOpen(true);
+    try {
+      const full = await fetchJson<Invoice>(`/api/invoices/${invoice.id}`);
+      setSelectedInvoice(full);
+    } catch (err) {
+      console.error('Failed to fetch invoice detail:', err);
+    }
   };
 
   const toggleProjectExpansion = (projectId: string) => {
@@ -671,7 +680,7 @@ export default function Invoices() {
             ]}
             actions={inv => (
               <div className="flex gap-2">
-                <button onClick={() => { setSelectedInvoice(inv); setIsGeneratorOpen(true); }} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
+                <button onClick={() => handleOpenGenerator(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
                 {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}

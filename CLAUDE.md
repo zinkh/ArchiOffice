@@ -807,6 +807,72 @@ données pour gagner une ligne dans `schema.sql`. Elle reste donc dans
 toute route qui l'écrit ou la lit désormais — même traitement que la table
 `specifications` plus bas, conservée pour la même raison.
 
+### Pagination et fan-out sur les listes
+
+`GET /api/projects` et `GET /api/invoices` faisaient tous deux la même
+chose : joindre, sur CHAQUE ligne de la liste, des données que seul le
+projet ou la facture réellement ouverte finit par utiliser. Pour les
+projets, `project_cotraitants(*), project_lots(*), project_stakeholders(*),
+project_categories_junction(...)` — utilisé nulle part ailleurs que dans la
+modale de `Projects.tsx` pour LE projet sélectionné, et pas du tout par
+`ProjectDetail.tsx` (qui appelait déjà `/api/projects/:id/full`, lequel
+n'incluait pourtant pas ce join — `project.lots_list` y était donc
+silencieusement toujours vide malgré tout le code qui le lit, un bug
+préexistant corrigé au passage). Pour les factures, `invoice_items(*)` —
+utilisé nulle part dans la LISTE elle-même, seulement par
+`InvoiceGenerator.tsx` quand on ouvre une facture précise pour la visualiser
+ou la générer.
+
+Une vingtaine de pages (Dashboard, Gantt, Documents, TimeTracking, Contacts,
+Calendar, Mailbox, ...) n'appellent `GET /api/projects` que comme un
+annuaire id→nom : aucune n'avait besoin de ce fan-out, et le payer sur
+chaque appel devient réellement coûteux pour un cabinet avec des années
+d'archives.
+
+**Le fan-out a migré vers la lecture d'un seul élément** :
+`GET /api/projects/:id/full` porte désormais ce même join (mappé sur
+`cotraitants_list`/`lots_list`/`stakeholders_list`/`categories_list`,
+exactement comme avant sur la liste) ; `GET /api/invoices/:id` (nouvelle
+route) porte les `items`. `Projects.tsx`'s `handleProjectClick` et
+`Invoices.tsx`'s `handleOpenGenerator` récupèrent désormais ces données à
+l'ouverture plutôt que de compter sur ce que la liste avait déjà — la liste
+elle-même ne les porte plus du tout.
+
+**Pagination par curseur, opt-in et rétrocompatible.** `limit`/`cursor` sont
+des paramètres de requête optionnels sur les deux listes — un curseur opaque
+(base64 de `id` pour les projets, faute de colonne de date de création ; de
+`created_at` pour les factures, déjà triées dessus). Sans eux, la route rend
+exactement le même tableau qu'avant : aucun des nombreux appelants qui ne
+paginent pas n'a besoin d'être touché. Un appelant qui passe les deux reçoit
+`{ data, nextCursor }` à la place — `nextCursor: null` signale la dernière
+page. Aucune page ne consomme encore ce mode (le tri/filtre des listes reste
+géré côté client, via `usePagination`) ; c'est le mécanisme qui manquait,
+pas encore son adoption dans l'UI.
+
+Tous les autres endpoints de liste (`/api/documents`, `/api/tasks`,
+`/api/contacts`, `/api/tenders`, ...) restent non paginés — voir
+ROADMAP.md.
+
+**`tests/fakeSupabaseAdmin.ts`'s `.order()`/`.limit()` sont devenus réels**
+(triaient et tronquaient auparavant en no-op, voir le commentaire historique
+resté dans le fichier) : les deux routes ci-dessus en dépendent pour un
+comportement correct, ce qui n'était vrai d'aucune route avant elles parmi
+la cinquantaine d'appels à `.order(...)` du codebase.
+
+### `x-user-role` retiré du frontend
+
+Le frontend envoyait encore l'en-tête `x-user-role` sur la sauvegarde et la
+suppression d'un projet (`ProjectDetail.tsx`, `Projects.tsx`), alors que le
+serveur ne l'a jamais lu : `DELETE /api/projects/:id` est gardé par
+`requireRole('admin')`, qui dérive le rôle de `getSystemRole(tenantId,
+userId)` côté serveur, jamais d'un en-tête client. L'en-tête était donc un
+reliquat sans effet — retiré pour ne pas laisser croire qu'il joue un rôle
+de sécurité. `ROADMAP.md`/`API.md` documentaient encore l'ancienne faille
+(« x-user-role est fait confiance sans vérification ») ; corrigé au passage,
+avec les mentions « pas de rate limiting » et « CORS reflète n'importe quelle
+origine », toutes deux également obsolètes (`server/rateLimit.ts` et
+l'allow-list CORS de `server.ts` existent déjà).
+
 ### Plusieurs cabinets pour une même personne
 
 Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un

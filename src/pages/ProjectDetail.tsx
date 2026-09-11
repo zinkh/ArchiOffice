@@ -700,10 +700,7 @@ export default function ProjectDetail() {
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': currentUser?.system_role || 'user'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(project)
       });
       if (res.ok) {
@@ -719,10 +716,7 @@ export default function ProjectDetail() {
   const handleDelete = async () => {
     if (!project || !confirm('Are you sure you want to delete this project?')) return;
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'DELETE',
-        headers: { 'x-user-role': currentUser?.system_role || 'user' }
-      });
+      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
       if (res.ok) {
         navigate('/projects');
       }

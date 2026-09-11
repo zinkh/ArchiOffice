@@ -28,22 +28,35 @@ export interface RouteDeps {
 }
 
 export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole }: RouteDeps) {
+  // Liste allégée : plus de join sur cotraitants/lots/stakeholders/catégories
+  // — porté sur CHAQUE projet à chaque appel, alors qu'une bonne vingtaine
+  // de pages (Dashboard, Gantt, Documents, ...) n'utilisent cette route que
+  // comme un annuaire id→nom, et que même la page Projets ne s'en sert que
+  // pour LE projet ouvert dans sa modale (voir GET /api/projects/:id/full,
+  // qui porte désormais ce même join). Voir CLAUDE.md.
+  //
+  // `limit`/`cursor` (curseur opaque sur `id` — la table n'a pas de colonne
+  // de date de création, et l'id est du type `p<horodatage>...`, donc
+  // approximativement ordonné dans le temps) sont optionnels et
+  // rétrocompatibles, même principe que GET /api/invoices juste au-dessus.
   app.get("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin
-        .from('projects')
-        .select('*, project_cotraitants(*), project_lots(*), project_stakeholders(*), project_categories_junction(category_id)')
-        .eq('tenant_id', tenantId);
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 0, 1), 500) : undefined;
+      let query = supabaseAdmin.from('projects').select('*').eq('tenant_id', tenantId).order('id', { ascending: false });
+      if (req.query.cursor) {
+        const cursorId = Buffer.from(String(req.query.cursor), 'base64url').toString('utf8');
+        query = query.lt('id', cursorId);
+      }
+      if (limit) query = query.limit(limit);
+      const { data, error } = await query;
       if (error) throw error;
-      const projectsWithDetails = (data || []).map((p: any) => ({
-        ...p,
-        cotraitants_list: p.project_cotraitants || [],
-        lots_list: p.project_lots || [],
-        stakeholders_list: p.project_stakeholders || [],
-        categories_list: (p.project_categories_junction || []).map((j: any) => j.category_id),
-      }));
-      res.json(projectsWithDetails);
+      if (!limit) return res.json(data || []);
+      const last = (data || [])[data.length - 1];
+      const nextCursor = data.length === limit && last?.id
+        ? Buffer.from(last.id, 'utf8').toString('base64url')
+        : null;
+      res.json({ data: data || [], nextCursor });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch projects" });
@@ -54,8 +67,22 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { data: project, error: pe } = await supabaseAdmin.from('projects').select('*').eq('id', id).eq('tenant_id', tenantId).single();
-      if (pe || !project) return res.status(404).json({ error: "Project not found" });
+      // Le même join que l'ancienne liste GET /api/projects portait sur
+      // CHAQUE ligne — coûteux là-bas (voir CLAUDE.md, « pagination et
+      // fan-out »), légitime ici puisqu'il ne porte plus que sur le seul
+      // projet ouvert.
+      const { data: projectRow, error: pe } = await supabaseAdmin.from('projects')
+        .select('*, project_cotraitants(*), project_lots(*), project_stakeholders(*), project_categories_junction(category_id)')
+        .eq('id', id).eq('tenant_id', tenantId).single();
+      if (pe || !projectRow) return res.status(404).json({ error: "Project not found" });
+      const { project_cotraitants, project_lots, project_stakeholders, project_categories_junction, ...projectFields } = projectRow as any;
+      const project = {
+        ...projectFields,
+        cotraitants_list: project_cotraitants || [],
+        lots_list: project_lots || [],
+        stakeholders_list: project_stakeholders || [],
+        categories_list: (project_categories_junction || []).map((j: any) => j.category_id),
+      };
       const [milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),

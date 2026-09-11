@@ -22,20 +22,63 @@ export interface RouteDeps {
 }
 
 export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber }: RouteDeps) {
+  // Liste allégée : ni `invoice_items` (une facture peut en porter des
+  // dizaines, et rien dans la liste ne les affiche — seul le générateur de
+  // facture, ouvert sur UNE facture à la fois, en a besoin ; voir GET
+  // /api/invoices/:id juste en dessous). Un cabinet avec des années
+  // d'archives voit vite ce fan-out peser plus lourd que tout le reste de la
+  // réponse.
+  //
+  // `limit`/`cursor` (curseur opaque sur `created_at`, la colonne déjà triée
+  // dessus) sont optionnels et rétrocompatibles : sans eux, la route rend
+  // exactement le même tableau qu'avant — aucun des nombreux appelants qui
+  // n'utilisent `/api/invoices` que comme un annuaire projet↔factures
+  // (Dashboard, Gantt, ManagerDashboard, ...) n'a besoin d'être touché. Un
+  // appelant qui PAGINE réellement (la page Factures) passe les deux et
+  // reçoit `{ data, nextCursor }` à la place.
   app.get("/api/invoices", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: invoices, error } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 0, 1), 500) : undefined;
+      let query = supabaseAdmin.from('invoices').select('*, projects(name)').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      if (req.query.cursor) {
+        const cursorCreatedAt = Buffer.from(String(req.query.cursor), 'base64url').toString('utf8');
+        query = query.lt('created_at', cursorCreatedAt);
+      }
+      if (limit) query = query.limit(limit);
+      const { data: invoices, error } = await query;
       if (error) throw error;
       const result = (invoices || []).map((inv: any) => {
         const project_name = inv.projects?.name || null;
-        const { projects: _p, invoice_items, ...rest } = inv;
-        return { ...rest, project_name, items: invoice_items || [] };
+        const { projects: _p, ...rest } = inv;
+        return { ...rest, project_name };
       });
-      res.json(result);
+      if (!limit) return res.json(result);
+      const last = result[result.length - 1];
+      const nextCursor = result.length === limit && last?.created_at
+        ? Buffer.from(last.created_at, 'utf8').toString('base64url')
+        : null;
+      res.json({ data: result, nextCursor });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  // Pendant de la liste allégée ci-dessus : les lignes chiffrées d'UNE
+  // facture, lues quand le générateur de facture (InvoiceGenerator.tsx)
+  // s'ouvre sur elle plutôt qu'en fan-out sur chaque ligne de la liste.
+  app.get("/api/invoices/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: inv, error } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)')
+        .eq('id', req.params.id).eq('tenant_id', tenantId).single();
+      if (error || !inv) return res.status(404).json({ error: 'Invoice not found' });
+      const { projects: p, invoice_items, ...rest } = inv as any;
+      res.json({ ...rest, project_name: p?.name || null, items: invoice_items || [] });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch invoice" });
     }
   });
 

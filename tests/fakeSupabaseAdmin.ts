@@ -350,15 +350,22 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
-  // No-op: none of this codebase's ~50 `.order(...)` call sites are tested
-  // for actual sort order, only for which rows come back (tenant scoping,
-  // filters) — implementing real sorting here would be pure scope creep for
-  // a fake that's already just enough to drive these routes' own logic.
-  order() {
+  // Real for the (few) call sites that now depend on it for correctness —
+  // cursor pagination (GET /api/projects, GET /api/invoices) orders by a
+  // column and slices with `.limit()` right after, so a no-op here would
+  // silently pass tests that assert the wrong page came back. The other
+  // ~50 `.order(...)` call sites in this codebase don't inspect order, so
+  // this doesn't change their behavior — they just get the same rows in a
+  // now-deterministic order instead of insertion order.
+  private orderBy?: { col: string; ascending: boolean };
+  order(col: string, opts?: { ascending?: boolean }) {
+    this.orderBy = { col, ascending: opts?.ascending ?? true };
     return this;
   }
 
-  limit() {
+  private limitN?: number;
+  limit(n: number) {
+    this.limitN = n;
     return this;
   }
 
@@ -460,6 +467,16 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     if (this.wantMaybeSingle) {
       return { data: clone(matched[0] ?? null), error: null };
     }
-    return { data: clone(matched), error: null, count: matched.length };
+    if (this.orderBy) {
+      const { col, ascending } = this.orderBy;
+      matched.sort((a, b) => {
+        if (a[col] === b[col]) return 0;
+        if (a[col] == null) return ascending ? -1 : 1;
+        if (b[col] == null) return ascending ? 1 : -1;
+        return (a[col] < b[col] ? -1 : 1) * (ascending ? 1 : -1);
+      });
+    }
+    const page = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    return { data: clone(page), error: null, count: matched.length };
   }
 }
