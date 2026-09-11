@@ -165,11 +165,21 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         });
       }
 
-      const password = Math.random().toString(36).slice(-8);
-      // Create Supabase Auth user
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({ email, password, user_metadata: { name }, email_confirm: true });
-      if (authErr || !authData?.user) return res.status(500).json({ error: authErr?.message || "Failed to create auth user" });
-      const id = authData.user.id;
+      // Aucun mot de passe généré ni transmis par e-mail : un secret qui
+      // transite en clair par SMTP (et reste dans les journaux du serveur de
+      // messagerie) est un risque qu'un lien à usage unique évite entièrement.
+      // `generateLink({ type: 'invite' })` crée le compte SANS mot de passe et
+      // renvoie un lien qui, une fois ouvert, établit une session temporaire —
+      // /reset-password (src/pages/ResetPassword.tsx) la détecte et laisse la
+      // personne choisir elle-même son mot de passe avant d'entrer.
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error: authErr } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'invite',
+        email,
+        options: { data: { name }, redirectTo: `${appUrl}/reset-password` },
+      });
+      if (authErr || !linkData?.user) return res.status(500).json({ error: authErr?.message || "Failed to create auth user" });
+      const id = linkData.user.id;
       await supabaseAdmin.from('profiles').upsert({ id, tenant_id: tenantId, name, email, role: role || 'Member', system_role: system_role || 'user' });
       // Le rattachement lui-même : c'est l'adhésion qui fait foi, le
       // `tenant_id` posé ci-dessus n'étant que le cabinet par défaut d'un
@@ -188,10 +198,12 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       const smtpPort = (settings as any)?.smtp_port || process.env.SMTP_PORT || '587';
       const smtpUser = (settings as any)?.smtp_user || process.env.SMTP_USER;
       const smtpPass = (settings as any)?.smtp_pass || process.env.SMTP_PASS;
+      const cabinetName = (settings as any)?.agency_name || 'ArchiOffice';
+      const actionLink = linkData.properties?.action_link;
 
-      console.log(`[Team Creation] Attempting to send email to ${email} using host ${smtpHost}:${smtpPort}`);
+      console.log(`[Team Creation] Attempting to send invite email to ${email} using host ${smtpHost}:${smtpPort}`);
 
-      if (smtpHost && smtpUser && smtpPass) {
+      if (smtpHost && smtpUser && smtpPass && actionLink) {
         try {
           const transporter = nodemailer.createTransport({
             host: smtpHost,
@@ -203,31 +215,25 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
             },
           });
 
-          const appUrl = process.env.APP_URL || 'http://localhost:3000';
-
           await transporter.sendMail({
             from: `"ArchiOffice" <${smtpUser}>`,
             to: email,
-            subject: "Your ArchiOffice Credentials",
+            subject: `Invitation à rejoindre ${cabinetName} sur ArchiOffice`,
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-                <h2 style="color: #2563eb;">Welcome to ArchiOffice</h2>
-                <p>Hello ${name},</p>
-                <p>An account has been created for you on ArchiOffice. Here are your credentials to access the application:</p>
-                <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
-                  <p style="margin: 0;"><strong>Login URL:</strong> <a href="${appUrl}">${appUrl}</a></p>
-                  <p style="margin: 10px 0 0 0;"><strong>Email:</strong> ${email}</p>
-                  <p style="margin: 5px 0 0 0;"><strong>Temporary Password:</strong> ${password}</p>
-                </div>
-                <p>Please change your password after your first login.</p>
-                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Best regards,<br>The ArchiOffice Team</p>
+                <h2 style="color: #2563eb;">Bienvenue sur ArchiOffice</h2>
+                <p>Bonjour ${name},</p>
+                <p>Vous avez été invité(e) à rejoindre le cabinet <strong>${cabinetName}</strong> sur ArchiOffice.</p>
+                <p style="margin: 24px 0;"><a href="${actionLink}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Choisir mon mot de passe et accéder au cabinet</a></p>
+                <p style="color: #64748b; font-size: 14px;">Si le bouton ne fonctionne pas, copiez ce lien : ${actionLink}</p>
+                <p style="color: #64748b; font-size: 14px; margin-top: 30px;">Ce lien est à usage unique et personnel.</p>
               </div>
             `
           });
-          console.log(`Credentials email sent to ${email}`);
+          console.log(`Invite email sent to ${email}`);
           emailSent = true;
         } catch (err: any) {
-          console.error("[Team Creation] Failed to send credentials email:", err);
+          console.error("[Team Creation] Failed to send invite email:", err);
           emailError = err.message;
         }
       } else {
@@ -235,8 +241,11 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         if (!smtpHost) missing.push('smtpHost');
         if (!smtpUser) missing.push('smtpUser');
         if (!smtpPass) missing.push('smtpPass');
-        console.warn(`[Team Creation] SMTP settings missing (${missing.join(', ')}), skipping credentials email.`);
-        emailError = `Configuration SMTP manquante : ${missing.join(', ')}`;
+        if (!actionLink) missing.push('actionLink');
+        console.warn(`[Team Creation] Cannot send invite email (${missing.join(', ')}).`);
+        emailError = missing.includes('actionLink')
+          ? "Le lien d'invitation n'a pas pu être généré."
+          : `Configuration SMTP manquante : ${missing.join(', ')}`;
       }
 
       res.status(201).json({ id, name, email, role, system_role, emailSent, emailError });

@@ -243,6 +243,27 @@ unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
 cabinet de porter le même numéro, quelle que soit la cause (course locale,
 numéro fourni par un client, import).
 
+### Invitation d'un nouveau membre d'équipe
+
+`POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot
+de passe : `supabaseAdmin.auth.admin.generateLink({ type: 'invite', ... })`
+crée le compte Supabase Auth **sans** mot de passe et renvoie un lien à usage
+unique, envoyé par e-mail (SMTP du cabinet, repli sur le SMTP plateforme comme
+le reste de cette route). `/reset-password` (`src/pages/ResetPassword.tsx`)
+détecte la session temporaire que ce lien établit — le même mécanisme que la
+récupération de mot de passe classique — et laisse la personne choisir
+elle-même son mot de passe avant d'entrer. Aucun secret ne transite donc en
+clair par e-mail ni ne reste dans les journaux d'un serveur SMTP.
+
+Point non traité ici, à garder en tête : `POST /api/team` retrouve un compte
+déjà existant via `profiles.eq('email', email)`. Un compte créé par
+inscription libre ou via un fournisseur externe peut avoir `profiles.email`
+vide alors que l'adresse existe bien côté Supabase Auth — l'ajout à un second
+cabinet le manquerait alors et tenterait de recréer un compte pour la même
+adresse. Un point de résolution centralisé (Auth d'abord, `profiles` en
+repli) fermerait ce cas sans devoir le refaire à chaque route qui cherche un
+utilisateur par e-mail.
+
 ### Références inter-locataires non validées
 
 `tenantScopedFrom.ts` empêche une requête d'écrire une ligne dans le mauvais
