@@ -43,8 +43,17 @@ export async function requestGoogleAccessToken(): Promise<string> {
   const challenge = await generateCodeChallenge(verifier);
   const state = crypto.randomUUID();
 
-  sessionStorage.setItem('google_oauth_verifier', verifier);
-  sessionStorage.setItem('google_oauth_state', state);
+  // localStorage, not sessionStorage: sessionStorage is scoped per top-level
+  // browsing context, copied to a popup only when the popup's *initial*
+  // navigation target is same-origin as the opener. Here the popup navigates
+  // straight to accounts.google.com (cross-origin from the start), so no copy
+  // ever happens — when it later lands back on our own /auth/google/callback,
+  // that's its first visit to our origin in this popup, and sessionStorage
+  // reads back empty there, failing the CSRF check every time. localStorage
+  // has no such per-context copy step: it's the same store for every
+  // same-origin window, popup included.
+  localStorage.setItem('google_oauth_verifier', verifier);
+  localStorage.setItem('google_oauth_state', state);
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
