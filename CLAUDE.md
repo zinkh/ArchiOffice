@@ -777,6 +777,43 @@ soit la préférence d'envoi de mail de la règle) et les mentions `@` de
 non par cabinet : `profiles.notification_prefs` (`{ muted: [catégories] }`),
 réglé depuis `src/components/PushNotificationsCard.tsx`.
 
+### Écran de démarrage (client Electron)
+
+`electron/splash.html` (+ `electron/splashPreload.cjs`) remplace la fenêtre
+blanche qui s'affichait pendant que Postgres/PostgREST/le serveur applicatif
+démarraient. Une seule liste d'étapes fait foi, `SPLASH_STEPS` dans
+`electron/main.cjs`, envoyée au splash par IPC (`splash:init`) — le HTML ne
+code aucun libellé en dur, pour qu'il n'existe qu'un seul endroit à mettre à
+jour si une étape change.
+
+`reportStep(id, status, detail)` (`main.cjs`) est passé tel quel à
+`startOfflineDataStack()`/`startLocalPostgres()` (`electron/pgBootstrap.cjs`),
+qui l'appellent à leurs points réels de progression (initialisation
+Postgres, application des migrations, démarrage de PostgREST) — l'écran
+reflète donc l'avancement RÉEL, pas une simulation minutée. Une étape (`app-
+server`, « Démarrage du serveur applicatif ») couvre volontairement PostgREST
+ET le serveur Node lancé juste après : `pgBootstrap.cjs` la laisse `active`
+en sortant, c'est `main.cjs` qui la clôt une fois SON propre contrôle de
+santé (`/api/health`) passé — le vrai signal que l'API est utilisable, pas
+seulement que PostgREST répond.
+
+Sur un échec fatal, l'étape en cause se marque `error` à l'endroit précis de
+la panne (jamais deviné après coup par un `catch` générique), et l'écran de
+démarrage reste affiché avec un bandeau détaillant le chemin du journal et un
+bouton « Quitter » — cette fenêtre n'a ni barre de titre ni menu, donc aucune
+croix système pour se fermer autrement. Remplace l'ancien écran d'erreur en
+texte brut (`data:text/plain`), qui montrait un message mais jamais À QUEL
+ENDROIT précis le démarrage avait échoué.
+
+Un piège rencontré en le construisant, à ne pas réintroduire : une tuile
+d'icône de taille fixe (`width/height: 84px`), enfant direct d'un conteneur
+flex `column` et elle-même conteneur flex pour son SVG, se voyait
+sous-dimensionnée à la taille de son contenu (42px) sur la toute première
+passe de mise en page de Chromium — reproductible de façon fiable, et pas
+seulement en tests headless. `flex: 0 0 84px` (une base explicite, plutôt que
+`flex-basis:auto` dérivé de `height`) lève l'ambiguïté dès cette première
+passe.
+
 ### Emplacement des données (client Electron)
 
 Historiquement, la base Postgres embarquée (`pgdata/`) et les fichiers
