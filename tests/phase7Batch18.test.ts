@@ -78,6 +78,18 @@ describe('Team member creation', () => {
     expect(created?.system_role).toBe('user');
   });
 
+  // Une nouvelle recrue reçoit un lien d'invitation à usage unique, jamais un
+  // mot de passe généré côté serveur transitant en clair par e-mail.
+  it('invites a new team member via a Supabase link instead of a generated password', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+
+    const res = await request(app).post('/api/team').set(authHeader(token)).send({ name: 'Invité', email: 'invite@example.test', role: 'Member', system_role: 'user' });
+    expect(res.status).toBe(201);
+    expect(res.body).not.toHaveProperty('password');
+    expect(JSON.stringify(res.body)).not.toMatch(/temporary|temporaire/i);
+  });
+
   it('rejects creation by a non-admin', async () => {
     const tenantId = makeTenant({ plan: 'pro' });
     const { token } = makeUser(tenantId, 'user');

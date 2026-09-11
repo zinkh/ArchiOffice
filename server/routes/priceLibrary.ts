@@ -10,6 +10,7 @@
 // routes à portée projet.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { ecrireObservations } from '../articlePrices';
 
 export interface RouteDeps {
@@ -345,6 +346,14 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
       if (readErr) throw readErr;
       if (!article) return res.status(404).json({ error: 'Article introuvable' });
 
+      const bodyProjectId = nullIfBlank(req.body?.project_id);
+      const bodyTenderId = nullIfBlank(req.body?.tender_id);
+      if (bodyProjectId && !(await assertTenantEntity(supabaseAdmin, 'projects', bodyProjectId, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (bodyTenderId && !(await assertTenantEntity(supabaseAdmin, 'tenders', bodyTenderId, tenantId))) {
+        return res.status(400).json({ error: "Appel d'offres introuvable pour ce cabinet." });
+      }
       const origine = ['saisie', 'bpu', 'offre', 'marche', 'import'].includes(req.body?.origine)
         ? req.body.origine : 'saisie';
       const dateObs = nullIfBlank(req.body?.date_observation) ?? new Date().toISOString().slice(0, 10);

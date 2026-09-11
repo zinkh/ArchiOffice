@@ -3,6 +3,7 @@
 // no dependency on any other route module beyond the usual pair.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -37,6 +38,9 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
       const { id } = req.params;
       const { contact_id, role } = req.body;
       if (!contact_id) return res.status(400).json({ error: "contact_id required" });
+      if (!(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       // Check no duplicate
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
         .select('id')

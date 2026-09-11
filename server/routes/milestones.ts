@@ -3,6 +3,7 @@
 // shared across projects/tenders/proposals via optional foreign keys.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -28,6 +29,15 @@ export function registerMilestoneRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, tender_id, proposal_id, title, due_date, completed, duration_days, dependencies } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (tender_id && !(await assertTenantEntity(supabaseAdmin, 'tenders', tender_id, tenantId))) {
+        return res.status(400).json({ error: "Appel d'offres introuvable pour ce cabinet." });
+      }
+      if (proposal_id && !(await assertTenantEntity(supabaseAdmin, 'proposals', proposal_id, tenantId))) {
+        return res.status(400).json({ error: "Devis introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').insert({ id, project_id: project_id || null, tender_id: tender_id || null, proposal_id: proposal_id || null, title, due_date, completed: !!completed, duration_days: duration_days ?? null, dependencies: dependencies || [] }).select().single();
       if (error) throw error;

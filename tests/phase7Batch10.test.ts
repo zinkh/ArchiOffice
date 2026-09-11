@@ -17,6 +17,7 @@ describe('Specifications (CCTP)', () => {
   it('creates, lists, updates, and deletes a specification', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/specifications').set(authHeader(token)).send({ project_id: 'p1', title: 'CCTP Lot Gros Œuvre', content: '[]' });
     expect(created.status).toBe(201);

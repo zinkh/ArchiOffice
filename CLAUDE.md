@@ -192,6 +192,181 @@ Shared interfaces live in `src/types.ts`. CCTP-specific types are in `src/types/
 | Excel | xlsx | Inline in pages |
 | XML (DPGF import) | fast-xml-parser | `src/lib/xmlHelper.ts` |
 
+### Numérotation des factures et connecteurs comptables (Zoho / Odoo)
+
+Deux modes, jamais mélangés sur une même facture :
+
+| | Autonome | Synchronisé |
+|---|---|---|
+| Numérotation | Locale (`getNextDocNumber`, PREFIX-ANNÉE-SEQ) | Attribuée par le connecteur (Zoho Invoice, Zoho Books, Odoo) |
+| Choisi par | Rien à faire (défaut) | `settings.accounting_sync_provider` |
+| Quand | Aucun connecteur actif, ou choisi puis déconnecté | Un connecteur est choisi ET connecté |
+
+`getActiveAccountingProvider()` (`server/invoiceAccountingSync.ts`) décide lequel
+s'applique à CHAQUE création : `accounting_sync_provider` seul ne suffit pas, il
+faut aussi que le jeton/la clé du connecteur soit encore présent en base — un
+connecteur choisi puis déconnecté retombe en mode autonome plutôt que de
+laisser toute nouvelle facture sans numéro indéfiniment.
+
+**En mode synchronisé, `POST /api/invoices` n'invente jamais de numéro** — ni
+localement, ni depuis un `invoice_number` fourni par le client (qui gagnait
+auparavant sans condition : `invoice_number || getNextDocNumber(...)`). La
+facture est créée en brouillon, sans numéro, puis `syncInvoiceToAccounting()`
+pousse son contenu au connecteur et ne renseigne `invoice_number` qu'une fois
+celui-ci confirmé — jamais avant. Un échec (connecteur injoignable, quota)
+laisse la facture sans numéro plutôt que d'improviser une valeur locale ;
+`POST /api/invoices/:id/sync-retry` rejoue l'envoi.
+
+**Idempotence.** Chaque paire (facture locale, connecteur) a un enregistrement
+dans `invoice_accounting_sync` (`local_invoice_id`, `provider`,
+`external_invoice_id`, `invoice_number`, `sync_status`, `last_synced_at`),
+créé par un `upsert(..., { onConflict: 'local_invoice_id,provider' })` — un
+retry ne duplique jamais cet enregistrement. Ça ne suffit pas à empêcher un
+doublon CÔTÉ CONNECTEUR si l'appel réseau a réussi mais que la réponse s'est
+perdue : chaque fonction de poussée (`pushInvoiceToZohoInvoice`/`Books`/`Odoo`,
+`server/routes/{zohoInvoice,zohoBooks,odoo}.ts`) recherche donc d'abord une
+facture déjà marquée avec sa propre clé d'idempotence (`reference_number` chez
+Zoho, `ref` chez Odoo, préfixé `archioffice:`) avant d'en créer une — un retry
+après coupure réseau retrouve et adopte la facture déjà créée au lieu d'en
+produire une seconde.
+
+**Un numéro confirmé par le connecteur est gelé**, même si la facture est
+encore au statut local `Draft` (fraîchement synchronisée, pas encore envoyée
+au client) : `PUT /api/invoices/:id` refuse toute modification du contenu
+légal dès qu'une ligne `invoice_accounting_sync.sync_status = 'synced'`
+existe pour cette facture, en plus du verrou déjà existant sur le statut
+`!= 'Draft'`.
+
+**Le verrou structurel reste la base**, pas le code applicatif : un index
+unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
+(`supabase/migrate_accounting_sync.sql`) empêche deux factures du même
+cabinet de porter le même numéro, quelle que soit la cause (course locale,
+numéro fourni par un client, import).
+
+### Invitation d'un nouveau membre d'équipe
+
+`POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot
+de passe : `supabaseAdmin.auth.admin.generateLink({ type: 'invite', ... })`
+crée le compte Supabase Auth **sans** mot de passe et renvoie un lien à usage
+unique, envoyé par e-mail (SMTP du cabinet, repli sur le SMTP plateforme comme
+le reste de cette route). `/reset-password` (`src/pages/ResetPassword.tsx`)
+détecte la session temporaire que ce lien établit — le même mécanisme que la
+récupération de mot de passe classique — et laisse la personne choisir
+elle-même son mot de passe avant d'entrer. Aucun secret ne transite donc en
+clair par e-mail ni ne reste dans les journaux d'un serveur SMTP.
+
+`POST /api/team` retrouve un compte déjà existant via `profiles.eq('email',
+email)` — ce qui suppose que `profiles.email` est fiable. Ce n'était pas
+toujours le cas : le trigger `handle_new_user()` (`supabase/schema.sql`) ne
+copiait que le nom depuis `auth.users` à la création d'un compte, jamais
+l'email. Un compte né d'une connexion Google (qui ne passe par aucune route
+applicative avant que ce trigger s'exécute) se retrouvait donc avec
+`profiles.email` vide alors que l'adresse existe bien côté Supabase Auth —
+`server/routes/agencySetup.ts::adminRecipients()` contournait déjà ce trou,
+mais pour un seul appelant (les notifications de demande de rattachement),
+pas pour toute recherche de compte par e-mail.
+
+`supabase/migrate_backfill_profile_email.sql` ferme ça à la source plutôt que
+d'ajouter un repli à chaque appelant : le trigger copie désormais
+`NEW.email`, avec `ON CONFLICT (id) DO UPDATE SET email = COALESCE(profiles
+.email, EXCLUDED.email)` — jamais `DO NOTHING`, pour qu'un profil déjà
+upserté plus richement par une route applicative avant l'exécution du
+trigger garde ses valeurs ; seul un email resté NULL est complété. La même
+migration corrige aussi les comptes déjà créés avant ce correctif.
+
+### Références inter-locataires non validées
+
+`tenantScopedFrom.ts` empêche une requête d'écrire une ligne dans le mauvais
+tenant, mais ne dit rien des identifiants qu'un payload se contente de
+RÉFÉRENCER — un `project_id` accepté tel quel dans le corps d'une requête peut
+pointer vers un projet d'un autre cabinet, tant que rien ne vérifie son
+appartenance avant l'écriture. `server/assertTenantEntity.ts` est le helper
+générique introduit pour ça (`assertTenantEntity(supabaseAdmin, table, id,
+tenantId): Promise<boolean>`).
+
+Balayage complet effectué sur `server/routes/*.ts` : tout `POST`/`PUT` qui
+acceptait un identifiant de clé étrangère depuis le corps de la requête
+(`project_id`, `contact_id`/`client_id`, `tender_id`, `proposal_id`,
+`reception_id`, `plan_id`, `situation_id`, `dpgf_item_id`, `dpgf_id`,
+`marche_id`, `assignee_id`/`user_id`) vérifie désormais son appartenance au
+cabinet avant l'écriture — `invoices.ts`, `proposals.ts`, `tenders.ts`,
+`timeTracking.ts`, `meetings.ts`, `observations.ts`, `visas.ts`,
+`specifications.ts`, `tasks.ts`, `reserves.ts`, `rfis.ts`, `situations.ts`,
+`projects.ts`, `receptions.ts`, `plans.ts`, `priceLibrary.ts`,
+`projectMembers.ts`, `ordresDeService.ts`, `permits.ts`, `maf.ts`,
+`marchesEntreprises.ts`, `meetingAttendees.ts`, `milestones.ts`,
+`gpaReserves.ts`, `documents.ts`, `dpgf.ts`. `assignee_id`/`user_id` (une
+personne, pas une ligne `tenant_id`-scopée comme les autres) se vérifie via
+`findMembership()` (`server/tenantMemberships.ts`), pas `assertTenantEntity`.
+
+Volontairement laissés de côté : les intégrations de synchro externe
+(`odoo.ts`, `zohoBooks.ts`, `zohoInvoice.ts`, `ragic.ts`, `gmailSync.ts`,
+`googleCalendarSync.ts`, `outlookSync.ts`) qui écrivent des FK à partir de
+leurs propres lignes locales déjà tenant-scopées — un risque différent, pas
+un oubli — et les cas où `project_id` vient d'un paramètre d'URL déjà validé
+en amont (routes imbriquées sous `/api/projects/:projectId/...`), qui ne
+sont pas la même faille : c'est l'identifiant RÉFÉRENCÉ depuis le corps
+d'une requête qui manquait de contrôle, pas celui de la ressource visée par
+l'URL elle-même.
+
+### Facturation IA atomique (réserve → exécute → règle)
+
+Le solde IA prépayé (`tenants.ai_credit_balance_eur_cents`) était jusqu'ici lu
+une fois avant l'appel au modèle — potentiellement long, plusieurs secondes,
+surtout sur une boucle d'appel d'outils (`POST /api/agents/:id/chat` peut
+enchaîner jusqu'à six appels au modèle : initial, jusqu'à
+`MAX_FUNCTION_ROUNDS` tours d'outils, un tour de clarification) — puis déduit
+une seule fois à la toute fin, plafonné à zéro. Une rafale de requêtes
+concurrentes contre un solde faible passait donc toutes le contrôle initial
+et déclenchait chacune un vrai appel, facturé par le fournisseur, avant
+qu'aucune déduction n'ait eu lieu.
+
+**`server.ts` : `reserveAiCredit()` / `settleAiCredit()` / `refundAiCredit()`**
+remplacent ce lire-puis-écrire par réserve → exécute → règle, câblés dans
+`timedChat()` (`packages/archioffice-agents/src/server/routes.ts`) : CHAQUE
+appel au modèle, pas la requête entière, réserve un coût pessimiste avant de
+s'exécuter et règle contre l'usage réel juste après.
+
+- **`reserve_ai_credit(tenant_id, montant)`** (SQL,
+  `supabase/migrate_ai_billing_atomicity.sql`) fait le contrôle ET l'écriture
+  dans la même instruction — sous verrou de ligne Postgres, deux appels
+  concurrents contre un solde qui ne couvre pas les deux ne peuvent plus tous
+  les deux réussir. Renvoie faux sans jamais avoir appelé le modèle.
+- Le montant réservé est pessimiste : `RESERVE_MAX_OUTPUT_TOKENS` (16000,
+  aligné sur le `max_tokens` déjà imposé aux adaptateurs Anthropic/Mistral —
+  Gemini n'a pas d'équivalent en code, donc c'est ici une hypothèse pour le
+  calcul de réserve, jamais une limite réellement appliquée à cet appel) et
+  une estimation grossière des jetons d'entrée (longueur des messages / 4).
+- **`settle_ai_credit(tenant_id, delta)`** régularise ensuite contre le coût
+  réel une fois l'usage connu : remboursement du surplus réservé (le cas
+  courant), ou complément si le réel dépasse la réservation — toujours
+  plafonné à zéro.
+- Un appel qui échoue (réseau, timeout) est intégralement remboursé via
+  `refundAiCredit()`, volontairement distinct de `settleAiCredit()` : cette
+  dernière passe par `priceEurCents()`, qui plancher même un appel à zéro
+  jeton à 1 centime — l'utiliser pour un remboursement aurait laissé un
+  centime fantôme sur un appel qui n'a jamais réellement eu lieu.
+
+**Recharge mensuelle du forfait**, même faille : l'ancien
+`maybeRefreshMonthlyCredits()` lisait `ai_credit_last_refresh`, puis créditait
+si absent/périmé — deux premiers appels du mois exécutés en même temps
+lisaient tous les deux l'ancienne date et créditaient tous les deux le
+montant mensuel. **`refresh_monthly_ai_credits(tenant_id, montant)`** fait la
+vérification et l'écriture dans la même instruction, remplaçant le
+lire-puis-écrire.
+
+**Le mode postpaid n'a pas ce garde-fou** — sans solde à protéger contre un
+dépassement, `POST /api/agents/:id/chat` y garde l'ancienne comptabilité
+globale a posteriori (`deductAiCredit()`, inchangée) plutôt que de réserver
+par appel. `POST /api/agents/transcribe`, `POST /api/agents/speak` et
+`POST /api/ai/suggest-articles` ne sont pas passés au modèle réserve/règle :
+leur coût dépend d'un volume audio dont la conversion en jetons avant l'appel
+n'a pas de formule fiable à documenter honnêtement (contrairement au texte,
+où `chars/4` est une approximation usuelle) — plutôt que d'inventer un
+facteur de conversion, ils gardent le lire-puis-déduire existant, dont
+l'exposition financière par appel reste bornée (audio ≤ 10 Mo, texte de
+synthèse ≤ `MAX_SPEECH_CHARS`).
+
 ### AI (provider abstraction)
 
 AI features (agent chat, CCTP generation) are called from the backend only — the frontend never talks to a model provider directly.
@@ -582,6 +757,121 @@ l'autosave du document n'efface pas un import fait entre-temps.
 (`` `dpgf:<offreId>:<ligneId>` `` vs `` `bpu:<offreId>:<ligneId>` ``, porté
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
+
+### Le CCTP n'est pas un document séparé
+
+Le codebase a longtemps porté trois chemins parallèles pour le CCTP, dont
+deux morts ou cassés :
+
+1. **Le vrai** : `CCTPEditor.tsx` édite le même arbre que le DPGF
+   (`lots > chapitres > lignes`, `GET/POST /api/projects/:projectId/dpgf`,
+   `server/routes/dpgf.ts`) — chaque lot, chapitre et article porte un champ
+   `cctpDescription` (le texte technique) et un booléen `cctpOnly` (masqué du
+   DPGF). C'est la seule table réellement écrite en production.
+2. **Une table `cctps` séparée**, avec sa propre route
+   `GET/POST /api/projects/:projectId/cctp` (`server/routes/cctps.ts`, aussi
+   `PUT/DELETE /api/cctps/:id`, colonnes qui n'existaient même pas sur la
+   table) et son propre hook frontend (`src/hooks/useCCTP.ts`,
+   `src/types/cctp.ts`) — inutilisé par tout composant en production
+   (`CCTPEditor.tsx` ne l'importe pas), sauf UN outil d'agent : `read_cctp`
+   (`packages/archioffice-agents/src/server/projectDocTools.ts`) lisait
+   cette route morte et rapportait donc systématiquement qu'aucun CCTP
+   n'existait, quel que soit le projet demandé — un bug utilisateur réel,
+   pas seulement du code mort.
+3. **L'ancienne table `specifications`**, qui servait de CCTP avant que
+   `/specifications` ne devienne la bibliothèque d'ouvrages (voir plus bas) ;
+   `packages/archioffice-agents/src/server/context.ts`'s `firmKnowledge`
+   (scope `firm_knowledge`) y puisait encore ses `cctpExcerpts` — du contenu
+   qui ne reçoit plus d'écriture depuis ce changement, donc de plus en plus
+   périmé au fil du temps.
+
+**Correction : `read_cctp` lit maintenant la même route que `read_dpgf`**
+(`/api/projects/:projectId/dpgf`) et `summarizeCctp()` en extrait le texte
+`cctpDescription` au lieu des champs `description`/`prescriptionsTechniques`
+d'un type `Article` qui ne correspondait à aucune donnée réelle.
+`firmKnowledge.cctpExcerpts` lit désormais `dpgfs` de la même façon (une
+fonction dédiée, `extractCctpExcerpt()`, rejoue la même marche que
+`summarizeCctp()` en miniature) plutôt que la table `specifications`.
+
+**Le code mort a été supprimé** : `server/routes/cctps.ts` (et son
+enregistrement dans `server.ts`), `src/hooks/useCCTP.ts`, `src/types/cctp.ts`,
+et le code CCTP inatteignable de `ProjectDetail.tsx`
+(`fetchSpecifications`/`handleCreateSpec`, jamais appelés depuis un rendu, et
+l'état `specifications`/`isAddingSpec`/`newSpecTitle` qui allait avec).
+
+**La table `cctps` elle-même n'a pas été supprimée**, à dessein : une
+instance de production en porte une ligne, écrite par l'ancien hook mort —
+la retirer sans savoir si un cabinet compte dessus serait une perte de
+données pour gagner une ligne dans `schema.sql`. Elle reste donc dans
+`server/syncTables.ts` et `supabase/migrate_add_sync_infra.sql`, vide de
+toute route qui l'écrit ou la lit désormais — même traitement que la table
+`specifications` plus bas, conservée pour la même raison.
+
+### Pagination et fan-out sur les listes
+
+`GET /api/projects` et `GET /api/invoices` faisaient tous deux la même
+chose : joindre, sur CHAQUE ligne de la liste, des données que seul le
+projet ou la facture réellement ouverte finit par utiliser. Pour les
+projets, `project_cotraitants(*), project_lots(*), project_stakeholders(*),
+project_categories_junction(...)` — utilisé nulle part ailleurs que dans la
+modale de `Projects.tsx` pour LE projet sélectionné, et pas du tout par
+`ProjectDetail.tsx` (qui appelait déjà `/api/projects/:id/full`, lequel
+n'incluait pourtant pas ce join — `project.lots_list` y était donc
+silencieusement toujours vide malgré tout le code qui le lit, un bug
+préexistant corrigé au passage). Pour les factures, `invoice_items(*)` —
+utilisé nulle part dans la LISTE elle-même, seulement par
+`InvoiceGenerator.tsx` quand on ouvre une facture précise pour la visualiser
+ou la générer.
+
+Une vingtaine de pages (Dashboard, Gantt, Documents, TimeTracking, Contacts,
+Calendar, Mailbox, ...) n'appellent `GET /api/projects` que comme un
+annuaire id→nom : aucune n'avait besoin de ce fan-out, et le payer sur
+chaque appel devient réellement coûteux pour un cabinet avec des années
+d'archives.
+
+**Le fan-out a migré vers la lecture d'un seul élément** :
+`GET /api/projects/:id/full` porte désormais ce même join (mappé sur
+`cotraitants_list`/`lots_list`/`stakeholders_list`/`categories_list`,
+exactement comme avant sur la liste) ; `GET /api/invoices/:id` (nouvelle
+route) porte les `items`. `Projects.tsx`'s `handleProjectClick` et
+`Invoices.tsx`'s `handleOpenGenerator` récupèrent désormais ces données à
+l'ouverture plutôt que de compter sur ce que la liste avait déjà — la liste
+elle-même ne les porte plus du tout.
+
+**Pagination par curseur, opt-in et rétrocompatible.** `limit`/`cursor` sont
+des paramètres de requête optionnels sur les deux listes — un curseur opaque
+(base64 de `id` pour les projets, faute de colonne de date de création ; de
+`created_at` pour les factures, déjà triées dessus). Sans eux, la route rend
+exactement le même tableau qu'avant : aucun des nombreux appelants qui ne
+paginent pas n'a besoin d'être touché. Un appelant qui passe les deux reçoit
+`{ data, nextCursor }` à la place — `nextCursor: null` signale la dernière
+page. Aucune page ne consomme encore ce mode (le tri/filtre des listes reste
+géré côté client, via `usePagination`) ; c'est le mécanisme qui manquait,
+pas encore son adoption dans l'UI.
+
+Tous les autres endpoints de liste (`/api/documents`, `/api/tasks`,
+`/api/contacts`, `/api/tenders`, ...) restent non paginés — voir
+ROADMAP.md.
+
+**`tests/fakeSupabaseAdmin.ts`'s `.order()`/`.limit()` sont devenus réels**
+(triaient et tronquaient auparavant en no-op, voir le commentaire historique
+resté dans le fichier) : les deux routes ci-dessus en dépendent pour un
+comportement correct, ce qui n'était vrai d'aucune route avant elles parmi
+la cinquantaine d'appels à `.order(...)` du codebase.
+
+### `x-user-role` retiré du frontend
+
+Le frontend envoyait encore l'en-tête `x-user-role` sur la sauvegarde et la
+suppression d'un projet (`ProjectDetail.tsx`, `Projects.tsx`), alors que le
+serveur ne l'a jamais lu : `DELETE /api/projects/:id` est gardé par
+`requireRole('admin')`, qui dérive le rôle de `getSystemRole(tenantId,
+userId)` côté serveur, jamais d'un en-tête client. L'en-tête était donc un
+reliquat sans effet — retiré pour ne pas laisser croire qu'il joue un rôle
+de sécurité. `ROADMAP.md`/`API.md` documentaient encore l'ancienne faille
+(« x-user-role est fait confiance sans vérification ») ; corrigé au passage,
+avec les mentions « pas de rate limiting » et « CORS reflète n'importe quelle
+origine », toutes deux également obsolètes (`server/rateLimit.ts` et
+l'allow-list CORS de `server.ts` existent déjà).
 
 ### Plusieurs cabinets pour une même personne
 

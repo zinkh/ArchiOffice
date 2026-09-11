@@ -19,6 +19,7 @@ describe('Ordres de service', () => {
   it('creates, updates, transitions status, and deletes an OS', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
       project_id: 'p1', os_number: '001', title: 'Terrassement', type: 'travaux',
@@ -69,6 +70,7 @@ describe('Visas', () => {
   it('creates, updates, and deletes a visa', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/visas').set(authHeader(token)).field('project_id', 'p1').field('title', 'Visa fondations');
     expect(created.status).toBe(200);
@@ -100,6 +102,7 @@ describe('Receptions', () => {
   it('creates, updates, and deletes a reception', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/receptions').set(authHeader(token)).send({ project_id: 'p1', date: '2026-01-01', type: 'OPR', has_reserves: true, reserves_count: 2 });
     expect(created.status).toBe(200);
@@ -123,6 +126,7 @@ describe('Reserves', () => {
   it('auto-numbers reserves per project and never leaks across tenants', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
     fakeSupabaseAdmin.seed('reserves', [{ id: 'r-existing', tenant_id: tenantId, project_id: 'p1', title: 'Fissure', number: 1 }]);
 
     const created = await request(app).post('/api/reserves').set(authHeader(token)).send({ project_id: 'p1', title: 'Fuite', status: 'A faire' });
@@ -154,6 +158,7 @@ describe('GPA reserves', () => {
   it('auto-numbers GPA reserves per project, independently of OPR reserves', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
     // A same-numbered OPR reserve must not influence the GPA sequence.
     fakeSupabaseAdmin.seed('reserves', [{ id: 'opr1', tenant_id: tenantId, project_id: 'p1', title: 'OPR', number: 5 }]);
 
@@ -174,6 +179,7 @@ describe('Permits', () => {
   it('creates, updates, and deletes a permit', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/permits').set(authHeader(token)).send({ project_id: 'p1', type: 'PC', reference: 'PC-001' });
     expect(created.status).toBe(200);
@@ -197,6 +203,7 @@ describe('RFIs', () => {
   it('creates, answers, and deletes an RFI', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/rfis').set(authHeader(token)).send({ project_id: 'p1', question: 'Quelle teinte de façade ?' });
     expect(created.status).toBe(200);

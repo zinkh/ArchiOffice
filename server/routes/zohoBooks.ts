@@ -30,6 +30,63 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
+/**
+ * Books equivalent of pushInvoiceToZohoInvoice (server/routes/zohoInvoice.ts)
+ * — same idempotency mechanics (search by `reference_number` before create),
+ * same no-cache rationale (one call per invoice creation, not per sync run).
+ */
+export async function pushInvoiceToZohoBooks(
+  supabaseAdmin: any,
+  tenantId: string,
+  inv: any,
+  idempotencyKey: string,
+): Promise<{ external_id: string; invoice_number: string; status: string }> {
+  const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+  const s = settings as any;
+  if (!s?.zoho_books_refresh_token) throw new Error('Zoho Books non connecté');
+
+  const dc = s.zoho_data_center || 'com';
+  const orgId = s.zoho_books_org_id || s.zoho_org_id;
+  const params = new URLSearchParams({
+    refresh_token: decryptSecretMaybe(s.zoho_books_refresh_token),
+    client_id: s.zoho_client_id,
+    client_secret: s.zoho_client_secret,
+    grant_type: 'refresh_token',
+  });
+  const tokenRes = await fetchWithTimeout(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params }, ZOHO_TIMEOUT_MS);
+  const tokenBody = await tokenRes.json() as any;
+  if (!tokenBody?.access_token) throw new Error(`Échec du rafraîchissement du jeton Zoho Books${tokenBody?.error ? ` (${tokenBody.error})` : ''}`);
+
+  const apiBase = `https://books.zoho.${dc}/api/v3`;
+  const headers = { Authorization: `Zoho-oauthtoken ${tokenBody.access_token}`, 'Content-Type': 'application/json' };
+
+  const existingRes = await fetchWithTimeout(
+    `${apiBase}/invoices?organization_id=${orgId}&reference_number=${encodeURIComponent(idempotencyKey)}&per_page=1`,
+    { headers }, ZOHO_TIMEOUT_MS,
+  );
+  const existingBody = await existingRes.json() as any;
+  const already = (existingBody?.invoices || [])[0];
+  if (already) {
+    return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
+  }
+
+  const payload = {
+    customer_name: inv.project_name || inv.description || 'Client',
+    reference_number: idempotencyKey,
+    date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
+    due_date: zohoDate(inv.due_date),
+    line_items: zohoLineItems(inv),
+    notes: inv.description || undefined,
+  };
+  const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {
+    method: 'POST', headers, body: JSON.stringify(payload),
+  }, ZOHO_TIMEOUT_MS);
+  const respData = await resp.json() as any;
+  const created = respData?.invoice;
+  if (!created?.invoice_id) throw new Error(respData?.message || 'Création Zoho Books échouée');
+  return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
+}
+
 export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   // Keyed by tenantId — see the matching comment in zohoInvoice.ts. An
   // unkeyed single value here let one tenant's cached Zoho token leak to

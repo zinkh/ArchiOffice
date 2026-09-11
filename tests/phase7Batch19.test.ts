@@ -47,6 +47,31 @@ describe('Proposals', () => {
     expect(specs.length).toBe(1);
   });
 
+  it('rejects creating a proposal against another tenant\'s client_id', async () => {
+    const otherTenant = makeTenant();
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-other', tenant_id: otherTenant, first_name: 'Autre', last_name: 'Cabinet' }]);
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/proposals').set(authHeader(token)).send({ title: 'Devis suspect', client_id: 'contact-other' });
+
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('proposals').some(pr => pr.client_id === 'contact-other')).toBe(false);
+  });
+
+  it('rejects re-attaching a proposal to another tenant\'s client_id on update', async () => {
+    const otherTenant = makeTenant();
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-other-2', tenant_id: otherTenant, first_name: 'Autre', last_name: 'Cabinet' }]);
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('proposals', [{ id: 'p-reparent', tenant_id: tenantId, title: 'Devis', status: 'Draft' }]);
+
+    const res = await request(app).put('/api/proposals/p-reparent').set(authHeader(token)).send({ title: 'Devis', client_id: 'contact-other-2' });
+
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('proposals').find(pr => pr.id === 'p-reparent')?.client_id).not.toBe('contact-other-2');
+  });
+
   it('creates a project (and copies specialties to cotraitants) when a proposal is accepted', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
@@ -102,7 +127,7 @@ describe('Proposals', () => {
 });
 
 describe('Invoices', () => {
-  it('lists invoices with their items and project name', async () => {
+  it('lists invoices with the project name but not the line items (see GET /api/invoices/:id)', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('projects', [{ id: 'proj1', tenant_id: tenantId, name: 'Villa' }]);
@@ -113,11 +138,57 @@ describe('Invoices', () => {
     expect(res.status).toBe(200);
     const inv = res.body.find((i: any) => i.id === 'inv1');
     expect(inv.project_name).toBe('Villa');
-    // Not asserting on inv.items here: the embedded `invoice_items(*)` relation
-    // isn't resolved by the fake (see fakeSupabaseAdmin.ts's file header) — it
-    // returns the flat invoice row, so items stays empty regardless of what's
-    // seeded. Covered directly against the invoice_items table below instead.
+    // The list dropped the `invoice_items(*)` fan-out (see CLAUDE.md,
+    // "pagination et fan-out") — items live only on the per-invoice detail
+    // route now, checked below.
+    expect(inv.items).toBeUndefined();
     expect(fakeSupabaseAdmin.getTable('invoice_items').some(i => i.invoice_id === 'inv1')).toBe(true);
+  });
+
+  it('GET /api/invoices/:id returns the single invoice with its items', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'proj1', tenant_id: tenantId, name: 'Villa' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv1', tenant_id: tenantId, project_id: 'proj1', invoice_number: 'FAC-001', projects: { name: 'Villa' } }]);
+    fakeSupabaseAdmin.seed('invoice_items', [{ id: 'it1', tenant_id: tenantId, invoice_id: 'inv1', description: 'Honoraires', quantity: 1, unit_price: 1000 }]);
+
+    const res = await request(app).get('/api/invoices/inv1').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.project_name).toBe('Villa');
+    // Not asserting on res.body.items — same embedded-relation limitation as
+    // the list test above (the fake doesn't resolve `invoice_items(*)`).
+    expect(fakeSupabaseAdmin.getTable('invoice_items').some(i => i.invoice_id === 'inv1')).toBe(true);
+  });
+
+  it('never returns another tenant\'s invoice on GET /api/invoices/:id', async () => {
+    const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-detail-b', tenant_id: tenantB, invoice_number: 'SECRET' }]);
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+
+    const res = await request(app).get('/api/invoices/inv-detail-b').set(authHeader(token));
+    expect(res.status).toBe(404);
+  });
+
+  it('paginates the invoice list with an opaque cursor when limit is passed', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-page-a', tenant_id: tenantId, invoice_number: 'A', created_at: '2026-01-01T00:00:00Z' },
+      { id: 'inv-page-b', tenant_id: tenantId, invoice_number: 'B', created_at: '2026-01-02T00:00:00Z' },
+      { id: 'inv-page-c', tenant_id: tenantId, invoice_number: 'C', created_at: '2026-01-03T00:00:00Z' },
+    ]);
+
+    const page1 = await request(app).get('/api/invoices?limit=2').set(authHeader(token));
+    expect(page1.status).toBe(200);
+    expect(page1.body.data).toHaveLength(2);
+    expect(page1.body.nextCursor).toBeTruthy();
+
+    const page2 = await request(app).get(`/api/invoices?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`).set(authHeader(token));
+    expect(page2.status).toBe(200);
+    const ids1 = page1.body.data.map((i: any) => i.id);
+    const ids2 = page2.body.data.map((i: any) => i.id);
+    expect(ids1.some((id: string) => ids2.includes(id))).toBe(false);
   });
 
   it('creates an invoice, auto-numbering it and falling back to settings for seller info', async () => {

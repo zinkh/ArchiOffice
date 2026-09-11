@@ -7,6 +7,7 @@ import type { Express } from 'express';
 import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -41,6 +42,12 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
+      // `client_id` is a contacts.id accepted straight from the body — a
+      // devis would otherwise happily point at another tenant's contact,
+      // and the GET /api/proposals join would leak that contact's name back.
+      if (proposalData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', proposalData.client_id, tenantId))) {
+        return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
+      }
       // Auto-generate readable reference if not provided
       if (!proposalData.reference) {
         proposalData.reference = await getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
@@ -75,6 +82,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
       const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, construction_cost_num: _ccn2, ...updateData } = p;
+      if (updateData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', updateData.client_id, tenantId))) {
+        return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
+      }
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

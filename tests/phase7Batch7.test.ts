@@ -40,6 +40,7 @@ describe('MAF entries', () => {
   it('creates, lists, updates the statut, and deletes an entry within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/maf/v1/entries').set(authHeader(token)).send({
       project_id: 'p1', declaration_year: 2026, intercalaire: 'violet', honoraires_ht: 5000, statut: 'brouillon',

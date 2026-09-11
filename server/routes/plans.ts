@@ -4,6 +4,7 @@
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -29,6 +30,12 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
       const { id: bodyId, project_id, name, index, version, parent_id, category } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (parent_id && !(await assertTenantEntity(supabaseAdmin, 'plans', parent_id, tenantId))) {
+        return res.status(400).json({ error: "Plan parent introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const uploaded_at = new Date().toISOString();
       const storagePath = `${tenantId}/${project_id}/${id}/${sanitizeFilename(file.originalname)}`;

@@ -7,6 +7,7 @@
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -46,13 +47,19 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       // falsify a document's apparent author (security audit finding).
       const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
       const projectIdVal = project_id === '' || project_id === 'null' ? null : project_id;
+      if (projectIdVal && !(await assertTenantEntity(supabaseAdmin, 'projects', projectIdVal, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      const { indice, emetteur, doc_type, contact_id, contact_name } = req.body;
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       const phaseVal = phase || null;
       const id = crypto.randomUUID();
       const phaseSegment = phaseVal ? `${phaseVal}/` : '';
       const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
       const uploaded_at = new Date().toISOString();
-      const { indice, emetteur, doc_type, contact_id, contact_name } = req.body;
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description, size_bytes: file.size });
@@ -95,6 +102,9 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { name, category, phase, description, indice, emetteur, doc_type, contact_id, contact_name, validation_status, validation_comments } = req.body;
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {

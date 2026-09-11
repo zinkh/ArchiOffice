@@ -18,6 +18,7 @@ describe('DPGF (items + parents)', () => {
   it('creates a DPGF and an item within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const dpgf = await request(app).post('/api/dpgfs').set(authHeader(token)).send({ project_id: 'p1', title: 'DPGF v1', version: '1' });
     expect(dpgf.status).toBe(201);
@@ -47,6 +48,7 @@ describe('Situations (+ detail lines)', () => {
   it('creates a situation and a detail line within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const situation = await request(app).post('/api/situations').set(authHeader(token)).send({ project_id: 'p1', numero: 1 });
     expect(situation.status).toBe(201);
@@ -66,35 +68,6 @@ describe('Situations (+ detail lines)', () => {
 
     await request(app).delete(`/api/situations/${situationId}`).set(authHeader(token));
     expect(fakeSupabaseAdmin.getTable('situations').find(s => s.id === situationId)).toBeDefined();
-  });
-});
-
-describe('CCTPs', () => {
-  it('updates and deletes a CCTP within one tenant', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    const cctpId = 'cctp-1';
-    fakeSupabaseAdmin.seed('cctps', [{ id: cctpId, tenant_id: tenantId, title: 'Lot 1' }]);
-
-    const updated = await request(app).put(`/api/cctps/${cctpId}`).set(authHeader(token)).send({ title: 'Lot 1 (révisé)' });
-    expect(updated.status).toBe(200);
-    expect(updated.body.title).toBe('Lot 1 (révisé)');
-
-    const deleted = await request(app).delete(`/api/cctps/${cctpId}`).set(authHeader(token));
-    expect(deleted.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('cctps').find(c => c.id === cctpId)).toBeUndefined();
-  });
-
-  it('never lets a caller update another tenant\'s CCTP', async () => {
-    const tenantB = makeTenant();
-    const cctpId = 'cctp-b';
-    fakeSupabaseAdmin.seed('cctps', [{ id: cctpId, tenant_id: tenantB, title: 'SECRET-CCTP-B' }]);
-
-    const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
-
-    await request(app).put(`/api/cctps/${cctpId}`).set(authHeader(token)).send({ title: 'Hacked' });
-    expect(fakeSupabaseAdmin.getTable('cctps').find(c => c.id === cctpId)?.title).toBe('SECRET-CCTP-B');
   });
 });
 
@@ -142,6 +115,7 @@ describe('Project Members', () => {
   it('adds and removes a member within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tenant_memberships', [{ id: 'mem-u1', user_id: 'u1', tenant_id: tenantId, is_default: true }]);
 
     const added = await request(app).post('/api/projects/p1/members').set(authHeader(token)).send({ user_id: 'u1', role: 'lead' });
     expect(added.status).toBe(201);

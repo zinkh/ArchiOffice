@@ -348,12 +348,30 @@ export default function Projects() {
     }
   };
 
-  const handleProjectClick = (project: Project) => {
+  // La liste (GET /api/projects) ne porte plus les cotraitants/lots/
+  // intervenants/catégories de chaque projet — voir CLAUDE.md — donc ouvrir
+  // la modale va les chercher à part, sur le seul projet ouvert, plutôt que
+  // de compter sur ce que la liste avait déjà.
+  const handleProjectClick = async (project: Project) => {
     setSelectedProject(project);
     setEditForm(project);
     setIsEditing(false);
     setIsModalOpen(true);
     fetchMilestones(project.id);
+    try {
+      const full = await fetchJson<{ project: Project }>(`/api/projects/${project.id}/full`);
+      const enriched = {
+        ...project,
+        cotraitants_list: full.project.cotraitants_list,
+        lots_list: full.project.lots_list,
+        stakeholders_list: full.project.stakeholders_list,
+        categories_list: full.project.categories_list,
+      };
+      setSelectedProject(enriched);
+      setEditForm(enriched);
+    } catch (err) {
+      console.error('Failed to fetch project relations:', err);
+    }
   };
 
   const fetchMilestones = async (projectId: string) => {
@@ -492,10 +510,7 @@ export default function Projects() {
       try {
         const res = await fetch(url, {
           method,
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-user-role': currentUser?.system_role || 'user'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(editForm)
         });
 
@@ -561,12 +576,7 @@ export default function Projects() {
 
     try {
       console.log('Sending DELETE request for project:', id);
-      const res = await fetch(`/api/projects/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-role': currentUser?.system_role || 'user'
-        }
-      });
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
 
       if (res.ok) {
         console.log('Delete successful, updating state');

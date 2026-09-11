@@ -97,6 +97,7 @@ describe('Meetings', () => {
   it('creates, reads, updates, and deletes a meeting within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/meetings').set(authHeader(token)).send({ project_id: 'p1', type: 'chantier', title: 'Réunion de chantier n°1', date: '2026-01-15' });
     expect(created.status).toBe(201);

@@ -5,6 +5,14 @@
 // deliberately deferred to last.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
+
+async function assertSpecialtyContacts(supabaseAdmin: any, tenantId: string, specialties: any[] | undefined): Promise<boolean> {
+  for (const s of specialties || []) {
+    if (s?.contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', s.contact_id, tenantId))) return false;
+  }
+  return true;
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -38,6 +46,12 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
     try {
       const tenantId = await getTenantId(req.user.id);
       const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, ville_execution } = req.body;
+      if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
+        return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
+      }
+      if (!(await assertSpecialtyContacts(supabaseAdmin, tenantId, specialties_list))) {
+        return res.status(400).json({ error: "Contact de spécialité introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({ id, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null });
       if (te) throw te;
@@ -73,6 +87,12 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, ville_execution } = req.body;
+      if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
+        return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
+      }
+      if (!(await assertSpecialtyContacts(supabaseAdmin, tenantId, specialties_list))) {
+        return res.status(400).json({ error: "Contact de spécialité introuvable pour ce cabinet." });
+      }
       const { error: ue } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null }).eq('id', id);
       if (ue) throw ue;
       await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').delete().eq('tender_id', id);

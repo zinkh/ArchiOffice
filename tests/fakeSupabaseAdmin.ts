@@ -82,15 +82,39 @@ export class FakeSupabaseAdmin {
     },
   };
 
-  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — the two AI-credit
-  // functions are the only ones this codebase calls.
+  // Minimal stand-in for supabaseAdmin.rpc(fnName, params) — the AI-credit
+  // functions are the only ones this codebase calls. reserve_ai_credit and
+  // refresh_monthly_ai_credits mirror the real migration's single-statement
+  // check-and-write: both read and write the row synchronously here, same
+  // as Postgres would under a row lock, so the atomicity these functions
+  // exist for isn't something this in-memory fake can fail to reproduce.
   async rpc(fnName: string, params: Record<string, any>) {
+    const tenants = this.tables.get('tenants') || [];
+    const tenant = tenants.find(t => t.id === params.p_tenant_id);
     if (fnName === 'increment_ai_credits' || fnName === 'deduct_ai_credits') {
       const sign = fnName === 'increment_ai_credits' ? 1 : -1;
-      const tenants = this.tables.get('tenants') || [];
-      const tenant = tenants.find(t => t.id === params.p_tenant_id);
       if (tenant) tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + sign * params.p_amount_cents;
       return { data: null, error: null };
+    }
+    if (fnName === 'reserve_ai_credit') {
+      if (!tenant) return { data: false, error: null };
+      const balance = tenant.ai_credit_balance_eur_cents || 0;
+      if (balance < params.p_amount_cents) return { data: false, error: null };
+      tenant.ai_credit_balance_eur_cents = balance - params.p_amount_cents;
+      return { data: true, error: null };
+    }
+    if (fnName === 'settle_ai_credit') {
+      if (tenant) tenant.ai_credit_balance_eur_cents = Math.max(0, (tenant.ai_credit_balance_eur_cents || 0) + params.p_delta_cents);
+      return { data: null, error: null };
+    }
+    if (fnName === 'refresh_monthly_ai_credits') {
+      if (!tenant) return { data: false, error: null };
+      const lastRefresh = tenant.ai_credit_last_refresh;
+      const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      if (lastRefresh && lastRefresh >= firstOfMonth) return { data: false, error: null };
+      tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
+      tenant.ai_credit_last_refresh = new Date().toISOString();
+      return { data: true, error: null };
     }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
   }
@@ -326,15 +350,22 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
-  // No-op: none of this codebase's ~50 `.order(...)` call sites are tested
-  // for actual sort order, only for which rows come back (tenant scoping,
-  // filters) — implementing real sorting here would be pure scope creep for
-  // a fake that's already just enough to drive these routes' own logic.
-  order() {
+  // Real for the (few) call sites that now depend on it for correctness —
+  // cursor pagination (GET /api/projects, GET /api/invoices) orders by a
+  // column and slices with `.limit()` right after, so a no-op here would
+  // silently pass tests that assert the wrong page came back. The other
+  // ~50 `.order(...)` call sites in this codebase don't inspect order, so
+  // this doesn't change their behavior — they just get the same rows in a
+  // now-deterministic order instead of insertion order.
+  private orderBy?: { col: string; ascending: boolean };
+  order(col: string, opts?: { ascending?: boolean }) {
+    this.orderBy = { col, ascending: opts?.ascending ?? true };
     return this;
   }
 
-  limit() {
+  private limitN?: number;
+  limit(n: number) {
+    this.limitN = n;
     return this;
   }
 
@@ -436,6 +467,16 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     if (this.wantMaybeSingle) {
       return { data: clone(matched[0] ?? null), error: null };
     }
-    return { data: clone(matched), error: null, count: matched.length };
+    if (this.orderBy) {
+      const { col, ascending } = this.orderBy;
+      matched.sort((a, b) => {
+        if (a[col] === b[col]) return 0;
+        if (a[col] == null) return ascending ? -1 : 1;
+        if (b[col] == null) return ascending ? 1 : -1;
+        return (a[col] < b[col] ? -1 : 1) * (ascending ? 1 : -1);
+      });
+    }
+    const page = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    return { data: clone(page), error: null, count: matched.length };
   }
 }

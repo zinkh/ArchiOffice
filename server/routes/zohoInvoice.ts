@@ -37,6 +37,88 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
+/**
+ * Pushes ONE invoice to Zoho Invoice at creation time, for
+ * server/invoiceAccountingSync.ts — distinct from the bulk `/api/zoho/sync`
+ * loop above (which pushes a backlog and has its own rate-limit/pagination
+ * concerns). No token cache here: this runs at most once per invoice
+ * creation, not per sync run, so the extra token refresh is not worth the
+ * cross-request cache's staleness/leak surface (see the module header on
+ * why that cache is keyed by tenant).
+ *
+ * Idempotent by construction: `reference_number` carries the caller's
+ * `idempotencyKey` (the local invoice id), and Zoho invoices are searched by
+ * it before creating — a retry after a lost response (network cut after
+ * Zoho accepted the invoice but before we read the reply) finds and reuses
+ * the same Zoho invoice instead of creating a second one.
+ */
+export async function pushInvoiceToZohoInvoice(
+  supabaseAdmin: any,
+  tenantId: string,
+  inv: any,
+  idempotencyKey: string,
+): Promise<{ external_id: string; invoice_number: string; status: string }> {
+  const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+  const s = settings as any;
+  if (!s?.zoho_refresh_token) throw new Error('Zoho Invoice non connecté');
+
+  const dc = s.zoho_data_center || 'com';
+  const params = new URLSearchParams({
+    refresh_token: decryptSecretMaybe(s.zoho_refresh_token),
+    client_id: s.zoho_client_id,
+    client_secret: s.zoho_client_secret,
+    grant_type: 'refresh_token',
+  });
+  const tokenResp = await axios.post(
+    `https://accounts.zoho.${dc}/oauth/v2/token`, params.toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: ZOHO_TIMEOUT_MS },
+  );
+  const accessToken = tokenResp.data?.access_token;
+  if (!accessToken) throw new Error(`Échec du rafraîchissement du jeton Zoho${tokenResp.data?.error ? ` (${tokenResp.data.error})` : ''}`);
+
+  const apiBase = `https://invoice.zoho.${dc}/api/v3`;
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${accessToken}`,
+    'X-com-zoho-invoice-organizationid': s.zoho_org_id,
+    'Content-Type': 'application/json',
+  };
+
+  // Idempotency check: an invoice already carrying this reference_number
+  // means a previous attempt succeeded on Zoho's side even if we never saw
+  // the response — reuse it rather than create a duplicate.
+  const existing = await axios.get(`${apiBase}/invoices`, {
+    headers, params: { reference_number: idempotencyKey, per_page: 1 }, timeout: ZOHO_TIMEOUT_MS,
+  });
+  const already = (existing.data?.invoices || [])[0];
+  if (already) {
+    return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
+  }
+
+  const customerName = inv.project_name || inv.description || 'Client';
+  const search = await axios.get(`${apiBase}/contacts`, {
+    headers, params: { contact_name: customerName, per_page: ZOHO_PAGE_SIZE }, timeout: ZOHO_TIMEOUT_MS,
+  });
+  const match = (search.data.contacts || []).find(
+    (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === customerName.trim(),
+  );
+  const customerId = match
+    ? match.contact_id
+    : (await axios.post(`${apiBase}/contacts`, { contact_name: customerName, contact_type: 'customer' }, { headers, timeout: ZOHO_TIMEOUT_MS })).data.contact.contact_id;
+
+  const payload: any = {
+    customer_id: customerId,
+    reference_number: idempotencyKey,
+    date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
+    due_date: zohoDate(inv.due_date),
+    line_items: zohoLineItems(inv),
+    notes: inv.description || undefined,
+  };
+  const resp = await axios.post(`${apiBase}/invoices`, payload, { headers, timeout: ZOHO_TIMEOUT_MS });
+  const created = resp.data?.invoice;
+  if (!created?.invoice_id) throw new Error(resp.data?.message || 'Création Zoho échouée');
+  return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
+}
+
 export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   // Keyed by tenantId — this cache is shared by every request the process
   // handles across every tenant. A single unkeyed value here previously meant

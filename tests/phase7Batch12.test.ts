@@ -20,6 +20,7 @@ describe('Marchés Entreprises CRUD', () => {
   it('creates, lists, updates, and deletes a marché', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/marches-entreprises').set(authHeader(token)).send({
       project_id: 'p1', entreprise_nom: 'BTP Dupont', lot_numero: '01', lot_titre: 'Gros œuvre', montant_ht: 150000, tva_rate: 20,
@@ -64,6 +65,7 @@ describe('Marchés Entreprises CRUD', () => {
     const tenantA = makeTenant();
     const { token } = makeUser(tenantA);
     const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantA }]);
 
     const created = await request(app).post('/api/marches-entreprises').set(authHeader(token)).send({
       project_id: 'p1', entreprise_nom: 'BTP Dupont', lot_numero: '01', lot_titre: 'Gros œuvre', montant_ht: 150000, tva_rate: 20,
@@ -102,6 +104,8 @@ describe('Situations enrichment', () => {
   it('bulk-replaces the detail lines of a situation', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('situations', [{ id: 'sit1', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('dpgf_items', [{ id: 'item1', tenant_id: tenantId }]);
     fakeSupabaseAdmin.seed('detail_situations', [{ id: 'old', tenant_id: tenantId, situation_id: 'sit1', dpgf_item_id: 'x', pourcentage_avancement: 10 }]);
 
     const res = await request(app).post('/api/situations/sit1/detail-bulk').set(authHeader(token)).send({

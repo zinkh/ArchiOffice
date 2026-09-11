@@ -46,3 +46,10 @@ jobs:
         env:
           VITE_SUPABASE_URL: https://placeholder.supabase.co
           VITE_SUPABASE_ANON_KEY: placeholder_anon_key
+
+      # Only build-windows.yml exercised this before, and only on its own
+      # tag/branch trigger — never on every push/PR to main. A server-side
+      # bundling break (a bad esbuild --external, an import cycle tsc
+      # --noEmit doesn't catch under a bundler) went uncaught here.
+      - name: Build server bundle
+        run: npm run build:server

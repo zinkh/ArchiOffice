@@ -2,6 +2,8 @@
 // planning tasks).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { findMembership } from '../tenantMemberships';
 import { validateBody } from '../../src/lib/validateRequest';
 import { createTaskSchema, updateTaskSchema } from '../../src/schemas/task.schema';
 
@@ -64,6 +66,12 @@ export function registerTaskRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, title, description, start_date, end_date, due_date, progress, dependencies, status, priority, assignee_id } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (assignee_id && !(await findMembership(supabaseAdmin, assignee_id, tenantId))) {
+        return res.status(400).json({ error: "Assigné introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').insert({
         id,
@@ -104,6 +112,12 @@ export function registerTaskRoutes(app: Express, { supabaseAdmin, getTenantId, g
       }
       if (req.body.dependencies !== undefined) patch.dependencies = JSON.stringify(req.body.dependencies || []);
       if (Object.keys(patch).length === 0) return res.status(400).json({ error: "Aucun champ à mettre à jour" });
+      if (patch.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', patch.project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (patch.assignee_id && !(await findMembership(supabaseAdmin, patch.assignee_id, tenantId))) {
+        return res.status(400).json({ error: "Assigné introuvable pour ce cabinet." });
+      }
       patch.updated_at = new Date().toISOString();
 
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').update(patch).eq('id', id).select().maybeSingle();

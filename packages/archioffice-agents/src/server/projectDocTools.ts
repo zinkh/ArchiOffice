@@ -33,12 +33,48 @@ function matchesLot(lot: any, wanted: string): boolean {
   );
 }
 
-export function summarizeCctp(cctp: any, wantedLot?: string): Record<string, unknown> {
-  const lots: any[] = Array.isArray(cctp?.lots) ? cctp.lots : [];
+// Le CCTP n'est pas un document séparé : sa description technique vit dans
+// les champs `cctpDescription` portés par les lots, chapitres et lignes du
+// même arbre que le DPGF (src/components/pro/CCTPEditor.tsx — « le CCTP
+// partage le même dpgf.lots »). `read_cctp` lit donc la même ressource que
+// `read_dpgf` (voir KIND_BY_TOOL plus bas) et cette fonction en extrait le
+// texte CCTP plutôt que les montants.
+function nbArticlesCctp(lignes: any[]): number {
+  let n = 0;
+  for (const l of lignes ?? []) {
+    if (Array.isArray(l?.children) && l.children.length) n += nbArticlesCctp(l.children);
+    else n++;
+  }
+  return n;
+}
+
+function resumerArticlesCctp(lignes: any[], remaining: { n: number }): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const l of lignes ?? []) {
+    if (remaining.n <= 0) break;
+    if (Array.isArray(l?.children) && l.children.length) {
+      out.push(...resumerArticlesCctp(l.children, remaining));
+      continue;
+    }
+    remaining.n--;
+    const text = String(l?.cctpDescription ?? '');
+    out.push({
+      numero: l?.numero,
+      designation: l?.designation,
+      unite: l?.unite,
+      contenu: text ? text.slice(0, MAX_ARTICLE_CHARS) : undefined,
+      tronque: text.length > MAX_ARTICLE_CHARS || undefined,
+    });
+  }
+  return out;
+}
+
+export function summarizeCctp(dpgf: any, wantedLot?: string): Record<string, unknown> {
+  const lots: any[] = Array.isArray(dpgf?.lots) ? dpgf.lots : [];
   const header = {
-    titre: cctp?.titre ?? null,
-    version: cctp?.version ?? null,
-    statut: cctp?.statut ?? null,
+    titre: dpgf?.titre ?? null,
+    version: dpgf?.version ?? null,
+    statut: dpgf?.statut ?? null,
     nb_lots: lots.length,
   };
 
@@ -49,7 +85,7 @@ export function summarizeCctp(cctp: any, wantedLot?: string): Record<string, unk
         numero: l?.numero,
         titre: l?.titre,
         nb_chapitres: Array.isArray(l?.chapitres) ? l.chapitres.length : 0,
-        nb_articles: (l?.chapitres || []).reduce((n: number, c: any) => n + (c?.articles?.length || 0), 0),
+        nb_articles: (l?.chapitres || []).reduce((n: number, c: any) => n + nbArticlesCctp(c?.lignes || []), 0),
       })),
       note: "Sommaire uniquement. Rappelle read_cctp avec le paramètre lot pour obtenir le détail d'un lot précis.",
     };
@@ -60,25 +96,15 @@ export function summarizeCctp(cctp: any, wantedLot?: string): Record<string, unk
     return { ...header, error: `Aucun lot ne correspond à « ${wantedLot} ».`, lots_disponibles: lots.map(l => `${l?.numero} ${l?.titre}`) };
   }
 
-  let remaining = MAX_ARTICLES_PER_LOT;
+  const remaining = { n: MAX_ARTICLES_PER_LOT };
   const chapitres = (lot.chapitres || []).map((c: any) => ({
     numero: c?.numero,
     titre: c?.titre,
-    articles: (c?.articles || []).slice(0, Math.max(remaining, 0)).map((a: any) => {
-      remaining--;
-      const text = [a?.description, a?.prescriptionsTechniques].filter(Boolean).join('\n');
-      return {
-        numero: a?.numero,
-        designation: a?.designation,
-        unite: a?.unite,
-        normes: a?.normes || undefined,
-        contenu: text.slice(0, MAX_ARTICLE_CHARS),
-        tronque: text.length > MAX_ARTICLE_CHARS || undefined,
-      };
-    }),
+    description: c?.cctpDescription || undefined,
+    articles: resumerArticlesCctp(c?.lignes || [], remaining),
   }));
 
-  return { ...header, lot: { numero: lot.numero, titre: lot.titre, description: lot.description, chapitres } };
+  return { ...header, lot: { numero: lot.numero, titre: lot.titre, description: lot.cctpDescription || undefined, chapitres } };
 }
 
 export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unknown> {
@@ -256,19 +282,25 @@ export async function executeProjectDocTool(
 
   const kind = KIND_BY_TOOL[name];
   if (!kind) return { response: { error: `Outil inconnu : ${name}.` } };
-  const { status, data } = await getJson(baseUrl, `/api/projects/${encodeURIComponent(projectId)}/${kind}`, auth);
+  // Le CCTP n'a pas de route propre : sa description technique vit sur
+  // l'arbre du DPGF (voir summarizeCctp ci-dessus), donc read_cctp lit la
+  // même ressource que read_dpgf plutôt qu'un endpoint dédié — RESOURCE_BY_KIND.
+  const resource = RESOURCE_BY_KIND[kind];
+  const label = LABEL_BY_KIND[kind];
+  const { status, data } = await getJson(baseUrl, `/api/projects/${encodeURIComponent(projectId)}/${resource}`, auth);
 
-  // Le CCTP et le DPGF répondent 404 quand ils n'existent pas ; la route du BPU
-  // répond 200 avec null. Les deux veulent la même réponse à l'utilisateur.
+  // Le DPGF (et donc le CCTP, qui en dépend) répond 404 quand il n'existe
+  // pas ; la route du BPU répond 200 avec null. Les deux veulent la même
+  // réponse à l'utilisateur.
   if (status === 404 || (status === 200 && !data)) {
     return {
       response: {
-        error: `Aucun ${kind.toUpperCase()} n'existe encore pour ce projet — dis-le à l'utilisateur au lieu de supposer son contenu.`,
+        error: `Aucun ${label} n'existe encore pour ce projet — dis-le à l'utilisateur au lieu de supposer son contenu.`,
       },
     };
   }
   if (status !== 200 || !data) {
-    return { response: { error: data?.error || `Lecture du ${kind.toUpperCase()} impossible.` } };
+    return { response: { error: data?.error || `Lecture du ${label} impossible.` } };
   }
 
   // La route du BPU rend la ligne entière (document + offres), pas le document.
@@ -278,12 +310,22 @@ export async function executeProjectDocTool(
     : summarizeDpgf(payload, lot);
   return {
     response: summary,
-    summary: `${kind.toUpperCase()} consulté${lot ? ` (lot ${lot})` : ''}`,
+    summary: `${label} consulté${lot ? ` (lot ${lot})` : ''}`,
   };
 }
 
 const KIND_BY_TOOL: Record<string, 'cctp' | 'dpgf' | 'bpu'> = {
   read_cctp: 'cctp', read_dpgf: 'dpgf', read_bpu: 'bpu',
+};
+
+// read_cctp lit la même route que read_dpgf (voir plus haut) : il n'existe
+// plus de table/endpoint `cctps` séparé.
+const RESOURCE_BY_KIND: Record<'cctp' | 'dpgf' | 'bpu', 'dpgf' | 'bpu'> = {
+  cctp: 'dpgf', dpgf: 'dpgf', bpu: 'bpu',
+};
+
+const LABEL_BY_KIND: Record<'cctp' | 'dpgf' | 'bpu', string> = {
+  cctp: 'CCTP', dpgf: 'DPGF', bpu: 'BPU',
 };
 
 export const PROJECT_DOC_TOOL_NAMES = Object.keys(KIND_BY_TOOL);

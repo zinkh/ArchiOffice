@@ -1,9 +1,11 @@
 // Phase 7 extraction — moved out of server.ts's inline Specifications
-// (CCTP) CRUD section. Distinct from server/routes/cctps.ts, which handles
-// update/delete on a different table (`cctps`) — this one is the
-// `specifications` table.
+// (CCTP) CRUD section, for the `specifications` table. A separate `cctps`
+// table and its own CRUD route existed briefly for the same purpose
+// (server/routes/cctps.ts) but was never the table any live UI wrote to —
+// removed during the CCTP consolidation (see CLAUDE.md).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -35,6 +37,9 @@ export function registerSpecificationRoutes(app: Express, { supabaseAdmin, getTe
       // qui visaient en réalité la Bibliothèque d'ouvrages (articles_type),
       // une ressource distincte. Refuser ici évite d'en recréer.
       if (!project_id) return res.status(400).json({ error: "project_id est obligatoire pour créer un CCTP" });
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const last_updated = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'specifications').insert({ id, project_id, title, content, last_updated, is_template: !!is_template });

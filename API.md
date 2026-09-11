@@ -192,11 +192,10 @@ Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth 
 ## Limitations for integrators
 
 - **No API key / service-account auth.** You must hold a real Supabase user session. Plan for token refresh.
-- **CORS reflects any Origin** with credentials allowed, and only permits `Content-Type` and `Authorization` as custom request headers — a browser-based third-party integration can't add its own auth header without a server-side CORS change.
-- **No rate limiting.** Self-throttle; the server won't do it for you.
-- **`x-user-role` is a client-supplied header**, trusted as-is by at least one destructive check (project delete). Don't rely on it as a security boundary in your own integration, and don't treat its presence in a request as authorization on the server side either.
+- **CORS is an allow-list of known ArchiOffice origins** (`server.ts`, shared with the Host-header redirect check), not a blanket reflect-any-origin — a browser-based third-party integration running from its own origin won't get a CORS grant at all, and only `Content-Type`/`Authorization` are permitted as custom request headers regardless.
+- **Rate limiting exists only on specific endpoints**, not as a blanket policy — see `server/rateLimit.ts` (public auth, local login, AI generation, outbound email, the billing webhook, the SMTP test). Self-throttle everywhere else; the server won't do it for you.
 - **No outbound webhooks/events.** The only webhooks are inbound (Stancer billing events, Ragic sync). If you need to react to changes in ArchiOffice in near-real-time, you'll need to poll.
-- **No pagination** on list endpoints — expect full tenant-scoped arrays back.
-- **Duplicated data models in a couple of spots** (`/api/dpgf` vs `/api/dpgfs`, `/api/specifications` vs `/api/projects/:id/cctp` + `/api/cctps/:id`) reflect an in-progress consolidation, not two supported alternatives — check [ROADMAP.md](ROADMAP.md) or ask before building against either.
+- **Pagination exists only on `/api/projects` and `/api/invoices`** (opt-in `?limit=&cursor=`, returning `{ data, nextCursor }` — omit both and you get the old plain-array response). Every other list endpoint still returns the full tenant-scoped array, unpaged.
+- **Duplicated data model in one spot**: `/api/dpgf` vs `/api/dpgfs` (per-field CRUD vs. a whole-document JSON blob, same underlying `dpgfs` table) reflects an in-progress consolidation, not two supported alternatives — check [ROADMAP.md](ROADMAP.md) or ask before building against either.
 
 See [ROADMAP.md](ROADMAP.md) for what's implemented vs. planned at a feature level, and the main [README](README.md) for local setup and the end-to-end product workflow.

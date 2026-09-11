@@ -84,13 +84,13 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 | Electron desktop build (offline-first, local sync) | 🟡 | Fully scaffolded (`electron/`, embedded Postgres, `electron-builder.yml`) but less battle-tested than the web app. |
 | Super-admin dashboard (`/admin`) | 🟡 | Functional platform-operator tools (tenant stats, plan/trial overrides), smaller and less polished than the main app. Gated by a single hardcoded `SUPER_ADMIN_EMAIL`, not a real role. |
 | Public API for third-party integrators | ⏳ | No API-key or service-account auth exists yet — see [API.md](API.md#authentication) for what integrating today actually requires. |
-| Rate limiting | ⏳ | Not implemented on any endpoint. |
+| Rate limiting | 🟡 | In place on the sensitive endpoints most worth protecting (`server/rateLimit.ts`: public auth, local login, AI generation, outbound email, the billing webhook, the SMTP test) — not a blanket limiter on every route. |
 | API versioning | ⏳ | Flat `/api/*` surface with no version prefix, except the self-contained `/api/maf/v1/*` namespace. |
 
 ## Known gaps worth knowing about before you rely on something
 
-- **`x-user-role` header is client-supplied and unverified** for at least one destructive check (project delete). Don't build automation that assumes this is a real security boundary.
-- **No pagination** on list endpoints — large tenants get full, unpaged arrays back.
+- **No pagination on most list endpoints** (`/api/documents`, `/api/tasks`, `/api/contacts`, `/api/tenders`, `/api/rfis`, `/api/reserves`, `/api/meetings`, and others) — large tenants get full, unpaged arrays back. `/api/projects` and `/api/invoices` got opt-in cursor pagination (`?limit=&cursor=`, returning `{ data, nextCursor }`) and dropped their per-row relational fan-out (cotraitants/lots/stakeholders/categories, line items) down to a single per-item detail fetch — see CLAUDE.md's "Pagination et fan-out sur les listes" — but the remaining endpoints above still return everything, unpaged, on every call.
+- **Uploads go through the server's memory**, not a direct signed upload to storage. Every route on the multer/`memoryStorage()` path (`server/documentUpload.ts`, `server/imageUpload.ts`) buffers the whole file (up to 50 Mo) in the Node process before it reaches Supabase Storage — several concurrent large uploads can add up to real memory pressure. A direct-to-storage signed-upload flow (client asks the server for a short-lived signed upload URL, then uploads straight to the now-private storage bucket) would remove the server from that hot path entirely; not started.
 - **Webhooks are inbound-only** (billing events from Stancer, sync notifications from Ragic) — there's no outbound event/webhook system for third parties wanting to react to changes in ArchiOffice.
 
 Screenshots and a demo GIF are also still on the list — see the TODO in [README.md](README.md#screenshots) if you'd like to contribute some.

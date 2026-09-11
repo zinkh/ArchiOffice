@@ -12,7 +12,6 @@ import { registerBpuRoutes } from "./server/routes/bpu";
 import { registerPriceLibraryRoutes } from "./server/routes/priceLibrary";
 import { registerReferentielRoutes } from "./server/routes/referentiels";
 import { registerSituationRoutes } from "./server/routes/situations";
-import { registerCctpRoutes } from "./server/routes/cctps";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
@@ -240,9 +239,17 @@ export async function createApp() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Debug middleware for API routes
+  // Debug middleware for API routes — logs the path only, never the query
+  // string: OAuth callbacks (Zoho, Gmail, Outlook, Google Calendar) arrive as
+  // /api/.../callback?code=...&state=..., and logging req.originalUrl as-is
+  // put that authorization code and state nonce in plaintext server logs.
+  // req.path can't replace it here: this middleware mounts on "/api/*", and
+  // Express strips the matched prefix from req.path for a path-mounted
+  // app.use (see the AUTH_EXEMPT matching below for the same caveat) — it
+  // would log "/zoho/callback", not "/api/zoho/callback". Splitting
+  // req.originalUrl on "?" keeps the full path without the query string.
   app.use("/api/*", (req, res, next) => {
-    console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
+    console.log(`[API DEBUG] ${req.method} ${req.originalUrl.split("?")[0]}`);
     next();
   });
 
@@ -408,20 +415,91 @@ export async function createApp() {
     pack_50: { amount_cents: 5000, label: '50 €' },
   };
 
-  // Top up plan monthly allowance on first AI call of each month
+  // Top up plan monthly allowance on first AI call of each month. Atomic:
+  // refresh_monthly_ai_credits() checks ai_credit_last_refresh and writes the
+  // new balance/timestamp in the SAME statement, so two concurrent
+  // first-calls-of-the-month can't both read "not yet refreshed" and both
+  // credit the tenant — a plain read-then-write here let exactly that
+  // happen (security audit finding).
   async function maybeRefreshMonthlyCredits(tenantId: string, plan: string): Promise<void> {
     const included = PLAN_AI_MONTHLY_CREDIT_CENTS[plan] ?? 0;
-    const { data: tenant } = await supabaseAdmin.from('tenants')
-      .select('ai_credit_last_refresh').eq('id', tenantId).single();
-    const lastRefresh = (tenant as any)?.ai_credit_last_refresh;
-    const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    if (!lastRefresh || lastRefresh < firstOfMonth) {
-      if (included > 0) {
-        await supabaseAdmin.rpc('increment_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
-      }
-      await supabaseAdmin.from('tenants')
-        .update({ ai_credit_last_refresh: new Date().toISOString() }).eq('id', tenantId);
-    }
+    await supabaseAdmin.rpc('refresh_monthly_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
+  }
+
+  // Conservative upper bound on a single model call's output, used only to
+  // size a pre-call reservation (see reserveAiCredit/settleAiCredit below) —
+  // never passed to the provider itself. Matches the hard max_tokens the
+  // Anthropic/Mistral adapters already enforce (llm/anthropic.ts,
+  // llm/mistral.ts); Gemini has no equivalent cap in code, so this is the
+  // assumption used for the reservation math on that provider, not a real
+  // limit — if a Gemini response ever exceeds it, settleAiCredit's delta
+  // charges the (small) difference after the fact rather than blocking it.
+  const RESERVE_MAX_OUTPUT_TOKENS = 16000;
+
+  async function estimateReserveCents(provider: string, model: string, inputTokens: number, audioInputTokens = 0): Promise<number> {
+    const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
+    return priceEurCents(provider, model, inputTokens, RESERVE_MAX_OUTPUT_TOKENS, audioInputTokens);
+  }
+
+  // Reserves a conservative worst-case cost BEFORE calling the model — the
+  // atomic half of the fix (see reserve_ai_credit() in
+  // supabase/migrate_ai_billing_atomicity.sql): the balance check and the
+  // deduction happen in one SQL statement, so a burst of concurrent
+  // requests against a low balance can no longer all pass a stale
+  // pre-check and each run (and cost real money against our own provider
+  // bill) before any of them deducts. Returns false when the balance can't
+  // cover the reservation — the caller must 402 without ever invoking the
+  // model.
+  async function reserveAiCredit(tenantId: string, estimateCents: number): Promise<boolean> {
+    const { data } = await supabaseAdmin.rpc('reserve_ai_credit', { p_tenant_id: tenantId, p_amount_cents: estimateCents });
+    return !!data;
+  }
+
+  // Refunds a reservation IN FULL when the call never completed (network
+  // error, timeout) — a plain settle_ai_credit credit with no usage row,
+  // since no tokens were actually consumed. Deliberately separate from
+  // settleAiCredit: that function prices the call via priceEurCents, which
+  // floors even a zero-token call at 1 cent (same rule a real, tiny call
+  // gets) — using it here would leave a 1-cent phantom charge on a call
+  // that never ran at all.
+  async function refundAiCredit(tenantId: string, cents: number): Promise<void> {
+    await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: tenantId, p_delta_cents: cents });
+  }
+
+  // Reconciles a prior reserveAiCredit() against the real cost once usage is
+  // known: refunds the unused portion of the reservation, or — when the
+  // reservation under-estimated — charges the difference, floored at zero
+  // either way (settle_ai_credit() in the same migration). Also records the
+  // usage row, same shape as the old deductAiCredit.
+  async function settleAiCredit(params: {
+    tenantId: string; userId: string;
+    agentId: string | null; conversationId: string | null;
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    provider: string; model: string;
+    reservedCents: number;
+    inputTokens: number; outputTokens: number;
+    audioInputTokens?: number;
+  }): Promise<{ newBalance: number; costCents: number }> {
+    const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
+    const audioInputTokens = params.audioInputTokens ?? 0;
+    const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
+    // Positive delta = refund (reservation was more than the real cost, the
+    // common case since it assumes RESERVE_MAX_OUTPUT_TOKENS); negative =
+    // extra charge for the rare call that ran past that assumption.
+    const delta = params.reservedCents - costCents;
+    await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: params.tenantId, p_delta_cents: delta });
+    const { data: t } = await supabaseAdmin.from('tenants')
+      .select('ai_credit_balance_eur_cents').eq('id', params.tenantId).single();
+    const newBalance = (t as any)?.ai_credit_balance_eur_cents ?? 0;
+    await supabaseAdmin.from('agent_token_usage').insert({
+      tenant_id: params.tenantId, agent_id: params.agentId,
+      user_id: params.userId, conversation_id: params.conversationId,
+      tokens_used: params.inputTokens + audioInputTokens + params.outputTokens,
+      input_tokens: params.inputTokens + audioInputTokens, output_tokens: params.outputTokens,
+      cost_eur_cents: costCents, endpoint_type: params.endpointType,
+      provider: params.provider, model: params.model,
+    });
+    return { newBalance, costCents };
   }
 
   // Deduct cost from tenant balance and log usage
@@ -769,7 +847,6 @@ export async function createApp() {
   registerPriceLibraryRoutes(app, { supabaseAdmin, getTenantId });
   registerReferentielRoutes(app, { supabaseAdmin });
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerCctpRoutes(app, { supabaseAdmin, getTenantId });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -843,8 +920,6 @@ export async function createApp() {
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
   // above alongside the other extracted domains.
 
-  // Phase 7: CCTPs update/delete now live in server/routes/cctps.ts.
-
   // Phase 7: Custom References now live in server/routes/customReferences.ts.
 
   // Phase 7: Project Members, Project Phase History, and Global Search now
@@ -856,6 +931,10 @@ export async function createApp() {
   const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
+    reserveAiCredit,
+    settleAiCredit,
+    refundAiCredit,
+    estimateReserveCents,
     maybeRefreshMonthlyCredits,
     PLAN_AI_MONTHLY_CREDIT_CENTS,
     baseUrl: `http://127.0.0.1:${PORT}`,

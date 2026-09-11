@@ -89,13 +89,16 @@ npm run dev
 
 This starts a single process (`tsx server.ts`) that serves the Vite dev server (with HMR) and the `/api/**` REST backend together at `http://localhost:3000`.
 
-### 4. Type-check
+### 4. Type-check and test
 
-There's no test suite or linter beyond TypeScript's own checks:
+There's no ESLint or Prettier, but there is a Vitest suite covering server routes end-to-end and pure frontend logic:
 
 ```bash
-npm run lint   # tsc --noEmit
+npm run lint   # tsc --noEmit — type check only, doesn't run the tests
+npm test       # vitest run
 ```
+
+CI (`.github/workflows/*.yml`) runs both, in that order, before `npm run build`.
 
 ### 5. Build for production
 

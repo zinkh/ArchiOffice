@@ -7,6 +7,7 @@
 // extracting those two integrations as a side effect of this batch.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { buildEtatAcomptePdfBuffer } from '../etatAcompte';
 
 export interface RouteDeps {
@@ -31,6 +32,9 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
   app.post("/api/marches-entreprises", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (req.body?.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', req.body.project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
         .insert({ ...req.body })
         .select()
@@ -44,6 +48,9 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
   app.put("/api/marches-entreprises/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (req.body?.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', req.body.project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
         .update({ ...req.body, updated_at: new Date().toISOString() })
         .eq('id', req.params.id)
@@ -152,7 +159,15 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
   app.post("/api/situations/:situationId/detail-bulk", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await assertTenantEntity(supabaseAdmin, 'situations', req.params.situationId, tenantId))) {
+        return res.status(404).json({ error: 'Situation introuvable pour ce cabinet.' });
+      }
       const { items } = req.body as { items: Array<{ dpgf_item_id: string; pourcentage_avancement: number; montant_periode: number }> };
+      for (const item of items || []) {
+        if (item?.dpgf_item_id && !(await assertTenantEntity(supabaseAdmin, 'dpgf_items', item.dpgf_item_id, tenantId))) {
+          return res.status(400).json({ error: "Ligne DPGF introuvable pour ce cabinet." });
+        }
+      }
 
       // Supprimer les anciens détails
       await tenantScopedFrom(supabaseAdmin, tenantId, 'detail_situations')
@@ -185,6 +200,9 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
         marche_id, date_reception_situation, penalites_ht, penalites_notes,
         avance_remboursement, revision_coeff, revision_indices, notes_moe, etat,
       } = req.body;
+      if (marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', marche_id, tenantId))) {
+        return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
         .update({
           marche_id, date_reception_situation, penalites_ht, penalites_notes,

@@ -37,6 +37,53 @@ async function odooRpc(url: string, db: string, username: string, apiKey: string
   return resp.data?.result;
 }
 
+/**
+ * Pushes ONE invoice to Odoo (account.move) at creation time, for
+ * server/invoiceAccountingSync.ts. Odoo has no `reference_number`-style
+ * field built for this, so idempotency piggybacks on `ref` (Customer
+ * Reference): it's searched before create, tagged with our own prefix so it
+ * never collides with a `ref` a user typed by hand in Odoo directly.
+ */
+export async function pushInvoiceToOdoo(
+  supabaseAdmin: any,
+  tenantId: string,
+  inv: any,
+  idempotencyKey: string,
+): Promise<{ external_id: string; invoice_number: string; status: string }> {
+  const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+  const s = settings as any;
+  if (!s?.odoo_url || !s?.odoo_api_key || !s?.odoo_username || !s?.odoo_db) throw new Error('Odoo non configuré');
+  await assertPublicHttpUrl(s.odoo_url);
+
+  const rpc = (model: string, method: string, args: any[], kwargs?: any) =>
+    odooRpc(s.odoo_url, s.odoo_db, s.odoo_username, s.odoo_api_key, model, method, args, kwargs);
+
+  const ref = `archioffice:${idempotencyKey}`;
+  const existing = await rpc('account.move', 'search_read', [[['ref', '=', ref]]], { fields: ['id', 'name', 'payment_state'], limit: 1 });
+  const already = (existing ?? [])[0];
+  const stateMap: Record<string, string> = { paid: 'Paid', not_paid: 'Sent', in_payment: 'Sent', partial: 'Sent', reversed: 'Draft' };
+  if (already) {
+    return { external_id: String(already.id), invoice_number: already.name, status: stateMap[already.payment_state] || 'Draft' };
+  }
+
+  const vals = {
+    move_type: 'out_invoice',
+    ref,
+    invoice_date: inv.issue_date ? String(inv.issue_date).split('T')[0] : false,
+    invoice_date_due: inv.due_date ? String(inv.due_date).split('T')[0] : false,
+    invoice_line_ids: (inv.items && inv.items.length)
+      ? inv.items.map((item: any) => ([0, 0, {
+          name: item.description ?? 'Prestation', quantity: item.quantity ?? 1,
+          price_unit: item.unit_price ?? item.amount ?? 0, tax_ids: [],
+        }]))
+      : [[0, 0, { name: inv.description ?? 'Honoraires', quantity: 1, price_unit: inv.amount ?? 0, tax_ids: [] }]],
+  };
+  const newId = await rpc('account.move', 'create', [vals]);
+  if (!newId) throw new Error('Création Odoo échouée');
+  const [created] = await rpc('account.move', 'search_read', [[['id', '=', newId]]], { fields: ['id', 'name', 'payment_state'], limit: 1 });
+  return { external_id: String(newId), invoice_number: created?.name || '/', status: stateMap[created?.payment_state] || 'Draft' };
+}
+
 export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   // GET /api/odoo/status
   app.get('/api/odoo/status', async (req: any, res: any) => {
