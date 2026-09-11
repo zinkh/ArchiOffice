@@ -192,6 +192,71 @@ Shared interfaces live in `src/types.ts`. CCTP-specific types are in `src/types/
 | Excel | xlsx | Inline in pages |
 | XML (DPGF import) | fast-xml-parser | `src/lib/xmlHelper.ts` |
 
+### Numérotation des factures et connecteurs comptables (Zoho / Odoo)
+
+Deux modes, jamais mélangés sur une même facture :
+
+| | Autonome | Synchronisé |
+|---|---|---|
+| Numérotation | Locale (`getNextDocNumber`, PREFIX-ANNÉE-SEQ) | Attribuée par le connecteur (Zoho Invoice, Zoho Books, Odoo) |
+| Choisi par | Rien à faire (défaut) | `settings.accounting_sync_provider` |
+| Quand | Aucun connecteur actif, ou choisi puis déconnecté | Un connecteur est choisi ET connecté |
+
+`getActiveAccountingProvider()` (`server/invoiceAccountingSync.ts`) décide lequel
+s'applique à CHAQUE création : `accounting_sync_provider` seul ne suffit pas, il
+faut aussi que le jeton/la clé du connecteur soit encore présent en base — un
+connecteur choisi puis déconnecté retombe en mode autonome plutôt que de
+laisser toute nouvelle facture sans numéro indéfiniment.
+
+**En mode synchronisé, `POST /api/invoices` n'invente jamais de numéro** — ni
+localement, ni depuis un `invoice_number` fourni par le client (qui gagnait
+auparavant sans condition : `invoice_number || getNextDocNumber(...)`). La
+facture est créée en brouillon, sans numéro, puis `syncInvoiceToAccounting()`
+pousse son contenu au connecteur et ne renseigne `invoice_number` qu'une fois
+celui-ci confirmé — jamais avant. Un échec (connecteur injoignable, quota)
+laisse la facture sans numéro plutôt que d'improviser une valeur locale ;
+`POST /api/invoices/:id/sync-retry` rejoue l'envoi.
+
+**Idempotence.** Chaque paire (facture locale, connecteur) a un enregistrement
+dans `invoice_accounting_sync` (`local_invoice_id`, `provider`,
+`external_invoice_id`, `invoice_number`, `sync_status`, `last_synced_at`),
+créé par un `upsert(..., { onConflict: 'local_invoice_id,provider' })` — un
+retry ne duplique jamais cet enregistrement. Ça ne suffit pas à empêcher un
+doublon CÔTÉ CONNECTEUR si l'appel réseau a réussi mais que la réponse s'est
+perdue : chaque fonction de poussée (`pushInvoiceToZohoInvoice`/`Books`/`Odoo`,
+`server/routes/{zohoInvoice,zohoBooks,odoo}.ts`) recherche donc d'abord une
+facture déjà marquée avec sa propre clé d'idempotence (`reference_number` chez
+Zoho, `ref` chez Odoo, préfixé `archioffice:`) avant d'en créer une — un retry
+après coupure réseau retrouve et adopte la facture déjà créée au lieu d'en
+produire une seconde.
+
+**Un numéro confirmé par le connecteur est gelé**, même si la facture est
+encore au statut local `Draft` (fraîchement synchronisée, pas encore envoyée
+au client) : `PUT /api/invoices/:id` refuse toute modification du contenu
+légal dès qu'une ligne `invoice_accounting_sync.sync_status = 'synced'`
+existe pour cette facture, en plus du verrou déjà existant sur le statut
+`!= 'Draft'`.
+
+**Le verrou structurel reste la base**, pas le code applicatif : un index
+unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
+(`supabase/migrate_accounting_sync.sql`) empêche deux factures du même
+cabinet de porter le même numéro, quelle que soit la cause (course locale,
+numéro fourni par un client, import).
+
+### Références inter-locataires non validées
+
+`tenantScopedFrom.ts` empêche une requête d'écrire une ligne dans le mauvais
+tenant, mais ne dit rien des identifiants qu'un payload se contente de
+RÉFÉRENCER — un `project_id` accepté tel quel dans le corps d'une requête peut
+pointer vers un projet d'un autre cabinet, tant que rien ne vérifie son
+appartenance avant l'écriture. `server/assertTenantEntity.ts` est le helper
+générique introduit pour ça (`assertTenantEntity(supabaseAdmin, table, id,
+tenantId): Promise<boolean>`) ; `server/routes/invoices.ts` l'utilise sur
+`project_id` en création et en modification. D'autres endroits acceptent une
+référence du même genre sans ce contrôle (`project_id` sur
+`server/routes/proposals.ts`, entre autres) — à traiter au fur et à mesure
+avec le même helper plutôt qu'en le dupliquant.
+
 ### AI (provider abstraction)
 
 AI features (agent chat, CCTP generation) are called from the backend only — the frontend never talks to a model provider directly.

@@ -8,6 +8,8 @@
 import type { Express } from 'express';
 import { validateBody } from '../../src/lib/validateRequest';
 import { invoiceSchema } from '../../src/schemas/invoice.schema';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoiceAccountingSync';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -48,6 +50,14 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         items
       } = req.body;
 
+      // A project_id accepted straight from the body without checking whose
+      // it is would let this tenant's invoice reference (and, via the
+      // service-role `projects(name)` join on GET, leak the name of)
+      // another tenant's project.
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
 
@@ -71,20 +81,31 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         }
       }
 
-      // Auto-generate invoice_number if not provided — the tenant-wide legal
-      // sequential reference, unaffected by the per-affaire number below.
-      const finalInvoiceNumber = invoice_number || await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC');
+      // When a connector (Zoho Invoice/Books, Odoo, ...) is this tenant's
+      // numbering authority, the local sequential number must never be
+      // assigned — including one supplied by the client, which used to win
+      // outright (`invoice_number || getNextDocNumber(...)`) regardless of
+      // whether a connector was active. The invoice is created as a
+      // numberless Draft; syncInvoiceToAccounting below fills invoice_number
+      // in only once the connector confirms it, so ArchiOffice never invents
+      // a number the connector's own sequence doesn't recognise.
+      const accountingProvider = await getActiveAccountingProvider(supabaseAdmin, tenantId);
+      const finalInvoiceNumber = accountingProvider === 'none'
+        ? (invoice_number || await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC'))
+        : null;
+      const finalStatus = accountingProvider === 'none' ? (status || 'Draft') : 'Draft';
 
       // Auto-generate the per-affaire business reference for acompte invoices
       // only (e.g. "26014-ACO-02") — a complement to, never a replacement of,
-      // finalInvoiceNumber above.
+      // finalInvoiceNumber above, and unaffected by which numbering authority
+      // owns finalInvoiceNumber: it's ArchiOffice-local bookkeeping either way.
       const finalAffaireInvoiceNumber = affaire_invoice_number
         || (invoice_type === 'acompte' && project_id ? await getNextAffaireInvoiceNumber(tenantId, project_id) : null);
 
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
         id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id,
         amount: amount || 0, tax_amount: tax_amount || 0, total_amount: total_amount || 0,
-        status: status || 'Draft', due_date: due_date || null,
+        status: finalStatus, due_date: due_date || null,
         issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
         seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
@@ -101,6 +122,23 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         if (itemErr) throw itemErr;
       }
 
+      let accountingSyncResult: any = null;
+      if (accountingProvider !== 'none') {
+        let pushProjectName: string | null = null;
+        if (project_id) {
+          const { data: proj } = await supabaseAdmin.from('projects').select('name').eq('id', project_id).eq('tenant_id', tenantId).maybeSingle();
+          pushProjectName = (proj as any)?.name || null;
+        }
+        // Best effort, like the rest of this codebase's remontée/push
+        // patterns: the invoice already exists locally (Draft, numberless),
+        // so a connector outage here never loses it — it's retried via
+        // POST /api/invoices/:id/sync-retry once the connector is reachable.
+        accountingSyncResult = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, accountingProvider, {
+          project_name: pushProjectName, description, issue_date: issue_date || created_at.split('T')[0],
+          due_date, amount, vat_rate, items: items || [],
+        });
+      }
+
       const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).single();
       const project_name = (invoice as any)?.projects?.name || null;
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
@@ -108,9 +146,13 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // Log activity
       const userNameInv = await getUserName(tenantId, req.user.id, req.user.email);
       const invLabel = invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture';
-      logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${invoice_number || id.slice(0, 8)}`, project_name || '', id, 'invoice', 'Factures');
+      const loggedNumber = (invoice as any)?.invoice_number || id.slice(0, 8);
+      logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${loggedNumber}`, project_name || '', id, 'invoice', 'Factures');
 
-      res.status(201).json({ ...rest, project_name, items: invoice_items || [] });
+      res.status(201).json({
+        ...rest, project_name, items: invoice_items || [],
+        accounting_sync: accountingProvider === 'none' ? null : { provider: accountingProvider, ...accountingSyncResult },
+      });
     } catch (error: any) {
       console.error("Error creating invoice:", error);
       res.status(500).json({ error: "Failed to create invoice: " + error.message });
@@ -138,6 +180,19 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         .select('status, project_id, affaire_invoice_number, phases, amount, description, due_date, invoice_number, tax_amount, total_amount, issue_date, seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate, invoice_type, mission_id, mission_name, advancement_pct')
         .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const existing = (existingInvoice as any) || {};
+
+      if (project_id && project_id !== existing.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+
+      // A connector-confirmed invoice number is the connector's own legal
+      // document reference, not local bookkeeping — it must stay frozen even
+      // while the invoice is still 'Draft' locally (freshly synced but not
+      // yet sent to the client), which the status-based lock below doesn't
+      // cover on its own.
+      const { data: syncedRow } = await supabaseAdmin.from('invoice_accounting_sync')
+        .select('id').eq('local_invoice_id', id).eq('tenant_id', tenantId).eq('sync_status', 'synced').maybeSingle();
+      const isAccountingSynced = !!syncedRow;
 
       // A key omitted from the body (e.g. ProjectDetail's inline status
       // dropdown, which PUTs only `{ status }`) means "leave unchanged", not
@@ -179,12 +234,14 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // A row with no status at all (never happens for a real invoice — the
       // column always defaults to 'Draft' on insert, see the POST route
       // above) is treated as still editable rather than locked.
-      if (existing.status && existing.status !== 'Draft') {
+      if ((existing.status && existing.status !== 'Draft') || isAccountingSynced) {
         const contentChanged = Object.keys(fieldDefaults)
           .some(key => protectedFields[key] !== (existing[key] ?? fieldDefaults[key]));
         if (contentChanged) {
           return res.status(409).json({
-            error: "Cette facture a déjà été envoyée au client : son montant, sa description, ses dates et ses mentions légales ne peuvent plus être modifiés. Seuls le statut, le type de facture et le rattachement à un projet restent modifiables."
+            error: isAccountingSynced && (!existing.status || existing.status === 'Draft')
+              ? "Cette facture est numérotée par le connecteur comptable connecté : son numéro et ses mentions légales ne peuvent plus être modifiés ici."
+              : "Cette facture a déjà été envoyée au client : son montant, sa description, ses dates et ses mentions légales ne peuvent plus être modifiés. Seuls le statut, le type de facture et le rattachement à un projet restent modifiables."
           });
         }
       }
@@ -233,6 +290,38 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
     } catch (error: any) {
       captureWithContext(error, { route: 'PUT /api/invoices/:id', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update invoice: " + error.message });
+    }
+  });
+
+  // POST /api/invoices/:id/sync-retry — replays the connector push for an
+  // invoice that came out of POST /api/invoices numberless because the
+  // first attempt errored (connector unreachable, rate-limited, ...). Safe
+  // to call any number of times: syncInvoiceToAccounting reuses the same
+  // idempotency_key, so a push that actually succeeded on a prior attempt
+  // is found and adopted rather than duplicated (see server/routes/
+  // zohoInvoice.ts, zohoBooks.ts, odoo.ts's search-before-create).
+  app.post("/api/invoices/:id/sync-retry", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const provider = await getActiveAccountingProvider(supabaseAdmin, tenantId);
+      if (provider === 'none') {
+        return res.status(400).json({ error: "Aucun connecteur comptable actif pour ce cabinet." });
+      }
+      const { data: inv } = await supabaseAdmin.from('invoices')
+        .select('*, projects(name)').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!inv) return res.status(404).json({ error: "Facture introuvable." });
+
+      const result = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, provider, {
+        project_name: (inv as any).projects?.name || null,
+        description: (inv as any).description, issue_date: (inv as any).issue_date,
+        due_date: (inv as any).due_date, amount: (inv as any).amount, vat_rate: (inv as any).vat_rate,
+        items: (inv as any).invoice_items || [],
+      });
+      res.json({ provider, ...result });
+    } catch (error: any) {
+      console.error("Error retrying invoice sync:", error);
+      res.status(500).json({ error: "Failed to retry accounting sync: " + error.message });
     }
   });
 }
