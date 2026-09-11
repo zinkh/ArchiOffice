@@ -48,16 +48,30 @@ async function fetchAllRows(cloudClient: SupabaseClient, table: string, tenantId
   return rows;
 }
 
-async function upsertRows(supabaseAdmin: SupabaseClient, table: string, rows: any[]): Promise<any[]> {
-  if (rows.length === 0) return [];
+interface UpsertResult {
+  failed: any[];
+  /** Le message Postgres/PostgREST de chaque lot en échec — sans lui, un
+   *  import raté ne renvoyait que « N ligne(s) en échec », sans dire
+   *  pourquoi (contrainte de clé étrangère, colonne manquante localement
+   *  après une migration pas encore rejouée, etc.), rendant le diagnostic
+   *  impossible pour l'utilisateur comme pour nous. */
+  errorMessages: string[];
+}
+
+async function upsertRows(supabaseAdmin: SupabaseClient, table: string, rows: any[]): Promise<UpsertResult> {
+  if (rows.length === 0) return { failed: [], errorMessages: [] };
   const failed: any[] = [];
+  const errorMessages: string[] = [];
   // Batch upserts to keep individual PostgREST payloads reasonable.
   for (let i = 0; i < rows.length; i += 200) {
     const batch = rows.slice(i, i + 200);
     const { error } = await supabaseAdmin.from(table).upsert(batch, { onConflict: 'id' });
-    if (error) failed.push(...batch);
+    if (error) {
+      failed.push(...batch);
+      errorMessages.push(error.message);
+    }
   }
-  return failed;
+  return { failed, errorMessages };
 }
 
 async function importJunctionRows(
@@ -142,13 +156,13 @@ export async function runInitialImport(
 
     const projectIds: string[] = [];
     const observationIds: string[] = [];
-    const pendingRetry: { table: string; rows: any[] }[] = [];
+    const pendingRetry: { table: string; rows: any[]; errorMessages: string[] }[] = [];
 
     for (const table of SYNC_TABLES) {
       job.currentTable = table;
       const rows = await fetchAllRows(cloudClient, table, tenantId);
-      const failed = await upsertRows(supabaseAdmin, table, rows);
-      if (failed.length > 0) pendingRetry.push({ table, rows: failed });
+      const { failed, errorMessages } = await upsertRows(supabaseAdmin, table, rows);
+      if (failed.length > 0) pendingRetry.push({ table, rows: failed, errorMessages });
 
       if (table === 'projects') projectIds.push(...rows.map((r) => r.id));
       if (table === 'observations') observationIds.push(...rows.map((r) => r.id));
@@ -161,10 +175,16 @@ export async function runInitialImport(
     // ordinary forward-reference issues (a table referencing another one
     // that happened to be imported later) — avoids hand-maintaining a full
     // FK dependency graph across 44 tables.
-    for (const { table, rows } of pendingRetry) {
-      const stillFailed = await upsertRows(supabaseAdmin, table, rows);
+    for (const { table, rows, errorMessages } of pendingRetry) {
+      const { failed: stillFailed, errorMessages: retryErrorMessages } = await upsertRows(supabaseAdmin, table, rows);
       if (stillFailed.length > 0) {
-        throw new Error(`${table}: ${stillFailed.length} row(s) failed to import after retry`);
+        // Le message Postgres/PostgREST réel (ex. contrainte de clé
+        // étrangère, colonne inconnue) plutôt qu'un simple décompte — sans
+        // lui, l'écran d'import affichait « N ligne(s) en échec » sans
+        // jamais dire pourquoi, rendant impossible tout diagnostic depuis
+        // l'application.
+        const detail = retryErrorMessages[0] || errorMessages[0] || 'raison inconnue';
+        throw new Error(`${table} : ${stillFailed.length} ligne(s) n'ont pas pu être importées — ${detail}`);
       }
     }
 

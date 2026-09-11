@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconCommand } from '@tabler/icons-react';
-import { getImportProgress, getExportProgress, ImportJobStatus, ExportJobStatus } from '../lib/cloudSync';
+import { getImportProgress, getExportProgress, retryImport, ImportJobStatus, ExportJobStatus } from '../lib/cloudSync';
 
 type Phase = 'export' | 'import';
 
@@ -20,7 +20,10 @@ export default function CloudImportProgress() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const jobId = searchParams.get('jobId');
+  // État plutôt que lu une fois dans searchParams : une relance
+  // (retryImport()) obtient un NOUVEL identifiant de tâche, qu'il faut
+  // pouvoir réassigner ici pour relancer le sondage sur ce nouveau job.
+  const [jobId, setJobId] = useState(searchParams.get('jobId'));
   const exportJobId = searchParams.get('exportJobId');
   const importJobId = searchParams.get('importJobId');
   const isUpgradeFlow = !!(exportJobId && importJobId);
@@ -29,6 +32,27 @@ export default function CloudImportProgress() {
   const [phase, setPhase] = useState<Phase>('export');
   const [conflicts, setConflicts] = useState<ExportJobStatus['conflicts']>([]);
   const [finished, setFinished] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  // Le compte local et la session existent déjà dès que cet écran s'affiche
+  // (posés avant même que l'import ne démarre — voir server/cloudLinkRoutes.ts)
+  // : un import qui échoue laisse donc une application par ailleurs
+  // pleinement utilisable, seule la synchro cloud n'est pas encore active.
+  // Sans ce bouton, l'écran d'erreur était une impasse.
+  const handleRetry = async () => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const result = await retryImport();
+      setStatus(null);
+      setJobId(result.importJobId);
+    } catch (err: any) {
+      setRetryError(err?.message || "La relance a échoué.");
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   useEffect(() => {
     if (!jobId && !isUpgradeFlow) {
@@ -122,7 +146,31 @@ export default function CloudImportProgress() {
         </h2>
 
         {status?.status === 'error' ? (
-          <p className="text-sm text-red-500 text-center">{status.error}</p>
+          <div className="space-y-4">
+            <p className="text-sm text-red-500 text-center">{status.error}</p>
+            {retryError && <p className="text-sm text-red-500 text-center">{retryError}</p>}
+            {/* La relance ne rejoue que l'import (server/initialImport.ts) —
+                le seul chemin passé par server/cloudLinkRoutes.ts, celui qui
+                affiche jobId (pas isUpgradeFlow), donc le seul où ce bouton
+                a un effet réel. */}
+            {!isUpgradeFlow && (
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={retrying}
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+              >
+                {retrying ? t('cloud_import_retrying') : t('cloud_import_retry')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/'; }}
+              className="w-full py-2 px-4 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium rounded-lg transition-colors"
+            >
+              {t('cloud_import_continue_anyway')}
+            </button>
+          </div>
         ) : finished && conflicts.length > 0 ? (
           <div className="space-y-4">
             <p className="text-sm text-center text-amber-600 dark:text-amber-400">

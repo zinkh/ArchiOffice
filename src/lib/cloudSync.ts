@@ -40,6 +40,17 @@ export async function cloudLink(email: string, password: string, localPassword: 
   return result;
 }
 
+/**
+ * Relance l'import initial après un échec. Le compte local et le lien cloud
+ * existent déjà (posés par cloudLink() avant même que l'import ne démarre),
+ * donc une session locale valide est disponible — apiFetch() l'ajoute comme
+ * partout ailleurs dans l'application, contrairement à cloudLink() ci-dessus
+ * qui s'exécute avant qu'aucune session n'existe.
+ */
+export async function retryImport(): Promise<{ importJobId: string }> {
+  return apiFetch('/api/auth/cloud-link-retry-import', { method: 'POST' });
+}
+
 export interface ImportJobStatus {
   status: 'running' | 'done' | 'error';
   tablesDone: number;
