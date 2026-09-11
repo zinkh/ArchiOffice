@@ -1,4 +1,4 @@
-const { app, BrowserWindow, safeStorage, ipcMain, Notification, dialog } = require('electron');
+const { app, BrowserWindow, safeStorage, ipcMain, Notification, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
+const { resolveDataLocation } = require('./dataLocation.cjs');
 
 // package.json's "name" is the npm workspace root ("react-example", a
 // leftover scaffold name) — Electron otherwise uses it verbatim for both the
@@ -35,6 +36,11 @@ const CLOUD_SUPABASE_ANON_KEY = 'sb_publishable_vajyn6z5pbHzrCbK9IKdOQ_zxKFU4ul'
 let serverProcess = null;
 let mainWindow = null;
 let offlineStack = null;
+// Résolu une fois dans startServer() (electron/dataLocation.cjs) — gardé ici
+// pour que le pont IPC ci-dessous puisse ouvrir le bon dossier sans jamais
+// transmettre le chemin réel au renderer (qui ne fait que désigner LEQUEL
+// des deux ouvrir, voir registerDataLocationIpc()).
+let dataLocation = null;
 let logStream = null;
 let logFilePath = null;
 
@@ -128,11 +134,18 @@ function handleIpcMessage(child, msg) {
 
 async function startServer() {
   const { cwd, serverEntry } = resolvePaths();
-  const dataDir = app.getPath('userData');
   const resourcesDir = app.isPackaged ? process.resourcesPath : null;
 
+  // Emplacement de la base et des documents — voir electron/dataLocation.cjs.
+  // Posé une seule fois (au tout premier lancement) puis relu tel quel à
+  // chaque démarrage suivant ; un poste déjà installé avant l'existence de
+  // ce choix continue sur son emplacement historique sans jamais se voir
+  // reposer la question.
+  dataLocation = await resolveDataLocation(app, log);
+  const { dbDataDir, storageDataDir } = dataLocation;
+
   log('Démarrage de la pile de données locale (Postgres + PostgREST)...');
-  offlineStack = await startOfflineDataStack(dataDir, log, resourcesDir);
+  offlineStack = await startOfflineDataStack(dbDataDir, log, resourcesDir);
   log('Pile de données locale prête, lancement du serveur applicatif...');
 
   serverProcess = spawn(process.execPath, [serverEntry], {
@@ -143,7 +156,8 @@ async function startServer() {
       NODE_ENV: 'production',
       ELECTRON_RUN_AS_NODE: '1',
       OFFLINE_MODE: 'true',
-      OFFLINE_DATA_DIR: dataDir,
+      OFFLINE_DATA_DIR: dbDataDir,
+      OFFLINE_STORAGE_DIR: storageDataDir,
       OFFLINE_POSTGREST_URL: offlineStack.postgrestUrl,
       OFFLINE_PG_URL: offlineStack.pgUrl,
       SUPABASE_URL: `http://127.0.0.1:${PORT}`,
@@ -211,6 +225,24 @@ function registerNotificationIpc() {
     } catch {
       /* environnement de bureau sans pastille */
     }
+    return true;
+  });
+}
+
+// Emplacement des données — voir electron/dataLocation.cjs. Le renderer ne
+// reçoit les chemins réels que pour AFFICHAGE (Réglages) ; l'ouverture du
+// dossier, elle, passe par 'kind' plutôt que par un chemin fourni par le
+// renderer, pour ne jamais ouvrir un chemin arbitraire à sa demande.
+function registerDataLocationIpc() {
+  ipcMain.handle('desktop:get-data-location', () => {
+    return dataLocation || { dbDataDir: null, storageDataDir: null };
+  });
+
+  ipcMain.handle('desktop:open-data-folder', (_event, kind) => {
+    if (!dataLocation) return false;
+    const dir = kind === 'storage' ? dataLocation.storageDataDir : dataLocation.dbDataDir;
+    if (!dir) return false;
+    shell.openPath(dir).catch((err) => log('[dataLocation] Échec ouverture dossier :', err));
     return true;
   });
 }
@@ -304,6 +336,7 @@ app.whenReady().then(() => {
   initLogging();
   log('ArchiOffice démarre — journal :', logFilePath);
   registerNotificationIpc();
+  registerDataLocationIpc();
   serverStartPromise = startServer().catch((err) => {
     log('Échec du démarrage :', err);
     throw err;
