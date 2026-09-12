@@ -6,9 +6,9 @@ import {
   IconAlertTriangle, IconFileImport,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { ContratMOE, ContratMOEMission, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
+import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -44,16 +44,44 @@ const STATUS_CONFIG = {
 const INDICES_REVISION = ['BT01', 'BT02', 'BT50', 'Ingénierie BT', 'ICC', 'IRL'];
 
 const DEFAULT_MISSIONS: ContratMOEMission[] = [
-  { id: 'esquisse',  name: 'Esquisse (ESQ)',           pct: 10, incluse: true },
-  { id: 'aps',       name: 'Avant-Projet Sommaire (APS)', pct: 12, incluse: true },
-  { id: 'apd',       name: 'Avant-Projet Détaillé (APD)', pct: 14, incluse: true },
-  { id: 'pro',       name: 'Projet (PRO)',              pct: 18, incluse: true },
-  { id: 'act',       name: 'Assistance Contrats de Travaux (ACT)', pct: 7, incluse: true },
-  { id: 'visa',      name: 'Visa',                     pct: 7,  incluse: true },
-  { id: 'det',       name: 'Direction de l\'Exécution des Travaux (DET)', pct: 25, incluse: true },
-  { id: 'aor',       name: 'Assistance aux Opérations de Réception (AOR)', pct: 7, incluse: true },
-  { id: 'opc',       name: 'OPC',                      pct: 0,  incluse: false },
-  { id: 'diag',      name: 'Diagnostic',               pct: 0,  incluse: false },
+  { id: 'esquisse',  name: 'Esquisse (ESQ)',           pct: 10, incluse: true,  category: 'base' },
+  { id: 'aps',       name: 'Avant-Projet Sommaire (APS)', pct: 12, incluse: true, category: 'base' },
+  { id: 'apd',       name: 'Avant-Projet Détaillé (APD)', pct: 14, incluse: true, category: 'base' },
+  { id: 'pro',       name: 'Projet (PRO)',              pct: 18, incluse: true,  category: 'base' },
+  { id: 'act',       name: 'Assistance Contrats de Travaux (ACT)', pct: 7, incluse: true, category: 'base' },
+  { id: 'visa',      name: 'Visa',                     pct: 7,  incluse: true,  category: 'exe' },
+  { id: 'det',       name: 'Direction de l\'Exécution des Travaux (DET)', pct: 25, incluse: true, category: 'exe' },
+  { id: 'aor',       name: 'Assistance aux Opérations de Réception (AOR)', pct: 7, incluse: true, category: 'exe' },
+  { id: 'opc',       name: 'OPC',                      pct: 0,  incluse: false, category: 'complementaire' },
+  { id: 'diag',      name: 'Diagnostic',               pct: 0,  incluse: false, category: 'complementaire' },
+];
+
+/**
+ * Les trois catégories de la répartition, dans l'ordre d'affichage. Mêmes
+ * sections que la répartition des propositions (`FeeDistributionGrid`,
+ * `Proposals.tsx`) : un contrat issu d'une proposition acceptée se lit donc
+ * avec le même découpage que le devis dont il vient.
+ */
+const MISSION_CATEGORIES = [
+  { id: 'base' as const, label: 'Missions de base', addLabel: 'Mission de base' },
+  { id: 'exe' as const, label: "Missions d'exécution", addLabel: "Mission d'exécution" },
+  { id: 'complementaire' as const, label: 'Missions complémentaires', addLabel: 'Mission complémentaire' },
+];
+
+/**
+ * Une mission enregistrée avant l'existence de `category` (ou une mission
+ * personnalisée créée sans catégorie) est rattachée aux missions de base
+ * plutôt que d'être escamotée d'un tableau qui ne rend que les trois
+ * catégories connues.
+ */
+const missionCategory = (m: ContratMOEMission) => m.category ?? 'base';
+
+// Les préréglages visent les missions par CATÉGORIE, plus par identifiant :
+// les missions étant désormais renommables, supprimables et créables, une
+// liste d'ids figée ne décrivait plus le contenu réel du contrat.
+const PRESETS = [
+  { label: 'Base sans Exé', cats: ['base'] as const },
+  { label: 'Base avec Exé', cats: ['base', 'exe'] as const },
 ];
 
 const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm';
@@ -66,6 +94,14 @@ const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
 function fmt(n?: number | null) {
   if (n == null) return '—';
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+}
+
+// Un taux d'honoraires se négocie parfois au fraction près (9,166667 % pour
+// 55/6) : on affiche jusqu'à 10 décimales, sans jamais en forcer, pour qu'un
+// taux rond reste écrit « 12 % » et qu'un taux long ne soit pas arrondi.
+function fmtPct(n?: number | null) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 10 }).format(n);
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -302,17 +338,47 @@ function ContratModal({
 
   const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
 
+  const missions = form.missions_list || DEFAULT_MISSIONS;
+
   const toggleMission = (id: string) => {
     setForm((f: Partial<ContratMOE>) => ({
       ...f,
-      missions_list: (f.missions_list || []).map((m: ContratMOEMission) => m.id === id ? { ...m, incluse: !m.incluse } : m),
+      missions_list: (f.missions_list || DEFAULT_MISSIONS).map((m: ContratMOEMission) => m.id === id ? { ...m, incluse: !m.incluse } : m),
     }));
   };
 
-  const updateMissionPct = (id: string, pct: number) => {
+  const updateMission = (id: string, patch: Partial<ContratMOEMission>) => {
     setForm((f: Partial<ContratMOE>) => ({
       ...f,
-      missions_list: (f.missions_list || []).map((m: ContratMOEMission) => m.id === id ? { ...m, pct } : m),
+      missions_list: (f.missions_list || DEFAULT_MISSIONS).map((m: ContratMOEMission) => m.id === id ? { ...m, ...patch } : m),
+    }));
+  };
+
+  // Toute mission est supprimable, y compris une mission de base : le
+  // découpage MOP ne convient pas à toutes les affaires (un diagnostic, une
+  // AMO), et la recréer reste possible par « Ajouter ».
+  const removeMission = (id: string) => {
+    setForm((f: Partial<ContratMOE>) => ({
+      ...f,
+      missions_list: (f.missions_list || DEFAULT_MISSIONS).filter((m: ContratMOEMission) => m.id !== id),
+    }));
+  };
+
+  const addMission = (category: ContratMissionCategory) => {
+    const mission: ContratMOEMission = {
+      id: crypto.randomUUID(),
+      name: 'Nouvelle mission',
+      pct: 0,
+      incluse: true,
+      category,
+    };
+    setForm((f: Partial<ContratMOE>) => ({ ...f, missions_list: [...(f.missions_list || DEFAULT_MISSIONS), mission] }));
+  };
+
+  const applyPreset = (cats: readonly ContratMissionCategory[]) => {
+    setForm(f => ({
+      ...f,
+      missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: cats.includes(missionCategory(m)) })),
     }));
   };
 
@@ -322,10 +388,13 @@ function ContratModal({
     try { await onSave(form); } finally { setSaving(false); }
   };
 
+  // Honoraires avant Missions : la répartition par mission se lit en montants,
+  // qui n'existent qu'une fois le forfait (ou le taux) renseigné dans
+  // l'onglet Honoraires.
   const TABS = [
     { id: 'general', label: 'Général' },
-    { id: 'missions', label: 'Missions' },
     { id: 'honoraires', label: 'Honoraires' },
+    { id: 'missions', label: 'Missions' },
     { id: 'equipe', label: 'Équipe MOE' },
     { id: 'clauses', label: 'Clauses' },
   ] as const;
@@ -336,6 +405,8 @@ function ContratModal({
   const totalHonorairesContrat = form.mode_honoraires === 'forfait'
     ? (form.montant_honoraires || 0)
     : ((form.budget_previsionnel || 0) * (form.taux_honoraires || 0) / 100);
+
+  const totalPctMissions = missions.filter(m => m.incluse).reduce((s, m) => s + (m.pct || 0), 0);
 
   // Helpers équipe MOE
   const addCotraitant = () => {
@@ -370,6 +441,15 @@ function ContratModal({
   // ne porte que l'ancien booléen `paiement_direct_moa` — 'moa' en reprend la
   // valeur telle quelle, sans qu'aucune migration de données ne soit nécessaire.
   const payeurOf = (st: ContratSousTraitant): string => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+
+  // TVA d'un membre du groupement : assujetti par défaut (le cas courant), au
+  // taux de droit commun. Un membre non assujetti (micro-entreprise, franchise
+  // en base) facture ses honoraires sans TVA, donc à taux nul quel que soit le
+  // taux resté enregistré — on ne l'efface pas pour ne pas le perdre si
+  // l'assujettissement est rétabli.
+  const tvaApplicable = (m: { tva_applicable?: boolean }) => m.tva_applicable !== false;
+  const tvaRateOf = (m: { tva_applicable?: boolean; tva_rate?: number }) => tvaApplicable(m) ? (m.tva_rate ?? 20) : 0;
+  const montantTTC = (ht: number, m: { tva_applicable?: boolean; tva_rate?: number }) => ht * (1 + tvaRateOf(m) / 100);
   const updateSousTraitant = (id: string, key: keyof ContratSousTraitant, val: any) => {
     setForm(f => ({ ...f, sous_traitants: (f.sous_traitants || []).map(s => s.id === id ? { ...s, [key]: val } : s) }));
   };
@@ -496,56 +576,127 @@ function ContratModal({
                 </div>
               )}
 
-              {/* TAB: Missions */}
+              {/* TAB: Missions — répartition par mission, sur le modèle de la
+                  répartition des propositions : missions renommables,
+                  supprimables et créables, groupées par catégorie avec un
+                  sous-total, et le montant HT déduit de la part. */}
               {tab === 'missions' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 mb-3">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Préréglages :</span>
-                    <button type="button" onClick={() => setForm(f => ({ ...f, missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: ['esquisse','aps','apd','pro','act','visa','aor'].includes(m.id) })) }))}
-                      className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                      style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-primary)' }}>
-                      Base sans Exé
-                    </button>
-                    <button type="button" onClick={() => setForm(f => ({ ...f, missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: ['esquisse','aps','apd','pro','act','visa','det','aor'].includes(m.id) })) }))}
-                      className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
-                      style={{ borderColor: 'var(--tblr-border)', color: '#4263eb' }}>
-                      Base avec Exé
-                    </button>
+                    {PRESETS.map(p => (
+                      <button key={p.label} type="button" onClick={() => applyPreset(p.cats)}
+                        className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                        {p.label}
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs mb-3" style={{ color: 'var(--tblr-muted)' }}>
-                    Cochez les missions incluses dans ce contrat et indiquez la part des honoraires pour chacune.
+                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                    Cochez les missions incluses, ajustez leur intitulé et leur part des honoraires.
+                    Le montant HT se déduit de la part appliquée au total des honoraires du contrat
+                    ({fmt(totalHonorairesContrat)}).
                   </p>
-                  {(form.missions_list || DEFAULT_MISSIONS).map(mission => (
-                    <div key={mission.id} className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                      <input
-                        type="checkbox"
-                        checked={mission.incluse}
-                        onChange={() => toggleMission(mission.id)}
-                        className="w-4 h-4 rounded flex-shrink-0"
-                      />
-                      <span className={cn('flex-1 text-sm', !mission.incluse && 'opacity-40')} style={{ color: 'var(--tblr-text)' }}>
-                        {mission.name}
-                      </span>
-                      {mission.incluse && (
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.5}
-                            value={mission.pct ?? ''}
-                            onChange={e => updateMissionPct(mission.id, parseFloat(e.target.value) || 0)}
-                            className="w-16 p-1.5 rounded text-sm text-center"
-                            style={inputStyle}
-                          />
-                          <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>%</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <p className="text-xs mt-2" style={{ color: 'var(--tblr-muted)' }}>
-                    Total : {(form.missions_list || []).filter(m => m.incluse).reduce((s, m) => s + (m.pct || 0), 0)} %
-                  </p>
+
+                  <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ background: 'var(--tblr-surface-2)' }}>
+                          <th className="text-center px-2 py-2 font-semibold w-8" style={{ color: 'var(--tblr-muted)' }} title="Mission incluse au contrat">✓</th>
+                          <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)' }}>Désignation</th>
+                          <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Part (%)</th>
+                          <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Montant HT</th>
+                          <th className="w-8" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {MISSION_CATEGORIES.map(cat => {
+                          const catMissions = missions.filter(m => missionCategory(m) === cat.id);
+                          const catPct = catMissions.filter(m => m.incluse).reduce((s, m) => s + (m.pct || 0), 0);
+                          return (
+                            <React.Fragment key={cat.id}>
+                              <tr style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)' }}>
+                                <td colSpan={5} className="px-3 py-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{cat.label}</span>
+                                    <button type="button" onClick={() => addMission(cat.id)}
+                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                      style={{ color: 'var(--tblr-primary)' }}>
+                                      <IconPlus size={11} /> {cat.addLabel}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {catMissions.length === 0 ? (
+                                <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                                  <td colSpan={5} className="px-3 py-2 text-center text-[11px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune mission</td>
+                                </tr>
+                              ) : catMissions.map(mission => (
+                                <tr key={mission.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                                  <td className="px-2 py-1.5 text-center">
+                                    <input type="checkbox" checked={mission.incluse} onChange={() => toggleMission(mission.id)} className="w-3.5 h-3.5 rounded" />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <input
+                                      className={cn('w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-blue-400', !mission.incluse && 'opacity-50')}
+                                      style={inputStyle}
+                                      value={mission.name}
+                                      onChange={e => updateMission(mission.id, { name: e.target.value })}
+                                    />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <input
+                                      type="number" min={0} max={100} step="any"
+                                      className={cn('w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400', !mission.incluse && 'opacity-50')}
+                                      style={inputStyle}
+                                      value={mission.pct ?? ''}
+                                      onChange={e => updateMission(mission.id, { pct: e.target.value ? parseFloat(e.target.value) : 0 })}
+                                    />
+                                  </td>
+                                  <td className={cn('px-3 py-1.5 text-right font-medium', !mission.incluse && 'opacity-50')} style={{ color: 'var(--tblr-text)' }}>
+                                    {mission.incluse ? fmt(totalHonorairesContrat * (mission.pct || 0) / 100) : '—'}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-center">
+                                    <button type="button" onClick={() => removeMission(mission.id)} title="Supprimer la mission"
+                                      className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {catMissions.length > 0 && (
+                                <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                                  <td />
+                                  <td className="px-3 py-1.5 font-semibold" style={{ color: 'var(--tblr-muted)' }}>Sous-total {cat.label.toLowerCase()}</td>
+                                  <td className="px-3 py-1.5 text-right font-semibold" style={{ color: 'var(--tblr-text)' }}>{fmtPct(catPct)} %</td>
+                                  <td className="px-3 py-1.5 text-right font-semibold" style={{ color: 'var(--tblr-text)' }}>{fmt(totalHonorairesContrat * catPct / 100)}</td>
+                                  <td />
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ borderTop: '2px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                          <td />
+                          <td className="px-3 py-2 font-bold" style={{ color: 'var(--tblr-text)' }}>Total des missions incluses</td>
+                          <td className="px-3 py-2 text-right font-bold" style={{ color: 'var(--tblr-primary)' }}>{fmtPct(totalPctMissions)} %</td>
+                          <td className="px-3 py-2 text-right font-bold" style={{ color: 'var(--tblr-primary)' }}>{fmt(totalHonorairesContrat * totalPctMissions / 100)}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {/* Une répartition qui ne fait pas 100 % laisse une part des
+                      honoraires non affectée : on le signale plutôt que de
+                      redistribuer d'office, l'écart pouvant être voulu (mission
+                      complémentaire chiffrée en plus du forfait de base). */}
+                  {missions.some(m => m.incluse) && Math.abs(totalPctMissions - 100) > 0.0001 && (
+                    <p className="flex items-center gap-1.5 text-xs" style={{ color: totalPctMissions > 100 ? '#d63939' : 'var(--tblr-muted)' }}>
+                      <IconAlertTriangle size={13} />
+                      La répartition totalise {fmtPct(totalPctMissions)} % et non 100 %.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -580,8 +731,11 @@ function ContratModal({
                     </Field>
                   ) : (
                     <div className="grid grid-cols-2 gap-4">
+                      {/* step="any" plutôt qu'un pas fixe : un taux issu d'une
+                          fraction (9,166667 % pour 55/6) était refusé par la
+                          validation du navigateur avec step={0.1}. */}
                       <Field label="Taux d'honoraires (%)">
-                        <input type="number" min={0} max={30} step={0.1} className={inputCls} style={inputStyle} value={form.taux_honoraires ?? ''} onChange={e => set('taux_honoraires', e.target.value ? parseFloat(e.target.value) : undefined)} />
+                        <input type="number" min={0} max={30} step="any" className={inputCls} style={inputStyle} value={form.taux_honoraires ?? ''} onChange={e => set('taux_honoraires', e.target.value ? parseFloat(e.target.value) : undefined)} />
                       </Field>
                       {form.budget_previsionnel && form.taux_honoraires && (
                         <div className="flex flex-col justify-end pb-2">
@@ -632,10 +786,13 @@ function ContratModal({
                         <table className="w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
-                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '35%' }}>Contact</th>
-                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Spécialité</th>
-                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Part (%)</th>
-                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '20%' }}>Montant HT (€)</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '26%' }}>Contact</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '18%' }}>Spécialité</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '11%' }}>Part (%)</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Montant HT (€)</th>
+                              <th className="text-center px-2 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '7%' }} title="Membre assujetti à la TVA">TVA</th>
+                              <th className="text-right px-2 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '10%' }}>Taux (%)</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Montant TTC (€)</th>
                               <th className="w-8" />
                             </tr>
                           </thead>
@@ -659,6 +816,22 @@ function ContratModal({
                                 <td className="px-2 py-1.5 text-right font-medium" style={{ color: 'var(--tblr-text)' }} title="Calculé automatiquement : part (%) × total des honoraires du contrat">
                                   {fmt(totalHonorairesContrat * (ct.fee_pct || 0) / 100)}
                                 </td>
+                                <td className="px-2 py-1.5 text-center">
+                                  <input type="checkbox" className="w-3.5 h-3.5 rounded" title="Assujetti à la TVA"
+                                    checked={tvaApplicable(ct)}
+                                    onChange={e => updateCotraitant(ct.id, 'tva_applicable', e.target.checked)} />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input type="number" min={0} max={100} step="any" disabled={!tvaApplicable(ct)}
+                                    className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-40"
+                                    style={inputStyle}
+                                    value={tvaApplicable(ct) ? (ct.tva_rate ?? 20) : ''}
+                                    placeholder="—"
+                                    onChange={e => updateCotraitant(ct.id, 'tva_rate', e.target.value ? parseFloat(e.target.value) : undefined)} />
+                                </td>
+                                <td className="px-2 py-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
+                                  {fmt(montantTTC(totalHonorairesContrat * (ct.fee_pct || 0) / 100, ct))}
+                                </td>
                                 <td className="px-1 py-1.5 text-center">
                                   <button type="button" onClick={() => removeCotraitant(ct.id)} className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
                                 </td>
@@ -669,10 +842,14 @@ function ContratModal({
                             <tr style={{ borderTop: '2px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                               <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Total cotraitants</td>
                               <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: 'var(--tblr-primary)' }}>
-                                {(form.cotraitants || []).reduce((s, c) => s + (c.fee_pct || 0), 0)} %
+                                {fmtPct((form.cotraitants || []).reduce((s, c) => s + (c.fee_pct || 0), 0))} %
                               </td>
                               <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: 'var(--tblr-primary)' }}>
                                 {fmt((form.cotraitants || []).reduce((s, c) => s + (c.montant_honoraires || 0), 0))}
+                              </td>
+                              <td colSpan={2} />
+                              <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: 'var(--tblr-primary)' }}>
+                                {fmt((form.cotraitants || []).reduce((s, c) => s + montantTTC(c.montant_honoraires || 0, c), 0))}
                               </td>
                               <td />
                             </tr>
@@ -700,10 +877,13 @@ function ContratModal({
                         <table className="w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
-                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '30%' }}>Contact</th>
-                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Spécialité / Prestation</th>
-                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '18%' }}>Montant HT (€)</th>
-                              <th className="text-center px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Réglé par</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Contact</th>
+                              <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '18%' }}>Spécialité / Prestation</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '14%' }}>Montant HT (€)</th>
+                              <th className="text-center px-2 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '7%' }} title="Membre assujetti à la TVA">TVA</th>
+                              <th className="text-right px-2 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '10%' }}>Taux (%)</th>
+                              <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '14%' }}>Montant TTC (€)</th>
+                              <th className="text-center px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '15%' }}>Réglé par</th>
                               <th className="w-8" />
                             </tr>
                           </thead>
@@ -723,6 +903,22 @@ function ContratModal({
                                 </td>
                                 <td className="px-2 py-1.5">
                                   <input type="number" min={0} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-indigo-400" style={inputStyle} value={st.montant ?? ''} onChange={e => updateSousTraitant(st.id, 'montant', parseFloat(e.target.value) || 0)} />
+                                </td>
+                                <td className="px-2 py-1.5 text-center">
+                                  <input type="checkbox" className="w-3.5 h-3.5 rounded" title="Assujetti à la TVA"
+                                    checked={tvaApplicable(st)}
+                                    onChange={e => updateSousTraitant(st.id, 'tva_applicable', e.target.checked)} />
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <input type="number" min={0} max={100} step="any" disabled={!tvaApplicable(st)}
+                                    className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-40"
+                                    style={inputStyle}
+                                    value={tvaApplicable(st) ? (st.tva_rate ?? 20) : ''}
+                                    placeholder="—"
+                                    onChange={e => updateSousTraitant(st.id, 'tva_rate', e.target.value ? parseFloat(e.target.value) : undefined)} />
+                                </td>
+                                <td className="px-2 py-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
+                                  {fmt(montantTTC(st.montant || 0, st))}
                                 </td>
                                 <td className="px-2 py-1.5">
                                   <select
@@ -750,6 +946,10 @@ function ContratModal({
                               <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Total sous-traitants</td>
                               <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: '#4263eb' }}>
                                 {fmt((form.sous_traitants || []).reduce((s, c) => s + (c.montant || 0), 0))}
+                              </td>
+                              <td colSpan={2} />
+                              <td className="px-3 py-1.5 text-xs font-bold text-right" style={{ color: '#4263eb' }}>
+                                {fmt((form.sous_traitants || []).reduce((s, c) => s + montantTTC(c.montant || 0, c), 0))}
                               </td>
                               <td colSpan={2} />
                             </tr>
@@ -876,6 +1076,7 @@ function proposalToContrat(p: any): Partial<ContratMOE> {
 export default function Contrats() {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const [contrats, setContrats] = useState<ContratMOE[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1039,8 +1240,10 @@ export default function Contrats() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="rounded-xl p-4"
+                  className={cn('rounded-xl p-4', contrat.project_id && 'cursor-pointer hover:shadow-md transition-shadow')}
                   style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+                  onClick={contrat.project_id ? () => navigate(`/projects/${contrat.project_id}`) : undefined}
+                  title={contrat.project_id ? "Ouvrir l'affaire liée" : undefined}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -1072,7 +1275,7 @@ export default function Contrats() {
                             <span className="font-medium" style={{ color: 'var(--tblr-primary)' }}>{fmt(contrat.montant_honoraires)} HT</span>
                           )}
                           {contrat.mode_honoraires === 'pourcentage' && contrat.taux_honoraires && (
-                            <span className="font-medium" style={{ color: 'var(--tblr-primary)' }}>{contrat.taux_honoraires} % des travaux</span>
+                            <span className="font-medium" style={{ color: 'var(--tblr-primary)' }}>{fmtPct(contrat.taux_honoraires)} % des travaux</span>
                           )}
                           {contrat.date_debut && <span>Du {new Date(contrat.date_debut).toLocaleDateString('fr-FR')}</span>}
                           {contrat.date_fin && <span>au {new Date(contrat.date_fin).toLocaleDateString('fr-FR')}</span>}
@@ -1080,7 +1283,9 @@ export default function Contrats() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    {/* stopPropagation : la carte entière ouvre l'affaire liée,
+                        les actions de la carte ne doivent donc pas y naviguer. */}
+                    <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => generateContratPdf(contrat)}
                         title="Télécharger PDF"

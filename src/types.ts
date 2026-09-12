@@ -1182,14 +1182,37 @@ export interface Meeting {
   attendees?: MeetingAttendee[];
 }
 
+/**
+ * Catégorie d'une mission du contrat, reprise de la répartition des
+ * propositions (`FeeDistributionGrid`, `Proposals.tsx`) pour que les deux
+ * écrans classent les missions de la même façon : mission de base, mission
+ * d'exécution, ou mission complémentaire ajoutée pour cette affaire.
+ * Facultative : une mission enregistrée avant l'existence de ce champ est
+ * traitée comme `'base'`.
+ */
+export type ContratMissionCategory = 'base' | 'exe' | 'complementaire';
+
 export interface ContratMOEMission {
   id: string;
   name: string;
   pct?: number;
   incluse: boolean;
+  category?: ContratMissionCategory;
 }
 
-export interface ContratCotraitant {
+/**
+ * TVA d'un membre du groupement. Tous les cotraitants ne sont pas assujettis
+ * (micro-entreprise, franchise en base) : le taux appliqué aux honoraires est
+ * donc propre à chaque membre, pas au contrat.
+ * `tva_applicable` absent vaut « assujetti » (le cas courant) et `tva_rate`
+ * absent vaut le taux de droit commun (20 %).
+ */
+export interface ContratMembreTVA {
+  tva_applicable?: boolean;
+  tva_rate?: number;
+}
+
+export interface ContratCotraitant extends ContratMembreTVA {
   id: string;
   contact_id?: string;
   contact_name?: string;
@@ -1208,7 +1231,7 @@ export interface ContratCotraitant {
  */
 export type ContratSousTraitantPayeur = 'agence' | 'moa' | string;
 
-export interface ContratSousTraitant {
+export interface ContratSousTraitant extends ContratMembreTVA {
   id: string;
   contact_id?: string;
   contact_name?: string;
