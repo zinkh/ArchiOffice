@@ -101,14 +101,25 @@ export async function exportNoteHonorairesToPDF(
   // ── Annexe : ventilation par mission et par intervenant ───────────────
   const cotraitants = note.cotraitants_facturation || [];
   const sousTraitants = note.sous_traitants_facturation || [];
+  // Le nom affiché est relu depuis le contrat courant (par contact_id), pas
+  // depuis le `nom` figé dans la note à sa création — sinon renommer un
+  // intervenant dans le contrat après coup ne se répercute jamais sur les
+  // notes déjà enregistrées. Un intervenant retiré du contrat depuis garde
+  // son dernier nom connu plutôt qu'un intitulé vide.
+  const liveName = (entry: { contact_id?: string; nom: string }, contratList: any[] | undefined) => {
+    const rec = (contratList || []).find((c: any) => (c.contact_id || c.contact_name) === (entry.contact_id || entry.nom));
+    return rec?.contact_name || rec?.specialty || entry.nom;
+  };
   const intervenants: { key: string; nom: string; isAgence: boolean }[] = [
     { key: '__agence__', nom: settings.agencyName || 'Agence', isAgence: true },
-    ...cotraitants.map(c => ({ key: c.contact_id || c.nom, nom: c.nom, isAgence: false })),
-    ...sousTraitants.map(s => ({ key: s.contact_id || s.nom, nom: s.nom, isAgence: false })),
+    ...cotraitants.map(c => ({ key: c.contact_id || c.nom, nom: liveName(c, contrat?.cotraitants), isAgence: false })),
+    ...sousTraitants.map(s => ({ key: s.contact_id || s.nom, nom: liveName(s, contrat?.sous_traitants), isAgence: false })),
   ];
 
   if ((note.phases || []).length > 0) {
-    const landscape = intervenants.length > 3;
+    // -1 : la colonne Groupement occupe désormais une place de plus, en
+    // plus de "Mission" et de chaque intervenant.
+    const landscape = intervenants.length > 2;
     (doc as any).addPage('a4', landscape ? 'landscape' : 'portrait');
     const annexeLetterhead = { ...letterhead, title: `Annexe — Note N° ${note.numero || ''}`, subtitle: 'Ventilation par mission' };
     const ay = drawAgencyHeader(doc, settings, annexeLetterhead);
@@ -128,22 +139,33 @@ export async function exportNoteHonorairesToPDF(
       const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === intervenantKey);
       return owner?.montant_ht || 0;
     };
+    // Total pour tout le groupement (agence + cotraitants + sous-traitants) —
+    // la note d'honoraires facture l'équipe entière, la colonne agence seule
+    // ne reflète que ce qui part en facture brouillon.
+    const groupementFor = (phaseId: string) => intervenants.reduce((s, iv) => {
+      if (iv.key === '__agence__') return s + (findPhase(note.phases, phaseId)?.montant_phase || 0);
+      const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === iv.key);
+      return s + (findPhase(owner?.phases, phaseId)?.montant_phase || 0);
+    }, 0);
+    const groupementTotal = (note.montant_ht || 0) + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0) + sousTraitants.reduce((s, st) => s + (st.montant_ht || 0), 0);
 
     const body = (note.phases || []).map(phase => [
       phase.phase_name?.split('—')[0].trim() || phase.phase_id,
+      `${fmt(groupementFor(phase.phase_id))} €`,
       ...intervenants.map(iv => cellFor(iv.key, phase.phase_id)),
     ]);
-    const totalsRow = ['Total HT', ...intervenants.map(iv => `${fmt(totalFor(iv.key))} €`)];
+    const totalsRow = ['Total HT', `${fmt(groupementTotal)} €`, ...intervenants.map(iv => `${fmt(totalFor(iv.key))} €`)];
 
     autoTable(doc, {
       startY: ay,
-      head: [['Mission', ...intervenants.map(iv => iv.nom)]],
+      head: [['Mission', 'Groupement', ...intervenants.map(iv => iv.nom)]],
       body,
       foot: [totalsRow],
       styles: { fontSize: 7.5, textColor: [17, 24, 39] },
       headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       footStyles: { fillColor: [225, 225, 225], textColor: [17, 24, 39], fontStyle: 'bold' },
-      columnStyles: Object.fromEntries(intervenants.map((_, i) => [i + 1, { halign: 'right' }])),
+      // Colonnes 1..N (Groupement + chaque intervenant) alignées à droite — seule la 0 (Mission) reste à gauche.
+      columnStyles: Object.fromEntries(Array.from({ length: intervenants.length + 1 }, (_, i) => [i + 1, { halign: 'right' }])),
       margin: { left: 14, right: 14, bottom: 25 },
     });
   }
