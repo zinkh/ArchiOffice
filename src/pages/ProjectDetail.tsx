@@ -2030,6 +2030,30 @@ export default function ProjectDetail() {
                     return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
                   };
 
+                  // Le nom de l'agence — jamais le mot générique "Agence" —
+                  // pour rappeler qu'une note d'honoraires concerne toute
+                  // l'équipe de maîtrise d'œuvre (le groupement), alors que
+                  // seule cette colonne, une fois isolée, donne la facture de
+                  // l'agence elle-même.
+                  const agencyName = (settings as any)?.agencyName || 'Agence';
+
+                  // Nom affiché d'un cotraitant/sous-traitant : toujours relu
+                  // depuis le contrat courant (par contact_id), jamais depuis
+                  // le `nom` figé dans la note à sa création — sinon renommer
+                  // un intervenant dans le contrat (ContactAutocomplete) ne se
+                  // répercutait jamais sur les notes déjà en cours d'édition
+                  // ni sur les nouvelles tant que la page n'était pas rechargée.
+                  // Un intervenant retiré du contrat depuis garde son dernier
+                  // nom connu plutôt que d'afficher un intitulé vide.
+                  const ctDisplayName = (ct: any) => {
+                    const rec = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom));
+                    return rec?.contact_name || rec?.specialty || ct.nom || 'Cotraitant';
+                  };
+                  const stDisplayName = (st: any) => {
+                    const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+                    return rec?.contact_name || rec?.specialty || st.nom || 'Sous-traitant';
+                  };
+
                   // Plafonds de ventilation : le cumul déjà facturé sur les notes
                   // précédentes du même contrat, par mission et par intervenant — sert à
                   // ne jamais laisser le total (toutes notes confondues) d'une mission
@@ -2220,7 +2244,8 @@ export default function ProjectDetail() {
                                 <thead>
                                   <tr className="bg-[var(--tblr-surface-2)]">
                                     <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom">Mission</th>
-                                    <th rowSpan={2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom" colSpan={2}>Agence</th>
+                                    <th rowSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom">Groupement</th>
+                                    <th rowSpan={2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom" colSpan={2}>{agencyName}</th>
                                     {(noteForm.cotraitants_facturation || []).length > 0 && (
                                       <th colSpan={(noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Cotraitants</th>
                                     )}
@@ -2230,11 +2255,11 @@ export default function ProjectDetail() {
                                   </tr>
                                   <tr className="bg-[var(--tblr-surface-2)]">
                                     {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
-                                      <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ct.nom || 'Cotraitant'}</th>
+                                      <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ctDisplayName(ct)}</th>
                                     ))}
                                     {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
                                       <th key={`st-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">
-                                        {st.nom || 'Sous-traitant'}
+                                        {stDisplayName(st)}
                                         {payeurLabel(st.payeur) && <span className="block text-[9px] font-normal normal-case text-amber-600">{payeurLabel(st.payeur)}</span>}
                                       </th>
                                     ))}
@@ -2250,9 +2275,20 @@ export default function ProjectDetail() {
                                     // toutes notes confondues (le montant de la mission n'est
                                     // jamais dépassé, même en cumulant plusieurs notes).
                                     const agenceCap = Math.max(0, montantPhaseBase - cumulAgencePhase(phase.phase_id));
+                                    // Total pour toute l'équipe (le "groupement") sur cette mission —
+                                    // ce que la note d'honoraires facture au maître d'ouvrage dans son
+                                    // ensemble, à ne pas confondre avec la seule part agence ci-dessous.
+                                    const groupementPhaseTotal = (Number(phase.montant_phase) || 0)
+                                      + (noteForm.cotraitants_facturation || []).reduce((s: number, ct: any) =>
+                                          s + (Number((ct.phases || []).find((p: any) => p.phase_id === phase.phase_id)?.montant_phase) || 0), 0)
+                                      + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) =>
+                                          s + (Number((st.phases || []).find((p: any) => p.phase_id === phase.phase_id)?.montant_phase) || 0), 0);
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
                                         <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">{basePhase?.name || phase.phase_name}</td>
+                                        <td className="p-2 border-l border-[var(--tblr-border)] text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                          {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(groupementPhaseTotal)}
+                                        </td>
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1">
                                             <input type="number" min={0} max={100} step={5}
@@ -2356,6 +2392,13 @@ export default function ProjectDetail() {
                                 <tfoot>
                                   <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
                                     <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
+                                    <td className="p-2 border-l border-[var(--tblr-border)] text-right whitespace-nowrap">
+                                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(
+                                        (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0)
+                                        + (noteForm.cotraitants_facturation || []).reduce((s: number, ct: any) => s + (Number(ct.montant_ht) || 0), 0)
+                                        + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) => s + (Number(st.montant_ht) || 0), 0)
+                                      )}
+                                    </td>
                                     <td className="p-2 border-l border-[var(--tblr-border)]"></td>
                                     <td className="p-2 text-right text-blue-600 whitespace-nowrap">
                                       {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}
@@ -2374,7 +2417,7 @@ export default function ProjectDetail() {
                                 </tfoot>
                               </table>
                             </div>
-                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Les montants cotraitants et sous-traitants restent hors comptabilité agence : seule la colonne Agence alimente la facture brouillon. Le montant saisi pour chaque intervenant est plafonné au montant de la mission qui lui revient, en tenant compte de ce qui a déjà été facturé sur les notes précédentes.</p>
+                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">La note d'honoraires concerne tout le groupement de maîtrise d'œuvre (colonne « Groupement ») ; la facture, elle, ne porte que sur {agencyName} — les montants cotraitants et sous-traitants restent hors comptabilité agence, seule cette colonne alimente la facture brouillon. Le montant saisi pour chaque intervenant est plafonné au montant de la mission qui lui revient, en tenant compte de ce qui a déjà été facturé sur les notes précédentes.</p>
                           </div>
 
                           {/* Suivi du pourcentage de facturation */}

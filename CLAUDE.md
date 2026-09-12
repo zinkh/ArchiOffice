@@ -311,6 +311,46 @@ Les deux lisent maintenant `invoice.client_id` via `loadInvoiceClientContact`
 SuperPDP) ; Chorus Pro (B2G, identifié par SIRET seul) gagne le même repli
 en plus de celui déjà existant sur `projects.client_siret`.
 
+### Groupement vs agence dans les notes d'honoraires
+
+Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes
+d'honoraires » de la fiche projet) porte la ventilation par mission de TOUT
+le groupement de maîtrise d'œuvre — agence, cotraitants, sous-traitants —
+alors que la facture brouillon qu'elle génère (`POST /api/notes_honoraires/
+:id/facture`) ne porte, elle, que la part de l'agence : les montants
+cotraitants/sous-traitants restent hors comptabilité agence par
+construction (voir le commentaire du schéma sur `cotraitants_facturation`/
+`sous_traitants_facturation`). Le tableau de ventilation portait pourtant
+une colonne « Agence » générique et aucun total d'ensemble, laissant croire
+que la note se limitait à cette seule colonne.
+
+Deux corrections dans le même tableau :
+
+1. **Colonne « Groupement »**, avant la colonne agence : le total, par
+   mission, de l'agence + tous les cotraitants + tous les sous-traitants —
+   ce que la note facture réellement à l'ensemble de l'équipe. La colonne
+   agence garde son propre total (celui qui alimente la facture brouillon)
+   juste à côté, pour que les deux échelles restent visibles l'une contre
+   l'autre plutôt que noyées dans le même total.
+2. **« Agence » remplacé par le nom réel du cabinet**
+   (`settings.agencyName`, déjà chargé par `useSettings()`) : la colonne
+   nommée génériquement pouvait laisser croire à une entité distincte du
+   cabinet plutôt qu'au cabinet lui-même.
+
+**Noms de cotraitants/sous-traitants désormais dynamiques.** Chaque entrée
+de `cotraitants_facturation`/`sous_traitants_facturation` fige un `nom` au
+moment où la note est créée (`ct.contact_name || ct.specialty`, voir
+`initNoteForm`) — un renommage ultérieur dans le contrat
+(`ContactAutocomplete`, `Contrats.tsx`) ne se répercutait donc jamais dans
+l'en-tête du tableau, y compris pour une note encore en cours d'édition ou
+tout juste rouverte. Les en-têtes (`ctDisplayName`/`stDisplayName` dans
+`ProjectDetail.tsx`, `liveName` dans `src/lib/noteHonorairesExport.ts` pour
+l'export PDF) relisent désormais le nom courant du contrat par
+`contact_id`, et ne retombent sur le `nom` figé que si l'intervenant a
+depuis été retiré du contrat (pas de ligne à relire). Le calcul des
+montants (bases, plafonds) continue, lui, de faire cette même résolution
+par `contact_id` — seul l'affichage du nom manquait ce fil.
+
 ### Invitation d'un nouveau membre d'équipe
 
 `POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot
