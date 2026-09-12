@@ -27,6 +27,11 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
+/** Same key builder used by GoogleAuthCallback.tsx to hand back the result. */
+export function oauthResultKey(state: string): string {
+  return `google_oauth_result_${state}`;
+}
+
 /**
  * Opens a popup for Google OAuth2 PKCE flow and resolves with the access_token.
  * Rejects if the popup is closed or if CLIENT_ID is not configured.
@@ -84,27 +89,61 @@ export async function requestGoogleAccessToken(): Promise<string> {
     throw new Error('Le popup a été bloqué. Autorisez les popups pour ce site.');
   }
 
+  const resultKey = oauthResultKey(state);
+
   return new Promise((resolve, reject) => {
-    const handler = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.type !== 'google_oauth_token') return;
-      window.removeEventListener('message', handler);
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
       clearInterval(poll);
-      if (event.data.error) {
-        reject(new Error(event.data.error));
-      } else {
-        resolve(event.data.access_token as string);
+      window.removeEventListener('message', messageHandler);
+      window.removeEventListener('storage', storageHandler);
+      localStorage.removeItem(resultKey);
+      fn();
+    };
+
+    const applyResult = (raw: string) => {
+      try {
+        const data = JSON.parse(raw);
+        if (data.error) finish(() => reject(new Error(data.error)));
+        else finish(() => resolve(data.access_token as string));
+      } catch {
+        finish(() => reject(new Error('Réponse de connexion Google illisible')));
       }
     };
-    window.addEventListener('message', handler);
 
-    // Detect popup closed without completing
+    // Primary channel: window.opener + postMessage. This is what most OAuth
+    // popup flows rely on, but it silently breaks whenever the opener/popup
+    // relationship gets severed by a Cross-Origin-Opener-Policy mismatch
+    // anywhere along the redirect chain through accounts.google.com — a class
+    // of failure that showed up repeatedly here and is effectively impossible
+    // to fully rule out from this side alone (it depends on headers set by a
+    // third party's pages too, not just ours).
+    const messageHandler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'google_oauth_token') return;
+      if (event.data.error) finish(() => reject(new Error(event.data.error)));
+      else finish(() => resolve(event.data.access_token as string));
+    };
+    window.addEventListener('message', messageHandler);
+
+    // Fallback channel: localStorage, shared unconditionally by every
+    // same-origin window regardless of opener/COOP state. The 'storage' event
+    // fires on this (listening) window whenever another same-origin window
+    // writes to localStorage — the popup writing its result is exactly that.
+    const storageHandler = (event: StorageEvent) => {
+      if (event.key === resultKey && event.newValue) applyResult(event.newValue);
+    };
+    window.addEventListener('storage', storageHandler);
+
+    // Belt-and-braces: also poll localStorage directly (some browsers are
+    // inconsistent about firing 'storage' for same-tab-group writes), and
+    // detect the popup closing without ever producing a result either way.
     const poll = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(poll);
-        window.removeEventListener('message', handler);
-        reject(new Error('Connexion annulée'));
-      }
+      const raw = localStorage.getItem(resultKey);
+      if (raw) { applyResult(raw); return; }
+      if (popup.closed) finish(() => reject(new Error('Connexion annulée')));
     }, 500);
   });
 }
