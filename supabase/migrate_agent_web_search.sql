@@ -1,0 +1,29 @@
+-- ============================================================
+-- ArchiOffice — Migration : recherche web pour les agents
+-- ============================================================
+-- Même principe qu'une colonne de plus par capacité (web_fetch_enabled,
+-- mail_enabled, geo_enabled, docs_read_enabled, delegate_enabled,
+-- notify_users_enabled) plutôt qu'une entrée dans action_scopes : le risque
+-- et la surface exposée ne sont pas ceux d'une écriture en base, réglable
+-- agent par agent depuis /agents/:id/edit.
+--
+-- web_search_enabled n'active PAS un outil déclaré par nos soins
+-- (buildAgentTools()/executeAgentAction(), comme fetch_url ou les outils
+-- cartographiques) : il active le tool NATIF de recherche web du fournisseur
+-- IA actif du cabinet (google_search chez Gemini, web_search chez Claude),
+-- exécuté côté fournisseur — on ne reçoit jamais d'appel d'outil à exécuter
+-- nous-mêmes pour ça (voir packages/archioffice-agents/src/server/llm/,
+-- LlmProvider.supportsWebSearch).
+--
+-- Mistral n'expose pas cette capacité hors de son API Conversations
+-- (/v1/conversations) — notre adaptateur appelle l'endpoint Chat Completions,
+-- que Mistral documente lui-même comme non supporté pour web_search/
+-- web_search_premium. La colonne reste donc sans effet tant qu'un cabinet
+-- fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude
+-- (voir mistral.ts) — dégradé, mais honnête, plutôt qu'un réglage qui
+-- échouerait silencieusement ou ferait échouer l'appel API.
+--
+-- Off par défaut, comme web_fetch_enabled : au cabinet de l'activer agent par
+-- agent plutôt que de la recevoir allumée, et jamais héritée d'un template
+-- (voir routes.ts, POST /api/agents).
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE;

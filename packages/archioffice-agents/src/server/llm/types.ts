@@ -76,6 +76,14 @@ export interface LlmChatParams {
   system?: string;
   messages: LlmMessage[];
   tools?: LlmToolDef[];
+  /** Active le tool natif de recherche web du fournisseur (Gemini
+   *  `googleSearch`, Claude `web_search_20250305`) EN PLUS de `tools` — pas un
+   *  remplacement. Exécuté côté fournisseur : il ne produit jamais de
+   *  LlmToolCall à notre charge, contrairement aux tools déclarés dans
+   *  `tools`. Sans effet chez un fournisseur qui ne l'annonce pas
+   *  (LlmProvider.supportsWebSearch) — voir mistral.ts pour pourquoi Mistral
+   *  n'est pas de ceux-là. */
+  webSearch?: boolean;
 }
 
 export interface LlmChatResult {
@@ -146,6 +154,13 @@ export interface LlmProvider {
    *  pièces photographiées — dégradé, mais honnête, plutôt que d'envoyer une
    *  image qu'il ignorerait silencieusement ou refuserait. */
   readonly supportsVision?: boolean;
+  /** Le fournisseur sait-il exécuter lui-même une recherche web (voir
+   *  LlmChatParams.webSearch) ? Absent/false : routes.ts n'envoie jamais ce
+   *  paramètre à ce fournisseur, et web_search_enabled reste sans effet tant
+   *  que le cabinet ne fait pas tourner ses agents sur un fournisseur qui le
+   *  supporte — dégradé, mais honnête, plutôt qu'une capacité qui échouerait
+   *  silencieusement ou qu'un appel API rejetterait. */
+  readonly supportsWebSearch?: boolean;
   chat(params: LlmChatParams): Promise<LlmChatResult>;
   /** Transcription d'un enregistrement vocal, quand le fournisseur sait lire
    *  l'audio. Optionnel à dessein : Claude n'accepte aucune entrée audio, et

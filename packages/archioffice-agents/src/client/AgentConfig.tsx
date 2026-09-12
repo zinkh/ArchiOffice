@@ -47,6 +47,7 @@ export default function AgentConfig() {
   const [docsReadEnabled, setDocsReadEnabled] = useState(false);
   const [delegateEnabled, setDelegateEnabled] = useState(false);
   const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export default function AgentConfig() {
         setDocsReadEnabled(!!found.docs_read_enabled);
         setDelegateEnabled(!!found.delegate_enabled);
         setNotifyUsersEnabled(!!found.notify_users_enabled);
+        setWebSearchEnabled(!!found.web_search_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -110,6 +112,7 @@ export default function AgentConfig() {
           docs_read_enabled: docsReadEnabled,
           delegate_enabled: delegateEnabled,
           notify_users_enabled: notifyUsersEnabled,
+          web_search_enabled: webSearchEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -315,6 +318,17 @@ export default function AgentConfig() {
               style={{ accentColor: 'var(--tblr-primary)' }}
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_read')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={webSearchEnabled}
+              onChange={() => setWebSearchEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_web_search')}</span>
           </label>
 
           <label className="flex items-center gap-3 cursor-pointer">

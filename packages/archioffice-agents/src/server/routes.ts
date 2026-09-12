@@ -149,10 +149,11 @@ export function registerAgentRoutes(
         // été migrée) : un agent activé est immédiatement utile, et l'architecte
         // retire ce qu'il ne veut pas depuis /agents/:id.
         //
-        // L'accès web reste la seule capacité jamais héritée : contrairement
-        // aux écritures internes et à la messagerie de l'utilisateur lui-même,
-        // il ouvre l'agent sur des contenus arbitraires (SSRF, injection de
-        // prompt) et n'a aucun rapport avec le métier du template.
+        // L'accès web (fetch_url comme la recherche web) reste la seule
+        // famille de capacités jamais héritée : contrairement aux écritures
+        // internes et à la messagerie de l'utilisateur lui-même, elle ouvre
+        // l'agent sur des contenus arbitraires (SSRF, injection de prompt) et
+        // n'a aucun rapport avec le métier du template.
         const templateActionScopes = (t.action_scopes && t.action_scopes.length > 0)
           ? t.action_scopes
           : (AGENT_DEFAULT_ACTION_SCOPES[t.slug] || []);
@@ -168,6 +169,7 @@ export function registerAgentRoutes(
           mail_send_enabled: false,
           geo_enabled: !!t.geo_enabled,
           docs_read_enabled: !!t.docs_read_enabled,
+          web_search_enabled: false,
           is_active: true, is_system_template: false,
         };
       } else {
@@ -180,7 +182,7 @@ export function registerAgentRoutes(
           context_scopes: context_scopes || [],
           action_scopes: action_scopes || [],
           web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
-          geo_enabled: false, docs_read_enabled: false,
+          geo_enabled: false, docs_read_enabled: false, web_search_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
         };
       }
@@ -199,7 +201,7 @@ export function registerAgentRoutes(
       const {
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
-        mail_send_enabled, geo_enabled, docs_read_enabled,
+        mail_send_enabled, geo_enabled, docs_read_enabled, web_search_enabled,
         system_prompt_override, is_active,
       } = req.body;
       const { data, error } = await supabaseAdmin.from('agents').update({
@@ -213,6 +215,7 @@ export function registerAgentRoutes(
         mail_send_enabled: !!mail_enabled && !!mail_send_enabled,
         geo_enabled: !!geo_enabled,
         docs_read_enabled: !!docs_read_enabled,
+        web_search_enabled: !!web_search_enabled,
         system_prompt_override, is_active,
       }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
@@ -512,10 +515,6 @@ export function registerAgentRoutes(
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       const contextStart = Date.now();
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision);
-      console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
-      const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
-
       const caps = capabilitiesFromAgent(agent as AgentRow);
       // Un seul niveau de consultation entre agents : cet en-tête n'est posé
       // que par consulter_agent (delegateTools.ts) sur son appel imbriqué, et
@@ -524,6 +523,17 @@ export function registerAgentRoutes(
       // indéfiniment, chaque tour étant facturé.
       if (req.headers['x-agent-delegation']) caps.delegate = false;
       const tools = buildAgentTools(caps);
+      // web_search_enabled ne suffit pas seul : le tool natif n'existe que
+      // chez les fournisseurs qui l'annoncent (Gemini, Claude) — voir
+      // LlmProvider.supportsWebSearch et mistral.ts pour pourquoi Mistral n'en
+      // fait pas partie. Calculé une fois, réutilisé par le prompt système
+      // (pour ne pas promettre une capacité que le tour n'aura pas) et par
+      // chaque appel de timedChat() plus bas.
+      const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
+
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision);
+      console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
+      const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, webSearchActive);
 
       // The full conversation, owned here rather than inside a vendor SDK's
       // stateful chat object: stored history, then the new user message, then
@@ -596,7 +606,7 @@ export function registerAgentRoutes(
           }
         }
         try {
-          const r = await withTimeout(provider.chat({ system: systemPrompt, messages, tools }));
+          const r = await withTimeout(provider.chat({ system: systemPrompt, messages, tools, webSearch: webSearchActive }));
           console.log(`[agent chat] llm call #${callIndex} (${label}) ok in ${Date.now() - callStart}ms conv=${convId} agent=${agentId}`);
           if (useReserve) {
             const settled = await billing!.settleAiCredit({

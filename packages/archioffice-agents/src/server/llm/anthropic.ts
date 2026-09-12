@@ -92,27 +92,35 @@ export function createAnthropicProvider(opts: { apiKey: string; model?: string }
     id: 'anthropic',
     model,
     supportsVision: true,
+    // web_search_20250305 est un server tool : Claude exécute la recherche
+    // lui-même et rend directement des blocs `web_search_tool_result`, jamais
+    // un `tool_use` à exécuter de notre côté (voir le filtre sur
+    // `b.type === 'tool_use'` plus bas, qui l'exclut déjà de `toolCalls`
+    // sans changement). Se combine sans restriction avec nos propres tools
+    // (`type` custom implicite) dans le même appel.
+    supportsWebSearch: true,
 
-    async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, webSearch }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {
         const { default: Anthropic } = await import('@anthropic-ai/sdk');
         client = new Anthropic({ apiKey: opts.apiKey });
       }
+
+      const anthropicTools: any[] = (tools || []).map(t => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parametersJsonSchema,
+      }));
+      // max_uses borne le coût d'un seul tour : sans lui un agent pourrait
+      // enchaîner des recherches indéfiniment sur une seule question.
+      if (webSearch) anthropicTools.push({ type: 'web_search_20250305', name: 'web_search', max_uses: 5 });
 
       const response = await client.messages.create({
         model,
         max_tokens: MAX_TOKENS,
         ...(system ? { system } : {}),
         messages: toAnthropicMessages(messages),
-        ...(tools && tools.length > 0
-          ? {
-              tools: tools.map(t => ({
-                name: t.name,
-                description: t.description,
-                input_schema: t.parametersJsonSchema,
-              })),
-            }
-          : {}),
+        ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
       });
 
       const usage = {

@@ -180,19 +180,28 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
     id: 'gemini',
     model,
     supportsVision: true,
+    // googleSearch se déclare comme un tool de plus, au même titre qu'un
+    // functionDeclarations — Gemini exécute la recherche lui-même et rend
+    // directement le texte sourcé, sans jamais produire de functionCall à
+    // notre charge (voir geminiTools plus bas, dans chat()).
+    supportsWebSearch: true,
 
-    async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, webSearch }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {
         const { GoogleGenAI } = await import('@google/genai');
         client = new GoogleGenAI({ apiKey: opts.apiKey });
       }
+
+      const geminiTools: Record<string, unknown>[] = [];
+      if (tools && tools.length > 0) geminiTools.push({ functionDeclarations: tools as any });
+      if (webSearch) geminiTools.push({ googleSearch: {} });
 
       const response = await client.models.generateContent({
         model,
         contents: toGeminiContents(messages),
         config: {
           ...(system ? { systemInstruction: system } : {}),
-          ...(tools && tools.length > 0 ? { tools: [{ functionDeclarations: tools as any }] } : {}),
+          ...(geminiTools.length > 0 ? { tools: geminiTools } : {}),
         },
       });
 
