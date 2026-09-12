@@ -669,9 +669,9 @@ export default function Invoices() {
                   <p className="font-semibold text-sm">{inv.invoice_number}</p>
                   {inv.affaire_invoice_number && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
                   <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
+                  <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>{projects.find(p => p.id === inv.project_id)?.client || '---'}</p>
                 </div>
               )},
-              { label: t('invoices_col_client'), render: inv => projects.find(p => p.id === inv.project_id)?.client || '---' },
               { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
@@ -710,6 +710,12 @@ export default function Invoices() {
                     {t('invoices_col_invoice_project')}
                     <SortIcon column="project_name" />
                   </div>
+                </th>
+                <th
+                  className="px-6 py-4 text-xs font-bold uppercase tracking-wider"
+                  style={{ color: 'var(--tblr-muted)' }}
+                >
+                  {t('invoices_col_client')}
                 </th>
                 <th
                   className="px-6 py-4 text-xs font-bold uppercase tracking-wider cursor-pointer group"
@@ -753,7 +759,7 @@ export default function Invoices() {
                       style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)', borderBottom: '1px solid var(--tblr-border)' }}
                       onClick={() => toggleProjectExpansion(projectId)}
                     >
-                      <td colSpan={5} className="px-6 py-3">
+                      <td colSpan={6} className="px-6 py-3">
                         <div className="flex items-center gap-3">
                           <div className="p-1 rounded shadow-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
                             {expandedProjects.has(projectId)
@@ -792,6 +798,9 @@ export default function Invoices() {
                               <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>
+                          {projects.find(p => p.id === invoice.project_id)?.client || '---'}
                         </td>
                         <td className="px-6 py-4 font-mono font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>
                           {formatCurrency(invoice.amount, currency)}
@@ -921,6 +930,9 @@ export default function Invoices() {
                         </div>
                       </div>
                     </td>
+                    <td className="px-6 py-4 text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>
+                      {projects.find(p => p.id === invoice.project_id)?.client || '---'}
+                    </td>
                     <td className="px-6 py-4 font-mono font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>
                       {formatCurrency(invoice.amount, currency)}
                     </td>
@@ -1021,7 +1033,7 @@ export default function Invoices() {
               )}
               {sortedInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
+                  <td colSpan={6} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     {t('invoices_no_invoices')}
                   </td>
                 </tr>
