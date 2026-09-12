@@ -154,8 +154,14 @@ export async function exportNoteHonorairesToPDF(
     // compris dans son montant, donc seuls les sous-traitants réglés en direct
     // par le maître d'ouvrage s'y ajoutent. Additionner toutes les colonnes
     // compterait deux fois la sous-traitance portée par un membre.
-    const paye = (st: { payeur?: string; paiement_direct_moa?: boolean }) =>
-      st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+    // Le payeur est relu sur le CONTRAT (par `contact_id`), comme les noms
+    // ci-dessus : c'est lui qui fait foi, la valeur figée dans la note ne
+    // servant de repli que si le sous-traitant a depuis été retiré du contrat.
+    const paye = (st: { contact_id?: string; nom: string; payeur?: string; paiement_direct_moa?: boolean }) => {
+      const rec = (contrat?.sous_traitants || []).find(s => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+      const source = rec || st;
+      return source.payeur ?? (source.paiement_direct_moa ? 'moa' : 'agence');
+    };
     const stMoa = sousTraitants.filter(st => paye(st) === 'moa');
     const groupementFor = (phaseId: string) =>
       (findPhase(note.phases, phaseId)?.montant_phase || 0)

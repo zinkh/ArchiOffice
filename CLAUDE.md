@@ -466,6 +466,28 @@ Un sous-traitant est donc plafonné deux fois : par son montant global au contra
 (`cumulStTotal` + ses autres missions) et par l'enveloppe de la mission qu'il
 ne peut pas dépasser.
 
+**Tout cela repose sur l'identification du payeur, donc `payeurEffectif()` le
+relit sur le CONTRAT** (par `contact_id`), exactement comme les noms
+d'intervenants plus haut, et non depuis la valeur figée dans la note à sa
+création : désigner ou changer le payeur dans le contrat doit se répercuter
+immédiatement, y compris sur une note déjà ouverte. Il rend une clé canonique
+(`'agence'`, `'moa'`, ou l'`id` du cotraitant payeur) et accepte aussi bien
+l'`id` de contrat que le `contact_id` d'un cotraitant, qu'une note ancienne ou
+un import peuvent porter. Un payeur désigné mais introuvable revient à l'agence
+(le mandataire) : sans ce repli, le montant du sous-traitant sortait de
+l'enveloppe de la mission **sans revenir à personne**, et les montants de TOUS
+les membres baissaient — le symptôme exact qui a motivé ce correctif.
+`recalcNote()` réécrit `payeur` avec cette valeur résolue, pour que la note
+enregistrée, l'export PDF et la facture brouillon lisent la même imputation que
+l'écran.
+
+Le pourcentage réellement facturé par chaque membre (montant ÷ montant
+groupement) s'affiche sous son montant dès qu'une ligne porte de la
+sous-traitance : la quote-part saisie porte sur ce qui reste après
+sous-traitance, donc le payeur facture un pourcentage plus élevé que sa part
+contractuelle et les autres un plus faible — sans cette mention, la ligne
+semblerait contredire le 50/50 du contrat sans dire pourquoi.
+
 Deux conséquences à ne pas défaire :
 
 1. **`groupementPhaseBase()` n'additionne plus les parts des cotraitants.**
