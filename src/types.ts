@@ -322,9 +322,15 @@ export interface Project {
   programme?: string;
 }
 
+// Un ordre de service s'adresse toujours à une entreprise sur un marché de
+// travaux (marche_id -> marches_entreprises) — jamais au contrat MOE de
+// l'agence elle-même : voir AvenantMoe pour ça, et
+// supabase/migrate_avenants_moe.sql pour l'historique de la séparation.
 export interface OrdreDeService {
   id: string;
   project_id: string;
+  /** Requis à la création (server/routes/ordresDeService.ts) ; nullable en base pour ne pas casser une lecture. */
+  marche_id?: string | null;
   os_number: string;
   march_number?: string;
   title: string;
@@ -332,7 +338,7 @@ export interface OrdreDeService {
   description?: string;
   lot?: string;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
-  type?: 'travaux' | 'contrat_moe';
+  type?: 'travaux';
   maitrise_oeuvre_adresse?: string;
   entreprise?: string;
   origine_demande?: 'maitrise_ouvrage' | 'maitrise_oeuvre' | 'aleas' | 'autres';
@@ -354,6 +360,30 @@ export interface OrdreDeService {
   notes_ar?: string;
   delai_execution?: number;
   delai_unit?: string;
+}
+
+// Avenant au contrat de maîtrise d'œuvre de l'agence (contrats_moe) — même
+// forme qu'un OrdreDeService pour les champs communs (numérotation, statut,
+// délais, montants), mais rattaché au contrat MOE et jamais à un marché de
+// travaux ni à une entreprise.
+export interface AvenantMoe {
+  id: string;
+  tenant_id?: string;
+  contrat_moe_id: string;
+  project_id?: string;
+  os_number: string;
+  title: string;
+  date: string;
+  description?: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  origine_demande?: 'maitrise_ouvrage' | 'maitrise_oeuvre' | 'aleas' | 'autres';
+  objet?: string;
+  date_signature?: string;
+  incidences_delais_type?: 'non' | 'oui';
+  incidences_delais_details?: string;
+  delai_execution?: number;
+  montant_devis_presente?: number;
+  montant_devis_accepte?: number;
 }
 
 export interface Visa {

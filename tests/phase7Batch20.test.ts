@@ -20,9 +20,10 @@ describe('Ordres de service', () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('marches_entreprises', [{ id: 'marche1', tenant_id: tenantId, project_id: 'p1', entreprise_nom: 'BTP Dupont' }]);
 
     const created = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
-      project_id: 'p1', os_number: '001', title: 'Terrassement', type: 'travaux',
+      project_id: 'p1', marche_id: 'marche1', os_number: '001', title: 'Terrassement', type: 'travaux',
     });
     expect(created.status).toBe(201);
     const id = created.body.id;
@@ -41,6 +42,38 @@ describe('Ordres de service', () => {
     const deleted = await request(app).delete(`/api/ordres_de_service/${id}`).set(authHeader(token));
     expect(deleted.status).toBe(200);
     expect(fakeSupabaseAdmin.getTable('ordres_de_service').find(o => o.id === id)).toBeUndefined();
+  });
+
+  it('refuses to create an OS without a marché de travaux', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1b', tenant_id: tenantId }]);
+
+    const res = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
+      project_id: 'p1b', os_number: '001', title: 'Terrassement',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('refuses a marché that does not belong to the OS\'s tenant or project', async () => {
+    const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('marches_entreprises', [{ id: 'marche-b', tenant_id: tenantB, project_id: 'p-b', entreprise_nom: 'Secret' }]);
+
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1c', tenant_id: tenantA }]);
+
+    const foreignTenant = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
+      project_id: 'p1c', marche_id: 'marche-b', os_number: '001', title: 'Terrassement',
+    });
+    expect(foreignTenant.status).toBe(400);
+
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1d', tenant_id: tenantA }]);
+    fakeSupabaseAdmin.seed('marches_entreprises', [{ id: 'marche-other-project', tenant_id: tenantA, project_id: 'p1c', entreprise_nom: 'BTP' }]);
+    const wrongProject = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
+      project_id: 'p1d', marche_id: 'marche-other-project', os_number: '001', title: 'Terrassement',
+    });
+    expect(wrongProject.status).toBe(400);
   });
 
   it('rejects an invalid status transition', async () => {
@@ -63,6 +96,58 @@ describe('Ordres de service', () => {
     const res = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'p2' }).set(authHeader(token));
     expect(res.status).toBe(200);
     expect(res.body.next).toBe('004');
+  });
+});
+
+describe('Avenants MOE', () => {
+  it('creates, lists, transitions status, and deletes an avenant — never touches ordres_de_service', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p-avenant', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('contrats_moe', [{ id: 'contrat1', tenant_id: tenantId, project_id: 'p-avenant', status: 'Signé' }]);
+
+    const created = await request(app).post('/api/avenants_moe').set(authHeader(token)).send({
+      project_id: 'p-avenant', contrat_moe_id: 'contrat1', os_number: 'A01', title: 'Extension mission',
+      montant_devis_presente: 5000,
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    const listed = await request(app).get('/api/avenants_moe').query({ project_id: 'p-avenant' }).set(authHeader(token));
+    expect(listed.body.some((a: any) => a.id === id)).toBe(true);
+
+    const transitioned = await request(app).patch(`/api/avenants_moe/${id}/status`).set(authHeader(token)).send({ status: 'approved', montant_devis_accepte: 5000 });
+    expect(transitioned.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('avenants_moe').find(a => a.id === id)?.status).toBe('approved');
+    expect(fakeSupabaseAdmin.getTable('avenants_moe').find(a => a.id === id)?.montant_devis_accepte).toBe(5000);
+
+    const deleted = await request(app).delete(`/api/avenants_moe/${id}`).set(authHeader(token));
+    expect(deleted.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('avenants_moe').find(a => a.id === id)).toBeUndefined();
+
+    // Un avenant n'est jamais un ordre de service.
+    expect(fakeSupabaseAdmin.getTable('ordres_de_service').some(o => o.id === id)).toBe(false);
+  });
+
+  it('refuses to create an avenant without a contrat_moe_id', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/avenants_moe').set(authHeader(token)).send({
+      project_id: 'p-x', os_number: 'A01', title: 'Sans contrat',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('never lists another tenant\'s avenants', async () => {
+    const tenantB = makeTenant();
+    fakeSupabaseAdmin.seed('avenants_moe', [{ id: 'av-b', tenant_id: tenantB, project_id: 'p-b', os_number: 'A01', title: 'Secret', status: 'draft' }]);
+
+    const tenantA = makeTenant();
+    const { token } = makeUser(tenantA);
+
+    const listed = await request(app).get('/api/avenants_moe').set(authHeader(token));
+    expect(listed.body.some((a: any) => a.id === 'av-b')).toBe(false);
   });
 });
 

@@ -65,6 +65,7 @@ import { getMemberRole, listMemberships, listTenantMemberIds, resolveActiveTenan
 import { registerProposalRoutes } from "./server/routes/proposals";
 import { registerInvoiceRoutes } from "./server/routes/invoices";
 import { registerOrdresDeServiceRoutes } from "./server/routes/ordresDeService";
+import { registerAvenantsMoeRoutes } from "./server/routes/avenantsMoe";
 import { registerVisaRoutes } from "./server/routes/visas";
 import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerReserveRoutes } from "./server/routes/reserves";
@@ -908,6 +909,7 @@ export async function createApp() {
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

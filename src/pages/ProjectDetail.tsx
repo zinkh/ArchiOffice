@@ -53,7 +53,7 @@ import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
-import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
@@ -183,6 +183,8 @@ export default function ProjectDetail() {
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [ordresDeService, setOrdresDeService] = useState<OrdreDeService[]>([]);
+  const [avenantsMoe, setAvenantsMoe] = useState<AvenantMoe[]>([]);
+  const [marchesTravaux, setMarchesTravaux] = useState<any[]>([]);
   const [linkedContratsMoe, setLinkedContratsMoe] = useState<any[]>([]);
   const [notesHonoraires, setNotesHonoraires] = useState<any[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -192,6 +194,7 @@ export default function ProjectDetail() {
   const [newOs, setNewOs] = useState({
     title: '',
     os_number: '',
+    marche_id: '',
     lot: '',
     entreprise: '',
     maitrise_oeuvre: '',
@@ -203,6 +206,11 @@ export default function ProjectDetail() {
     delai_unit: 'jours',
     objet: '',
   });
+  // Formulaire de création rapide d'un marché travaux, ouvert depuis le
+  // formulaire OS quand le projet n'en a encore aucun — un OS doit toujours
+  // être rattaché à un marché (server/routes/ordresDeService.ts).
+  const [isAddingMarche, setIsAddingMarche] = useState(false);
+  const [newMarche, setNewMarche] = useState({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
 
   // AR modal state
   const [arOsTarget, setArOsTarget] = useState<OrdreDeService | null>(null);
@@ -404,10 +412,7 @@ export default function ProjectDetail() {
   // in several places in the JSX below (up to 4x for the MOE avenants alone),
   // rescanning ordresDeService/invoices/reserves on every render even when
   // typing in an unrelated form field elsewhere in this component.
-  const moeAvenants = useMemo(
-    () => ordresDeService.filter(o => o.type === 'contrat_moe'),
-    [ordresDeService]
-  );
+  const moeAvenants = avenantsMoe;
   const moeAvenantsApprouves = useMemo(
     () => moeAvenants.filter(o => o.status === 'approved'),
     [moeAvenants]
@@ -491,6 +496,8 @@ export default function ProjectDetail() {
         setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
         setInvoices(data.invoices);
         setOrdresDeService(data.ordres_de_service);
+        setAvenantsMoe(data.avenants_moe || []);
+        setMarchesTravaux(data.marches_entreprises || []);
         setVisas(data.visas);
         setReceptions(data.receptions);
         setReserves(data.reserves);
@@ -618,6 +625,24 @@ export default function ProjectDetail() {
     }
   };
 
+  const fetchAvenantsMoe = async () => {
+    try {
+      const res = await fetch(`/api/avenants_moe?project_id=${id}`);
+      if (res.ok) setAvenantsMoe(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchMarchesTravaux = async () => {
+    try {
+      const res = await fetch(`/api/marches-entreprises/${id}`);
+      if (res.ok) setMarchesTravaux(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchContacts = async () => {
     try {
       const res = await fetch('/api/contacts');
@@ -664,33 +689,48 @@ export default function ProjectDetail() {
     }
   }, [project]);
 
-  const getNextOsNumber = (entreprise: string) => {
-    if (!entreprise) return '';
-    const companyOs = ordresDeService.filter(os => os.entreprise === entreprise);
-    const nextNum = companyOs.length + 1;
-    return nextNum.toString().padStart(2, '0');
+  // Numérotation par marché, plutôt que par nom d'entreprise en texte libre :
+  // un OS s'adresse toujours à un marché de travaux (marche_id).
+  const getNextOsNumberForMarche = (marcheId: string) => {
+    if (!marcheId) return '';
+    const count = ordresDeService.filter(os => os.marche_id === marcheId).length;
+    return (count + 1).toString().padStart(2, '0');
   };
 
-  const handleLotChange = (lotNumber: string) => {
-    const lot = project?.lots_list?.find(l => l.lot_number === lotNumber);
-    const entreprise = lot?.contact_name || '';
-    const nextOsNum = getNextOsNumber(entreprise);
-    
+  const handleMarcheChange = (marcheId: string) => {
+    const marche = marchesTravaux.find((m: any) => m.id === marcheId);
+    const entreprise = marche?.entreprise_nom || '';
+    const lot = marche ? [marche.lot_numero, marche.lot_titre].filter(Boolean).join(' — ') : '';
     setNewOs(prev => ({
       ...prev,
-      lot: lotNumber,
-      entreprise: entreprise,
-      os_number: nextOsNum
-    }));
-  };
-
-  const handleEntrepriseChange = (entreprise: string) => {
-    const nextOsNum = getNextOsNumber(entreprise);
-    setNewOs(prev => ({
-      ...prev,
+      marche_id: marcheId,
+      lot,
       entreprise,
-      os_number: nextOsNum
+      destinataire_os: entreprise,
+      os_number: getNextOsNumberForMarche(marcheId),
     }));
+  };
+
+  const handleCreateMarche = async () => {
+    if (!id || !newMarche.entreprise_nom) return;
+    const res = await fetch('/api/marches-entreprises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: id, entreprise_nom: newMarche.entreprise_nom,
+        lot_numero: newMarche.lot_numero, lot_titre: newMarche.lot_titre,
+        montant_ht: Number(newMarche.montant_ht) || 0,
+      }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      await fetchMarchesTravaux();
+      handleMarcheChange(created.id);
+      setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
+      setIsAddingMarche(false);
+    } else {
+      alert("Échec de la création du marché.");
+    }
   };
 
   const fetchInvoices = async () => {
@@ -794,13 +834,14 @@ export default function ProjectDetail() {
   };
 
   const handleCreateOs = async () => {
-    if (!id || !newOs.title || !newOs.os_number) return;
+    if (!id || !newOs.title || !newOs.os_number || !newOs.marche_id) return;
     try {
       const res = await fetch('/api/ordres_de_service', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: id,
+          marche_id: newOs.marche_id,
           os_number: newOs.os_number,
           title: newOs.title,
           lot: newOs.lot,
@@ -820,8 +861,11 @@ export default function ProjectDetail() {
       });
       if (res.ok) {
         await fetchOrdresDeService();
-        setNewOs({ title: '', os_number: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
+        setNewOs({ title: '', os_number: '', marche_id: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
         setIsAddingOs(false);
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || "Échec de la création de l'OS.");
       }
     } catch (err) {
       console.error(err);
@@ -830,12 +874,15 @@ export default function ProjectDetail() {
 
   const handleCreateOsMoe = async () => {
     if (!id || !newOsMoe.title || !newOsMoe.os_number) return;
+    const contratMoeId = (linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0])?.id;
+    if (!contratMoeId) return;
     try {
-      const res = await fetch('/api/ordres_de_service', {
+      const res = await fetch('/api/avenants_moe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: id,
+          contrat_moe_id: contratMoeId,
           os_number: newOsMoe.os_number,
           title: newOsMoe.title,
           objet: newOsMoe.objet || null,
@@ -848,20 +895,22 @@ export default function ProjectDetail() {
           delai_execution: newOsMoe.delai_execution ? Number(newOsMoe.delai_execution) : null,
           montant_devis_presente: Number(newOsMoe.montant_devis_presente) || null,
           status: 'draft',
-          type: 'contrat_moe',
         })
       });
       if (res.ok) {
-        await fetchOrdresDeService();
+        await fetchAvenantsMoe();
         setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '', objet: 'extension_mission', description: '', origine_demande: 'maitrise_ouvrage', date: new Date().toISOString().split('T')[0], date_signature: '', incidences_delais_type: 'non', incidences_delais_details: '', delai_execution: '' });
         setIsAddingOsMoe(false);
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || "Échec de la création de l'avenant.");
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  const generateAvenantPdf = async (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+  const generateAvenantPdf = async (os: AvenantMoe, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable'),
@@ -1018,6 +1067,36 @@ export default function ProjectDetail() {
       }
     } catch (err) { console.error(err); }
     finally { setArSaving(false); }
+  };
+
+  // Distincts des transitions de statut d'un OS travaux ci-dessus : un
+  // avenant MOE n'a pas d'accusé de réception d'entreprise (concept propre
+  // au marché de travaux) — approuver un avenant est une simple transition
+  // de statut, immédiate.
+  const handleUpdateAvenantStatus = async (avenantId: string, newStatus: AvenantMoe['status']) => {
+    try {
+      const avenant = avenantsMoe.find(a => a.id === avenantId);
+      const body: any = { status: newStatus };
+      if (newStatus === 'approved') body.montant_devis_accepte = avenant?.montant_devis_accepte ?? avenant?.montant_devis_presente ?? undefined;
+      const res = await fetch(`/api/avenants_moe/${avenantId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setAvenantsMoe(prev => prev.map(a => a.id === avenantId
+          ? { ...a, status: newStatus, montant_devis_accepte: body.montant_devis_accepte ?? a.montant_devis_accepte }
+          : a));
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAvenant = async (avenantId: string) => {
+    if (!confirm("Supprimer cet avenant ?")) return;
+    try {
+      const res = await fetch(`/api/avenants_moe/${avenantId}`, { method: 'DELETE' });
+      if (res.ok) setAvenantsMoe(prev => prev.filter(a => a.id !== avenantId));
+    } catch (err) { console.error(err); }
   };
 
   const generateOsPdf = async (os: OrdreDeService) => {
@@ -1666,8 +1745,7 @@ export default function ProjectDetail() {
                         { id: 'act', name: 'ACT', pct: 7 },  { id: 'visa', name: 'VISA', pct: 7 },
                         { id: 'det', name: 'DET', pct: 25 }, { id: 'aor', name: 'AOR', pct: 7 },
                       ];
-                      const honRevises = (Number(project.remuneration) || 0) +
-                        ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                      const honRevises = (Number(project.remuneration) || 0) + cumulAvenantsApprouves;
                       if (honRevises <= 0) return null;
                       const phases = linkedContratsMoe[0]?.missions_list?.filter((m: any) => m.incluse) ?? DEFAULT_PHASES;
                       return (
@@ -1694,9 +1772,7 @@ export default function ProjectDetail() {
                     icon={IconClipboardList}
                     title="Avenants Contrat MOE"
                     description={(() => {
-                      const moeApprouves = ordresDeService
-                        .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
-                        .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                      const moeApprouves = cumulAvenantsApprouves;
                       const honorairesInitiaux = Number(project.remuneration) || 0;
                       if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
                         <span className="font-semibold" style={{ color: 'var(--tblr-primary)' }}>
@@ -1880,18 +1956,18 @@ export default function ProjectDetail() {
                               <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  {os.status === 'draft' && <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"><IconSend size={11} /> Soumettre</button>}
+                                  {os.status === 'draft' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"><IconSend size={11} /> Soumettre</button>}
                                   {os.status === 'submitted' && (<>
-                                    <button onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"><IconCheck size={11} /> Approuver</button>
-                                    <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"><IconX size={11} /> Rejeter</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"><IconCheck size={11} /> Approuver</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"><IconX size={11} /> Rejeter</button>
                                   </>)}
-                                  {os.status === 'rejected' && <button onClick={() => handleUpdateOsStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"><IconRefresh size={11} /> Rouvrir</button>}
+                                  {os.status === 'rejected' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"><IconRefresh size={11} /> Rouvrir</button>}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                  <button onClick={() => handleDeleteOs(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                  <button onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
                                 </div>
                               </td>
                             </tr>
@@ -1917,8 +1993,7 @@ export default function ProjectDetail() {
                     { id: 'det', name: 'DET — Direction de l\'Exécution des Travaux' },
                     { id: 'aor', name: 'AOR — Assistance à la Réception' },
                   ];
-                  const honRevises = (Number(project.remuneration) || 0) +
-                    ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s: number, o: any) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                  const honRevises = (Number(project.remuneration) || 0) + cumulAvenantsApprouves;
                   const contrat = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
                   const cotraitants: any[] = contrat?.cotraitants || [];
                   const sousTraitants: any[] = contrat?.sous_traitants || [];
@@ -3137,17 +3212,46 @@ export default function ProjectDetail() {
                             value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Lot</label>
+                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Marché travaux *</label>
                           <select
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.lot} onChange={e => handleLotChange(e.target.value)}>
-                            <option value="">Sélectionner un lot</option>
-                            {project.lots_list?.map(l => (
-                              <option key={l.id} value={l.lot_number}>{l.lot_number} - {l.lot_title}</option>
+                            value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
+                            <option value="">Sélectionner un marché</option>
+                            {marchesTravaux.map((m: any) => (
+                              <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
                             ))}
                           </select>
                         </div>
                       </div>
+                      {marchesTravaux.length === 0 && !isAddingMarche && (
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-700 dark:text-amber-400">
+                          <span>Aucun marché de travaux sur ce projet — un OS doit être rattaché à un marché.</span>
+                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] whitespace-nowrap transition-all">+ Créer un marché</button>
+                        </div>
+                      )}
+                      {isAddingMarche && (
+                        <div className="p-4 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] space-y-3">
+                          <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Nouveau marché de travaux</p>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <input type="text" placeholder="Entreprise *"
+                              className="md:col-span-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.entreprise_nom} onChange={e => setNewMarche({ ...newMarche, entreprise_nom: e.target.value })} />
+                            <input type="text" placeholder="N° lot"
+                              className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.lot_numero} onChange={e => setNewMarche({ ...newMarche, lot_numero: e.target.value })} />
+                            <input type="number" placeholder="Montant HT"
+                              className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.montant_ht} onChange={e => setNewMarche({ ...newMarche, montant_ht: e.target.value })} />
+                          </div>
+                          <input type="text" placeholder="Intitulé du lot (ex: Gros œuvre)"
+                            className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1.5 text-xs font-bold text-[var(--tblr-muted)]">Annuler</button>
+                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition-all">Créer le marché</button>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Titre *</label>
                         <input type="text"
@@ -3174,7 +3278,7 @@ export default function ProjectDetail() {
                           <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.destinataire_os || newOs.entreprise}
-                            onChange={e => { handleEntrepriseChange(e.target.value); setNewOs(prev => ({...prev, destinataire_os: e.target.value})); }} />
+                            onChange={e => setNewOs(prev => ({...prev, destinataire_os: e.target.value, entreprise: e.target.value}))} />
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Montant présenté HT</label>
@@ -3200,8 +3304,8 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                         <div className="md:col-span-2 flex items-end">
-                          <button onClick={handleCreateOs}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
+                          <button onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition-all">
                             Créer l'OS
                           </button>
                         </div>
@@ -3403,9 +3507,7 @@ export default function ProjectDetail() {
                     .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
                   const marchesRevises = marchesInitiaux + avenantsTravauxApprouves;
                   const honorairesInitiaux = Number(project.remuneration) || 0;
-                  const avenantsHonorairesApprouves = ordresDeService
-                    .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
-                    .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                  const avenantsHonorairesApprouves = cumulAvenantsApprouves;
                   const honorairesRevises = honorairesInitiaux + avenantsHonorairesApprouves;
                   return (
                     <>
