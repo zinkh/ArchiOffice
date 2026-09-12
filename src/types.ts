@@ -502,6 +502,8 @@ export interface TeamMember {
   address?: string;
   jobTitle?: string;
   department?: string;
+  /** Préférence personnelle : afficher ses propres contacts personnels dans la liste (défaut : oui). */
+  showPersonalContacts?: boolean;
   tenantId?: string | null;
   // Platform back-office access — orthogonal to system_role (see
   // server/superAdminAuth.ts). Only ever set on the current user's own
@@ -720,6 +722,10 @@ export interface Contact {
   // contactSync.ts) regardless of category — a family member or personal
   // reference entered here for reminders/notes, not meant to leave the cabinet.
   is_personal?: boolean;
+  // Set server-side only (never client-writable — see server/routes/
+  // contacts.ts) when is_personal is true: the one user this contact is
+  // visible to. Null on a "pro" contact, which stays shared by the tenant.
+  owner_user_id?: string | null;
   // Free multi-value tags, shown/edited only for the matching category
   // (src/components/ContactFormFields.tsx): corps_etat for "Entreprise"
   // contacts, specialite for "Bureau d'études" ones.

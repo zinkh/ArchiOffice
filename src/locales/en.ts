@@ -156,6 +156,9 @@ export default {
       "send_from_personal": "Send from Personal",
       "default_email_template": "Default Email Template",
       "my_email_settings": "My Email Settings",
+      "settings_personal_contacts_title": "Personal Contacts",
+      "settings_personal_contacts_desc": "A personal contact is never visible to the rest of the firm — this only controls whether your own show up in your list.",
+      "settings_show_personal_contacts": "Show my personal contacts in the list",
       "siret": "SIRET",
       "pdf_generator": "PDF Generator",
 

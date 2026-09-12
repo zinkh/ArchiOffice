@@ -46,12 +46,28 @@ function pickContactColumns(body: Record<string, any>): Record<string, any> {
 }
 
 export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+  // Un contact "pro" reste partagé par tout le cabinet ; un contact
+  // `is_personal` n'appartient qu'à son créateur (`owner_user_id`, jamais
+  // `created_by` — un champ texte libre déjà utilisé pour d'autres valeurs
+  // comme 'odoo'/'ragic', pas un identifiant fiable). Filtré en mémoire
+  // plutôt que via `.or()` PostgREST : la liste d'un cabinet reste petite, et
+  // ça évite de dépendre de la syntaxe `and()` imbriquée dans un `.or()`.
   app.get("/api/contacts", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      const { data: profileRow } = await supabaseAdmin.from('profiles').select('show_personal_contacts').eq('id', req.user.id).maybeSingle();
+      // Absent (colonne pas encore migrée, ou profil introuvable) vaut "oui" :
+      // le réglage ne doit jamais masquer des contacts déjà visibles avant son
+      // introduction.
+      const showPersonal = (profileRow as any)?.show_personal_contacts ?? true;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('*');
       if (error) throw error;
-      res.json((data || []).map((c: any) => ({ ...c, name: `${c.first_name || ''} ${c.last_name || ''}`.trim() })));
+      const visible = (data || []).filter((c: any) => {
+        if (!c.is_personal) return true;
+        if (!showPersonal) return false;
+        return c.owner_user_id === req.user.id;
+      });
+      res.json(visible.map((c: any) => ({ ...c, name: `${c.first_name || ''} ${c.last_name || ''}`.trim() })));
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch contacts" }); }
   });
 
@@ -71,6 +87,10 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
         id,
         first_name: contact.first_name ?? '',
         last_name: contact.last_name ?? '',
+        // Never client-writable (owner_user_id isn't in CONTACT_COLUMNS —
+        // pickContactColumns already dropped it from `contact` above): a
+        // personal contact belongs to whoever creates it, a pro one to no one.
+        owner_user_id: contact.is_personal ? req.user.id : null,
       });
       if (error) throw error;
       const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
@@ -87,10 +107,27 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('is_personal, owner_user_id').eq('id', id).maybeSingle();
+      // A personal contact owned by someone else stays invisible in the list
+      // (GET above), but the id can still leak elsewhere (an activity log, a
+      // link shared between colleagues) — refuse the edit outright rather
+      // than rely on it never being guessed.
+      if (existing && (existing as any).is_personal && (existing as any).owner_user_id && (existing as any).owner_user_id !== req.user.id) {
+        return res.status(403).json({ error: "Ce contact personnel appartient à un autre utilisateur." });
+      }
       // pickContactColumns already strips computed/non-column fields (id,
-      // tenant_id, the derived `name`, and anything else not a real column).
+      // tenant_id, the derived `name`, and anything else not a real column) —
+      // owner_user_id in particular is never in that whitelist, so it can
+      // only be set below, never straight from the request body.
       const updateData = pickContactColumns(req.body);
       delete updateData.id;
+      const nextIsPersonal = updateData.is_personal !== undefined ? !!updateData.is_personal : !!(existing as any)?.is_personal;
+      updateData.owner_user_id = nextIsPersonal
+        // Keep the existing owner once one is set; a legacy personal contact
+        // (created before owner_user_id existed) is claimed by whoever edits
+        // it first, rather than staying invisible to everyone forever.
+        ? ((existing as any)?.owner_user_id || req.user.id)
+        : null;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(updateData).eq('id', id);
       if (error) throw error;
       res.json({ success: true });
@@ -104,7 +141,10 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { data: contact } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('first_name, last_name, company_name').eq('id', id).maybeSingle();
+      const { data: contact } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('first_name, last_name, company_name, is_personal, owner_user_id').eq('id', id).maybeSingle();
+      if (contact && (contact as any).is_personal && (contact as any).owner_user_id && (contact as any).owner_user_id !== req.user.id) {
+        return res.status(403).json({ error: "Ce contact personnel appartient à un autre utilisateur." });
+      }
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').delete().eq('id', id);
       if (error) throw error;
       const contactName = (contact as any)?.company_name || `${(contact as any)?.first_name || ''} ${(contact as any)?.last_name || ''}`.trim();

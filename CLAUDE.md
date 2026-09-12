@@ -1034,6 +1034,44 @@ Le sélecteur (`src/components/TenantSwitcher.tsx`) n'apparaît qu'à partir de
 deux cabinets ; un compte à cabinet unique ne voit rien changer, hormis
 l'entrée « Rejoindre ou créer un cabinet » qui mène à `/agency-setup?add=1`.
 
+### Visibilité des contacts personnels
+
+`contacts.is_personal` (`migrate_contacts_is_personal.sql`) existait déjà
+pour exclure un contact de la synchro Google Contacts, mais rien ne
+distinguait AUPRÈS DE QUI il restait visible dans l'application elle-même :
+un contact personnel (un proche, une référence saisie pour un rappel
+d'anniversaire) apparaissait dans la liste de tout le cabinet au même titre
+qu'un contact « pro ». `migrate_contacts_personal_visibility.sql` ferme ce
+trou avec deux colonnes distinctes, une par moitié du problème :
+
+- **`contacts.owner_user_id`** — à qui appartient un contact personnel.
+  Jamais `contacts.created_by` : ce champ texte libre sert déjà à d'autres
+  valeurs (`'odoo'`, `'ragic'`, la source d'un import) et n'a jamais été un
+  identifiant fiable. Server-side only — absent de `CONTACT_COLUMNS`
+  (`server/routes/contacts.ts`), donc jamais accepté depuis le corps d'une
+  requête : posé à `req.user.id` à la création d'un contact personnel, à
+  `null` sur un contact « pro » (partagé, sans propriétaire).
+- **`profiles.show_personal_contacts`** — préférence personnelle, pas par
+  cabinet (même principe que `notification_prefs`) : afficher ou non SES
+  PROPRES contacts personnels dans sa liste. Réglée depuis `/settings`, lue
+  et écrite comme le reste du profil (`GET /api/me` /
+  `PUT /api/team/:id`, camelCase `showPersonalContacts`). Un contact
+  personnel appartenant à quelqu'un d'autre reste invisible quel que soit ce
+  réglage — il ne joue que sur les siens.
+
+`GET /api/contacts` filtre en mémoire (`is_personal` faux → toujours visible ;
+vrai → visible seulement si `owner_user_id === req.user.id` ET que la
+préférence est active) plutôt que via un `.or()` PostgREST imbriqué : la
+liste d'un cabinet reste petite, et ça évite de dépendre de la syntaxe
+`and()` dans un `.or()`. `PUT`/`DELETE /api/contacts/:id` refusent en 403
+la modification d'un contact personnel appartenant à quelqu'un d'autre —
+la liste seule ne suffit pas, l'id peut fuiter ailleurs (un journal
+d'activité, un lien partagé entre collègues). Un contact personnel créé
+avant l'existence d'`owner_user_id` (`owner_user_id` NULL) est réclamé par
+la première personne qui l'édite, plutôt que de rester invisible pour tout
+le monde indéfiniment ; basculer un contact de personnel à pro efface
+`owner_user_id` (plus de propriétaire à avoir, une fois partagé).
+
 ### Multi-comptes mail et multi-calendriers
 
 `email_connections` et `calendar_connections` portaient chacune un index

@@ -100,6 +100,117 @@ describe('Contacts', () => {
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === contactId)?.first_name).toBe('Secret');
   });
 
+  // contacts.is_personal (migrate_contacts_is_personal.sql) + owner_user_id /
+  // profiles.show_personal_contacts (migrate_contacts_personal_visibility.sql):
+  // a "pro" contact stays shared tenant-wide, a personal one is visible only
+  // to its owner — see CLAUDE.md.
+  describe('Personal contacts visibility', () => {
+    it('a personal contact is owned by its creator and invisible to a colleague in the same tenant', async () => {
+      const tenantId = makeTenant();
+      const { token: tokenA } = makeUser(tenantId);
+      const { token: tokenB } = makeUser(tenantId);
+
+      const created = await request(app).post('/api/contacts').set(authHeader(tokenA)).send({ first_name: 'Tante', last_name: 'Josephine', is_personal: true });
+      expect(created.status).toBe(201);
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === created.body.id)?.owner_user_id).toBeTruthy();
+
+      const listedByOwner = await request(app).get('/api/contacts').set(authHeader(tokenA));
+      expect(listedByOwner.body.some((c: any) => c.id === created.body.id)).toBe(true);
+
+      const listedByColleague = await request(app).get('/api/contacts').set(authHeader(tokenB));
+      expect(listedByColleague.body.some((c: any) => c.id === created.body.id)).toBe(false);
+    });
+
+    it('a pro contact stays visible to every user in the tenant', async () => {
+      const tenantId = makeTenant();
+      const { token: tokenA } = makeUser(tenantId);
+      const { token: tokenB } = makeUser(tenantId);
+
+      const created = await request(app).post('/api/contacts').set(authHeader(tokenA)).send({ first_name: 'Marché', last_name: 'Public', is_personal: false });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === created.body.id)?.owner_user_id).toBeFalsy();
+
+      const listedByColleague = await request(app).get('/api/contacts').set(authHeader(tokenB));
+      expect(listedByColleague.body.some((c: any) => c.id === created.body.id)).toBe(true);
+    });
+
+    it('a colleague cannot update or delete another user\'s personal contact even by guessing its id', async () => {
+      const tenantId = makeTenant();
+      const { userId: ownerId, token: ownerToken } = makeUser(tenantId);
+      const { token: colleagueToken } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-personal-1', tenant_id: tenantId, first_name: 'Papy', last_name: 'Michel', is_personal: true, owner_user_id: ownerId }]);
+
+      const updated = await request(app).put('/api/contacts/contact-personal-1').set(authHeader(colleagueToken)).send({ first_name: 'Hacked' });
+      expect(updated.status).toBe(403);
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'contact-personal-1')?.first_name).toBe('Papy');
+
+      const deleted = await request(app).delete('/api/contacts/contact-personal-1').set(authHeader(colleagueToken));
+      expect(deleted.status).toBe(403);
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'contact-personal-1')).toBeDefined();
+
+      // The owner can still edit their own.
+      const ownerUpdate = await request(app).put('/api/contacts/contact-personal-1').set(authHeader(ownerToken)).send({ first_name: 'Michel' });
+      expect(ownerUpdate.status).toBe(200);
+    });
+
+    it('a legacy personal contact with no owner_user_id is claimed by whoever edits it first', async () => {
+      const tenantId = makeTenant();
+      const { userId, token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-legacy', tenant_id: tenantId, first_name: 'Ancien', last_name: 'Contact', is_personal: true, owner_user_id: null }]);
+
+      const updated = await request(app).put('/api/contacts/contact-legacy').set(authHeader(token)).send({ last_name: 'Contact2' });
+      expect(updated.status).toBe(200);
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'contact-legacy')?.owner_user_id).toBe(userId);
+    });
+
+    it('unsets owner_user_id when a contact is switched from personal back to pro', async () => {
+      const tenantId = makeTenant();
+      const { userId, token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-switch', tenant_id: tenantId, first_name: 'Basculé', last_name: 'Contact', is_personal: true, owner_user_id: userId }]);
+
+      const updated = await request(app).put('/api/contacts/contact-switch').set(authHeader(token)).send({ is_personal: false });
+      expect(updated.status).toBe(200);
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'contact-switch')?.owner_user_id).toBeNull();
+    });
+
+    it('never lets a client-supplied owner_user_id override server-side ownership on create', async () => {
+      const tenantId = makeTenant();
+      const { userId, token } = makeUser(tenantId);
+      const otherTenant = makeTenant();
+      const { userId: otherUserId } = makeUser(otherTenant);
+
+      const created = await request(app).post('/api/contacts').set(authHeader(token)).send({ first_name: 'X', last_name: 'Y', is_personal: true, owner_user_id: otherUserId });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === created.body.id)?.owner_user_id).toBe(userId);
+    });
+
+    it('respects profiles.show_personal_contacts: hides the caller\'s own personal contacts when turned off', async () => {
+      const tenantId = makeTenant();
+      const { userId, token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-own-personal', tenant_id: tenantId, first_name: 'Moi', last_name: 'Perso', is_personal: true, owner_user_id: userId }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-pro-visible', tenant_id: tenantId, first_name: 'Toujours', last_name: 'Visible', is_personal: false }]);
+
+      const beforeToggle = await request(app).get('/api/contacts').set(authHeader(token));
+      expect(beforeToggle.body.some((c: any) => c.id === 'contact-own-personal')).toBe(true);
+
+      await request(app).put(`/api/team/${userId}`).set(authHeader(token)).send({ showPersonalContacts: false });
+      expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.show_personal_contacts).toBe(false);
+
+      const afterToggle = await request(app).get('/api/contacts').set(authHeader(token));
+      expect(afterToggle.body.some((c: any) => c.id === 'contact-own-personal')).toBe(false);
+      // Pro contacts are unaffected by the toggle.
+      expect(afterToggle.body.some((c: any) => c.id === 'contact-pro-visible')).toBe(true);
+    });
+
+    it('GET /api/me reports showPersonalContacts', async () => {
+      const tenantId = makeTenant();
+      const { userId, token } = makeUser(tenantId);
+      await request(app).put(`/api/team/${userId}`).set(authHeader(token)).send({ showPersonalContacts: false });
+
+      const res = await request(app).get('/api/me').set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.showPersonalContacts).toBe(false);
+    });
+  });
+
   it('lists contact categories scoped to the caller\'s tenant', async () => {
     const tenantA = makeTenant();
     fakeSupabaseAdmin.seed('contact_categories', [{ id: 'cat-a', tenant_id: tenantA, name: 'Fournisseurs' }]);

@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- Horodatage du consentement à la politique de confidentialité / CGU,
   -- capturé à l'inscription (case à cocher obligatoire, voir Register.tsx).
   terms_accepted_at TIMESTAMPTZ,
+  -- Préférence personnelle : afficher ou non ses propres contacts personnels
+  -- dans la liste — voir migrate_contacts_personal_visibility.sql.
+  show_personal_contacts BOOLEAN NOT NULL DEFAULT true,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

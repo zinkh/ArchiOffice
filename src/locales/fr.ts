@@ -158,6 +158,9 @@ export default {
       "send_from_personal": "Envoyer depuis mon compte",
       "default_email_template": "Modèle d'e-mail par défaut",
       "my_email_settings": "Mes paramètres de messagerie",
+      "settings_personal_contacts_title": "Contacts personnels",
+      "settings_personal_contacts_desc": "Un contact personnel n'est jamais visible par le reste du cabinet — ce réglage ne concerne que l'affichage des vôtres dans votre propre liste.",
+      "settings_show_personal_contacts": "Afficher mes contacts personnels dans la liste",
       "siret": "SIRET",
       "pdf_generator": "Générateur PDF",
 
