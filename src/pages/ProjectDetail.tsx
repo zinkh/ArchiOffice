@@ -2148,25 +2148,37 @@ export default function ProjectDetail() {
 
                     const nextPhases = (form.phases || []).map((phase: any) => {
                       const montantGroupement = groupementPhaseBase(phase.phase_id) * (Number(phase.avancement_pct) || 0) / 100;
-                      // Ce qu'un membre règle à ses sous-traitants sur cette mission
-                      // sort de sa propre part : le groupement facture le même total,
-                      // seule sa ventilation change. Un sous-traitant réglé
-                      // directement par le maître d'ouvrage ne se déduit de personne.
-                      const stPayePar = (payeurKey: string) => sts.reduce((s: number, st: any) => {
-                        const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
-                        if (payeur !== payeurKey) return s;
-                        return s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0);
-                      }, 0);
+                      const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
+                      const payeurDe = (st: any) => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+                      const stPayePar = (payeurKey: string) => sts.reduce((s: number, st: any) =>
+                        payeurDe(st) === payeurKey ? s + stMission(st) : s, 0);
 
+                      // Le montant facturé par le groupement sur une mission ne bouge
+                      // PAS quand des sous-traitants sont saisis : ce qui leur est
+                      // reversé sort de l'enveloppe de la mission, pas en supplément.
+                      // Les quote-parts se calculent donc sur ce qui reste après
+                      // sous-traitance (`resteAPartager`), de sorte que chacun
+                      // touche RÉELLEMENT sa part une fois les sous-traitants payés.
+                      const stTotalMission = sts.reduce((s: number, st: any) => s + stMission(st), 0);
+                      const resteAPartager = Math.max(0, montantGroupement - stTotalMission);
+
+                      // Le membre qui règle un sous-traitant le facture au maître
+                      // d'ouvrage puis le reverse : son montant facturé est donc sa
+                      // part NETTE augmentée de ce qu'il reverse, tandis que celui
+                      // qui ne règle personne voit sa part baisser d'autant — les
+                      // deux touchent bien leur pourcentage une fois la
+                      // sous-traitance payée, et la somme des membres reste égale au
+                      // montant du groupement (diminuée de ce que le maître
+                      // d'ouvrage règle lui-même en direct).
                       cts.forEach((ct: any) => {
                         const p = phaseOf(ct.phases, phase.phase_id);
                         if (!p) return;
-                        const brut = montantGroupement * (Number(p.part_pct) || 0) / 100;
-                        p.montant_phase = parseFloat(Math.max(0, brut - stPayePar(ctContratId(ct) || '')).toFixed(2));
+                        const net = resteAPartager * (Number(p.part_pct) || 0) / 100;
+                        p.montant_phase = parseFloat((net + stPayePar(ctContratId(ct) || '')).toFixed(2));
                       });
 
-                      const brutAgence = montantGroupement * (Number(phase.part_pct) || 0) / 100;
-                      return { ...phase, montant_phase: parseFloat(Math.max(0, brutAgence - stPayePar('agence')).toFixed(2)) };
+                      const netAgence = resteAPartager * (Number(phase.part_pct) || 0) / 100;
+                      return { ...phase, montant_phase: parseFloat((netAgence + stPayePar('agence')).toFixed(2)) };
                     });
 
                     const totaux = (intervenant: any) => {
@@ -2244,16 +2256,29 @@ export default function ProjectDetail() {
 
                     const phaseOf = (list: any[], phaseId: string) => (list || []).find((p: any) => p.phase_id === phaseId);
                     form.phases = (form.phases || []).map((phase: any) => {
-                      const stPayePar = (payeurKey: string) => form.sous_traitants_facturation.reduce((s: number, st: any) => {
-                        const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
-                        if (payeur !== payeurKey) return s;
-                        return s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0);
-                      }, 0);
-                      const montantGroupement = (Number(phase.montant_phase) || 0)
-                        + form.cotraitants_facturation.reduce((s: number, ct: any) => s + (Number(phaseOf(ct.phases, phase.phase_id)?.montant_phase) || 0), 0)
-                        + form.sous_traitants_facturation.reduce((s: number, st: any) => s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0), 0);
-                      const part = (montantNet: number, deduction: number) =>
-                        montantGroupement > 0 ? parseFloat(((montantNet + deduction) / montantGroupement * 100).toFixed(4)) : 0;
+                      const payeurDe = (st: any) => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+                      const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
+                      const stPayePar = (payeurKey: string) => form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurDe(st) === payeurKey ? s + stMission(st) : s, 0);
+
+                      // Dans l'ancien modèle, les montants des sous-traitants
+                      // s'ajoutaient à ceux des membres ; dans le nouveau, ceux
+                      // qu'un membre règle sont compris dans son montant. Les
+                      // montants des membres sont donc repris tels quels et les
+                      // valeurs saisissables déduites à l'envers : l'enveloppe à
+                      // partager est la somme des membres moins ce qu'ils
+                      // reversent, et le montant du groupement cette enveloppe plus
+                      // TOUS les sous-traitants (ceux réglés en direct par le
+                      // maître d'ouvrage compris, qui ne reviennent à aucun membre).
+                      const totalMembres = (Number(phase.montant_phase) || 0)
+                        + form.cotraitants_facturation.reduce((s: number, ct: any) => s + (Number(phaseOf(ct.phases, phase.phase_id)?.montant_phase) || 0), 0);
+                      const stMoa = form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurDe(st) === 'moa' ? s + stMission(st) : s, 0);
+                      const stMembres = form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurDe(st) !== 'moa' ? s + stMission(st) : s, 0);
+                      const resteAPartager = totalMembres - stMembres;
+                      const part = (montantFacture: number, reverse: number) =>
+                        resteAPartager > 0 ? parseFloat((Math.max(0, montantFacture - reverse) / resteAPartager * 100).toFixed(4)) : 0;
 
                       form.cotraitants_facturation.forEach((ct: any) => {
                         const p = phaseOf(ct.phases, phase.phase_id);
@@ -2262,6 +2287,7 @@ export default function ProjectDetail() {
                       });
 
                       const base = groupementPhaseBase(phase.phase_id);
+                      const montantGroupement = resteAPartager + stMembres + stMoa;
                       return {
                         ...phase,
                         avancement_pct: base > 0 ? parseFloat((montantGroupement / base * 100).toFixed(4)) : 0,
@@ -2497,12 +2523,16 @@ export default function ProjectDetail() {
                                     const totalParts = (Number(phase.part_pct) || 0)
                                       + ctPhasesRow.reduce((s: number, p: any) => s + (Number(p.part_pct) || 0), 0);
                                     const repartitionIncomplete = pctGroupement > 0 && Math.abs(totalParts - 100) > 0.01;
-                                    // Ce que chaque membre règle à ses sous-traitants sur cette
-                                    // mission, pour l'afficher sous son montant net.
-                                    const stDeduction = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) => {
+                                    // Ce que chaque membre reverse à ses sous-traitants sur cette
+                                    // mission : compris dans son montant facturé, donc affiché
+                                    // sous celui-ci en « dont … » et jamais additionné en plus.
+                                    const stReverse = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) => {
                                       const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
                                       return payeur === payeurKey ? s + (Number(stPhasesRow[i]?.montant_phase) || 0) : s;
                                     }, 0);
+                                    // Tous sous-traitants de la mission confondus : ce qui sort de
+                                    // l'enveloppe avant répartition entre les membres.
+                                    const stTotalMission = stPhasesRow.reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
                                     const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
@@ -2533,12 +2563,13 @@ export default function ProjectDetail() {
                                             </span>
                                           )}
                                         </td>
-                                        {/* Part de l'agence dans le montant groupement, et son
-                                            montant net une fois ses sous-traitants déduits. */}
+                                        {/* Quote-part de l'agence dans ce qui reste après
+                                            sous-traitance, et son montant facturé — sa part nette
+                                            plus ce qu'elle reverse à ses propres sous-traitants. */}
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1">
                                             <input type="number" min={0} max={100} step="any"
-                                              title="Quote-part de l'agence dans le montant groupement de cette mission"
+                                              title="Quote-part de l'agence sur cette mission, une fois les sous-traitants payés"
                                               className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
                                               value={phase.part_pct ?? 0}
                                               onChange={e => updatePartAgence(idx, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))} />
@@ -2547,21 +2578,21 @@ export default function ProjectDetail() {
                                         </td>
                                         <td className="p-2 text-right whitespace-nowrap">
                                           {eur(Number(phase.montant_phase) || 0)}
-                                          {stDeduction('agence') > 0 && (
-                                            <span className="block text-[9px] font-normal text-amber-600" title="Sous-traitants réglés par l'agence, déduits de sa part">
-                                              − {eur(stDeduction('agence'))} ST
+                                          {stReverse('agence') > 0 && (
+                                            <span className="block text-[9px] font-normal text-amber-600" title="Sous-traitants réglés par l'agence : compris dans son montant facturé, qu'elle leur reverse">
+                                              dont {eur(stReverse('agence'))} ST
                                             </span>
                                           )}
                                         </td>
                                         {(noteForm.cotraitants_facturation || []).map((ct: any, ctIdx: number) => {
                                           const ctPhase = ctPhasesRow[ctIdx];
-                                          const deduction = stDeduction(ctContratId(ct) || '');
+                                          const reverse = stReverse(ctContratId(ct) || '');
                                           return (
                                             <React.Fragment key={`ct-${ctIdx}`}>
                                               <td className="p-1 border-l border-[var(--tblr-border)]">
                                                 <div className="flex items-center gap-1">
                                                   <input type="number" min={0} max={100} step="any"
-                                                    title={`Quote-part de ${ctDisplayName(ct)} dans le montant groupement de cette mission`}
+                                                    title={`Quote-part de ${ctDisplayName(ct)} sur cette mission, une fois les sous-traitants payés`}
                                                     className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
                                                     value={ctPhase.part_pct ?? 0}
                                                     onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { part_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
@@ -2570,9 +2601,9 @@ export default function ProjectDetail() {
                                               </td>
                                               <td className="p-2 text-right whitespace-nowrap">
                                                 {eur(Number(ctPhase.montant_phase) || 0)}
-                                                {deduction > 0 && (
-                                                  <span className="block text-[9px] font-normal text-amber-600" title={`Sous-traitants réglés par ${ctDisplayName(ct)}, déduits de sa part`}>
-                                                    − {eur(deduction)} ST
+                                                {reverse > 0 && (
+                                                  <span className="block text-[9px] font-normal text-amber-600" title={`Sous-traitants réglés par ${ctDisplayName(ct)} : compris dans son montant facturé, qu'il leur reverse`}>
+                                                    dont {eur(reverse)} ST
                                                   </span>
                                                 )}
                                               </td>
@@ -2590,11 +2621,19 @@ export default function ProjectDetail() {
                                           const stRecord = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === stKey);
                                           const stTotal = stRecord?.montant || 0;
                                           const stOtherPhasesSum = (st.phases || []).filter((p: any) => p.phase_id !== phase.phase_id).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
-                                          const stCap = Math.max(0, stTotal - cumulStTotal(stKey) - stOtherPhasesSum);
+                                          // Second plafond : la sous-traitance d'une mission sort de
+                                          // l'enveloppe de cette mission, elle ne peut donc pas la
+                                          // dépasser (les autres sous-traitants de la ligne déjà
+                                          // saisis comptent dans ce qui reste).
+                                          const resteMission = Math.max(0, montantGroupement - (stTotalMission - (Number(stPhase.montant_phase) || 0)));
+                                          const stCap = Math.min(
+                                            Math.max(0, stTotal - cumulStTotal(stKey) - stOtherPhasesSum),
+                                            resteMission,
+                                          );
                                           return (
                                             <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
                                               <input type="number" min={0} max={stCap}
-                                                title={`Montant réglé à ${stDisplayName(st)} sur cette mission — déduit de la part de celui qui le règle`}
+                                                title={`Montant réglé à ${stDisplayName(st)} sur cette mission — prélevé sur l'enveloppe de la mission, et compris dans le montant facturé par celui qui le règle`}
                                                 className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
                                                 value={stPhase.montant_phase}
                                                 onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), stCap) })} />
@@ -2609,9 +2648,14 @@ export default function ProjectDetail() {
                                   <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
                                     <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
                                     {(() => {
-                                      const totalGroupement = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0)
-                                        + (noteForm.cotraitants_facturation || []).reduce((s: number, ct: any) => s + (Number(ct.montant_ht) || 0), 0)
-                                        + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) => s + (Number(st.montant_ht) || 0), 0);
+                                      // Le total du groupement est la somme des montants de
+                                      // mission facturés (base × avancement), et NON la somme des
+                                      // colonnes : saisir des sous-traitants ne change pas ce que
+                                      // le groupement facture, seulement qui l'encaisse — les
+                                      // additionner aux membres compterait deux fois ce que le
+                                      // payeur leur reverse.
+                                      const totalGroupement = (noteForm.phases || []).reduce((s: number, p: any) =>
+                                        s + groupementPhaseBase(p.phase_id) * (Number(p.avancement_pct) || 0) / 100, 0);
                                       // Base de l'ensemble des missions présentes dans la note,
                                       // pour que le % du pied se lise comme la somme des lignes.
                                       const baseGroupement = (noteForm.phases || []).reduce((s: number, p: any) => s + groupementPhaseBase(p.phase_id), 0);
@@ -2644,7 +2688,7 @@ export default function ProjectDetail() {
                                 </tfoot>
                               </table>
                             </div>
-                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Le pourcentage se saisit une seule fois par mission, dans la colonne « Groupement » : c'est la part de la mission facturée au maître d'ouvrage pour toute l'équipe (par exemple 100 % de l'esquisse et 50 % de l'APS). Les colonnes suivantes en répartissent le montant entre les membres du groupement — leurs parts totalisent 100 % — et le montant réglé à un sous-traitant se déduit de la part de celui qui le règle, sans changer le total facturé. Le cumul d'une mission, toutes notes confondues, ne peut pas dépasser 100 %. La facture, elle, ne porte que sur {agencyName} : seule cette colonne alimente la facture brouillon, les montants cotraitants et sous-traitants restant hors comptabilité agence.</p>
+                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Le pourcentage se saisit une seule fois par mission, dans la colonne « Groupement » : c'est la part de la mission facturée au maître d'ouvrage pour toute l'équipe (par exemple 100 % de l'esquisse et 50 % de l'APS). Ce montant ne bouge pas selon les sous-traitants saisis : ce qui leur est reversé sort de l'enveloppe de la mission, jamais en supplément. Les quote-parts des membres portent donc sur ce qui reste une fois les sous-traitants payés, et le membre qui en règle un le facture au maître d'ouvrage avant de le lui reverser — son montant est augmenté d'autant (« dont … ST »), celui des autres baissé, chacun touchant bien son pourcentage. La somme des colonnes des membres est ainsi égale, sur chaque ligne, à 100 % du montant de la mission, les colonnes sous-traitants n'en étant que le détail. Le cumul d'une mission, toutes notes confondues, ne peut pas dépasser 100 %. La facture, elle, ne porte que sur {agencyName} : seule cette colonne alimente la facture brouillon, les montants cotraitants restant hors comptabilité agence.</p>
                           </div>
 
                           {/* Suivi du pourcentage de facturation */}

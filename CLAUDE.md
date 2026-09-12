@@ -432,13 +432,39 @@ Trois valeurs seulement sont désormais saisies, tout le reste en découle :
 `recalcNote()` (`src/pages/ProjectDetail.tsx`) recalcule TOUTE la note à chaque
 frappe plutôt que la cellule touchée : changer l'avancement du groupement
 déplace les montants de tous les membres de la ligne, et un montant de
-sous-traitant change la part nette de celui qui le règle — un recalcul local
-serait faux dans les deux cas. `montant_phase` d'un membre n'est donc plus
-saisissable : c'est `montant groupement × part_pct / 100`, moins ce que ce
-membre règle à ses sous-traitants sur cette mission (`payeur`, cf. plus haut).
-Un sous-traitant réglé directement par le maître d'ouvrage (`'moa'`) ne se
-déduit de personne. Le total facturé par le groupement, lui, ne change pas
-quand un sous-traitant apparaît : seule la ventilation change.
+sous-traitant déplace ceux de tous les membres aussi — un recalcul local serait
+faux dans les deux cas.
+
+**La sous-traitance sort de l'enveloppe de la mission, jamais en supplément**,
+et c'est ce qui décide de tout le reste du calcul :
+
+```
+montant groupement (mission)  = base contractuelle × avancement_pct / 100   ← invariant
+reste à partager              = montant groupement − TOUS les sous-traitants de la mission
+part nette d'un membre        = reste à partager × part_pct / 100
+montant facturé par un membre = sa part nette + ce qu'il reverse à SES sous-traitants
+```
+
+Trois conséquences, toutes voulues :
+
+- **Le montant du groupement ne bouge pas** quand on saisit des sous-traitants :
+  seul change qui l'encaisse. Le total du pied de tableau est donc la somme des
+  montants de mission (base × avancement), **pas** la somme des colonnes — les
+  additionner compterait deux fois ce qu'un payeur reverse.
+- **Le membre qui règle un sous-traitant voit son montant AUGMENTER** de ce
+  qu'il reverse (affiché « dont … ST »), et celui des autres baisser d'autant :
+  c'est la seule façon que chacun touche réellement son pourcentage une fois la
+  sous-traitance payée. Le contraire — déduire le sous-traitant de la part de
+  son payeur — le faisait payer seul une prestation commune.
+- **La somme des colonnes des MEMBRES vaut 100 % du montant de la mission**, les
+  colonnes sous-traitants n'en étant que le détail. Seul un sous-traitant réglé
+  en direct par le maître d'ouvrage (`payeur = 'moa'`) ne revient à aucun membre :
+  il sort de l'enveloppe sans être refacturé par personne, et la somme des
+  membres vaut alors le montant du groupement moins sa part.
+
+Un sous-traitant est donc plafonné deux fois : par son montant global au contrat
+(`cumulStTotal` + ses autres missions) et par l'enveloppe de la mission qu'il
+ne peut pas dépasser.
 
 Deux conséquences à ne pas défaire :
 
@@ -453,12 +479,14 @@ Deux conséquences à ne pas défaire :
    sous-traitant (`stCap`).
 2. **Une note enregistrée avant ce changement est migrée à l'ouverture**
    (`noteFormFromSaved`), jamais recalculée telle quelle : sans `part_pct`, un
-   recalcul direct ramènerait tous ses montants à zéro. Les valeurs saisissables
-   du nouveau modèle sont reconstruites depuis les montants déjà enregistrés
-   (l'avancement du groupement depuis le montant total de la mission, la
-   quote-part d'un membre depuis son montant brut = net + ses sous-traitants),
-   de sorte que la note rouvre sur exactement les mêmes montants. Aucune
-   migration SQL : `phases` est du jsonb.
+   recalcul direct ramènerait tous ses montants à zéro. Les montants des membres
+   sont repris tels quels et les valeurs saisissables déduites à l'envers — le
+   reste à partager est la somme des membres moins ce qu'ils reversent, la
+   quote-part d'un membre son montant facturé moins ce qu'il reverse, rapporté à
+   ce reste, et l'avancement du groupement ce reste plus TOUS les sous-traitants
+   (ceux réglés en direct par le maître d'ouvrage compris), rapporté à la base
+   contractuelle. La note rouvre ainsi sur exactement les mêmes montants.
+   Aucune migration SQL : `phases` est du jsonb.
 
 Les parts d'une mission doivent totaliser 100 % ; l'écart est signalé sous le
 montant groupement (« répartition : 80 % ») plutôt que redistribué d'office, et

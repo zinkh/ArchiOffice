@@ -147,15 +147,23 @@ export async function exportNoteHonorairesToPDF(
       const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === intervenantKey);
       return owner?.montant_ht || 0;
     };
-    // Total pour tout le groupement (agence + cotraitants + sous-traitants) —
-    // la note d'honoraires facture l'équipe entière, la colonne agence seule
-    // ne reflète que ce qui part en facture brouillon.
-    const groupementFor = (phaseId: string) => intervenants.reduce((s, iv) => {
-      if (iv.key === '__agence__') return s + (findPhase(note.phases, phaseId)?.montant_phase || 0);
-      const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === iv.key);
-      return s + (findPhase(owner?.phases, phaseId)?.montant_phase || 0);
-    }, 0);
-    const groupementTotal = (note.montant_ht || 0) + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0) + sousTraitants.reduce((s, st) => s + (st.montant_ht || 0), 0);
+    // Total pour tout le groupement — la note d'honoraires facture l'équipe
+    // entière, la colonne agence seule ne reflète que ce qui part en facture
+    // brouillon. Ce sont les MEMBRES (agence + cotraitants) qui facturent le
+    // maître d'ouvrage : ce qu'un membre reverse à ses sous-traitants est déjà
+    // compris dans son montant, donc seuls les sous-traitants réglés en direct
+    // par le maître d'ouvrage s'y ajoutent. Additionner toutes les colonnes
+    // compterait deux fois la sous-traitance portée par un membre.
+    const paye = (st: { payeur?: string; paiement_direct_moa?: boolean }) =>
+      st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+    const stMoa = sousTraitants.filter(st => paye(st) === 'moa');
+    const groupementFor = (phaseId: string) =>
+      (findPhase(note.phases, phaseId)?.montant_phase || 0)
+      + cotraitants.reduce((s, ct) => s + (findPhase(ct.phases, phaseId)?.montant_phase || 0), 0)
+      + stMoa.reduce((s, st) => s + (findPhase(st.phases, phaseId)?.montant_phase || 0), 0);
+    const groupementTotal = (note.montant_ht || 0)
+      + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0)
+      + stMoa.reduce((s, st) => s + (st.montant_ht || 0), 0);
 
     // Le pourcentage du groupement est saisi une fois par mission dans la note
     // (`phases[].avancement_pct`, cf. `NoteHonorairePhase`) : c'est la part de
