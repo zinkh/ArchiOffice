@@ -45,7 +45,14 @@ function toGeminiContents(messages: LlmMessage[]): { role: string; parts: Gemini
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      contents.push({ role: 'user', parts: [{ text: msg.content }] });
+      // Les images passent AVANT le texte : c'est l'ordre que Gemini
+      // recommande pour qu'un modèle multimodal ancre correctement sa
+      // réponse texte sur l'image plutôt que l'inverse.
+      const parts: GeminiPart[] = (msg.images || []).map(img => ({
+        inlineData: { mimeType: img.mimeType, data: img.data.toString('base64') },
+      }));
+      if (msg.content) parts.push({ text: msg.content });
+      contents.push({ role: 'user', parts });
       continue;
     }
 
@@ -172,6 +179,7 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
   return {
     id: 'gemini',
     model,
+    supportsVision: true,
 
     async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {

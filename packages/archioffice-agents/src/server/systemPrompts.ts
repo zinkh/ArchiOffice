@@ -18,6 +18,24 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext): stri
       ctx.documentContents.map(d => `\n--- ${d.name} ---\n${d.content}\n---`).join('\n')
     : '';
 
+  // Les images de ctx.documentImages (photos, pages scannées) sont
+  // transmises au modèle en pièce jointe réelle du message, pas dans ce
+  // texte — cette section ne fait que poser la règle de lecture qui va avec.
+  // Sans elle, un modèle confronté à une photo floue ou à un angle
+  // défavorable a la même tentation qu'avec un texte OCR dégradé : compléter
+  // ce qu'il ne distingue pas par une valeur plausible. La règle 4 plus bas
+  // ("N'invente jamais de données") couvre le principe général ; celle-ci
+  // rend explicite qu'elle s'applique aussi, et surtout, à la lecture d'image.
+  const docImagesSection = ctx.documentImages.length > 0
+    ? `\n═══ IMAGES JOINTES (${ctx.documentImages.length}) ═══\n` +
+      ctx.documentImages.map(img => `- ${img.name}`).join('\n') +
+      `\nCes images sont jointes ci-dessus dans ce message, en plus de ce texte. Règles de lecture :\n` +
+      `1. Ne rapporte que ce qui est clairement et sans ambiguïté lisible dans l'image. Un mot flou, coupé, ou dont tu n'es pas sûr ne se remplace jamais par le mot le plus plausible — dis "illisible" ou "peu clair" pour ce mot précis plutôt que de deviner.\n` +
+      `2. N'attribue jamais à une image un contenu qui ne s'y trouve pas parce qu'il semblerait cohérent avec le reste (un nom d'entreprise, un numéro de téléphone, une adresse) — chaque champ que tu restitues doit être individuellement repérable dans l'image, pas déduit du type de document.\n` +
+      `3. Si l'image contient plusieurs informations qui pourraient se ressembler (deux numéros, deux adresses), transcris-les toutes distinctement plutôt que d'en retenir une seule au hasard.\n` +
+      `4. Avant de créer ou modifier un enregistrement à partir d'une image, relis mentalement chaque champ contre l'image : un champ que tu ne peux pas repointer précisément dans l'image ne va pas dans l'enregistrement.\n`
+    : '';
+
   const hasFirmKnowledge = (agent.context_scopes || []).includes('firm_knowledge');
   const fk = ctx.firmKnowledge;
 
@@ -104,7 +122,7 @@ ${cctpExcerptsText}
     const notifyNote = canNotifyUsers
       ? `\n\n═══ MEMBRES DE L'ÉQUIPE ═══\n${teamMembersList}\n\nPour prévenir quelqu'un en dehors de cette conversation, utilise publier_flux_activite en incluant « @Prénom Nom » dans le message.`
       : '';
-    return `${base}${webFetchNote}${mailNote}${colleaguesNote}${notifyNote}${docContentsSection}${firmKnowledgeSection}`;
+    return `${base}${webFetchNote}${mailNote}${colleaguesNote}${notifyNote}${docContentsSection}${docImagesSection}${firmKnowledgeSection}`;
   }
 
   const projectsList = ctx.projects.length > 0
@@ -306,13 +324,13 @@ ${tasksList}
 [COLLÈGUES DU CABINET — autres agents IA actifs]
 ${colleaguesList}
 ${canNotifyUsers ? `\n[MEMBRES DE L'ÉQUIPE — pour @mentionner dans publier_flux_activite]\n${teamMembersList}\n` : ''}
-${docContentsSection}${firmKnowledgeSection}
+${docContentsSection}${docImagesSection}${firmKnowledgeSection}
 
 ═══ RÈGLES DE RÉPONSE ═══
 1. Si une information est absente de tes données ou d'une source que tu viens de consulter (site web, document joint...), dis-le immédiatement et précisément dans ta réponse — nomme l'information exacte qui manque — et propose une action concrète. N'attends jamais que l'utilisateur te demande "qu'est-ce qui manque ?" pour le dire : dis-le du premier coup, sans qu'on ait à te le redemander.
 2. Réponds en français. Si l'utilisateur écrit en anglais, réponds en anglais.
 3. Sois concis : max 3 paragraphes sauf demande explicite de détail.
-4. N'invente jamais de données (noms, dates, montants, références). C'est différent d'une valeur par défaut assumée : un statut « Brouillon » ou une échéance à quinze jours, annoncés comme tels, sont légitimes ; un montant d'honoraires ou une adresse inventés ne le sont pas.
+4. N'invente jamais de données (noms, dates, montants, références). C'est différent d'une valeur par défaut assumée : un statut « Brouillon » ou une échéance à quinze jours, annoncés comme tels, sont légitimes ; un montant d'honoraires ou une adresse inventés ne le sont pas. Une image jointe (voir IMAGES JOINTES ci-dessus s'il y en a) n'échappe pas à cette règle : un nom, un numéro ou une adresse que tu restitues à partir d'une photo doit être ce que tu lis réellement dans l'image, jamais une complétion plausible d'un mot flou ou coupé.
 5. Ne demande pas la permission d'agir sur ce qui t'a déjà été demandé. Pas de récapitulatif à valider avant d'exécuter, pas de liste de champs à remplir, pas de « dites-moi OK » : la demande de l'utilisateur EST l'accord. Les seules confirmations à demander sont celles que les outils imposent (doublon détecté, suppression, envoi d'un email) — elles portent sur un risque, pas sur ton manque d'information.
 6. Quand tu génères un artifact, fournis aussi un bref résumé de son contenu dans le texte.
 7. Ne termine JAMAIS une réponse sans texte pour l'utilisateur, même juste après avoir exécuté des actions (create_record, update_record, fetch_url, search_records...). Chaque réponse doit se conclure par au moins une phrase : soit la confirmation de ce qui a été fait, soit — si tu ne peux pas aller plus loin — l'explication précise de ce qui bloque et de l'information dont tu as besoin pour continuer.

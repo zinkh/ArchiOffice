@@ -500,17 +500,21 @@ export function registerAgentRoutes(
       const convId = (conv as any).id;
 
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
-      const contextStart = Date.now();
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds);
-      console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length}`);
-      const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
       // Which provider/model this call runs on is decided in llm/: the
       // platform setting picked in /admin when there is one, else
       // AI_PROVIDER/AI_MODEL, else Gemini. The lookup is cached, so this is
       // not a database round trip per call. A missing key throws
       // LlmNotConfiguredError, turned into a 503 by the catch block below.
+      // Resolved BEFORE buildAgentContext: whether an attached photo or
+      // scanned PDF goes to the model as a real image or as OCR text depends
+      // on this provider's vision support (see supportsVision, context.ts).
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+
+      const contextStart = Date.now();
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision);
+      console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
+      const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx);
 
       const caps = capabilitiesFromAgent(agent as AgentRow);
       // Un seul niveau de consultation entre agents : cet en-tête n'est posé
@@ -530,7 +534,13 @@ export function registerAgentRoutes(
           ? { role: 'assistant' as const, content: m.content }
           : { role: 'user' as const, content: m.content }
       ));
-      messages.push({ role: 'user', content: message });
+      messages.push({
+        role: 'user',
+        content: message,
+        ...(ctx.documentImages.length > 0
+          ? { images: ctx.documentImages.map(img => ({ data: img.data, mimeType: img.mimeType })) }
+          : {}),
+      });
       // Bounds how long a stuck/slow provider call can hold the request open —
       // shorter than the client's own abort timeout (AgentChat.tsx, 130s) so
       // the client always gets this explicit message instead of a silent
