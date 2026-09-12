@@ -4,6 +4,8 @@ import { IconMail, IconPhone, IconBrandLinkedin, IconUser, IconX } from '@tabler
 import type { Contact, ContactCategory } from '../types';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { CompanyAutocomplete } from './CompanyAutocomplete';
+import { TagChipInput } from './TagChipInput';
+import { isEntrepriseContact, isBureauEtudesContact } from '../lib/contactCategories';
 import { frenchVatNumber, parseDirectors, streetWithoutCity, type CompanyDirector } from '../lib/siren';
 
 /**
@@ -19,6 +21,9 @@ interface ContactFormFieldsProps {
   /** Applique une modification partielle : le parent garde la propriété de l'état. */
   onChange: (patch: Partial<Contact>) => void;
   categories: ContactCategory[];
+  /** Valeurs déjà utilisées par d'autres contacts, proposées en complétion des puces Corps d'état / Spécialité. */
+  corpsEtatSuggestions?: string[];
+  specialiteSuggestions?: string[];
 }
 
 const NEW_CATEGORY = '__new__';
@@ -50,7 +55,7 @@ function workToHome(c: Partial<Contact>): Partial<Contact> {
   };
 }
 
-export function ContactFormFields({ contact, onChange, categories }: ContactFormFieldsProps) {
+export function ContactFormFields({ contact, onChange, categories, corpsEtatSuggestions = [], specialiteSuggestions = [] }: ContactFormFieldsProps) {
   const { t } = useTranslation();
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [sameAddress, setSameAddress] = useState(() => homeMirrorsWork(contact));
@@ -463,6 +468,28 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
               </div>
               <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_is_personal_hint')}</p>
             </div>
+            {isEntrepriseContact(contact as Contact) && !!contact.category && (
+              <div className="space-y-1">
+                <label className={labelClass} style={labelStyle}>{t('contacts_corps_etat_label')}</label>
+                <TagChipInput
+                  value={contact.corps_etat || []}
+                  onChange={next => onChange({ corps_etat: next })}
+                  suggestions={corpsEtatSuggestions}
+                  placeholder={t('contacts_corps_etat_placeholder')}
+                />
+              </div>
+            )}
+            {isBureauEtudesContact(contact as Contact) && !!contact.category && (
+              <div className="space-y-1">
+                <label className={labelClass} style={labelStyle}>{t('contacts_specialite_label')}</label>
+                <TagChipInput
+                  value={contact.specialite || []}
+                  onChange={next => onChange({ specialite: next })}
+                  suggestions={specialiteSuggestions}
+                  placeholder={t('contacts_specialite_placeholder')}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <label className={labelClass} style={labelStyle}>{t('contacts_tags_label')}</label>
               <input

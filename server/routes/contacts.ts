@@ -34,7 +34,7 @@ const CONTACT_COLUMNS = new Set([
   'candidatures', 'affaires', 'logo', 'ca_amount', 'electronic_signature', 'contact_references', 'tags',
   'category', 'notes', 'birthday', 'website', 'created_at', 'created_by',
   'siret', 'vat_number', 'market_number', 'market_amount_base', 'market_amount_options', 'market_amount_avenants',
-  'is_personal',
+  'is_personal', 'corps_etat', 'specialite',
 ]);
 
 function pickContactColumns(body: Record<string, any>): Record<string, any> {
