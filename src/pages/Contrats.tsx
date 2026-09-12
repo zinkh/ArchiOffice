@@ -363,9 +363,13 @@ function ContratModal({
     setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).filter(c => c.id !== id) }));
   };
   const addSousTraitant = () => {
-    const newS: ContratSousTraitant = { id: crypto.randomUUID(), contact_name: '', specialty: '', montant: 0, paiement_direct_moa: false };
+    const newS: ContratSousTraitant = { id: crypto.randomUUID(), contact_name: '', specialty: '', montant: 0, payeur: 'agence' };
     setForm(f => ({ ...f, sous_traitants: [...(f.sous_traitants || []), newS] }));
   };
+  // Rétrocompatibilité : un contrat enregistré avant l'introduction de `payeur`
+  // ne porte que l'ancien booléen `paiement_direct_moa` — 'moa' en reprend la
+  // valeur telle quelle, sans qu'aucune migration de données ne soit nécessaire.
+  const payeurOf = (st: ContratSousTraitant): string => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
   const updateSousTraitant = (id: string, key: keyof ContratSousTraitant, val: any) => {
     setForm(f => ({ ...f, sous_traitants: (f.sous_traitants || []).map(s => s.id === id ? { ...s, [key]: val } : s) }));
   };
@@ -683,7 +687,7 @@ function ContratModal({
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <p className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>Sous-traitants</p>
-                        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les honoraires sous-traitants sont intégrés à la comptabilité sauf si paiement direct par le MOA.</p>
+                        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les honoraires sous-traitants sont intégrés à la comptabilité de la partie qui les règle (agence, un cotraitant, ou hors comptabilité agence si le maître d'ouvrage règle directement).</p>
                       </div>
                       <button type="button" onClick={addSousTraitant} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700">
                         <IconPlus size={13} /> Ajouter
@@ -699,7 +703,7 @@ function ContratModal({
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '30%' }}>Contact</th>
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '25%' }}>Spécialité / Prestation</th>
                               <th className="text-right px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '18%' }}>Montant HT (€)</th>
-                              <th className="text-center px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Paiement direct MOA</th>
+                              <th className="text-center px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Réglé par</th>
                               <th className="w-8" />
                             </tr>
                           </thead>
@@ -720,8 +724,20 @@ function ContratModal({
                                 <td className="px-2 py-1.5">
                                   <input type="number" min={0} className="w-full px-2 py-1 rounded text-xs text-right outline-none focus:ring-1 focus:ring-indigo-400" style={inputStyle} value={st.montant ?? ''} onChange={e => updateSousTraitant(st.id, 'montant', parseFloat(e.target.value) || 0)} />
                                 </td>
-                                <td className="px-2 py-1.5 text-center">
-                                  <input type="checkbox" checked={!!st.paiement_direct_moa} onChange={e => updateSousTraitant(st.id, 'paiement_direct_moa', e.target.checked)} className="w-4 h-4 rounded" title="Paiement direct par le Maître d'Ouvrage (hors comptabilité agence)" />
+                                <td className="px-2 py-1.5">
+                                  <select
+                                    className="w-full px-2 py-1 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400"
+                                    style={inputStyle}
+                                    value={payeurOf(st)}
+                                    title="Qui règle ce sous-traitant"
+                                    onChange={e => setForm(f => ({ ...f, sous_traitants: (f.sous_traitants || []).map(s => s.id === st.id ? { ...s, payeur: e.target.value, paiement_direct_moa: undefined } : s) }))}
+                                  >
+                                    <option value="agence">Agence</option>
+                                    {(form.cotraitants || []).map(ct => (
+                                      <option key={ct.id} value={ct.id}>{ct.contact_name || ct.specialty || 'Cotraitant'}</option>
+                                    ))}
+                                    <option value="moa">Maître d'ouvrage</option>
+                                  </select>
                                 </td>
                                 <td className="px-1 py-1.5 text-center">
                                   <button type="button" onClick={() => removeSousTraitant(st.id)} className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"><IconTrash size={12} /></button>
