@@ -438,6 +438,32 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
               )}
             </div>
             <div className="space-y-1">
+              <label className={labelClass} style={labelStyle}>{t('contacts_is_personal_label')}</label>
+              <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
+                <button
+                  type="button"
+                  className="flex-1 py-1.5 text-xs font-medium transition-colors"
+                  style={!contact.is_personal
+                    ? { background: 'var(--tblr-primary)', color: '#fff' }
+                    : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                  onClick={() => onChange({ is_personal: false })}
+                >
+                  {t('contacts_is_personal_pro')}
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 py-1.5 text-xs font-medium transition-colors"
+                  style={contact.is_personal
+                    ? { background: 'var(--tblr-primary)', color: '#fff' }
+                    : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                  onClick={() => onChange({ is_personal: true })}
+                >
+                  {t('contacts_is_personal_perso')}
+                </button>
+              </div>
+              <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_is_personal_hint')}</p>
+            </div>
+            <div className="space-y-1">
               <label className={labelClass} style={labelStyle}>{t('contacts_tags_label')}</label>
               <input
                 className={inputClass}

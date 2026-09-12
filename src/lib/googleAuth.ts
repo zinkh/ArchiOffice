@@ -10,7 +10,9 @@
  */
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-const SCOPES = 'https://www.googleapis.com/auth/contacts.readonly';
+// Read-write, not .readonly: the sync is now bidirectional (server/routes/contactSync.ts
+// pushes contacts back to Google for categories selected in Réglages), which needs write access.
+const SCOPES = 'https://www.googleapis.com/auth/contacts';
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;
 
 function generateCodeVerifier(): string {

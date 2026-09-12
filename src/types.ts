@@ -716,6 +716,10 @@ export interface Contact {
   website?: string;
   created_at: string;
   created_by: string;
+  // Excludes the contact from the Google Contacts push sync (server/routes/
+  // contactSync.ts) regardless of category — a family member or personal
+  // reference entered here for reminders/notes, not meant to leave the cabinet.
+  is_personal?: boolean;
 }
 
 export interface ContactCategory {

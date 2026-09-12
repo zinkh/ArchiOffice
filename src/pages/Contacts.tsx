@@ -244,13 +244,20 @@ export default function Contacts() {
     setSyncingGoogle(true);
     try {
       const access_token = await requestGoogleAccessToken();
-      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/google-contacts', {
+      const result = await apiFetch<{ imported: number; updated: number; pushedCreated: number; pushedUpdated: number; pulledOnConflict: number }>('/api/sync/google-contacts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token })
       });
       fetchContacts();
-      showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour`);
+      // Push counts only appear when at least one category is configured in
+      // Réglages › Google Contacts (bidirectionnel) — most cabinets have none
+      // set, so the message stays exactly as it was for the pull-only case.
+      const pushed = result.pushedCreated + result.pushedUpdated;
+      const pushPart = pushed > 0 || result.pulledOnConflict > 0
+        ? `, ${pushed} envoyés vers Google${result.pulledOnConflict > 0 ? ` (${result.pulledOnConflict} conflit(s) résolu(s) en faveur de Google)` : ''}`
+        : '';
+      showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour${pushPart}`);
     } catch (err: any) {
       showToast(err?.message || 'Erreur de synchronisation Google Contacts', 'error');
     } finally {
@@ -726,6 +733,11 @@ export default function Contacts() {
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }} title="Informations manquantes : nom, téléphone ou email">
                           <IconAlertTriangle size={9} />
                           À compléter
+                        </span>
+                      )}
+                      {contact.is_personal && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }} title={t('contacts_is_personal_hint')}>
+                          {t('contacts_is_personal_perso')}
                         </span>
                       )}
                     </div>
