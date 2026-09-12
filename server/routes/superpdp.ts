@@ -8,6 +8,7 @@
 import type { Express } from 'express';
 import { buildEnInvoiceData } from '../../src/lib/facturX';
 import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -44,11 +45,17 @@ async function superpdpFetch(token: string, path: string, opts: RequestInit = {}
 // shared FacturXInvoiceData contract — see src/lib/facturX.ts for why this
 // and the client-side XML export (InvoiceGenerator.tsx) now share one
 // implementation instead of two that could silently drift apart.
-function buildEnInvoice(invoice: any, items: any[], settings: any): any {
+async function buildEnInvoice(supabaseAdmin: any, tenantId: string, invoice: any, items: any[], settings: any): Promise<any> {
   const vatRate = invoice.vat_rate ?? 20;
   const amountHT = parseFloat(invoice.amount ?? 0);
   const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
   const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
+  // `invoice.client_name` never existed as a column (see supabase/schema.sql)
+  // — this always fell through to mission_name/'Client', so every invoice
+  // submitted to SuperPDP carried no real buyer identity, SIRET or address
+  // at all. invoices.client_id (supabase/migrate_invoice_client_link.sql)
+  // is what actually resolves one now.
+  const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, invoice);
 
   return buildEnInvoiceData({
     invoiceNumber: invoice.invoice_number || invoice.id,
@@ -76,7 +83,11 @@ function buildEnInvoice(invoice: any, items: any[], settings: any): any {
       email: settings.email || '',
     },
     buyer: {
-      name: invoice.client_name || invoice.mission_name || 'Client',
+      name: client?.name || invoice.mission_name || 'Client',
+      address: [client?.address, [client?.zip, client?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || undefined,
+      siret: client?.siret || undefined,
+      vatNumber: client?.vat_number || undefined,
+      email: client?.email || undefined,
     },
   });
 }
@@ -136,7 +147,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
 
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
-      const enInvoice = buildEnInvoice(invoice, items, cfg);
+      const enInvoice = await buildEnInvoice(supabaseAdmin, tenantId, invoice, items, cfg);
 
       // Convert en16931 JSON → CII XML
       const ciiXml = await superpdpFetch(token, '/v1.beta/invoices/convert?from=en16931&to=cii', {

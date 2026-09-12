@@ -8,6 +8,59 @@
 import type { Express } from 'express';
 import axios from 'axios';
 import { assertPublicHttpUrl } from '../ssrfGuard';
+import { resolveInvoiceClientId } from '../invoiceClientContact';
+
+/**
+ * res.partner values from a local `contacts` row — the exact shape the
+ * contacts push (below, in the sync route) already builds, extracted so
+ * pushInvoiceToOdoo can create the SAME kind of partner for an invoice's
+ * Maître d'Ouvrage without duplicating the mapping. `ref` carries the SIRET
+ * (Odoo's res.partner has no dedicated French SIRET field; `ref`, the
+ * generic "Reference" field, is already what the contacts sync uses — see
+ * below) and `vat` the intracommunautaire VAT number.
+ */
+function buildOdooPartnerVals(c: any) {
+  return {
+    name: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || 'Contact',
+    email: c.email ?? c.email_work ?? '',
+    phone: c.phone ?? c.phone_mobile ?? c.phone_work ?? '',
+    street: c.address ?? c.address_work_street ?? '',
+    city: c.city ?? c.address_work_city ?? '',
+    zip: c.zip ?? c.address_work_zip ?? '',
+    vat: c.vat_number ?? '',
+    ref: c.siret ?? '',
+    comment: c.notes ?? '',
+    customer_rank: 1,
+    is_company: !!(c.company_name && !c.first_name),
+    company_name: c.company_name ?? '',
+  };
+}
+
+/**
+ * The Odoo partner id an invoice's Maître d'Ouvrage resolves to — reuses the
+ * contact's own `odoo_id` once it has one (set by the contacts push in the
+ * sync route below, or by a prior call here), otherwise pushes it to Odoo
+ * for the first time. Without this, `pushInvoiceToOdoo` created invoices
+ * with no `partner_id` at all: a legal document with no buyer identity,
+ * even though Odoo's own contact sync already carries the SIRET/address/
+ * phone this needed.
+ */
+async function resolveOdooPartnerIdForInvoice(
+  supabaseAdmin: any,
+  tenantId: string,
+  rpc: (model: string, method: string, args: any[], kwargs?: any) => Promise<any>,
+  inv: { client_id?: string | null; project_id?: string | null },
+): Promise<number | null> {
+  const clientId = await resolveInvoiceClientId(supabaseAdmin, tenantId, inv);
+  if (!clientId) return null;
+  const { data: contact } = await supabaseAdmin.from('contacts').select('*').eq('id', clientId).eq('tenant_id', tenantId).maybeSingle();
+  const c = contact as any;
+  if (!c) return null;
+  if (c.odoo_id) return c.odoo_id;
+  const newId = await rpc('res.partner', 'create', [buildOdooPartnerVals(c)]);
+  if (newId) await supabaseAdmin.from('contacts').update({ odoo_id: newId }).eq('id', c.id).eq('tenant_id', tenantId);
+  return newId || null;
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -66,9 +119,11 @@ export async function pushInvoiceToOdoo(
     return { external_id: String(already.id), invoice_number: already.name, status: stateMap[already.payment_state] || 'Draft' };
   }
 
+  const partnerId = await resolveOdooPartnerIdForInvoice(supabaseAdmin, tenantId, rpc, inv);
   const vals = {
     move_type: 'out_invoice',
     ref,
+    partner_id: partnerId || undefined,
     invoice_date: inv.issue_date ? String(inv.issue_date).split('T')[0] : false,
     invoice_date_due: inv.due_date ? String(inv.due_date).split('T')[0] : false,
     invoice_line_ids: (inv.items && inv.items.length)
@@ -146,20 +201,7 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
         const { data: contacts } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId);
         for (const c of (contacts ?? [])) {
           try {
-            const vals = {
-              name: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || 'Contact',
-              email: c.email ?? c.email_work ?? '',
-              phone: c.phone ?? c.phone_mobile ?? c.phone_work ?? '',
-              street: c.address ?? c.address_work_street ?? '',
-              city: c.city ?? c.address_work_city ?? '',
-              zip: c.zip ?? c.address_work_zip ?? '',
-              vat: c.vat_number ?? '',
-              ref: c.siret ?? '',
-              comment: c.notes ?? '',
-              customer_rank: 1,
-              is_company: !!(c.company_name && !c.first_name),
-              company_name: c.company_name ?? '',
-            };
+            const vals = buildOdooPartnerVals(c);
             if (c.odoo_id) {
               await rpc('res.partner', 'write', [[c.odoo_id], vals]);
             } else {
@@ -277,10 +319,12 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
         const { data: invoices } = await supabaseAdmin.from('invoices').select('*').eq('tenant_id', tenantId);
         for (const inv of (invoices ?? [])) {
           try {
+            const partnerId = await resolveOdooPartnerIdForInvoice(supabaseAdmin, tenantId, rpc, inv);
             const vals = {
               move_type: 'out_invoice',
               name: inv.invoice_number ?? '/',
               ref: inv.description ?? '',
+              partner_id: partnerId || undefined,
               invoice_date: inv.issue_date ? inv.issue_date.split('T')[0] : false,
               invoice_date_due: inv.due_date ? inv.due_date.split('T')[0] : false,
               invoice_line_ids: (inv.items && (inv as any).items.length)
@@ -293,7 +337,7 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
                 : [[0, 0, { name: inv.description ?? 'Honoraires', quantity: 1, price_unit: inv.amount ?? 0, tax_ids: [] }]],
             };
             if (inv.odoo_id) {
-              await rpc('account.move', 'write', [[inv.odoo_id], { ref: vals.ref, invoice_date_due: vals.invoice_date_due }]);
+              await rpc('account.move', 'write', [[inv.odoo_id], { ref: vals.ref, invoice_date_due: vals.invoice_date_due, partner_id: vals.partner_id }]);
             } else {
               const newId = await rpc('account.move', 'create', [vals]);
               if (newId) await supabaseAdmin.from('invoices').update({ odoo_id: newId }).eq('id', inv.id).eq('tenant_id', tenantId);
@@ -307,11 +351,21 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
         try {
           const odooInvoices = await rpc('account.move', 'search_read',
             [[['move_type', '=', 'out_invoice']]],
-            { fields: ['id', 'name', 'amount_untaxed', 'amount_tax', 'amount_total', 'payment_state', 'invoice_date', 'invoice_date_due', 'ref'], limit: 500 }
+            { fields: ['id', 'name', 'amount_untaxed', 'amount_tax', 'amount_total', 'payment_state', 'invoice_date', 'invoice_date_due', 'ref', 'partner_id'], limit: 500 }
           );
           const stateMap: Record<string, string> = { paid: 'Paid', not_paid: 'Sent', in_payment: 'Sent', partial: 'Sent', reversed: 'Draft' };
           for (const oi of (odooInvoices ?? [])) {
             try {
+              // Odoo returns a many2one as [id, display_name], or false when
+              // unset — the contacts sync above already pulls every
+              // res.partner into `contacts` keyed by odoo_id, so a match here
+              // is a lookup, never a new contact to create.
+              let clientId: string | null = null;
+              if (Array.isArray(oi.partner_id) && oi.partner_id[0]) {
+                const { data: partnerContact } = await supabaseAdmin.from('contacts')
+                  .select('id').eq('odoo_id', oi.partner_id[0]).eq('tenant_id', tenantId).maybeSingle();
+                clientId = (partnerContact as any)?.id || null;
+              }
               const mapped = {
                 invoice_number: oi.name ?? '',
                 amount: oi.amount_untaxed ?? 0,
@@ -326,9 +380,13 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
               };
               const { data: existing } = await supabaseAdmin.from('invoices').select('id').eq('odoo_id', oi.id).eq('tenant_id', tenantId).maybeSingle();
               if (existing) {
-                await supabaseAdmin.from('invoices').update(mapped).eq('id', (existing as any).id).eq('tenant_id', tenantId);
+                // clientId only overwrites an already-linked invoice when
+                // Odoo actually has a partner on it — a transient lookup miss
+                // (or the invoice's partner not yet in `contacts`) must not
+                // clobber a client_id set locally in the meantime.
+                await supabaseAdmin.from('invoices').update({ ...mapped, ...(clientId ? { client_id: clientId } : {}) }).eq('id', (existing as any).id).eq('tenant_id', tenantId);
               } else {
-                await supabaseAdmin.from('invoices').insert({ ...mapped, odoo_id: oi.id, tenant_id: tenantId });
+                await supabaseAdmin.from('invoices').insert({ ...mapped, client_id: clientId, odoo_id: oi.id, tenant_id: tenantId });
               }
               out.pulled++;
             } catch (err: any) {

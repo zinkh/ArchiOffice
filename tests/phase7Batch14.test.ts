@@ -568,6 +568,10 @@ describe('Zoho Books', () => {
     global.fetch = vi.fn(async (url: any, init: any) => {
       const u = String(url);
       if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      // The push now resolves a real Zoho Books contact (customer_id) before
+      // creating the invoice, instead of a bare customer_name — see
+      // getOrCreateZohoBooksCustomer in server/routes/zohoBooks.ts.
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
       if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [{ invoice_id: 'zoho-b-existing', status: 'paid' }] }) } as any;
       if (u.includes('/invoices')) {
         pushBody = JSON.parse(init.body);

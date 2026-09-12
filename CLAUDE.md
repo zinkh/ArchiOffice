@@ -243,6 +243,74 @@ unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
 cabinet de porter le même numéro, quelle que soit la cause (course locale,
 numéro fourni par un client, import).
 
+### Le Maître d'Ouvrage d'une facture (`invoices.client_id`)
+
+Jusqu'ici `invoices` n'avait aucun lien vers `contacts` : le « client » d'une
+facture se déduisait toujours de son projet (`project_id` → `projects` →
+`client`), donc une facture sans projet — facture générale, ou importée d'un
+connecteur comptable — n'avait aucune identité de Maître d'Ouvrage : ni nom,
+ni SIRET, ni adresse, ni téléphone, alors qu'une facture française doit
+porter ces mentions pour l'acheteur comme pour le vendeur (`seller_*` existe
+déjà sur cette table). `invoices.client_id`
+(`supabase/migrate_invoice_client_link.sql`, FK vers `contacts`) ferme ce
+trou : rempli depuis `projects.client_id` à la création quand les deux
+existent, toujours modifiable ensuite — même principe que `project_id` :
+corriger le rattachement n'est pas modifier le contenu légal déjà envoyé,
+et c'est exactement ce qui permet de corriger après coup un contact que le
+connecteur a créé à la volée sans toutes ses mentions.
+
+`server/invoiceClientContact.ts` centralise la résolution :
+
+- **`resolveInvoiceClientId`** — `client_id` de la facture, sinon celui de
+  son projet, sinon aucun. Lecture seule.
+- **`loadInvoiceClientContact`** — la fiche complète du contact (nom, SIRET,
+  TVA, adresse, téléphone, email), jointe par `GET /api/invoices/:id`
+  uniquement (jamais la liste — voir « Pagination et fan-out sur les
+  listes » plus haut) et exposée en lecture seule sous `invoice.client`.
+- **`resolveOrCreateContactFromExternal`** — utilisée seulement au PULL
+  Zoho (Invoice/Books) : retrouve un contact existant par email puis par nom
+  exact, sinon en crée un avec les informations renvoyées par Zoho. Odoo
+  n'en a pas besoin : sa propre synchro de contacts (`server/routes/
+  odoo.ts`) pull déjà chaque `res.partner` dans `contacts` par `odoo_id`
+  avant que les factures ne soient traitées dans le même appel.
+
+**Push (ArchiOffice → connecteur), les trois connecteurs :**
+
+`pushInvoiceToZohoInvoice`/`pushInvoiceToZohoBooks` (et l'envoi en masse des
+deux routes `/sync`) recherchent désormais un contact Zoho par nom réel du
+Maître d'Ouvrage (plus par nom de projet) et, faute de correspondance, en
+créent un avec nom, email, téléphone et adresse de facturation — Zoho
+Invoice/Books n'ayant pas de champ SIRET natif, celui-ci est écrit dans
+`notes` (`SIRET : <valeur>`), relu au pull via une regex sur ce même
+format. `pushInvoiceToOdoo` résout (ou pousse pour la première fois) le
+`res.partner` du contact et pose enfin `partner_id` sur la facture — cette
+colonne n'était jamais renseignée avant, qu'une facture soit créée à
+l'unité ou par la synchro `/api/odoo/sync` : la ligne de vente Odoo n'avait
+alors aucun acheteur, malgré une synchro de contacts déjà complète (SIRET
+dans `ref`, TVA dans `vat`) tournant à côté sans être exploitée par les
+factures.
+
+**Pull (connecteur → ArchiOffice) :** un import Zoho sans correspondance
+locale (`zohoInvoiceToLocalRow`) résout maintenant le client — un appel
+`GET /contacts/:id` de plus, mais seulement pour un client réellement
+nouveau, jamais par facture déjà connue. Côté Odoo, `client_id` se déduit
+d'une recherche `contacts.odoo_id = partner_id` : ne JAMAIS écraser un
+`client_id` existant avec `null` quand cette recherche ne trouve rien (une
+facture déjà rattachée à la main ne doit pas perdre son contact au pull
+suivant) — seule une correspondance trouvée peut mettre à jour la ligne.
+
+**Factur-X / EN16931 (`src/lib/facturX.ts`)** portait déjà `FacturXParty`
+avec `siret`/`vatNumber`/`email`, mais seul le vendeur les utilisait : le
+XML CII n'émettait ni `SpecifiedLegalOrganization` ni
+`SpecifiedTaxRegistration` pour l'acheteur, et `EnInvoiceJson.buyer` n'avait
+même pas de type pour les porter — une facture envoyée à SuperPDP (`server/
+routes/superpdp.ts`) n'a donc jamais transmis le SIRET/l'adresse/la TVA du
+Maître d'Ouvrage, quelle que soit la donnée disponible côté ArchiOffice.
+Les deux lisent maintenant `invoice.client_id` via `loadInvoiceClientContact`
+(`InvoiceGenerator.tsx` pour l'export local, `buildEnInvoice` pour l'envoi
+SuperPDP) ; Chorus Pro (B2G, identifié par SIRET seul) gagne le même repli
+en plus de celui déjà existant sur `projects.client_siret`.
+
 ### Invitation d'un nouveau membre d'équipe
 
 `POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot
@@ -965,6 +1033,44 @@ et l'adresse courante vise souvent une affaire qui n'existe pas dans l'autre.
 Le sélecteur (`src/components/TenantSwitcher.tsx`) n'apparaît qu'à partir de
 deux cabinets ; un compte à cabinet unique ne voit rien changer, hormis
 l'entrée « Rejoindre ou créer un cabinet » qui mène à `/agency-setup?add=1`.
+
+### Visibilité des contacts personnels
+
+`contacts.is_personal` (`migrate_contacts_is_personal.sql`) existait déjà
+pour exclure un contact de la synchro Google Contacts, mais rien ne
+distinguait AUPRÈS DE QUI il restait visible dans l'application elle-même :
+un contact personnel (un proche, une référence saisie pour un rappel
+d'anniversaire) apparaissait dans la liste de tout le cabinet au même titre
+qu'un contact « pro ». `migrate_contacts_personal_visibility.sql` ferme ce
+trou avec deux colonnes distinctes, une par moitié du problème :
+
+- **`contacts.owner_user_id`** — à qui appartient un contact personnel.
+  Jamais `contacts.created_by` : ce champ texte libre sert déjà à d'autres
+  valeurs (`'odoo'`, `'ragic'`, la source d'un import) et n'a jamais été un
+  identifiant fiable. Server-side only — absent de `CONTACT_COLUMNS`
+  (`server/routes/contacts.ts`), donc jamais accepté depuis le corps d'une
+  requête : posé à `req.user.id` à la création d'un contact personnel, à
+  `null` sur un contact « pro » (partagé, sans propriétaire).
+- **`profiles.show_personal_contacts`** — préférence personnelle, pas par
+  cabinet (même principe que `notification_prefs`) : afficher ou non SES
+  PROPRES contacts personnels dans sa liste. Réglée depuis `/settings`, lue
+  et écrite comme le reste du profil (`GET /api/me` /
+  `PUT /api/team/:id`, camelCase `showPersonalContacts`). Un contact
+  personnel appartenant à quelqu'un d'autre reste invisible quel que soit ce
+  réglage — il ne joue que sur les siens.
+
+`GET /api/contacts` filtre en mémoire (`is_personal` faux → toujours visible ;
+vrai → visible seulement si `owner_user_id === req.user.id` ET que la
+préférence est active) plutôt que via un `.or()` PostgREST imbriqué : la
+liste d'un cabinet reste petite, et ça évite de dépendre de la syntaxe
+`and()` dans un `.or()`. `PUT`/`DELETE /api/contacts/:id` refusent en 403
+la modification d'un contact personnel appartenant à quelqu'un d'autre —
+la liste seule ne suffit pas, l'id peut fuiter ailleurs (un journal
+d'activité, un lien partagé entre collègues). Un contact personnel créé
+avant l'existence d'`owner_user_id` (`owner_user_id` NULL) est réclamé par
+la première personne qui l'édite, plutôt que de rester invisible pour tout
+le monde indéfiniment ; basculer un contact de personnel à pro efface
+`owner_user_id` (plus de propriétaire à avoir, une fois partagé).
 
 ### Multi-comptes mail et multi-calendriers
 

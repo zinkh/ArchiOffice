@@ -10,6 +10,7 @@ import { validateBody } from '../../src/lib/validateRequest';
 import { invoiceSchema } from '../../src/schemas/invoice.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoiceAccountingSync';
+import { loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -75,7 +76,10 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         .eq('id', req.params.id).eq('tenant_id', tenantId).single();
       if (error || !inv) return res.status(404).json({ error: 'Invoice not found' });
       const { projects: p, invoice_items, ...rest } = inv as any;
-      res.json({ ...rest, project_name: p?.name || null, items: invoice_items || [] });
+      // Fan-out kept to this single-item route only (never the list above) —
+      // see CLAUDE.md's "Pagination et fan-out sur les listes" for why.
+      const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, rest);
+      res.json({ ...rest, project_name: p?.name || null, items: invoice_items || [], client });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch invoice" });
@@ -86,20 +90,27 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const {
-        project_id, amount, description, status, due_date,
+        project_id, client_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
         items
       } = req.body;
 
-      // A project_id accepted straight from the body without checking whose
-      // it is would let this tenant's invoice reference (and, via the
-      // service-role `projects(name)` join on GET, leak the name of)
-      // another tenant's project.
+      // A project_id/client_id accepted straight from the body without
+      // checking whose it is would let this tenant's invoice reference (and,
+      // via the service-role `projects(name)`/contacts join on GET, leak the
+      // name of) another tenant's project or contact.
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
+      if (client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      // A Maître d'Ouvrage explicitly supplied wins; otherwise fall back to
+      // the project's own client, so a facture created from a project still
+      // carries a buyer identity without the caller having to look it up.
+      const finalClientId = await resolveInvoiceClientId(supabaseAdmin, tenantId, { client_id, project_id });
 
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
@@ -146,7 +157,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         || (invoice_type === 'acompte' && project_id ? await getNextAffaireInvoiceNumber(tenantId, project_id) : null);
 
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
-        id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id,
+        id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id, client_id: finalClientId,
         amount: amount || 0, tax_amount: tax_amount || 0, total_amount: total_amount || 0,
         status: finalStatus, due_date: due_date || null,
         issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
@@ -177,8 +188,8 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         // so a connector outage here never loses it — it's retried via
         // POST /api/invoices/:id/sync-retry once the connector is reachable.
         accountingSyncResult = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, accountingProvider, {
-          project_name: pushProjectName, description, issue_date: issue_date || created_at.split('T')[0],
-          due_date, amount, vat_rate, items: items || [],
+          project_id, client_id: finalClientId, project_name: pushProjectName, description,
+          issue_date: issue_date || created_at.split('T')[0], due_date, amount, vat_rate, items: items || [],
         });
       }
 
@@ -208,7 +219,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        project_id, amount, description, status, due_date,
+        project_id, client_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
@@ -220,12 +231,15 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // to the tenant-scoped update/select below, which then match nothing
       // and the response comes back with none of that invoice's data.
       const { data: existingInvoice } = await supabaseAdmin.from('invoices')
-        .select('status, project_id, affaire_invoice_number, phases, amount, description, due_date, invoice_number, tax_amount, total_amount, issue_date, seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate, invoice_type, mission_id, mission_name, advancement_pct')
+        .select('status, project_id, client_id, affaire_invoice_number, phases, amount, description, due_date, invoice_number, tax_amount, total_amount, issue_date, seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate, invoice_type, mission_id, mission_name, advancement_pct')
         .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const existing = (existingInvoice as any) || {};
 
       if (project_id && project_id !== existing.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (client_id && client_id !== existing.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
 
       // A connector-confirmed invoice number is the connector's own legal
@@ -297,6 +311,12 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // for the acompte invoices already issued on that project. Only
       // generated when the caller didn't explicitly supply one.
       const finalProjectId = merge(project_id, existing.project_id) ?? null;
+      // client_id (the Maître d'Ouvrage) stays editable even once the
+      // invoice's legal content is locked — same rationale as project_id
+      // just above: correcting who a document is attached to isn't part of
+      // the content already sent, and it's exactly what lets a Zoho/Odoo-
+      // created placeholder contact be fixed after the fact.
+      const finalClientId = merge(client_id, existing.client_id) ?? null;
       const projectChanged = project_id !== undefined && project_id !== existing.project_id;
       const finalInvoiceType = merge(invoice_type, existing.invoice_type) || 'standard';
       let finalAffaireInvoiceNumber = merge(affaire_invoice_number, existing.affaire_invoice_number) ?? null;
@@ -307,7 +327,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
 
       const { error: updErr } = await supabaseAdmin.from('invoices').update({
         ...protectedFields,
-        status: merge(status, existing.status) || 'Draft', project_id: finalProjectId,
+        status: merge(status, existing.status) || 'Draft', project_id: finalProjectId, client_id: finalClientId,
         invoice_type: finalInvoiceType,
         mission_id: merge(mission_id, existing.mission_id) ?? null,
         mission_name: merge(mission_name, existing.mission_name) ?? null,
@@ -356,6 +376,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       if (!inv) return res.status(404).json({ error: "Facture introuvable." });
 
       const result = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, provider, {
+        project_id: (inv as any).project_id, client_id: (inv as any).client_id,
         project_name: (inv as any).projects?.name || null,
         description: (inv as any).description, issue_date: (inv as any).issue_date,
         due_date: (inv as any).due_date, amount: (inv as any).amount, vat_rate: (inv as any).vat_rate,

@@ -22,6 +22,90 @@ import {
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
   zohoInvoiceToLocalRow,
 } from '../zohoSync';
+import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
+
+/**
+ * Books equivalent of zohoInvoice.ts's buildZohoContactPayload — same
+ * `/contacts` shape on both Zoho products, same "no native SIRET field, so
+ * it rides in `notes`" workaround. Kept duplicated rather than shared: the
+ * two files already each keep their own token cache and callback URL logic
+ * (different OAuth scopes/redirect URIs per product), so a third shared
+ * concern here wouldn't remove much and would cost an import both files
+ * would need to keep synchronised anyway.
+ */
+function buildZohoContactPayload(info: ClientContactInfo) {
+  const hasAddress = !!(info.address || info.city || info.zip || info.country);
+  return {
+    contact_name: info.name,
+    company_name: info.name,
+    contact_type: 'customer',
+    email: info.email || undefined,
+    phone: info.phone || undefined,
+    billing_address: hasAddress ? {
+      address: info.address || undefined, city: info.city || undefined,
+      zip: info.zip || undefined, country: info.country || undefined,
+    } : undefined,
+    notes: info.siret ? `SIRET : ${info.siret}` : undefined,
+  };
+}
+
+/** Match-or-create a Zoho Books contact for the invoice's Maître d'Ouvrage, mirroring getOrCreateZohoCustomer in zohoInvoice.ts. */
+async function getOrCreateZohoBooksCustomer(apiBase: string, orgId: string, headers: any, info: ClientContactInfo): Promise<string> {
+  const searchRes = await fetchWithTimeout(
+    `${apiBase}/contacts?organization_id=${orgId}&contact_name=${encodeURIComponent(info.name)}&per_page=${ZOHO_PAGE_SIZE}`,
+    { headers }, ZOHO_TIMEOUT_MS,
+  );
+  const searchBody = await searchRes.json() as any;
+  const match = (searchBody?.contacts || []).find(
+    (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === info.name.trim(),
+  );
+  if (match) return match.contact_id;
+
+  const createRes = await fetchWithTimeout(`${apiBase}/contacts?organization_id=${orgId}`, {
+    method: 'POST', headers, body: JSON.stringify(buildZohoContactPayload(info)),
+  }, ZOHO_TIMEOUT_MS);
+  const createBody = await createRes.json() as any;
+  if (!createBody?.contact?.contact_id) throw new Error(createBody?.message || 'Création du contact Zoho Books échouée');
+  return createBody.contact.contact_id;
+}
+
+/** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
+async function fetchZohoBooksContactDetail(apiBase: string, orgId: string, headers: any, contactId: string | undefined): Promise<any | null> {
+  if (!contactId) return null;
+  try {
+    const resp = await fetchWithTimeout(`${apiBase}/contacts/${contactId}?organization_id=${orgId}`, { headers }, ZOHO_TIMEOUT_MS);
+    const body = await resp.json() as any;
+    return body?.contact || null;
+  } catch {
+    return null;
+  }
+}
+
+function zohoBooksContactToClientInfo(contact: any, fallbackName: string): ClientContactInfo {
+  const addr = contact?.billing_address || {};
+  const notesSiret = typeof contact?.notes === 'string' ? contact.notes.match(/SIRET\s*:\s*(\S+)/i)?.[1] : undefined;
+  return {
+    name: contact?.contact_name || contact?.company_name || fallbackName,
+    email: contact?.email || undefined,
+    phone: contact?.phone || contact?.mobile || undefined,
+    address: addr.address || undefined,
+    city: addr.city || undefined,
+    zip: addr.zip || undefined,
+    country: addr.country || undefined,
+    siret: notesSiret,
+  };
+}
+
+/** The local contact a pulled Zoho Books invoice's customer resolves to — see the matching helper in zohoInvoice.ts. */
+async function resolveZohoBooksCustomerAsLocalContact(
+  apiBase: string, orgId: string, headers: any, supabaseAdmin: any, tenantId: string,
+  customerId: string | undefined, customerName: string | undefined,
+): Promise<string | null> {
+  if (!customerId && !customerName) return null;
+  const detail = await fetchZohoBooksContactDetail(apiBase, orgId, headers, customerId);
+  const info = zohoBooksContactToClientInfo(detail, customerName || '');
+  return resolveOrCreateContactFromExternal(supabaseAdmin, tenantId, info);
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -70,8 +154,16 @@ export async function pushInvoiceToZohoBooks(
     return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
   }
 
+  // The invoice's Maître d'Ouvrage — same resolution as pushInvoiceToZohoInvoice:
+  // invoices.client_id, falling back to its project's client, then to a bare
+  // name only when neither exists (an invoice predating client_id, or a
+  // general one with no contact chosen).
+  const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+  const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+  const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
+
   const payload = {
-    customer_name: inv.project_name || inv.description || 'Client',
+    customer_id: customerId,
     reference_number: idempotencyKey,
     date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
     due_date: zohoDate(inv.due_date),
@@ -298,8 +390,11 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             // its UUID as the invoice number and today's date, carrying a single
             // untaxed line. These are the real columns, mapped the same way the
             // Zoho Invoice push maps them.
+            const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+            const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+            const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
             const payload = {
-              customer_name: inv.project_name || inv.description || 'Client',
+              customer_id: customerId,
               invoice_number: inv.invoice_number || undefined,
               date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
               due_date: zohoDate(inv.due_date),
@@ -359,9 +454,10 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             // A Zoho Books invoice ArchiOffice has never recorded — see the
             // matching note in zohoInvoice.ts. This used to `continue` here too,
             // so nothing already in Zoho Books at connection time ever appeared
-            // in ArchiOffice.
+            // in ArchiOffice. Same customer resolution as Zoho Invoice's pull.
+            const clientId = await resolveZohoBooksCustomerAsLocalContact(apiBase, orgId, headers, supabaseAdmin, tenantId, zohoInv.customer_id, zohoInv.customer_name);
             const { error: importErr } = await supabaseAdmin
-              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId, clientId));
             if (importErr) {
               console.error("[POST /api/zoho-books/sync] import", importErr);
               errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);

@@ -158,6 +158,9 @@ export default {
       "send_from_personal": "Envoyer depuis mon compte",
       "default_email_template": "Modèle d'e-mail par défaut",
       "my_email_settings": "Mes paramètres de messagerie",
+      "settings_personal_contacts_title": "Contacts personnels",
+      "settings_personal_contacts_desc": "Un contact personnel n'est jamais visible par le reste du cabinet — ce réglage ne concerne que l'affichage des vôtres dans votre propre liste.",
+      "settings_show_personal_contacts": "Afficher mes contacts personnels dans la liste",
       "siret": "SIRET",
       "pdf_generator": "Générateur PDF",
 
@@ -586,6 +589,9 @@ export default {
       "invoices_edit_locked_banner": "Cette facture a déjà été envoyée au client : le montant, la description, la date d'échéance et les mentions légales ne peuvent plus être modifiés. Le statut, le type de facture et le rattachement à un projet restent modifiables.",
       "invoices_edit_error": "Échec de la modification de la facture.",
       "invoices_no_project_option": "Aucun projet (facture générale)",
+      "invoices_client_label": "Maître d'Ouvrage",
+      "invoices_select_client": "Sélectionner un contact",
+      "invoices_no_client_warning": "Aucun Maître d'Ouvrage rattaché — la facture ne porte pas les mentions légales du client (SIRET, adresse, téléphone).",
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",

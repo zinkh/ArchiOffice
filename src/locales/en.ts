@@ -156,6 +156,9 @@ export default {
       "send_from_personal": "Send from Personal",
       "default_email_template": "Default Email Template",
       "my_email_settings": "My Email Settings",
+      "settings_personal_contacts_title": "Personal Contacts",
+      "settings_personal_contacts_desc": "A personal contact is never visible to the rest of the firm — this only controls whether your own show up in your list.",
+      "settings_show_personal_contacts": "Show my personal contacts in the list",
       "siret": "SIRET",
       "pdf_generator": "PDF Generator",
 
@@ -584,6 +587,9 @@ export default {
       "invoices_edit_locked_banner": "This invoice has already been sent to the client: the amount, description, due date and legal details can no longer be changed. The status, invoice type and linked project can still be updated.",
       "invoices_edit_error": "Failed to update the invoice.",
       "invoices_no_project_option": "No project (general invoice)",
+      "invoices_client_label": "Client (bill to)",
+      "invoices_select_client": "Select a contact",
+      "invoices_no_client_warning": "No client linked — the invoice is missing the buyer's legal details (registration number, address, phone).",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",

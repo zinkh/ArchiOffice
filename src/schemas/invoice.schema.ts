@@ -20,6 +20,7 @@ export const invoiceItemSchema = z.object({
 
 export const invoiceSchema = z.object({
   project_id: z.string().optional().nullable(),
+  client_id: z.string().optional().nullable(),
   amount: z.number().optional(),
   description: z.string().optional(),
   status: z.enum(['Draft', 'Sent', 'Paid', 'Overdue']).optional(),

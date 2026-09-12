@@ -232,6 +232,89 @@ describe('Invoices', () => {
     await request(app).put('/api/invoices/inv-b').set(authHeader(token)).send({ amount: 1 });
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-b')?.amount).toBe(999);
   });
+
+  // invoices.client_id (supabase/migrate_invoice_client_link.sql) — the
+  // Maître d'Ouvrage a facture is billed to, independent of project_id (see
+  // CLAUDE.md's "Le Maître d'Ouvrage d'une facture").
+  describe('client_id (Maître d\'Ouvrage)', () => {
+    it('defaults an invoice\'s client_id from its project when none is supplied', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('projects', [{ id: 'proj-c1', tenant_id: tenantId, name: 'Villa', client_id: 'contact-c1' }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-c1', tenant_id: tenantId, first_name: 'Jean', last_name: 'Dupont', siret: '12345678900011' }]);
+
+      const res = await request(app).post('/api/invoices').set(authHeader(token)).send({ project_id: 'proj-c1', amount: 100 });
+      expect(res.status).toBe(201);
+      expect(res.body.client_id).toBe('contact-c1');
+    });
+
+    it('an explicitly supplied client_id wins over the project\'s own client', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('projects', [{ id: 'proj-c2', tenant_id: tenantId, name: 'Villa', client_id: 'contact-project' }]);
+      fakeSupabaseAdmin.seed('contacts', [
+        { id: 'contact-project', tenant_id: tenantId, first_name: 'Projet', last_name: 'Client' },
+        { id: 'contact-chosen', tenant_id: tenantId, first_name: 'Choisi', last_name: 'Manuellement' },
+      ]);
+
+      const res = await request(app).post('/api/invoices').set(authHeader(token)).send({ project_id: 'proj-c2', client_id: 'contact-chosen', amount: 100 });
+      expect(res.status).toBe(201);
+      expect(res.body.client_id).toBe('contact-chosen');
+    });
+
+    it('rejects a client_id belonging to another tenant, on create and on update', async () => {
+      const otherTenant = makeTenant();
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-other', tenant_id: otherTenant, first_name: 'Autre', last_name: 'Cabinet' }]);
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-client-guard', tenant_id: tenantId, amount: 100 }]);
+
+      const created = await request(app).post('/api/invoices').set(authHeader(token)).send({ amount: 100, client_id: 'contact-other' });
+      expect(created.status).toBe(400);
+
+      const updated = await request(app).put('/api/invoices/inv-client-guard').set(authHeader(token)).send({ client_id: 'contact-other' });
+      expect(updated.status).toBe(400);
+      expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-client-guard')?.client_id).not.toBe('contact-other');
+    });
+
+    it('client_id stays editable even once the invoice is locked (Sent) — same rationale as project_id', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-fix', tenant_id: tenantId, first_name: 'Bon', last_name: 'Contact' }]);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-locked-client', tenant_id: tenantId, status: 'Sent', amount: 500, description: 'Facture envoyée' }]);
+
+      const res = await request(app).put('/api/invoices/inv-locked-client').set(authHeader(token)).send({ client_id: 'contact-fix' });
+      expect(res.status).toBe(200);
+      expect(res.body.client_id).toBe('contact-fix');
+    });
+
+    it('GET /api/invoices/:id joins the client\'s legal details (name, SIRET, address, phone)', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'contact-full', tenant_id: tenantId, first_name: '', last_name: '', company_name: 'SCI Duval',
+        siret: '98765432100019', address: '10 rue de la Paix', city: 'Paris', zip: '75002', phone: '0102030405', email: 'contact@sciduval.fr',
+      }]);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-with-client', tenant_id: tenantId, client_id: 'contact-full', invoice_number: 'FAC-100' }]);
+
+      const res = await request(app).get('/api/invoices/inv-with-client').set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.client).toMatchObject({
+        name: 'SCI Duval', siret: '98765432100019', address: '10 rue de la Paix',
+        city: 'Paris', zip: '75002', phone: '0102030405', email: 'contact@sciduval.fr',
+      });
+    });
+
+    it('GET /api/invoices/:id returns a null client when the invoice has no project and no client_id', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-no-client', tenant_id: tenantId, invoice_number: 'FAC-101' }]);
+
+      const res = await request(app).get('/api/invoices/inv-no-client').set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.client).toBeNull();
+    });
+  });
 });
 
 describe('Contact categories', () => {

@@ -7,7 +7,7 @@ import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
   IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
-  IconArchive, IconCloud, IconFolder, IconFolderOpen
+  IconArchive, IconCloud, IconFolder, IconFolderOpen, IconAddressBook
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
@@ -402,6 +402,7 @@ export default function Settings() {
     jobTitle: '',
     department: '',
     avatar: '',
+    showPersonalContacts: true,
   });
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -492,6 +493,7 @@ export default function Settings() {
         jobTitle: currentUser.jobTitle || '',
         department: currentUser.department || '',
         avatar: currentUser.avatar || '',
+        showPersonalContacts: currentUser.showPersonalContacts ?? true,
       });
     }
   }, [currentUser]);
@@ -2619,9 +2621,28 @@ export default function Settings() {
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
 
-      {/* Informations utilisateur + Mes paramètres email share the same profile
-          row (PUT /api/team/:id) — one save action for both, entirely separate
-          from every tenant-settings section above. */}
+      {/* ── Contacts personnels ── */}
+      <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconAddressBook size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_personal_contacts_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_personal_contacts_desc')}</p>
+          </div>
+        </div>
+        <label className="flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+          <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{t('settings_show_personal_contacts')}</span>
+          <input
+            type="checkbox"
+            checked={userSettings.showPersonalContacts}
+            onChange={e => setUserSettings({ ...userSettings, showPersonalContacts: e.target.checked })}
+          />
+        </label>
+      </div>
+
+      {/* Informations utilisateur + Mes paramètres email + contacts personnels
+          share the same profile row (PUT /api/team/:id) — one save action for
+          all three, entirely separate from every tenant-settings section above. */}
       {renderSaveButton('profile', () => saveProfile())}
 
       {/* Mes boîtes mail — état géré par son propre hook (useMailAccounts),

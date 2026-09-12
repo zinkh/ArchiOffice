@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- Horodatage du consentement à la politique de confidentialité / CGU,
   -- capturé à l'inscription (case à cocher obligatoire, voir Register.tsx).
   terms_accepted_at TIMESTAMPTZ,
+  -- Préférence personnelle : afficher ou non ses propres contacts personnels
+  -- dans la liste — voir migrate_contacts_personal_visibility.sql.
+  show_personal_contacts BOOLEAN NOT NULL DEFAULT true,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -306,9 +309,12 @@ CREATE TABLE IF NOT EXISTS invoices (
   -- de invoice_number (le numéro légal séquentiel ci-dessus). phases porte
   -- la ventilation par phase de mission d'un acompte, même forme que
   -- notes_honoraires.phases : [{phase_id, phase_name, avancement_pct, montant_phase}]
-  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]'
+  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]',
+  -- Maître d'Ouvrage de la facture — voir migrate_invoice_client_link.sql.
+  client_id TEXT REFERENCES contacts(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,
