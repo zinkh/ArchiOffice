@@ -63,6 +63,7 @@ Model calls go through one provider-neutral layer, `packages/archioffice-agents/
 | Per-model pricing | ✅ | `llm/pricing.ts`. A model absent from `MODEL_CATALOG` is refused rather than billed at an invented rate; `AI_PRICE_MARKUP` is the single margin lever. |
 | Provider choice from the UI | ✅ | Platform operator picks the active provider **and a model per provider** in `/admin` (**Fournisseur IA**), stored in `platform_settings`, effective within ~30s with no restart. Each provider keeps its own model, so switching back restores the earlier choice instead of resetting to that provider's default. A provider with no API key configured can be pre-set but not activated. Still instance-wide: no per-tenant or per-agent picker. |
 | BYOK (tenants bringing their own API key) | ⏳ | Designed, not built — see below. |
+| Speech synthesis (TTS) native per provider | ⏳ | Always Gemini today, regardless of the tenant's active chat provider — see below. |
 
 ### BYOK — planned
 
@@ -75,6 +76,14 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 - **Open question**: tenant-wide only, or also per agent (`agents.provider` / `agents.model`)? Per-agent allows "Claude for drafting, Mistral for cheap classification" but doubles the config surface.
 - **Already in place**: `resolveLlmProvider()` takes `{ provider, model, apiKey }` and those win over everything else, and `platform_settings` shows the pattern for a stored selection. The per-tenant lookup slots in where `getPlatformAiConfig()` is called today — in `routes.ts` and `aiSuggestions.ts` — with the tenant's decrypted key as `apiKey`.
 - **Also required**: BYOK moves data processing to a provider the tenant picked, so the privacy policy (`src/pages/PrivacyPolicy.tsx`) and the subcontractor list need updating before it ships.
+
+### TTS per provider — planned
+
+`resolveSpeechProvider()` (`packages/archioffice-agents/src/server/llm/index.ts`) always returns Gemini today, whatever the tenant's active chat provider is — see CLAUDE.md's "Synthèse vocale". That's not an oversight to fix, it's a limit of what Anthropic and Mistral currently expose: neither publishes a public text-to-speech endpoint (Claude has none; Mistral's audio work, Voxtral, is speech-to-text only), so there is no Claude/Mistral adapter to route to yet.
+
+- **Blocked on the providers, not on our code**: `LlmProvider.speak` is already optional per-adapter (see `gemini.ts`'s `speak()` and the interface in `llm/types.ts`) precisely so a provider without TTS just doesn't implement it — the plumbing for "native per provider" already exists, same shape as `supportsWebSearch` for the recently added web-search capability.
+- **When a provider ships one**: add `speak()` to that adapter (mirroring `gemini.ts`'s `pcmToWav()`-style handling of whatever raw format it returns) and change `resolveSpeechProvider()` to prefer the active chat provider when it implements `speak`, falling back to Gemini otherwise — the same fallback shape already used by `resolveTranscriptionProvider()` for audio input.
+- **Pricing**: a new entry in `llm/pricing.ts`'s `MODEL_CATALOG` for that provider's TTS model — the same invariant as everywhere else in the AI layer, a model absent from the catalog can't run because we can't bill it honestly.
 
 ## Platform
 
