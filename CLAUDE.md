@@ -1034,11 +1034,13 @@ donné lieu à un contact inventé — nom, société et téléphone différents
 tout ce qui figurait réellement sur le véhicule). Le modèle ne voyait alors
 jamais les pixels de l'image, seulement le bruit OCR.
 
-`LlmProvider.supportsVision` (`llm/types.ts`, vrai pour `gemini.ts` et
-`anthropic.ts`, absent pour `mistral.ts` — aucun modèle du catalogue Mistral
-ne lit d'image) dit si le fournisseur actif sait lire une image jointe au
-message (`LlmMessage.images`, envoyée en vision native — `inlineData` chez
-Gemini, un bloc `image` chez Claude). `buildAgentContext()` (`context.ts`)
+`LlmProvider.supportsVision` (`llm/types.ts`, vrai pour les trois adaptateurs
+— `gemini.ts`, `anthropic.ts` et `mistral.ts`, dont les alias `-latest`
+pointent vers des versions vision-capables de Large/Medium/Small, voir
+docs.mistral.ai/studio/conversations/vision) dit si le fournisseur actif sait
+lire une image jointe au message (`LlmMessage.images`, envoyée en vision
+native — `inlineData` chez Gemini, un bloc `image` chez Claude, un
+`image_url` en data URI chez Mistral). `buildAgentContext()` (`context.ts`)
 route en conséquence chaque pièce sans couche texte : image directe
 (`.jpg`/`.png`/`.webp`) ou page de PDF scanné rasterisée en PNG partent dans
 `ctx.documentImages` quand `supportsVision` est vrai, jamais par Tesseract ;
