@@ -9,7 +9,7 @@ import { AGENT_RESOURCES } from '../types.js';
 // 1.x is a pure-JS text-only extractor with zero native dependencies.
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
-import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS } from './ocr.js';
+import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -187,7 +187,14 @@ export async function buildAgentContext(
   userId: string,
   currentAgentId: string,
   scopes: string[],
-  attachedDocumentIds: string[] = []
+  attachedDocumentIds: string[] = [],
+  // Décide, pour les pièces attachées à CE message, si une photo ou un PDF
+  // scanné part comme image (vision native) ou comme texte OCR — voir
+  // LlmProvider.supportsVision et LlmImage dans llm/types.ts. Faux par
+  // défaut : un appelant qui ne le passe pas (les tests existants, avant
+  // cette capacité) garde le comportement OCR d'origine plutôt que de
+  // planter sur un paramètre manquant.
+  supportsVision: boolean = false
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -204,6 +211,7 @@ export async function buildAgentContext(
     recentDocuments: [],
     tasks: [],
     documentContents: [],
+    documentImages: [],
     colleagues: [],
     teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
@@ -382,6 +390,25 @@ export async function buildAgentContext(
         if (!fetched) return;
         const { buffer, contentType } = fetched;
 
+        // Une photo (carte de visite, panneau, véhicule d'entreprise...) part
+        // en vision native quand le fournisseur actif sait la lire — jamais
+        // par l'OCR texte (ocrDocument/Tesseract), conçu pour un texte scanné
+        // à plat. Sur une photo prise en perspective, Tesseract ne produit
+        // pas "un peu moins bon" que la vision : il produit du bruit
+        // incohérent, que le modèle "corrige" ensuite en une donnée plausible
+        // mais fausse, sans jamais avoir vu les pixels réels. Voir LlmImage
+        // dans llm/types.ts.
+        const imageMime = visionMimeType(lowerName);
+        if (imageMime) {
+          if (supportsVision) {
+            ctx.documentImages.push({ id: doc.id, name: doc.name, mimeType: imageMime, data: buffer });
+            return;
+          }
+          // Fournisseur sans vision (ex. Mistral) : reste sur l'OCR texte
+          // classique ci-dessous, dégradé mais honnête — c'est le chemin
+          // isOcrCandidate/ocrDocument existant, inchangé.
+        }
+
         let text: string | null = null;
         let ocrNote = '';
         if (lowerName.endsWith('.pdf')) {
@@ -403,10 +430,28 @@ export async function buildAgentContext(
           return;
         }
 
-        // PDF scanné (aucune couche texte exploitable) ou image : dernier
-        // recours par reconnaissance de caractères. Le résultat remplace le
-        // texte vide, et si l'OCR n'est pas disponible sur ce serveur on
-        // injecte la raison plutôt que rien, pour que l'agent puisse le dire.
+        // PDF scanné (aucune couche texte exploitable) : avec un fournisseur
+        // vision, ses pages rendues en image partent en vision native pour la
+        // même raison que ci-dessus — un PV ou un plan scanné à la va-vite
+        // n'est pas plus "plat" qu'une photo, et mérite la même lecture
+        // directe plutôt qu'un détour par Tesseract.
+        if (lowerName.endsWith('.pdf') && supportsVision && (!text || text.trim().length < OCR_MIN_TEXT_CHARS)) {
+          const pages = await rasterizePdf(buffer, ocrMaxPages()).catch(() => null);
+          if (pages && pages.length > 0) {
+            pages.forEach((page, i) => {
+              ctx.documentImages.push({ id: doc.id, name: `${doc.name} (page ${i + 1})`, mimeType: 'image/png', data: page });
+            });
+            return;
+          }
+          // pdftoppm absent de ce serveur : retombe sur l'OCR texte ci-dessous
+          // plutôt que de laisser le document sans aucun contenu.
+        }
+
+        // PDF scanné sans fournisseur vision, ou image sur un fournisseur
+        // sans vision : dernier recours par reconnaissance de caractères. Le
+        // résultat remplace le texte vide, et si l'OCR n'est pas disponible
+        // sur ce serveur on injecte la raison plutôt que rien, pour que
+        // l'agent puisse le dire.
         if (isOcrCandidate(lowerName, text)) {
           const ocrStart = Date.now();
           const ocr = await ocrDocument(lowerName, buffer).catch((e: any) => {

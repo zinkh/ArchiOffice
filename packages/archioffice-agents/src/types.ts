@@ -351,6 +351,17 @@ export interface AgentContext {
   tasks: { id: string; title: string; status: string; due_date: string; project_id: string }[];
   documentContents: { id: string; name: string; content: string }[];
   /**
+   * Pièces jointes photographiées ou scannées, transmises au modèle comme
+   * de vraies images (vision native) plutôt que comme du texte reconstitué
+   * par OCR — voir buildAgentContext() dans context.ts. Une photo n'est pas
+   * un document scanné à plat : Tesseract (OCR) y produit un texte
+   * incohérent qu'un modèle laissé libre "corrige" en une donnée plausible
+   * mais fausse, jamais confrontée aux pixels réels. Vide quand le
+   * fournisseur actif ne sait pas lire d'image (LlmProvider.supportsVision) ;
+   * ces pièces retombent alors sur l'OCR classique dans documentContents.
+   */
+  documentImages: { id: string; name: string; mimeType: string; data: Buffer }[];
+  /**
    * Les autres agents actifs du cabinet (jamais l'agent lui-même), avec ce
    * qu'ils sont autorisés à écrire — pour qu'un agent sache vers qui
    * rediriger une demande qui n'est pas de son ressort au lieu de

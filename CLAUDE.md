@@ -1022,6 +1022,40 @@ pages en image, `tesseract.js` les reconnaît. Si l'un des deux manque, le
 contenu injecté dit explicitement que le document est scanné et illisible,
 plutôt que de le laisser passer pour vide.
 
+**Une photo n'est pas un document scanné à plat, et ne doit plus passer par
+Tesseract quand le fournisseur actif sait faire mieux.** Jusqu'ici, toute
+pièce jointe sans couche texte — un PDF scanné aussi bien qu'une photo de
+carte de visite ou de véhicule d'entreprise prise en perspective, avec
+reflets et angle de vue — suivait le même chemin OCR. Tesseract, conçu pour
+du texte scanné à plat, produit sur une photo réelle un texte incohérent
+que le modèle « corrige » ensuite en une donnée plausible mais fausse
+(incident constaté : une photo de camionnette d'entreprise de couverture a
+donné lieu à un contact inventé — nom, société et téléphone différents de
+tout ce qui figurait réellement sur le véhicule). Le modèle ne voyait alors
+jamais les pixels de l'image, seulement le bruit OCR.
+
+`LlmProvider.supportsVision` (`llm/types.ts`, vrai pour `gemini.ts` et
+`anthropic.ts`, absent pour `mistral.ts` — aucun modèle du catalogue Mistral
+ne lit d'image) dit si le fournisseur actif sait lire une image jointe au
+message (`LlmMessage.images`, envoyée en vision native — `inlineData` chez
+Gemini, un bloc `image` chez Claude). `buildAgentContext()` (`context.ts`)
+route en conséquence chaque pièce sans couche texte : image directe
+(`.jpg`/`.png`/`.webp`) ou page de PDF scanné rasterisée en PNG partent dans
+`ctx.documentImages` quand `supportsVision` est vrai, jamais par Tesseract ;
+sans fournisseur vision, le chemin OCR d'origine reste inchangé — dégradé,
+mais honnête, plutôt que d'envoyer une image qu'il ignorerait ou refuserait.
+`ctx.documentImages` est distinct de `ctx.documentContents` : ce dernier
+reste du texte injecté dans le prompt système, les images voyagent en pièce
+jointe réelle du message utilisateur (`routes.ts`).
+
+Ça ne suffit pas à éliminer toute erreur de lecture — une photo floue ou mal
+cadrée reste une photo floue ou mal cadrée pour un modèle vision. D'où la
+section IMAGES JOINTES du prompt (`systemPrompts.ts`) : ne rapporter que ce
+qui est clairement lisible, dire explicitement « illisible » pour un champ
+incertain plutôt que de le compléter par la valeur la plus plausible, et ne
+jamais transcrire une donnée qui semblerait cohérente avec le type de
+document sans être individuellement repérable dans l'image.
+
 ### Documents produits par un agent
 
 `server/artifacts.ts` fabrique les fichiers demandés dans un bloc

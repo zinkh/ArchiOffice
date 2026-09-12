@@ -35,7 +35,19 @@ function toAnthropicMessages(messages: LlmMessage[]): any[] {
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      out.push({ role: 'user', content: msg.content });
+      if (!msg.images || msg.images.length === 0) {
+        out.push({ role: 'user', content: msg.content });
+        continue;
+      }
+      // Une image jointe (photo, page scannée) part en bloc `image` natif,
+      // jamais reconstituée en texte au préalable — voir LlmImage dans
+      // types.ts pour pourquoi.
+      const content: any[] = msg.images.map(img => ({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mimeType, data: img.data.toString('base64') },
+      }));
+      if (msg.content) content.push({ type: 'text', text: msg.content });
+      out.push({ role: 'user', content });
       continue;
     }
 
@@ -79,6 +91,7 @@ export function createAnthropicProvider(opts: { apiKey: string; model?: string }
   return {
     id: 'anthropic',
     model,
+    supportsVision: true,
 
     async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {

@@ -27,7 +27,7 @@ function baseContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
     tenantName: 'AAZS', currentDate: '7 septembre 2026', currentUserName: 'Khaldoun',
     projects: [], contacts: [], upcomingMeetings: [], recentDocuments: [], tasks: [],
-    documentContents: [], colleagues: [], teamMembers: [],
+    documentContents: [], documentImages: [], colleagues: [], teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
     ...overrides,
   };

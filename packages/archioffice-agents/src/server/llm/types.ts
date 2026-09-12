@@ -25,8 +25,21 @@ export interface LlmToolResult {
   response: Record<string, unknown>;
 }
 
+/** Une image jointe à un message utilisateur — une photo (carte de visite,
+ *  panneau de chantier, véhicule d'entreprise...), ou une page de document
+ *  scanné rendue en image. Transmise telle quelle au fournisseur qui sait la
+ *  lire (LlmProvider.supportsVision) plutôt que reconstituée en texte par
+ *  OCR : un OCR conçu pour du texte scanné à plat (Tesseract) produit un
+ *  texte incohérent sur une photo prise en perspective, que le modèle
+ *  "corrige" ensuite en une donnée plausible mais inventée — la vision
+ *  native évite ce détour en laissant le modèle lire les pixels lui-même. */
+export interface LlmImage {
+  data: Buffer;
+  mimeType: string;
+}
+
 export type LlmMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: LlmImage[] }
   | {
       role: 'assistant';
       content: string;
@@ -127,6 +140,12 @@ export interface LlmProvider {
   readonly id: string;
   /** Concrete model id this instance calls. */
   readonly model: string;
+  /** Le fournisseur sait-il lire une image jointe (LlmMessage.images) ?
+   *  Absent/false : buildAgentContext() (context.ts) n'attache jamais
+   *  d'image à ce fournisseur et retombe sur l'OCR texte classique pour les
+   *  pièces photographiées — dégradé, mais honnête, plutôt que d'envoyer une
+   *  image qu'il ignorerait silencieusement ou refuserait. */
+  readonly supportsVision?: boolean;
   chat(params: LlmChatParams): Promise<LlmChatResult>;
   /** Transcription d'un enregistrement vocal, quand le fournisseur sait lire
    *  l'audio. Optionnel à dessein : Claude n'accepte aucune entrée audio, et

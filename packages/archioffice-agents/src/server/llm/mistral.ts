@@ -95,6 +95,12 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
   return {
     id: 'mistral',
     model,
+    // Aucun modèle du catalogue (mistral-large/medium/small) ne lit d'image —
+    // seul Pixtral le sait chez Mistral, absent de MODEL_CATALOG. Laisser
+    // `supportsVision` absent (plutôt que de construire un contenu image que
+    // le modèle ignorerait silencieusement) fait retomber buildAgentContext()
+    // sur l'OCR texte classique pour les pièces photographiées, tant qu'un
+    // modèle Pixtral n'est pas ajouté au catalogue.
 
     async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {
