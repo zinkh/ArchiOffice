@@ -2014,10 +2014,38 @@ export default function ProjectDetail() {
                     sous_traitants_facturation: sousTraitants.map((st: any) => ({
                       contact_id: st.contact_id, nom: st.contact_name || st.specialty || '',
                       phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
-                      montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa,
+                      montant_ht: 0, tva_rate: 20, montant_ttc: 0,
+                      payeur: st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence'),
                     })),
                     notes: '',
                   });
+
+                  // Libellé du payeur d'un sous-traitant, pour l'affichage sous son nom
+                  // de colonne : 'agence' (par défaut, rien à afficher), 'moa', ou l'id
+                  // d'un cotraitant du même contrat.
+                  const payeurLabel = (payeur: string | undefined) => {
+                    if (!payeur || payeur === 'agence') return null;
+                    if (payeur === 'moa') return "réglé par le MOA";
+                    const ct = cotraitants.find((c: any) => c.id === payeur);
+                    return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
+                  };
+
+                  // Plafonds de ventilation : le cumul déjà facturé sur les notes
+                  // précédentes du même contrat, par mission et par intervenant — sert à
+                  // ne jamais laisser le total (toutes notes confondues) d'une mission
+                  // dépasser le montant qui lui est alloué.
+                  const contratIdForCaps = contrat?.id || null;
+                  const priorNotesForCaps = notesHonoraires.filter((n: any) => n.contrat_id === contratIdForCaps && n.id !== editingNote?.id);
+                  const cumulAgencePhase = (phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) =>
+                    s + ((n.phases || []).find((p: any) => p.phase_id === phaseId)?.montant_phase || 0), 0);
+                  const cumulCtPhase = (key: string, phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) => {
+                    const ct = (n.cotraitants_facturation || []).find((c: any) => (c.contact_id || c.nom) === key);
+                    return s + ((ct?.phases || []).find((p: any) => p.phase_id === phaseId)?.montant_phase || 0);
+                  }, 0);
+                  const cumulStTotal = (key: string) => priorNotesForCaps.reduce((s: number, n: any) => {
+                    const st = (n.sous_traitants_facturation || []).find((x: any) => (x.contact_id || x.nom) === key);
+                    return s + (st?.montant_ht || 0);
+                  }, 0);
 
                   const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
                   const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
@@ -2191,15 +2219,23 @@ export default function ProjectDetail() {
                               <table className="w-full text-xs border-collapse">
                                 <thead>
                                   <tr className="bg-[var(--tblr-surface-2)]">
-                                    <th className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Mission</th>
-                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>Agence</th>
+                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom">Mission</th>
+                                    <th rowSpan={2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom" colSpan={2}>Agence</th>
+                                    {(noteForm.cotraitants_facturation || []).length > 0 && (
+                                      <th colSpan={(noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Cotraitants</th>
+                                    )}
+                                    {(noteForm.sous_traitants_facturation || []).length > 0 && (
+                                      <th colSpan={(noteForm.sous_traitants_facturation || []).length} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Sous-traitants</th>
+                                    )}
+                                  </tr>
+                                  <tr className="bg-[var(--tblr-surface-2)]">
                                     {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
                                       <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ct.nom || 'Cotraitant'}</th>
                                     ))}
                                     {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
                                       <th key={`st-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">
                                         {st.nom || 'Sous-traitant'}
-                                        {st.paiement_direct_moa && <span className="block text-[9px] font-normal normal-case text-amber-600">paiement direct MOA</span>}
+                                        {payeurLabel(st.payeur) && <span className="block text-[9px] font-normal normal-case text-amber-600">{payeurLabel(st.payeur)}</span>}
                                       </th>
                                     ))}
                                   </tr>
@@ -2210,6 +2246,10 @@ export default function ProjectDetail() {
                                     const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
                                     const montantPhaseBase = honRevises * phasePct / 100;
                                     const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
+                                    // Ce qui reste facturable sur cette mission pour l'agence,
+                                    // toutes notes confondues (le montant de la mission n'est
+                                    // jamais dépassé, même en cumulant plusieurs notes).
+                                    const agenceCap = Math.max(0, montantPhaseBase - cumulAgencePhase(phase.phase_id));
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
                                         <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">{basePhase?.name || phase.phase_name}</td>
@@ -2221,7 +2261,7 @@ export default function ProjectDetail() {
                                               onChange={e => {
                                                 const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
                                                 const newPhases = [...noteForm.phases];
-                                                const mp = montantPhaseBase * pct / 100;
+                                                const mp = Math.min(montantPhaseBase * pct / 100, agenceCap);
                                                 newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
                                                 setNoteForm({ ...noteForm, phases: newPhases });
                                               }} />
@@ -2230,18 +2270,18 @@ export default function ProjectDetail() {
                                         </td>
                                         <td className="p-1">
                                           <div className="flex items-center gap-1">
-                                            <input type="number" min={0}
+                                            <input type="number" min={0} max={agenceCap}
                                               className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
                                               value={phase.montant_phase}
                                               onChange={e => {
                                                 const newPhases = [...noteForm.phases];
-                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(e.target.value) || 0 };
+                                                newPhases[idx] = { ...phase, montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), agenceCap) };
                                                 setNoteForm({ ...noteForm, phases: newPhases });
                                               }} />
                                             {montantAvancement > 0 && phase.montant_phase === 0 ? (
                                               <button type="button" title="Reprendre le montant calculé depuis le %" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
                                                 const newPhases = [...noteForm.phases];
-                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(montantAvancement.toFixed(2)) };
+                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(Math.min(montantAvancement, agenceCap).toFixed(2)) };
                                                 setNoteForm({ ...noteForm, phases: newPhases });
                                               }}>Auto</button>
                                             ) : <span className="text-[var(--tblr-muted)]">€</span>}
@@ -2249,6 +2289,14 @@ export default function ProjectDetail() {
                                         </td>
                                         {(noteForm.cotraitants_facturation || []).map((ct: any, ctIdx: number) => {
                                           const ctPhase = (ct.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
+                                          const ctKey = ct.contact_id || ct.nom;
+                                          // Base de calcul du cotraitant pour cette mission : sa part
+                                          // du contrat (montant_honoraires, déjà = fee_pct × total du
+                                          // contrat) répartie selon le même % par mission que l'agence.
+                                          const ctRecord = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === ctKey);
+                                          const ctPhaseBase = (ctRecord?.montant_honoraires || 0) * phasePct / 100;
+                                          const ctAvancement = ctPhaseBase * (ctPhase.avancement_pct || 0) / 100;
+                                          const ctCap = Math.max(0, ctPhaseBase - cumulCtPhase(ctKey, phase.phase_id));
                                           return (
                                             <React.Fragment key={`ct-${ctIdx}`}>
                                               <td className="p-1 border-l border-[var(--tblr-border)]">
@@ -2256,27 +2304,48 @@ export default function ProjectDetail() {
                                                   <input type="number" min={0} max={100} step={5}
                                                     className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
                                                     value={ctPhase.avancement_pct}
-                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { avancement_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+                                                    onChange={e => {
+                                                      const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+                                                      const mp = Math.min(ctPhaseBase * pct / 100, ctCap);
+                                                      updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) });
+                                                    }} />
                                                   <span className="text-[var(--tblr-muted)]">%</span>
                                                 </div>
                                               </td>
                                               <td className="p-1">
-                                                <input type="number" min={0}
-                                                  className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                                  value={ctPhase.montant_phase}
-                                                  onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(e.target.value) || 0 })} />
+                                                <div className="flex items-center gap-1">
+                                                  <input type="number" min={0} max={ctCap}
+                                                    className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                                    value={ctPhase.montant_phase}
+                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), ctCap) })} />
+                                                  {ctAvancement > 0 && ctPhase.montant_phase === 0 && (
+                                                    <button type="button" title="Reprendre le montant calculé depuis le %" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() =>
+                                                      updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(Math.min(ctAvancement, ctCap).toFixed(2)) })
+                                                    }>Auto</button>
+                                                  )}
+                                                </div>
                                               </td>
                                             </React.Fragment>
                                           );
                                         })}
                                         {(noteForm.sous_traitants_facturation || []).map((st: any, stIdx: number) => {
                                           const stPhase = (st.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
+                                          const stKey = st.contact_id || st.nom;
+                                          // Les sous-traitants n'ont pas de répartition par mission dans
+                                          // le contrat (un seul montant global) : le plafond porte donc
+                                          // sur le montant total du sous-traitant, réparti sur les autres
+                                          // missions déjà saisies dans cette note et le cumul des notes
+                                          // précédentes.
+                                          const stRecord = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === stKey);
+                                          const stTotal = stRecord?.montant || 0;
+                                          const stOtherPhasesSum = (st.phases || []).filter((p: any) => p.phase_id !== phase.phase_id).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                                          const stCap = Math.max(0, stTotal - cumulStTotal(stKey) - stOtherPhasesSum);
                                           return (
                                             <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
-                                              <input type="number" min={0}
+                                              <input type="number" min={0} max={stCap}
                                                 className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
                                                 value={stPhase.montant_phase}
-                                                onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(e.target.value) || 0 })} />
+                                                onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), stCap) })} />
                                             </td>
                                           );
                                         })}
@@ -2305,7 +2374,7 @@ export default function ProjectDetail() {
                                 </tfoot>
                               </table>
                             </div>
-                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Les montants cotraitants et sous-traitants restent hors comptabilité agence : seule la colonne Agence alimente la facture brouillon.</p>
+                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Les montants cotraitants et sous-traitants restent hors comptabilité agence : seule la colonne Agence alimente la facture brouillon. Le montant saisi pour chaque intervenant est plafonné au montant de la mission qui lui revient, en tenant compte de ce qui a déjà été facturé sur les notes précédentes.</p>
                           </div>
 
                           {/* Suivi du pourcentage de facturation */}

@@ -1174,13 +1174,25 @@ export interface ContratCotraitant {
   montant_honoraires?: number;
 }
 
+/**
+ * Qui règle ce sous-traitant : l'agence (comptabilité agence, par défaut),
+ * un cotraitant du même contrat (son `id` dans `ContratMOE.cotraitants`), ou
+ * le maître d'ouvrage directement (`'moa'`, hors comptabilité agence).
+ * Remplace l'ancien booléen `paiement_direct_moa` — un sous-traitant peut
+ * être réglé par n'importe lequel des membres du groupement, pas seulement
+ * l'agence ou le MOA.
+ */
+export type ContratSousTraitantPayeur = 'agence' | 'moa' | string;
+
 export interface ContratSousTraitant {
   id: string;
   contact_id?: string;
   contact_name?: string;
   specialty?: string;
   montant?: number;
-  paiement_direct_moa: boolean;
+  payeur?: ContratSousTraitantPayeur;
+  /** @deprecated remplacé par `payeur` ('moa' vaut pour l'ancien `true`) — conservé en lecture pour les contrats déjà enregistrés. */
+  paiement_direct_moa?: boolean;
 }
 
 export interface ContratMOE {
@@ -1244,7 +1256,10 @@ export interface NoteHonoraireSousTraitant {
   montant_ht: number;
   tva_rate: number;
   montant_ttc: number;
-  paiement_direct_moa: boolean;
+  /** cf. ContratSousTraitantPayeur — reprise depuis le contrat à la création de la note. */
+  payeur?: ContratSousTraitantPayeur;
+  /** @deprecated remplacé par `payeur`. */
+  paiement_direct_moa?: boolean;
 }
 
 // ─── MAF — Déclaration des activités professionnelles ────────────────────────
