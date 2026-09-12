@@ -116,6 +116,14 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // généraliste. À revoir si un -latest change de version sous-jacente
     // sans le redevenir.
     supportsVision: true,
+    // Pas de supportsWebSearch : `web_search`/`web_search_premium` de Mistral
+    // ne fonctionnent qu'avec son API Conversations (/v1/conversations), pas
+    // avec l'endpoint Chat Completions que cet adaptateur appelle — la
+    // réponse de Chat Completions ne porte pas les références de résultat de
+    // recherche que ces tools renvoient (docs.mistral.ai/studio/agents/agent-
+    // tools#websearch). routes.ts n'envoie donc jamais `webSearch: true` à ce
+    // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
+    // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
     async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {

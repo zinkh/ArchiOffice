@@ -18,6 +18,7 @@ function baseAgent(overrides: Partial<AgentRow> = {}): AgentRow {
     context_scopes: [], action_scopes: [],
     web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
     geo_enabled: false, docs_read_enabled: false, delegate_enabled: false, notify_users_enabled: false,
+    web_search_enabled: false,
     is_active: true, is_system_template: false,
     ...overrides,
   };

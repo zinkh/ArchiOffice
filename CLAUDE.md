@@ -621,6 +621,34 @@ sont des noms, pas une donnée métier) donne à l'agent le nom exact à
 reprendre — la mention n'y répond qu'à une correspondance stricte avec
 `profiles.name`.
 
+### Recherche web des agents
+
+`web_search_enabled` (`supabase/migrate_agent_web_search.sql`), une colonne de
+plus sur `agents` réglable depuis `/agents/:id/edit`, off par défaut et jamais
+héritée d'un template (même traitement que `web_fetch_enabled`). Contrairement
+à `fetch_url` ou aux outils cartographiques, ce n'est PAS une déclaration de
+fonction que `buildAgentTools()` ajoute et qu'`executeAgentAction()` exécute :
+c'est le tool NATIF de recherche web du fournisseur IA actif du cabinet —
+`google_search` chez Gemini, `web_search_20250305` chez Claude — exécuté côté
+fournisseur. Ni Gemini ni Claude ne renvoient d'appel d'outil à notre charge
+pour ça ; ils rendent directement une réponse déjà sourcée.
+
+`LlmProvider.supportsWebSearch` (`llm/types.ts`) dit si le fournisseur actif
+sait le faire ; `routes.ts` calcule `webSearchActive = caps.webSearch &&
+!!provider.supportsWebSearch` une fois par requête et le passe à la fois à
+`provider.chat({ ..., webSearch })` et à `buildAgentSystemPrompt()`, pour que
+le prompt ne promette jamais une capacité que le tour n'aura pas.
+
+**Mistral n'est pas de la partie.** `web_search`/`web_search_premium` de
+Mistral n'existent que via son API Conversations (`/v1/conversations`) — sa
+propre documentation précise que Chat Completions, l'endpoint que
+`mistral.ts` appelle, ne les supporte pas : la réponse de Chat Completions ne
+porte pas les références de résultat de recherche que ces tools renvoient.
+`mistral.ts` ne déclare donc pas `supportsWebSearch`, et la capacité reste
+sans effet — dégradé, mais honnête, plutôt qu'un réglage qui échouerait
+silencieusement ou ferait échouer l'appel API — tant qu'un cabinet fait
+tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
+
 ### Bibliothèque d'ouvrages
 
 `/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de

@@ -214,6 +214,15 @@ export interface AgentCapabilities {
    *  mentionnant une personne du cabinet, pour la prévenir sans passer par
    *  la conversation privée entre l'utilisateur et l'agent. */
   notifyUsers: boolean;
+  /** Recherche web en temps réel, via le tool natif du fournisseur IA actif
+   *  (google_search chez Gemini, web_search chez Claude) — jamais une de nos
+   *  propres déclarations de fonction, donc jamais une entrée de
+   *  buildAgentTools()/executeAgentAction() comme les autres capacités
+   *  ci-dessus. Reflète uniquement la colonne : si le cabinet fait tourner
+   *  ses agents sur Mistral, qui ne l'expose pas hors de son API
+   *  Conversations, routes.ts n'active le tool que quand
+   *  LlmProvider.supportsWebSearch est vrai — voir mistral.ts. */
+  webSearch: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -225,6 +234,7 @@ export function capabilitiesFromAgent(agent: {
   docs_read_enabled?: boolean | null;
   delegate_enabled?: boolean | null;
   notify_users_enabled?: boolean | null;
+  web_search_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -237,6 +247,7 @@ export function capabilitiesFromAgent(agent: {
     docsRead: !!agent.docs_read_enabled,
     delegate: !!agent.delegate_enabled,
     notifyUsers: !!agent.notify_users_enabled,
+    webSearch: !!agent.web_search_enabled,
   };
 }
 
@@ -260,6 +271,7 @@ export interface Agent {
   docs_read_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
+  web_search_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -336,6 +348,7 @@ export interface AgentRow {
   docs_read_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
+  web_search_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
