@@ -125,14 +125,22 @@ export async function exportNoteHonorairesToPDF(
     const ay = drawAgencyHeader(doc, settings, annexeLetterhead);
 
     const findPhase = (list: NoteHonorairePhase[] | undefined, phaseId: string) => (list || []).find(p => p.phase_id === phaseId);
+    // Le pourcentage d'un membre du groupement est sa QUOTE-PART du montant de
+    // la mission (`part_pct`), l'avancement étant porté une seule fois par le
+    // groupement. Repli sur `avancement_pct` pour les notes enregistrées avant
+    // cette refonte, où chaque intervenant portait son propre avancement.
+    const pctFor = (p: NoteHonorairePhase) => p.part_pct ?? p.avancement_pct ?? 0;
     const cellFor = (intervenantKey: string, phaseId: string) => {
       if (intervenantKey === '__agence__') {
         const p = findPhase(note.phases, phaseId);
-        return p ? `${p.avancement_pct || 0}% · ${fmt(p.montant_phase)} €` : '—';
+        return p ? `${pctFor(p)}% · ${fmt(p.montant_phase)} €` : '—';
       }
       const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === intervenantKey);
       const p = findPhase(owner?.phases, phaseId);
-      return p ? `${p.avancement_pct || 0}% · ${fmt(p.montant_phase)} €` : '—';
+      if (!p) return '—';
+      // Un sous-traitant n'a pas de quote-part : il est réglé d'un montant.
+      const estSousTraitant = sousTraitants.some(s => (s.contact_id || s.nom) === intervenantKey);
+      return estSousTraitant ? `${fmt(p.montant_phase)} €` : `${pctFor(p)}% · ${fmt(p.montant_phase)} €`;
     };
     const totalFor = (intervenantKey: string) => {
       if (intervenantKey === '__agence__') return note.montant_ht || 0;
@@ -149,27 +157,14 @@ export async function exportNoteHonorairesToPDF(
     }, 0);
     const groupementTotal = (note.montant_ht || 0) + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0) + sousTraitants.reduce((s, st) => s + (st.montant_ht || 0), 0);
 
-    // Montant d'une mission pour tout le groupement, base du pourcentage
-    // affiché dans la colonne « Groupement » — même convention que l'éditeur
-    // (`ProjectDetail.tsx`) : part agence du contrat + part de chaque
-    // cotraitant + part de chaque sous-traitant, celle des sous-traitants
-    // étant répartie au même pourcentage de mission faute de ventilation
-    // propre dans le contrat.
-    const totalContrat = contrat?.mode_honoraires === 'forfait'
-      ? (contrat?.montant_honoraires || 0)
-      : ((contrat?.budget_previsionnel || 0) * (contrat?.taux_honoraires || 0) / 100);
-    const groupementBase = (phaseId: string) => {
-      const pct = (contrat?.missions_list || []).find(m => m.id === phaseId)?.pct || 0;
-      return pct / 100 * (
-        totalContrat
-        + (contrat?.cotraitants || []).reduce((s, c) => s + (c.montant_honoraires || 0), 0)
-        + (contrat?.sous_traitants || []).reduce((s, st) => s + (st.montant || 0), 0)
-      );
-    };
+    // Le pourcentage du groupement est saisi une fois par mission dans la note
+    // (`phases[].avancement_pct`, cf. `NoteHonorairePhase`) : c'est la part de
+    // la mission facturée pour toute l'équipe, que les colonnes de membres se
+    // répartissent ensuite. Rien à recalculer ici.
     const groupementCell = (phaseId: string) => {
       const montant = groupementFor(phaseId);
-      const base = groupementBase(phaseId);
-      return base > 0 ? `${(montant / base * 100).toFixed(1)}% · ${fmt(montant)} €` : `${fmt(montant)} €`;
+      const pct = findPhase(note.phases, phaseId)?.avancement_pct;
+      return pct ? `${pct}% · ${fmt(montant)} €` : `${fmt(montant)} €`;
     };
 
     const body = (note.phases || []).map(phase => [
