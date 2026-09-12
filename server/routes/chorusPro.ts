@@ -7,6 +7,7 @@
 // rather than tenantScopedFrom, matching the other integration modules.
 import type { Express } from 'express';
 import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -167,12 +168,20 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
       if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
 
-      // Fall back to the SIRET already captured on the linked project (Factur-X fields)
-      // so it doesn't need to be re-entered when it's already known there.
+      // Fall back to the SIRET already captured on the linked project (Factur-X fields),
+      // or on the invoice's own Maître d'Ouvrage contact, so it doesn't need to be
+      // re-entered when it's already known there — the contact fallback notably
+      // covers a general/imported invoice, which has no project at all.
       let projectSiret: string | null = null;
-      if (!buyer_siret && !invoice.buyer_siret && invoice.project_id) {
-        const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
-        projectSiret = (project as any)?.client_siret || null;
+      if (!buyer_siret && !invoice.buyer_siret) {
+        if (invoice.project_id) {
+          const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
+          projectSiret = (project as any)?.client_siret || null;
+        }
+        if (!projectSiret) {
+          const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, invoice);
+          projectSiret = client?.siret || null;
+        }
       }
 
       const finalBuyerSiret = buyer_siret || invoice.buyer_siret || projectSiret;

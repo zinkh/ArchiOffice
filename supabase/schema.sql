@@ -306,9 +306,12 @@ CREATE TABLE IF NOT EXISTS invoices (
   -- de invoice_number (le numéro légal séquentiel ci-dessus). phases porte
   -- la ventilation par phase de mission d'un acompte, même forme que
   -- notes_honoraires.phases : [{phase_id, phase_name, avancement_pct, montant_phase}]
-  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]'
+  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]',
+  -- Maître d'Ouvrage de la facture — voir migrate_invoice_client_link.sql.
+  client_id TEXT REFERENCES contacts(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,

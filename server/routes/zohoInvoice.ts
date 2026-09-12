@@ -29,6 +29,79 @@ import {
   mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
   zohoInvoiceToLocalRow,
 } from '../zohoSync';
+import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
+
+/**
+ * A Zoho Invoice contact payload from our own client info — shared by the
+ * per-invoice push (pushInvoiceToZohoInvoice) and the bulk backlog push
+ * (getOrCreateZohoCustomer below), so a customer created either way carries
+ * the same mentions. Zoho Invoice's contact object has no native French
+ * SIRET field, so it's recorded in `notes` — still visible on the contact
+ * record in Zoho, rather than silently dropped.
+ */
+function buildZohoContactPayload(info: ClientContactInfo) {
+  const hasAddress = !!(info.address || info.city || info.zip || info.country);
+  return {
+    contact_name: info.name,
+    company_name: info.name,
+    contact_type: 'customer',
+    email: info.email || undefined,
+    phone: info.phone || undefined,
+    billing_address: hasAddress ? {
+      address: info.address || undefined, city: info.city || undefined,
+      zip: info.zip || undefined, country: info.country || undefined,
+    } : undefined,
+    notes: info.siret ? `SIRET : ${info.siret}` : undefined,
+  };
+}
+
+/** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
+async function fetchZohoContactDetail(apiBase: string, headers: any, contactId: string | undefined): Promise<any | null> {
+  if (!contactId) return null;
+  try {
+    const resp = await axios.get(`${apiBase}/contacts/${contactId}`, { headers, timeout: ZOHO_TIMEOUT_MS });
+    return resp.data?.contact || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Zoho's contact detail has no native SIRET field either (see
+ * buildZohoContactPayload above) — read back from the same `notes`
+ * convention this integration writes on push, so a round trip (push then
+ * pull, or a contact a human typed the SIRET into by hand the same way)
+ * doesn't lose it.
+ */
+function zohoContactToClientInfo(contact: any, fallbackName: string): ClientContactInfo {
+  const addr = contact?.billing_address || {};
+  const notesSiret = typeof contact?.notes === 'string' ? contact.notes.match(/SIRET\s*:\s*(\S+)/i)?.[1] : undefined;
+  return {
+    name: contact?.contact_name || contact?.company_name || fallbackName,
+    email: contact?.email || undefined,
+    phone: contact?.phone || contact?.mobile || undefined,
+    address: addr.address || undefined,
+    city: addr.city || undefined,
+    zip: addr.zip || undefined,
+    country: addr.country || undefined,
+    siret: notesSiret,
+  };
+}
+
+/**
+ * The local contact a pulled Zoho invoice's customer resolves to — matched
+ * or created via resolveOrCreateContactFromExternal. One extra Zoho call
+ * (contact detail), only for a customer this pull hasn't resolved yet.
+ */
+async function resolveZohoCustomerAsLocalContact(
+  apiBase: string, headers: any, supabaseAdmin: any, tenantId: string,
+  customerId: string | undefined, customerName: string | undefined,
+): Promise<string | null> {
+  if (!customerId && !customerName) return null;
+  const detail = await fetchZohoContactDetail(apiBase, headers, customerId);
+  const info = zohoContactToClientInfo(detail, customerName || '');
+  return resolveOrCreateContactFromExternal(supabaseAdmin, tenantId, info);
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -94,7 +167,13 @@ export async function pushInvoiceToZohoInvoice(
     return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
   }
 
-  const customerName = inv.project_name || inv.description || 'Client';
+  // The invoice's Maître d'Ouvrage, resolved from invoices.client_id (or its
+  // project's client) — falls back to the old bare-name behaviour only when
+  // neither the invoice nor its project has a contact at all, so an invoice
+  // that predates client_id (or a general one with no contact chosen) still
+  // pushes rather than failing outright.
+  const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+  const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
   const search = await axios.get(`${apiBase}/contacts`, {
     headers, params: { contact_name: customerName, per_page: ZOHO_PAGE_SIZE }, timeout: ZOHO_TIMEOUT_MS,
   });
@@ -103,7 +182,11 @@ export async function pushInvoiceToZohoInvoice(
   );
   const customerId = match
     ? match.contact_id
-    : (await axios.post(`${apiBase}/contacts`, { contact_name: customerName, contact_type: 'customer' }, { headers, timeout: ZOHO_TIMEOUT_MS })).data.contact.contact_id;
+    : (await axios.post(
+        `${apiBase}/contacts`,
+        buildZohoContactPayload(clientInfo || { name: customerName }),
+        { headers, timeout: ZOHO_TIMEOUT_MS },
+      )).data.contact.contact_id;
 
   const payload: any = {
     customer_id: customerId,
@@ -159,18 +242,18 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     return access_token;
   }
 
-  async function getOrCreateZohoCustomer(apiBase: string, headers: any, name: string): Promise<string> {
+  async function getOrCreateZohoCustomer(apiBase: string, headers: any, info: ClientContactInfo): Promise<string> {
     // contact_name_contains matched substrings, so an invoice for "Dupont" bound
     // itself to an existing "Dupont-Martin" — the wrong client, silently, and
     // permanently once the invoice carried that contact_id. Ask Zoho for the
     // exact name and verify it, since contact_name is what we'd create anyway.
     const search = await axios.get(`${apiBase}/contacts`, {
       headers,
-      params: { contact_name: name, per_page: ZOHO_PAGE_SIZE },
+      params: { contact_name: info.name, per_page: ZOHO_PAGE_SIZE },
       timeout: ZOHO_TIMEOUT_MS,
     });
     const match = (search.data.contacts || []).find(
-      (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === name.trim(),
+      (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === info.name.trim(),
     );
     if (match) return match.contact_id;
 
@@ -178,10 +261,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     // meant a transient Zoho error created a duplicate contact every time it
     // happened. Letting it throw fails this one invoice and leaves the next
     // sync able to find the contact that already exists.
-    const create = await axios.post(`${apiBase}/contacts`, {
-      contact_name: name,
-      contact_type: 'customer'
-    }, { headers, timeout: ZOHO_TIMEOUT_MS });
+    const create = await axios.post(`${apiBase}/contacts`, buildZohoContactPayload(info), { headers, timeout: ZOHO_TIMEOUT_MS });
     return create.data.contact.contact_id;
   }
 
@@ -354,8 +434,9 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
 
       for (const inv of toPush) {
         try {
-          const customerName = inv.project_name || inv.description || 'Client';
-          const customerId = await getOrCreateZohoCustomer(apiBase, headers, customerName);
+          const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+          const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+          const customerId = await getOrCreateZohoCustomer(apiBase, headers, clientInfo || { name: customerName });
 
           const payload: any = {
             customer_id: customerId,
@@ -414,8 +495,17 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             // skip these (`continue`), so nothing already sitting in Zoho at
             // connection time ever showed up in ArchiOffice — only invoices
             // pushed FROM here and then re-pulled came back with status updates.
+            //
+            // The customer isn't just a name here: without a matching or new
+            // local contact, an imported invoice would carry no Maître
+            // d'Ouvrage identity at all — no SIRET, address or phone, and no
+            // way to attach one short of typing it by hand. One extra call
+            // per genuinely new customer (never per invoice already known)
+            // fetches the full Zoho contact so the local one is created with
+            // real legal details instead of a bare name.
+            const clientId = await resolveZohoCustomerAsLocalContact(apiBase, headers, supabaseAdmin, tenantId, zohoInv.customer_id, zohoInv.customer_name);
             const { error: importErr } = await supabaseAdmin
-              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId, clientId));
             if (importErr) {
               console.error("[POST /api/zoho/sync] import", importErr);
               errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);

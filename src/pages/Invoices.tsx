@@ -4,12 +4,14 @@ import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
-import type { Invoice, InvoicePhase, Project } from '../types';
+import type { Invoice, InvoicePhase, Project, Contact } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { isClientContact } from '../lib/contactCategories';
 
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
@@ -54,6 +56,23 @@ function chorusProStatusLabel(status: string): { label: string; style: React.CSS
 // Invoices created before the multi-phase model only have a single
 // mission_id/mission_name/advancement_pct — synthesize a one-entry phases
 // list from them so read-only displays don't need two code paths.
+// Ligne d'adresse + mentions légales d'un contact, pour l'affichage sous le
+// sélecteur de Maître d'Ouvrage — mêmes champs que le serveur agrège dans
+// `invoice.client` (server/invoiceClientContact.ts), lus directement ici sur
+// le contact déjà chargé plutôt que sur la facture, pour refléter tout de
+// suite un changement de sélection avant même l'enregistrement.
+function contactLegalLines(c: Contact): string[] {
+  const name = c.company_name || `${c.first_name} ${c.last_name}`.trim();
+  const address = c.address || c.address_work_street;
+  const city = [c.zip || c.address_work_zip, c.city || c.address_work_city].filter(Boolean).join(' ');
+  const lines = [name];
+  if (address || city) lines.push([address, city].filter(Boolean).join(', '));
+  if (c.siret) lines.push(`SIRET : ${c.siret}`);
+  if (c.phone) lines.push(`Tél : ${c.phone}`);
+  if (c.email) lines.push(c.email);
+  return lines;
+}
+
 function getEffectivePhases(invoice: Invoice): InvoicePhase[] {
   if (invoice.phases && invoice.phases.length > 0) return invoice.phases;
   if (invoice.mission_id) {
@@ -178,6 +197,7 @@ export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [currency, setCurrency] = useState('EUR');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
@@ -217,9 +237,10 @@ export default function Invoices() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [invoicesData, projectsData, settingsData] = await Promise.all([
+        const [invoicesData, projectsData, contactsData, settingsData] = await Promise.all([
           fetchJson<Invoice[]>('/api/invoices'),
           fetchJson<Project[]>('/api/projects'),
+          fetchJson<Contact[]>('/api/contacts'),
           fetchJson<any>('/api/settings')
         ]);
         const enrichedInvoices = invoicesData.map(inv => ({
@@ -228,6 +249,7 @@ export default function Invoices() {
         }));
         setInvoices(enrichedInvoices);
         setProjects(projectsData);
+        setContacts(contactsData);
         if (settingsData?.currency) setCurrency(settingsData.currency);
       } catch (err) {
         console.error('Invoices data fetch failed:', err);
@@ -1212,6 +1234,40 @@ export default function Invoices() {
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Maître d'Ouvrage — always editable, same rationale as the
+                    project select just above: correcting who a document is
+                    attached to isn't part of the legal content already sent,
+                    and it's exactly what lets a Zoho/Odoo-created placeholder
+                    contact (name only, no SIRET/address/phone) be fixed
+                    after the fact. Independent of project_id: a general
+                    invoice or one imported from a connector has no project
+                    at all, but still needs a Maître d'Ouvrage to be a valid
+                    French invoice. */}
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_client_label')}</label>
+                  <ContactAutocomplete
+                    contacts={contacts.filter(isClientContact)}
+                    value={editForm.client_id || ''}
+                    onChange={id => setEditForm({ ...editForm, client_id: id || null })}
+                    placeholder={t('invoices_select_client')}
+                  />
+                  {(() => {
+                    const client = contacts.find(c => c.id === editForm.client_id);
+                    if (client) {
+                      return (
+                        <div className="mt-2 text-xs space-y-0.5 p-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          {contactLegalLines(client).map((line, i) => <p key={i}>{line}</p>)}
+                        </div>
+                      );
+                    }
+                    return (
+                      <p className="mt-1 text-xs flex items-center gap-1" style={{ color: '#e67700' }}>
+                        <IconInfoCircle size={12} className="shrink-0" />{t('invoices_no_client_warning')}
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 {/* Invoice type toggle — always editable: recategorizing an

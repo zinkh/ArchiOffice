@@ -81,6 +81,23 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
   const { net, vat, gross } = calculateTotals();
 
+  // The Maître d'Ouvrage this invoice is billed to — `data.client` is joined
+  // server-side from invoices.client_id (see GET /api/invoices/:id in
+  // server/routes/invoices.ts) and takes priority over the project's own
+  // client_siret/address, which used to be the ONLY source here (and only
+  // for the visual preview — the Factur-X XML/JSON export below didn't read
+  // even that much, so a generated invoice never carried the buyer's SIRET
+  // or VAT number at all, regardless of what the project knew).
+  const buyer = {
+    name: data.client?.name || project?.client || 'Client',
+    address: data.client
+      ? [data.client.address, [data.client.zip, data.client.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+      : (project?.address || ''),
+    siret: data.client?.siret || project?.client_siret || undefined,
+    vatNumber: data.client?.vat_number || undefined,
+    email: data.client?.email || undefined,
+  };
+
   const generateFacturXXML = () => buildFacturXCiiXml({
     invoiceNumber: data.invoice_number || '',
     invoiceType: data.invoice_type,
@@ -101,10 +118,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       vatNumber: data.seller_vat_number,
       iban: data.seller_iban,
     },
-    buyer: {
-      name: project?.client || '',
-      address: project?.address,
-    },
+    buyer,
   });
 
   const handleSave = async () => {
@@ -323,9 +337,10 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                   <div>
                     <h3 className="text-[8pt] font-bold uppercase text-zinc-400 mb-2">Destinataire</h3>
                     <div className="text-[9pt]">
-                      <p className="font-bold">{project?.client || 'Client'}</p>
-                      <p>{project?.address || 'Adresse non renseignée'}</p>
-                      {project?.client_siret && <p>SIRET : {project.client_siret}</p>}
+                      <p className="font-bold">{buyer.name}</p>
+                      <p>{buyer.address || 'Adresse non renseignée'}</p>
+                      {buyer.siret && <p>SIRET : {buyer.siret}</p>}
+                      {buyer.vatNumber && <p>TVA : {buyer.vatNumber}</p>}
                     </div>
                   </div>
                 </div>

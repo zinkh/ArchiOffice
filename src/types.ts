@@ -910,6 +910,24 @@ export interface Invoice {
   // server/zohoSync.ts) until it's attached to one from the edit modal.
   project_id: string | null;
   project_name?: string;
+  // Le Maître d'Ouvrage de la facture — indépendant de project_id (une
+  // facture générale ou importée d'un connecteur comptable n'a pas de
+  // projet). Rempli depuis projects.client_id à la création quand les deux
+  // existent, toujours modifiable ensuite (voir invoices.client_id).
+  client_id?: string | null;
+  // Lecture seule, jointe par GET /api/invoices/:id à des fins d'affichage —
+  // jamais envoyée sur un POST/PUT (voir server/routes/invoices.ts).
+  client?: {
+    name: string;
+    siret?: string | null;
+    vat_number?: string | null;
+    address?: string | null;
+    city?: string | null;
+    zip?: string | null;
+    country?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
   amount: number;
   tax_amount?: number;
   total_amount?: number;

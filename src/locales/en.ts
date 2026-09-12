@@ -584,6 +584,9 @@ export default {
       "invoices_edit_locked_banner": "This invoice has already been sent to the client: the amount, description, due date and legal details can no longer be changed. The status, invoice type and linked project can still be updated.",
       "invoices_edit_error": "Failed to update the invoice.",
       "invoices_no_project_option": "No project (general invoice)",
+      "invoices_client_label": "Client (bill to)",
+      "invoices_select_client": "Select a contact",
+      "invoices_no_client_warning": "No client linked — the invoice is missing the buyer's legal details (registration number, address, phone).",
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",

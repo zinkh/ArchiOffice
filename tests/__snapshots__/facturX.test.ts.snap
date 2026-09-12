@@ -5,6 +5,7 @@ exports[`buildEnInvoiceData > standard invoice — matches the golden fixture 1`
   "buyer": {
     "name": "Client Dupont",
     "postal_address": {
+      "address_line1": "5 avenue Foch, 75116 Paris",
       "country_code": "FR",
     },
   },

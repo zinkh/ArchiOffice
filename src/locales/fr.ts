@@ -586,6 +586,9 @@ export default {
       "invoices_edit_locked_banner": "Cette facture a déjà été envoyée au client : le montant, la description, la date d'échéance et les mentions légales ne peuvent plus être modifiés. Le statut, le type de facture et le rattachement à un projet restent modifiables.",
       "invoices_edit_error": "Échec de la modification de la facture.",
       "invoices_no_project_option": "Aucun projet (facture générale)",
+      "invoices_client_label": "Maître d'Ouvrage",
+      "invoices_select_client": "Sélectionner un contact",
+      "invoices_no_client_warning": "Aucun Maître d'Ouvrage rattaché — la facture ne porte pas les mentions légales du client (SIRET, adresse, téléphone).",
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",

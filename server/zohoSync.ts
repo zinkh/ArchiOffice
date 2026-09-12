@@ -128,8 +128,13 @@ export async function localInvoicesByZohoId(
  * reference that already exists and break the sequential numbering the local
  * series guarantees. project_id stays null — Zoho has a customer, not one of
  * our projects, and guessing the link would be worse than leaving it unset.
+ * client_id, unlike project_id, IS resolved (see the `clientId` param):
+ * unlike a project, a Zoho customer maps onto exactly the same kind of
+ * entity as a `contacts` row, so there's a real match/create to attempt
+ * rather than a guess to avoid — see resolveOrCreateContactFromExternal in
+ * server/invoiceClientContact.ts.
  */
-export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string): Record<string, unknown> {
+export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string, clientId: string | null = null): Record<string, unknown> {
   const total = Number(zohoInv?.total ?? 0);
   const untaxed = zohoInv?.sub_total != null ? Number(zohoInv.sub_total) : null;
   const tax = zohoInv?.tax_total != null
@@ -142,6 +147,13 @@ export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string): Record<st
     zoho_invoice_id: zohoInv.invoice_id,
     invoice_number: zohoInv.invoice_number || null,
     project_id: null,
+    // The Maître d'Ouvrage this invoice is billed to — resolved by the
+    // caller (server/routes/zohoInvoice.ts, zohoBooks.ts) via
+    // resolveOrCreateContactFromExternal before this row is built, since
+    // that resolution needs DB round trips this pure mapping function
+    // shouldn't make. Still null when the caller couldn't identify a
+    // customer at all (no name and no email on the Zoho side).
+    client_id: clientId,
     amount: untaxed ?? total,
     tax_amount: tax,
     total_amount: total,
