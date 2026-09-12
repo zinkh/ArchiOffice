@@ -404,18 +404,67 @@ plutôt que de mener à une route `/projects/undefined`.
 
 **Colonne « Groupement » en deux parties** dans la ventilation d'une note
 d'honoraires : le pourcentage de la mission facturé par l'ensemble de l'équipe
-dans cette note, puis son montant. Sa base (`groupementPhaseBase`) additionne
-la part agence, celle de chaque cotraitant et celle de chaque sous-traitant ;
-les sous-traitants ne portant qu'un montant global dans le contrat, leur part
-y est répartie au même pourcentage de mission que les autres — une hypothèse
-d'AFFICHAGE, jamais un plafond, la saisie d'un sous-traitant restant plafonnée
-à son montant global (`stCap`). L'agence et les cotraitants passent sous une
+dans cette note, puis son montant. L'agence et les cotraitants passent sous une
 entête commune « Mandataire et cotraitants » (« Mandataire » seul s'il n'y a
 pas de cotraitant) : ce sont les titulaires du marché de maîtrise d'œuvre, par
 opposition aux sous-traitants regroupés à leur droite. L'export PDF
 (`src/lib/noteHonorairesExport.ts`) rend le même pourcentage dans sa cellule
 Groupement, au format « % · € » déjà utilisé par les colonnes d'intervenants,
 plutôt qu'en ajoutant une colonne à un tableau déjà large.
+
+### L'avancement se saisit une fois, au niveau du groupement
+
+Le tableau de ventilation d'une note faisait saisir un avancement PAR
+intervenant, et en déduisait le total du groupement par addition. C'était le
+bon calcul pour personne : une mission s'avance pour toute l'équipe (« sur
+cette note je facture 100 % de l'esquisse et 50 % de l'APS »), et ce qui
+distingue les membres n'est pas leur avancement mais leur QUOTE-PART de ce
+montant (l'agence 60 % de l'esquisse, un cotraitant 40 %).
+
+Trois valeurs seulement sont désormais saisies, tout le reste en découle :
+
+| Saisi | Où | Champ |
+|---|---|---|
+| Avancement de la mission pour tout le groupement | colonne Groupement | `NoteHonorairePhase.avancement_pct` sur `note.phases` |
+| Quote-part d'un membre dans ce montant | colonne du membre | `NoteHonorairePhase.part_pct` (nouveau) |
+| Montant réglé à un sous-traitant | colonne du sous-traitant | `montant_phase` |
+
+`recalcNote()` (`src/pages/ProjectDetail.tsx`) recalcule TOUTE la note à chaque
+frappe plutôt que la cellule touchée : changer l'avancement du groupement
+déplace les montants de tous les membres de la ligne, et un montant de
+sous-traitant change la part nette de celui qui le règle — un recalcul local
+serait faux dans les deux cas. `montant_phase` d'un membre n'est donc plus
+saisissable : c'est `montant groupement × part_pct / 100`, moins ce que ce
+membre règle à ses sous-traitants sur cette mission (`payeur`, cf. plus haut).
+Un sous-traitant réglé directement par le maître d'ouvrage (`'moa'`) ne se
+déduit de personne. Le total facturé par le groupement, lui, ne change pas
+quand un sous-traitant apparaît : seule la ventilation change.
+
+Deux conséquences à ne pas défaire :
+
+1. **`groupementPhaseBase()` n'additionne plus les parts des cotraitants.**
+   C'est `honRevises × pct de mission / 100` — les honoraires révisés étant le
+   montant du contrat pour toute l'équipe (cf. section précédente), la part
+   d'un cotraitant en est une FRACTION et l'y ajouter comptait deux fois le
+   même argent. Les plafonds par intervenant (`agenceCap`/`ctCap`) disparaissent
+   avec ce changement : une part est bornée par le montant groupement lui-même.
+   Le plafond qui reste est en pourcentage (`cumulGroupementPct`, 100 % d'une
+   mission toutes notes confondues) plus celui du montant global d'un
+   sous-traitant (`stCap`).
+2. **Une note enregistrée avant ce changement est migrée à l'ouverture**
+   (`noteFormFromSaved`), jamais recalculée telle quelle : sans `part_pct`, un
+   recalcul direct ramènerait tous ses montants à zéro. Les valeurs saisissables
+   du nouveau modèle sont reconstruites depuis les montants déjà enregistrés
+   (l'avancement du groupement depuis le montant total de la mission, la
+   quote-part d'un membre depuis son montant brut = net + ses sous-traitants),
+   de sorte que la note rouvre sur exactement les mêmes montants. Aucune
+   migration SQL : `phases` est du jsonb.
+
+Les parts d'une mission doivent totaliser 100 % ; l'écart est signalé sous le
+montant groupement (« répartition : 80 % ») plutôt que redistribué d'office, et
+un bouton « Répartir » remet la ligne sur la répartition du contrat
+(`fee_pct` par cotraitant, le solde à l'agence) — qui sert aussi de valeur par
+défaut à la création d'une note.
 
 ### Invitation d'un nouveau membre d'équipe
 

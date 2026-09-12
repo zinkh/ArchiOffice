@@ -2032,16 +2032,25 @@ export default function ProjectDetail() {
                   const sousTraitants: any[] = contrat?.sous_traitants || [];
                   const phases = contrat?.missions_list?.filter((m: any) => m.incluse).map((m: any) => ({ id: m.id, name: m.name })) ?? DEFAULT_PHASES;
 
+                  // Parts de répartition par défaut, reprises du contrat : chaque
+                  // cotraitant a la part qui lui est contractuellement due
+                  // (`fee_pct`), l'agence le solde. C'est la répartition la plus
+                  // probable d'une mission, à ajuster mission par mission dans la
+                  // note (une esquisse peut pencher davantage vers l'agence que le
+                  // contrat dans son ensemble).
+                  const partCotraitantDefaut = (ct: any) => Number(ct?.fee_pct) || 0;
+                  const partAgenceDefaut = Math.max(0, 100 - cotraitants.reduce((s: number, ct: any) => s + partCotraitantDefaut(ct), 0));
+
                   const initNoteForm = () => ({
                     numero: `NH-${String(notesHonoraires.length + 1).padStart(2, '0')}`,
                     date: new Date().toISOString().split('T')[0],
                     objet: '',
                     status: 'Brouillon',
                     tva_rate: 20,
-                    phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                    phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0, part_pct: partAgenceDefaut })),
                     cotraitants_facturation: cotraitants.map((ct: any) => ({
                       contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '',
-                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0, part_pct: partCotraitantDefaut(ct) })),
                       montant_ht: 0, tva_rate: 20, montant_ttc: 0,
                     })),
                     sous_traitants_facturation: sousTraitants.map((st: any) => ({
@@ -2088,67 +2097,211 @@ export default function ProjectDetail() {
                   };
 
                   // Plafonds de ventilation : le cumul déjà facturé sur les notes
-                  // précédentes du même contrat, par mission et par intervenant — sert à
-                  // ne jamais laisser le total (toutes notes confondues) d'une mission
-                  // dépasser le montant qui lui est alloué.
+                  // précédentes du même contrat — ne jamais laisser le total, toutes
+                  // notes confondues, dépasser ce qui est dû.
                   const contratIdForCaps = contrat?.id || null;
                   const priorNotesForCaps = notesHonoraires.filter((n: any) => n.contrat_id === contratIdForCaps && n.id !== editingNote?.id);
-                  const cumulAgencePhase = (phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) =>
-                    s + ((n.phases || []).find((p: any) => p.phase_id === phaseId)?.montant_phase || 0), 0);
-                  const cumulCtPhase = (key: string, phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) => {
-                    const ct = (n.cotraitants_facturation || []).find((c: any) => (c.contact_id || c.nom) === key);
-                    return s + ((ct?.phases || []).find((p: any) => p.phase_id === phaseId)?.montant_phase || 0);
-                  }, 0);
+                  // L'avancement se cumule en POURCENTAGE et non en montant : c'est
+                  // le groupement qui porte l'avancement d'une mission, et une
+                  // mission ne peut pas être facturée au-delà de 100 %.
+                  const cumulGroupementPct = (phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) =>
+                    s + (Number((n.phases || []).find((p: any) => p.phase_id === phaseId)?.avancement_pct) || 0), 0);
                   const cumulStTotal = (key: string) => priorNotesForCaps.reduce((s: number, n: any) => {
                     const st = (n.sous_traitants_facturation || []).find((x: any) => (x.contact_id || x.nom) === key);
                     return s + (st?.montant_ht || 0);
                   }, 0);
 
-                  // Montant d'une mission pour TOUT le groupement, base du
-                  // pourcentage affiché dans la colonne « Groupement » : la part
-                  // agence + celle de chaque cotraitant + celle de chaque
-                  // sous-traitant. Les sous-traitants ne portant qu'un montant
-                  // global dans le contrat (aucune ventilation par mission), leur
-                  // part est ici répartie au même pourcentage de mission que les
-                  // autres — une hypothèse d'affichage, pas un plafond : le
-                  // plafond de saisie d'un sous-traitant reste son montant global
-                  // (cf. `stCap` plus bas).
+                  // Montant total d'une mission pour TOUT le groupement : le
+                  // pourcentage de mission du contrat appliqué aux honoraires
+                  // révisés, qui sont eux-mêmes le montant du contrat pour
+                  // l'ensemble de l'équipe. C'est ce montant que la répartition
+                  // par membre découpe ensuite — il n'additionne donc PAS les
+                  // parts des cotraitants, qui en sont des fractions et non des
+                  // suppléments.
                   const groupementPhaseBase = (phaseId: string) => {
                     const pct = (contrat?.missions_list || []).find((m: any) => m.id === phaseId)?.pct || 0;
-                    return (honRevises * pct / 100)
-                      + cotraitants.reduce((s: number, c: any) => s + (Number(c.montant_honoraires) || 0) * pct / 100, 0)
-                      + sousTraitants.reduce((s: number, st: any) => s + (Number(st.montant) || 0) * pct / 100, 0);
+                    return honRevises * pct / 100;
+                  };
+
+                  // Identifiant contractuel d'un cotraitant de la note — c'est cet
+                  // `id` que `ContratSousTraitant.payeur` désigne, et donc lui qui
+                  // relie un sous-traitant au membre dont le montant se réduit.
+                  const ctContratId = (ct: any) => cotraitants.find((c: any) =>
+                    (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom))?.id;
+
+                  /**
+                   * Recalcule tous les montants dérivés de la note, mission par
+                   * mission : seuls trois champs sont réellement saisis — le
+                   * pourcentage d'avancement du groupement, la quote-part de chaque
+                   * membre, et le montant de chaque sous-traitant. Tout le reste en
+                   * découle, d'où un recalcul global plutôt qu'une retouche cellule
+                   * par cellule : changer l'avancement du groupement déplace les
+                   * montants de tous les membres de la ligne.
+                   */
+                  const recalcNote = (form: any) => {
+                    // Les objets `phases` sont recopiés et non seulement leurs
+                    // tableaux : `montant_phase` y est réécrit, et ces objets sont
+                    // partagés avec l'état précédent du formulaire.
+                    const cts = (form.cotraitants_facturation || []).map((ct: any) => ({ ...ct, phases: (ct.phases || []).map((p: any) => ({ ...p })) }));
+                    const sts = (form.sous_traitants_facturation || []).map((st: any) => ({ ...st, phases: (st.phases || []).map((p: any) => ({ ...p })) }));
+                    const phaseOf = (list: any[], phaseId: string) => list.find((p: any) => p.phase_id === phaseId);
+
+                    const nextPhases = (form.phases || []).map((phase: any) => {
+                      const montantGroupement = groupementPhaseBase(phase.phase_id) * (Number(phase.avancement_pct) || 0) / 100;
+                      // Ce qu'un membre règle à ses sous-traitants sur cette mission
+                      // sort de sa propre part : le groupement facture le même total,
+                      // seule sa ventilation change. Un sous-traitant réglé
+                      // directement par le maître d'ouvrage ne se déduit de personne.
+                      const stPayePar = (payeurKey: string) => sts.reduce((s: number, st: any) => {
+                        const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+                        if (payeur !== payeurKey) return s;
+                        return s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0);
+                      }, 0);
+
+                      cts.forEach((ct: any) => {
+                        const p = phaseOf(ct.phases, phase.phase_id);
+                        if (!p) return;
+                        const brut = montantGroupement * (Number(p.part_pct) || 0) / 100;
+                        p.montant_phase = parseFloat(Math.max(0, brut - stPayePar(ctContratId(ct) || '')).toFixed(2));
+                      });
+
+                      const brutAgence = montantGroupement * (Number(phase.part_pct) || 0) / 100;
+                      return { ...phase, montant_phase: parseFloat(Math.max(0, brutAgence - stPayePar('agence')).toFixed(2)) };
+                    });
+
+                    const totaux = (intervenant: any) => {
+                      const montant_ht = parseFloat((intervenant.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0).toFixed(2));
+                      return {
+                        ...intervenant,
+                        montant_ht,
+                        montant_ttc: parseFloat((montant_ht * (1 + (intervenant.tva_rate || 20) / 100)).toFixed(2)),
+                      };
+                    };
+
+                    return {
+                      ...form,
+                      phases: nextPhases,
+                      cotraitants_facturation: cts.map(totaux),
+                      sous_traitants_facturation: sts.map(totaux),
+                    };
                   };
 
                   const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
                   const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
 
-                  // Ventilation par mission d'un cotraitant/sous-traitant : trouve (ou
-                  // crée à la volée) l'entrée de la mission dans son tableau `phases`
-                  // et recalcule son total HT/TTC — même principe que la ventilation
-                  // agence, mais un niveau plus bas (par intervenant).
+                  // Saisie d'une cellule d'intervenant : pose la valeur saisie
+                  // (`part_pct` pour un cotraitant, `montant_phase` pour un
+                  // sous-traitant) puis laisse `recalcNote` refaire tous les
+                  // montants dérivés — un montant de sous-traitant change la part
+                  // nette de celui qui le règle, donc un recalcul local ne suffit
+                  // pas.
                   const updateIntervenantPhase = (
                     group: 'cotraitants_facturation' | 'sous_traitants_facturation',
                     intervenantIdx: number,
                     phaseId: string,
                     phaseName: string,
-                    patch: Partial<{ avancement_pct: number; montant_phase: number }>,
+                    patch: Partial<{ part_pct: number; montant_phase: number }>,
                   ) => {
                     const list = [...(noteForm[group] || [])];
                     const intervenant = { ...list[intervenantIdx] };
                     const phasesArr = [...(intervenant.phases || [])];
                     let pIdx = phasesArr.findIndex((p: any) => p.phase_id === phaseId);
                     if (pIdx === -1) {
-                      phasesArr.push({ phase_id: phaseId, phase_name: phaseName, avancement_pct: 0, montant_phase: 0 });
+                      phasesArr.push({ phase_id: phaseId, phase_name: phaseName, avancement_pct: 0, montant_phase: 0, part_pct: 0 });
                       pIdx = phasesArr.length - 1;
                     }
                     phasesArr[pIdx] = { ...phasesArr[pIdx], ...patch };
-                    const montant_ht = phasesArr.reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
                     intervenant.phases = phasesArr;
-                    intervenant.montant_ht = montant_ht;
-                    intervenant.montant_ttc = parseFloat((montant_ht * (1 + (intervenant.tva_rate || 20) / 100)).toFixed(2));
                     list[intervenantIdx] = intervenant;
-                    setNoteForm({ ...noteForm, [group]: list });
+                    setNoteForm(recalcNote({ ...noteForm, [group]: list }));
+                  };
+
+                  /**
+                   * Ouverture d'une note enregistrée AVANT cette refonte : chaque
+                   * intervenant y portait son propre avancement et aucun
+                   * `part_pct`, donc un recalcul direct ramènerait tous ses
+                   * montants à zéro. On reconstruit ici les valeurs saisissables
+                   * du nouveau modèle à partir des montants déjà enregistrés —
+                   * l'avancement du groupement depuis le montant total de la
+                   * mission, et la quote-part de chaque membre depuis son montant
+                   * brut (son montant net plus ce qu'il règle à ses
+                   * sous-traitants) — de sorte que la note rouvre sur exactement
+                   * les mêmes montants qu'à son enregistrement.
+                   */
+                  const noteFormFromSaved = (note: any) => {
+                    // Copie en profondeur des `phases` : on y écrit les `part_pct`
+                    // reconstruits, et les objets de la note enregistrée sont
+                    // partagés avec la liste affichée (`notesHonoraires`).
+                    const copiePhases = (list: any[]) => (list || []).map((p: any) => ({ ...p }));
+                    const form = {
+                      ...note,
+                      phases: copiePhases(note.phases),
+                      cotraitants_facturation: (note.cotraitants_facturation || []).map((ct: any) => ({ ...ct, phases: copiePhases(ct.phases) })),
+                      sous_traitants_facturation: (note.sous_traitants_facturation || []).map((st: any) => ({ ...st, phases: copiePhases(st.phases) })),
+                    };
+                    const dejaMigree = (form.phases || []).every((p: any) => p.part_pct != null);
+                    if (dejaMigree) return recalcNote(form);
+
+                    const phaseOf = (list: any[], phaseId: string) => (list || []).find((p: any) => p.phase_id === phaseId);
+                    form.phases = (form.phases || []).map((phase: any) => {
+                      const stPayePar = (payeurKey: string) => form.sous_traitants_facturation.reduce((s: number, st: any) => {
+                        const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+                        if (payeur !== payeurKey) return s;
+                        return s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0);
+                      }, 0);
+                      const montantGroupement = (Number(phase.montant_phase) || 0)
+                        + form.cotraitants_facturation.reduce((s: number, ct: any) => s + (Number(phaseOf(ct.phases, phase.phase_id)?.montant_phase) || 0), 0)
+                        + form.sous_traitants_facturation.reduce((s: number, st: any) => s + (Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0), 0);
+                      const part = (montantNet: number, deduction: number) =>
+                        montantGroupement > 0 ? parseFloat(((montantNet + deduction) / montantGroupement * 100).toFixed(4)) : 0;
+
+                      form.cotraitants_facturation.forEach((ct: any) => {
+                        const p = phaseOf(ct.phases, phase.phase_id);
+                        if (!p) return;
+                        p.part_pct = part(Number(p.montant_phase) || 0, stPayePar(ctContratId(ct) || ''));
+                      });
+
+                      const base = groupementPhaseBase(phase.phase_id);
+                      return {
+                        ...phase,
+                        avancement_pct: base > 0 ? parseFloat((montantGroupement / base * 100).toFixed(4)) : 0,
+                        part_pct: part(Number(phase.montant_phase) || 0, stPayePar('agence')),
+                      };
+                    });
+                    return recalcNote(form);
+                  };
+
+                  // Avancement du groupement sur une mission — la seule valeur
+                  // d'avancement saisie de toute la note.
+                  const updateGroupementPct = (phaseIdx: number, pct: number) => {
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], avancement_pct: pct };
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases }));
+                  };
+
+                  // Quote-part de l'agence sur une mission (les parts des
+                  // cotraitants passent, elles, par `updateIntervenantPhase`).
+                  const updatePartAgence = (phaseIdx: number, part: number) => {
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], part_pct: part };
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases }));
+                  };
+
+                  // Remet la répartition d'une mission sur celle du contrat :
+                  // chaque cotraitant à sa part contractuelle, l'agence au solde.
+                  const resetRepartition = (phaseIdx: number) => {
+                    const phaseId = (noteForm.phases || [])[phaseIdx]?.phase_id;
+                    if (!phaseId) return;
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], part_pct: partAgenceDefaut };
+                    const cts = (noteForm.cotraitants_facturation || []).map((ct: any) => {
+                      const rec = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom));
+                      return {
+                        ...ct,
+                        phases: (ct.phases || []).map((p: any) => p.phase_id === phaseId ? { ...p, part_pct: partCotraitantDefaut(rec) } : p),
+                      };
+                    });
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases, cotraitants_facturation: cts }));
                   };
 
                   const saveNote = async () => {
@@ -2325,110 +2478,109 @@ export default function ProjectDetail() {
                                 <tbody>
                                   {(noteForm.phases || []).map((phase: any, idx: number) => {
                                     const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
-                                    const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
-                                    const montantPhaseBase = honRevises * phasePct / 100;
-                                    const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
-                                    // Ce qui reste facturable sur cette mission pour l'agence,
-                                    // toutes notes confondues (le montant de la mission n'est
-                                    // jamais dépassé, même en cumulant plusieurs notes).
-                                    const agenceCap = Math.max(0, montantPhaseBase - cumulAgencePhase(phase.phase_id));
-                                    // Total pour toute l'équipe (le "groupement") sur cette mission —
-                                    // ce que la note d'honoraires facture au maître d'ouvrage dans son
-                                    // ensemble, à ne pas confondre avec la seule part agence ci-dessous.
-                                    const groupementPhaseTotal = (Number(phase.montant_phase) || 0)
-                                      + (noteForm.cotraitants_facturation || []).reduce((s: number, ct: any) =>
-                                          s + (Number((ct.phases || []).find((p: any) => p.phase_id === phase.phase_id)?.montant_phase) || 0), 0)
-                                      + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) =>
-                                          s + (Number((st.phases || []).find((p: any) => p.phase_id === phase.phase_id)?.montant_phase) || 0), 0);
+                                    // Montant total de la mission pour le groupement, et ce qui en
+                                    // est facturé dans cette note : c'est LA valeur saisie de la
+                                    // ligne, tous les montants des membres s'en déduisant.
+                                    const baseGroupement = groupementPhaseBase(phase.phase_id);
+                                    const pctGroupement = Number(phase.avancement_pct) || 0;
+                                    const montantGroupement = baseGroupement * pctGroupement / 100;
+                                    // Une mission ne se facture pas au-delà de 100 %, cumul des
+                                    // notes précédentes du même contrat compris.
+                                    const pctRestant = Math.max(0, 100 - cumulGroupementPct(phase.phase_id));
+                                    const ctPhasesRow = (noteForm.cotraitants_facturation || []).map((ct: any) =>
+                                      (ct.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { part_pct: 0, montant_phase: 0 });
+                                    const stPhasesRow = (noteForm.sous_traitants_facturation || []).map((st: any) =>
+                                      (st.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { montant_phase: 0 });
+                                    // La répartition d'une mission doit totaliser 100 % : en deçà,
+                                    // une part du montant groupement n'est attribuée à personne ;
+                                    // au-delà, la somme des membres dépasse ce qui est facturé.
+                                    const totalParts = (Number(phase.part_pct) || 0)
+                                      + ctPhasesRow.reduce((s: number, p: any) => s + (Number(p.part_pct) || 0), 0);
+                                    const repartitionIncomplete = pctGroupement > 0 && Math.abs(totalParts - 100) > 0.01;
+                                    // Ce que chaque membre règle à ses sous-traitants sur cette
+                                    // mission, pour l'afficher sous son montant net.
+                                    const stDeduction = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) => {
+                                      const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
+                                      return payeur === payeurKey ? s + (Number(stPhasesRow[i]?.montant_phase) || 0) : s;
+                                    }, 0);
+                                    const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
-                                        <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">{basePhase?.name || phase.phase_name}</td>
-                                        <td className="p-2 border-l border-[var(--tblr-border)] text-center font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
-                                          title="Part de la mission facturée par l'ensemble du groupement dans cette note">
-                                          {groupementPhaseBase(phase.phase_id) > 0
-                                            ? `${(groupementPhaseTotal / groupementPhaseBase(phase.phase_id) * 100).toFixed(1)} %`
-                                            : '—'}
-                                        </td>
-                                        <td className="p-2 text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
-                                          {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(groupementPhaseTotal)}
+                                        <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">
+                                          {basePhase?.name || phase.phase_name}
+                                          {(noteForm.cotraitants_facturation || []).length > 0 && (
+                                            <button type="button" title="Reprendre la répartition du contrat pour cette mission"
+                                              className="ml-2 text-[10px] font-normal text-blue-500 hover:text-blue-700"
+                                              onClick={() => resetRepartition(idx)}>Répartir</button>
+                                          )}
                                         </td>
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
-                                          <div className="flex items-center gap-1">
-                                            <input type="number" min={0} max={100} step={5}
-                                              className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                          <div className="flex items-center gap-1 justify-center">
+                                            <input type="number" min={0} max={pctRestant} step={5}
+                                              title={`Part de la mission facturée dans cette note pour tout le groupement (reste ${pctRestant.toFixed(1)} % à facturer)`}
+                                              className="w-14 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center font-bold outline-none focus:ring-2 focus:ring-blue-500"
                                               value={phase.avancement_pct}
-                                              onChange={e => {
-                                                const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                                                const newPhases = [...noteForm.phases];
-                                                const mp = Math.min(montantPhaseBase * pct / 100, agenceCap);
-                                                newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
-                                                setNoteForm({ ...noteForm, phases: newPhases });
-                                              }} />
+                                              onChange={e => updateGroupementPct(idx, Math.min(pctRestant, Math.max(0, parseFloat(e.target.value) || 0)))} />
                                             <span className="text-[var(--tblr-muted)]">%</span>
                                           </div>
                                         </td>
-                                        <td className="p-1">
+                                        <td className="p-2 text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
+                                          title={`Montant total de la mission pour le groupement : ${eur(baseGroupement)}`}>
+                                          {eur(montantGroupement)}
+                                          {repartitionIncomplete && (
+                                            <span className="block text-[9px] font-normal text-amber-600" title="La somme des parts des membres n'atteint pas 100 % du montant groupement">
+                                              répartition : {totalParts.toFixed(1)} %
+                                            </span>
+                                          )}
+                                        </td>
+                                        {/* Part de l'agence dans le montant groupement, et son
+                                            montant net une fois ses sous-traitants déduits. */}
+                                        <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1">
-                                            <input type="number" min={0} max={agenceCap}
-                                              className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                              value={phase.montant_phase}
-                                              onChange={e => {
-                                                const newPhases = [...noteForm.phases];
-                                                newPhases[idx] = { ...phase, montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), agenceCap) };
-                                                setNoteForm({ ...noteForm, phases: newPhases });
-                                              }} />
-                                            {montantAvancement > 0 && phase.montant_phase === 0 ? (
-                                              <button type="button" title="Reprendre le montant calculé depuis le %" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
-                                                const newPhases = [...noteForm.phases];
-                                                newPhases[idx] = { ...phase, montant_phase: parseFloat(Math.min(montantAvancement, agenceCap).toFixed(2)) };
-                                                setNoteForm({ ...noteForm, phases: newPhases });
-                                              }}>Auto</button>
-                                            ) : <span className="text-[var(--tblr-muted)]">€</span>}
+                                            <input type="number" min={0} max={100} step="any"
+                                              title="Quote-part de l'agence dans le montant groupement de cette mission"
+                                              className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                              value={phase.part_pct ?? 0}
+                                              onChange={e => updatePartAgence(idx, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))} />
+                                            <span className="text-[var(--tblr-muted)]">%</span>
                                           </div>
                                         </td>
+                                        <td className="p-2 text-right whitespace-nowrap">
+                                          {eur(Number(phase.montant_phase) || 0)}
+                                          {stDeduction('agence') > 0 && (
+                                            <span className="block text-[9px] font-normal text-amber-600" title="Sous-traitants réglés par l'agence, déduits de sa part">
+                                              − {eur(stDeduction('agence'))} ST
+                                            </span>
+                                          )}
+                                        </td>
                                         {(noteForm.cotraitants_facturation || []).map((ct: any, ctIdx: number) => {
-                                          const ctPhase = (ct.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
-                                          const ctKey = ct.contact_id || ct.nom;
-                                          // Base de calcul du cotraitant pour cette mission : sa part
-                                          // du contrat (montant_honoraires, déjà = fee_pct × total du
-                                          // contrat) répartie selon le même % par mission que l'agence.
-                                          const ctRecord = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === ctKey);
-                                          const ctPhaseBase = (ctRecord?.montant_honoraires || 0) * phasePct / 100;
-                                          const ctAvancement = ctPhaseBase * (ctPhase.avancement_pct || 0) / 100;
-                                          const ctCap = Math.max(0, ctPhaseBase - cumulCtPhase(ctKey, phase.phase_id));
+                                          const ctPhase = ctPhasesRow[ctIdx];
+                                          const deduction = stDeduction(ctContratId(ct) || '');
                                           return (
                                             <React.Fragment key={`ct-${ctIdx}`}>
                                               <td className="p-1 border-l border-[var(--tblr-border)]">
                                                 <div className="flex items-center gap-1">
-                                                  <input type="number" min={0} max={100} step={5}
+                                                  <input type="number" min={0} max={100} step="any"
+                                                    title={`Quote-part de ${ctDisplayName(ct)} dans le montant groupement de cette mission`}
                                                     className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
-                                                    value={ctPhase.avancement_pct}
-                                                    onChange={e => {
-                                                      const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                                                      const mp = Math.min(ctPhaseBase * pct / 100, ctCap);
-                                                      updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) });
-                                                    }} />
+                                                    value={ctPhase.part_pct ?? 0}
+                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { part_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
                                                   <span className="text-[var(--tblr-muted)]">%</span>
                                                 </div>
                                               </td>
-                                              <td className="p-1">
-                                                <div className="flex items-center gap-1">
-                                                  <input type="number" min={0} max={ctCap}
-                                                    className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                                    value={ctPhase.montant_phase}
-                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), ctCap) })} />
-                                                  {ctAvancement > 0 && ctPhase.montant_phase === 0 && (
-                                                    <button type="button" title="Reprendre le montant calculé depuis le %" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() =>
-                                                      updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: parseFloat(Math.min(ctAvancement, ctCap).toFixed(2)) })
-                                                    }>Auto</button>
-                                                  )}
-                                                </div>
+                                              <td className="p-2 text-right whitespace-nowrap">
+                                                {eur(Number(ctPhase.montant_phase) || 0)}
+                                                {deduction > 0 && (
+                                                  <span className="block text-[9px] font-normal text-amber-600" title={`Sous-traitants réglés par ${ctDisplayName(ct)}, déduits de sa part`}>
+                                                    − {eur(deduction)} ST
+                                                  </span>
+                                                )}
                                               </td>
                                             </React.Fragment>
                                           );
                                         })}
                                         {(noteForm.sous_traitants_facturation || []).map((st: any, stIdx: number) => {
-                                          const stPhase = (st.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { avancement_pct: 0, montant_phase: 0 };
+                                          const stPhase = stPhasesRow[stIdx];
                                           const stKey = st.contact_id || st.nom;
                                           // Les sous-traitants n'ont pas de répartition par mission dans
                                           // le contrat (un seul montant global) : le plafond porte donc
@@ -2442,6 +2594,7 @@ export default function ProjectDetail() {
                                           return (
                                             <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
                                               <input type="number" min={0} max={stCap}
+                                                title={`Montant réglé à ${stDisplayName(st)} sur cette mission — déduit de la part de celui qui le règle`}
                                                 className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
                                                 value={stPhase.montant_phase}
                                                 onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), stCap) })} />
@@ -2491,7 +2644,7 @@ export default function ProjectDetail() {
                                 </tfoot>
                               </table>
                             </div>
-                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">La note d'honoraires concerne tout le groupement de maîtrise d'œuvre (colonne « Groupement ») ; la facture, elle, ne porte que sur {agencyName} — les montants cotraitants et sous-traitants restent hors comptabilité agence, seule cette colonne alimente la facture brouillon. Le montant saisi pour chaque intervenant est plafonné au montant de la mission qui lui revient, en tenant compte de ce qui a déjà été facturé sur les notes précédentes.</p>
+                            <p className="mt-2 text-[10px] text-[var(--tblr-muted)]">Le pourcentage se saisit une seule fois par mission, dans la colonne « Groupement » : c'est la part de la mission facturée au maître d'ouvrage pour toute l'équipe (par exemple 100 % de l'esquisse et 50 % de l'APS). Les colonnes suivantes en répartissent le montant entre les membres du groupement — leurs parts totalisent 100 % — et le montant réglé à un sous-traitant se déduit de la part de celui qui le règle, sans changer le total facturé. Le cumul d'une mission, toutes notes confondues, ne peut pas dépasser 100 %. La facture, elle, ne porte que sur {agencyName} : seule cette colonne alimente la facture brouillon, les montants cotraitants et sous-traitants restant hors comptabilité agence.</p>
                           </div>
 
                           {/* Suivi du pourcentage de facturation */}
@@ -2574,7 +2727,7 @@ export default function ProjectDetail() {
                                     </button>
                                     <button onClick={() => {
                                       setEditingNote(note);
-                                      setNoteForm({ ...note });
+                                      setNoteForm(noteFormFromSaved(note));
                                       setIsAddingNote(true);
                                     }} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconEdit size={14} /></button>
                                     <button onClick={() => deleteNote(note.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>

@@ -1281,8 +1281,25 @@ export interface ContratMOE {
 export interface NoteHonorairePhase {
   phase_id: string;
   phase_name: string;
+  /**
+   * Sur les `phases` de la note : le pourcentage de la mission facturé dans
+   * cette note pour TOUT le groupement — la seule valeur d'avancement saisie,
+   * les montants de chaque membre s'en déduisant par répartition.
+   * Sur les `phases` d'un intervenant : n'est plus renseigné (c'est `part_pct`
+   * qui porte sa quote-part) ; conservé en lecture pour les notes
+   * enregistrées avant cette refonte, où chaque intervenant portait son
+   * propre avancement.
+   */
   avancement_pct: number;
   montant_phase: number;
+  /**
+   * Quote-part de l'intervenant dans le montant groupement de cette mission
+   * (%) — par exemple l'agence 60 % et un cotraitant 40 % de l'esquisse.
+   * Sur les `phases` de la note elle-même, c'est la part de l'agence.
+   * Les parts d'une mission totalisent normalement 100 % ; ce qu'un membre
+   * règle à un sous-traitant se déduit ensuite de son propre montant.
+   */
+  part_pct?: number;
 }
 
 export interface NoteHonoraireCotraitant {
