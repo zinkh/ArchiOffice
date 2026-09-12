@@ -83,17 +83,19 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         stakeholders_list: project_stakeholders || [],
         categories_list: (project_categories_junction || []).map((j: any) => j.category_id),
       };
-      const [milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans] = await Promise.all([
+      const [milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('ordres_de_service').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
+        supabaseAdmin.from('avenants_moe').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
+        supabaseAdmin.from('marches_entreprises').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('visas').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('receptions').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('reserves').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
       ]);
-      res.json({ project, milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans });
+      res.json({ project, milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch project details" });

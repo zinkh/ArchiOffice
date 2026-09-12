@@ -120,8 +120,7 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
     margin: { left: margin, right: margin },
     head: [['Champ', 'Valeur']],
     body: [
-      ['N° de marché', os.march_number || '—'],
-      ['Lot / Entreprise', [os.lot, os.entreprise].filter(Boolean).join(' · ') || '—'],
+      ['Marché travaux (lot / entreprise)', [os.lot, os.entreprise].filter(Boolean).join(' · ') || '—'],
       ['Origine de la demande', ORIGINE_LABELS[os.origine_demande || ''] || '—'],
       ['Montant du marché HT', formatCurrency(os.montant_marche_ht)],
       ['Délai d\'exécution', os.delai_execution ? `${os.delai_execution} ${os.delai_unit || 'jours'}` : '—'],
@@ -188,6 +187,14 @@ const emptyForm = (): Partial<OrdreDeService> => ({
   incidences_couts_type: 'non',
 });
 
+interface MarcheTravaux {
+  id: string;
+  project_id: string;
+  entreprise_nom: string;
+  lot_numero?: string;
+  lot_titre?: string;
+}
+
 export default function OrdresDeService() {
   const navigate = useNavigate();
   const { currentUser } = useUser();
@@ -212,11 +219,37 @@ export default function OrdresDeService() {
   const [form, setForm] = useState<Partial<OrdreDeService>>(emptyForm());
   const [saving, setSaving] = useState(false);
 
+  // Marchés de travaux du projet choisi dans le formulaire — un OS doit
+  // toujours être rattaché à l'un d'eux (server/routes/ordresDeService.ts).
+  const [marches, setMarches] = useState<MarcheTravaux[]>([]);
+  const [isAddingMarche, setIsAddingMarche] = useState(false);
+  const [newMarche, setNewMarche] = useState({ entreprise_nom: '', lot_numero: '', lot_titre: '' });
+
   const refresh = useCallback(async () => {
     const data = await apiFetch<OrdreDeService[]>('/api/ordres_de_service');
     setOsList(data || []);
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (!form.project_id) { setMarches([]); return; }
+    apiFetch<MarcheTravaux[]>(`/api/marches-entreprises/${form.project_id}`).then(d => setMarches(d || [])).catch(() => setMarches([]));
+  }, [form.project_id]);
+
+  const createMarche = async () => {
+    if (!form.project_id || !newMarche.entreprise_nom) return;
+    const created = await apiFetch<MarcheTravaux>('/api/marches-entreprises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: form.project_id, ...newMarche }),
+    });
+    if (created) {
+      setMarches(prev => [...prev, created]);
+      setForm(prev => ({ ...prev, marche_id: created.id, entreprise: created.entreprise_nom, lot: [created.lot_numero, created.lot_titre].filter(Boolean).join(' — ') }));
+      setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '' });
+      setIsAddingMarche(false);
+    }
+  };
 
   useEffect(() => {
     apiFetch<Project[]>('/api/projects').then(d => setProjects(d || []));
@@ -245,7 +278,7 @@ export default function OrdresDeService() {
   };
 
   const handleSave = async () => {
-    if (!form.title || !form.os_number) return;
+    if (!form.title || !form.os_number || !form.marche_id) return;
     setSaving(true);
     try {
       if (editingOs) {
@@ -436,7 +469,6 @@ export default function OrdresDeService() {
                     >
                       <td className="px-4 py-3">
                         <span className="font-mono font-bold text-sm" style={{ color: 'var(--tblr-primary)' }}>OS {os.os_number}</span>
-                        {os.type === 'contrat_moe' && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8d7ff', color: '#ae3ec9' }}>MOE</span>}
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }} title={os.title}>{os.title}</p>
@@ -582,14 +614,10 @@ export default function OrdresDeService() {
                 {/* Identifiants */}
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° OS *</label>
                       <input {...field('os_number')} className={inputCls} style={inputStyle} placeholder="001" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° marché</label>
-                      <input {...field('march_number')} className={inputCls} style={inputStyle} />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Date *</label>
@@ -636,27 +664,48 @@ export default function OrdresDeService() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Type</label>
-                      <select
-                        value={form.type ?? 'travaux'}
-                        onChange={e => setForm(prev => ({ ...prev, type: e.target.value as OrdreDeService['type'] }))}
-                        className={inputCls} style={inputStyle}
-                      >
-                        <option value="travaux">Travaux</option>
-                        <option value="contrat_moe">Contrat MOE</option>
-                      </select>
-                    </div>
-                    <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Émetteur (MOE)</label>
                       <input {...field('emetteur_os')} className={inputCls} style={inputStyle} placeholder="Agence d'architecture" />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Destinataire (Entreprise)</label>
-                      <input {...field('entreprise')} className={inputCls} style={inputStyle} placeholder="Nom de l'entreprise" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Lot</label>
-                      <input {...field('lot')} className={inputCls} style={inputStyle} placeholder="Ex: Gros œuvre" />
+                    <div className="col-span-2">
+                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Marché travaux *</label>
+                      <select
+                        value={form.marche_id ?? ''}
+                        disabled={!form.project_id}
+                        onChange={e => {
+                          const m = marches.find(x => x.id === e.target.value);
+                          setForm(prev => ({
+                            ...prev, marche_id: e.target.value,
+                            entreprise: m?.entreprise_nom || '',
+                            lot: m ? [m.lot_numero, m.lot_titre].filter(Boolean).join(' — ') : '',
+                          }));
+                        }}
+                        className={inputCls} style={inputStyle}
+                      >
+                        <option value="">{form.project_id ? '— Choisir un marché —' : '— Choisir une affaire d\'abord —'}</option>
+                        {marches.map(m => <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>)}
+                      </select>
+                      {form.project_id && marches.length === 0 && !isAddingMarche && (
+                        <button type="button" onClick={() => setIsAddingMarche(true)} className="mt-1.5 text-xs font-bold" style={{ color: 'var(--tblr-primary)' }}>
+                          Aucun marché sur cette affaire — en créer un
+                        </button>
+                      )}
+                      {isAddingMarche && (
+                        <div className="mt-2 p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input placeholder="Entreprise *" className={inputCls} style={inputStyle}
+                              value={newMarche.entreprise_nom} onChange={e => setNewMarche({ ...newMarche, entreprise_nom: e.target.value })} />
+                            <input placeholder="N° lot" className={inputCls} style={inputStyle}
+                              value={newMarche.lot_numero} onChange={e => setNewMarche({ ...newMarche, lot_numero: e.target.value })} />
+                          </div>
+                          <input placeholder="Intitulé du lot" className={inputCls} style={inputStyle}
+                            value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1 text-xs font-bold" style={{ color: 'var(--tblr-muted)' }}>Annuler</button>
+                            <button type="button" onClick={createMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50" style={{ background: 'var(--tblr-primary)' }}>Créer</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Origine de la demande</label>
@@ -766,7 +815,7 @@ export default function OrdresDeService() {
                 </button>
                 <button
                   onClick={handleSave}
-                  disabled={saving || !form.title || !form.os_number}
+                  disabled={saving || !form.title || !form.os_number || !form.marche_id}
                   className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
