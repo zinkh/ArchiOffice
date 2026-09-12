@@ -82,7 +82,14 @@ export default defineConfig(({mode}) => {
           // Using NetworkOnly would still intercept the request and emit a
           // "no-response" SW error when the network fails; no registered route
           // means the browser handles /api/ natively with its own error path.
-          navigateFallbackDenylist: [/^\/api\//],
+          // /auth/ is excluded for a different reason: OAuth popup callbacks
+          // (src/pages/GoogleAuthCallback.tsx) MUST hit the live server on
+          // every navigation — the navigateFallback precache response was
+          // observed serving a stale cached document (and stale bundled JS)
+          // for this route, silently keeping a popup on a pre-fix version no
+          // matter how many times the server and client code were fixed and
+          // redeployed, since the browser never even asked the network.
+          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
