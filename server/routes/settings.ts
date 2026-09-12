@@ -49,6 +49,7 @@ const toSnake: Record<string, string> = {
   defaultLeaveDaysRtt: 'default_leave_days_rtt',
   architectName: 'architect_name', oaNumber: 'oa_number',
   notificationArchiveDays: 'notification_archive_days',
+  googleContactsSyncCategories: 'google_contacts_sync_categories',
 };
 const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -107,6 +108,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'architect_name', 'oa_number',
         'notification_archive_days',
         'tender_boamp_enabled', 'tender_ted_enabled',
+        'google_contacts_sync_categories',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits']);
       const filteredData: any = Object.fromEntries(

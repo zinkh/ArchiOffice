@@ -58,7 +58,7 @@ describe('Contact Sync', () => {
 
     const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 1 });
+    expect(res.body).toEqual({ imported: 1, updated: 1, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.email === 'new@example.com')?.tenant_id).toBe(tenantId);
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-existing')?.first_name).toBe('Updated');
   });
@@ -76,9 +76,132 @@ describe('Contact Sync', () => {
 
     const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 0 });
+    expect(res.body).toEqual({ imported: 1, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-b')?.first_name).toBe('Foreign');
     expect(fakeSupabaseAdmin.getTable('contacts').filter(c => c.email === 'shared@example.com' && c.tenant_id === tenantA)).toHaveLength(1);
+  });
+
+  describe('push direction (ArchiOffice → Google Contacts)', () => {
+    it('does not push anything when no category is selected in settings', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-1', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ connections: [] }) })) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
+    });
+
+    it('never pushes a contact marked personal, even in a selected category', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-personal', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-personal', tenant_id: tenantId, email: 'a@example.com', category: 'Client',
+        first_name: 'A', last_name: 'One', is_personal: true,
+      }]);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ connections: [] }) })) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-personal')?.google_resource_name).toBeUndefined();
+    });
+
+    it('creates a new Google contact for an unlinked contact in a selected category', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-1', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-push-create', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (init?.method === 'POST' && String(url).includes('people:createContact')) {
+          return { ok: true, json: async () => ({ resourceName: 'people/new123' }) };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 1, pushedUpdated: 0, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-create')?.google_resource_name).toBe('people/new123');
+    });
+
+    it('links to an existing Google connection by email instead of creating a duplicate', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-2', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-push-link', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+
+      global.fetch = vi.fn(async (url: string) => {
+        if (String(url).includes('/people/me/connections')) {
+          return { ok: true, json: async () => ({ connections: [{ resourceName: 'people/already123', emailAddresses: [{ value: 'a@example.com' }] }] }) };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 1, pushedCreated: 0, pushedUpdated: 1, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-link')?.google_resource_name).toBe('people/already123');
+    });
+
+    it('a more recently modified local contact overwrites the linked Google contact', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-3', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-local-wins', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One',
+        google_resource_name: 'people/linked1', updated_at: '2026-06-01T00:00:00.000Z',
+      }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (String(url).includes('people/linked1') && (!init || !init.method)) {
+          return { ok: true, json: async () => ({ etag: 'etag-1', metadata: { sources: [{ type: 'CONTACT', updateTime: '2026-01-01T00:00:00.000Z' }] } }) };
+        }
+        if (init?.method === 'PATCH' && String(url).includes('people/linked1:updateContact')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 1, pulledOnConflict: 0 });
+    });
+
+    it('a more recently modified Google contact overwrites the local one instead of being clobbered', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-4', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-google-wins', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One',
+        google_resource_name: 'people/linked1', updated_at: '2026-01-01T00:00:00.000Z',
+      }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (String(url).includes('people/linked1') && (!init || !init.method)) {
+          return {
+            ok: true,
+            json: async () => ({
+              names: [{ givenName: 'Fresher', familyName: 'FromGoogle' }],
+              emailAddresses: [{ value: 'a@example.com' }],
+              metadata: { sources: [{ type: 'CONTACT', updateTime: '2026-06-01T00:00:00.000Z' }] },
+            }),
+          };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 1 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-google-wins')?.first_name).toBe('Fresher');
+    });
   });
 
   it('requires url and username for CardDAV sync', async () => {

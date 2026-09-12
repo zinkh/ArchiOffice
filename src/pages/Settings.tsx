@@ -204,6 +204,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconLabel: 'BO',
   },
   {
+    id: 'google_contacts',
+    name: 'Google Contacts (bidirectionnel)',
+    vendor: 'Google',
+    description: "Choisissez quelles catégories de contacts du cabinet sont poussées vers Google Contacts lors d'une synchronisation (import Google → ArchiOffice déjà actif sans réglage). Le contact modifié le plus récemment l'emporte en cas de conflit.",
+    category: 'crm',
+    status: 'active',
+    iconBg: 'bg-yellow-50',
+    iconColor: 'text-yellow-700',
+    iconLabel: 'GC',
+  },
+  {
     id: 'ted',
     name: 'TED (API)',
     vendor: 'Office des publications de l\'Union européenne',
@@ -300,7 +311,9 @@ export default function Settings() {
     notificationArchiveDays: {} as Record<string, number>,
     tender_boamp_enabled: false,
     tender_ted_enabled: false,
+    googleContactsSyncCategories: [] as string[],
   });
+  const [contactCategories, setContactCategories] = useState<{ id: string; name: string }[]>([]);
 
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -422,6 +435,9 @@ export default function Settings() {
           db.settings.put(s).catch(() => {});
         }
       })
+      .catch(() => {});
+    apiFetch('/api/contact-categories')
+      .then((c: any) => setContactCategories(Array.isArray(c) ? c : []))
       .catch(() => {});
     if (currentUser?.system_role === 'admin') {
       apiFetch('/api/zoho/status')
@@ -1402,6 +1418,43 @@ export default function Settings() {
         </div>
         {renderSaveButton('boamp', () => saveSection('boamp', {
           tender_boamp_enabled: !!(settings as any).tender_boamp_enabled,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'google_contacts') return (
+      <div className="space-y-4">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Import et export</p>
+          <p>L'import (Google → ArchiOffice) reste actif sans réglage, comme aujourd'hui. Les catégories cochées ci-dessous sont en plus poussées vers Google Contacts à chaque synchronisation. Aucune catégorie cochée : rien n'est poussé.</p>
+        </div>
+        {contactCategories.length === 0 ? (
+          <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>
+            Aucune catégorie de contact définie pour l'instant — créez-en depuis Contacts › Catégories.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {contactCategories.map(cat => {
+              const selected = (settings as any).googleContactsSyncCategories.includes(cat.name);
+              return (
+                <label key={cat.id} className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={e => {
+                      const current: string[] = (settings as any).googleContactsSyncCategories;
+                      const next = e.target.checked ? [...current, cat.name] : current.filter(n => n !== cat.name);
+                      setSettings({ ...settings, googleContactsSyncCategories: next } as any);
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {renderSaveButton('google_contacts', () => saveSection('google_contacts', {
+          googleContactsSyncCategories: (settings as any).googleContactsSyncCategories,
         }))}
       </div>
     );

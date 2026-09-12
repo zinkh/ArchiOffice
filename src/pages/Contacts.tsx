@@ -46,6 +46,8 @@ export default function Contacts() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
+  const [filterCorpsEtat, setFilterCorpsEtat] = useState('');
+  const [filterSpecialite, setFilterSpecialite] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'last_name', order: 'asc' });
 
   // Edit State
@@ -244,13 +246,20 @@ export default function Contacts() {
     setSyncingGoogle(true);
     try {
       const access_token = await requestGoogleAccessToken();
-      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/google-contacts', {
+      const result = await apiFetch<{ imported: number; updated: number; pushedCreated: number; pushedUpdated: number; pulledOnConflict: number }>('/api/sync/google-contacts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token })
       });
       fetchContacts();
-      showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour`);
+      // Push counts only appear when at least one category is configured in
+      // Réglages › Google Contacts (bidirectionnel) — most cabinets have none
+      // set, so the message stays exactly as it was for the pull-only case.
+      const pushed = result.pushedCreated + result.pushedUpdated;
+      const pushPart = pushed > 0 || result.pulledOnConflict > 0
+        ? `, ${pushed} envoyés vers Google${result.pulledOnConflict > 0 ? ` (${result.pulledOnConflict} conflit(s) résolu(s) en faveur de Google)` : ''}`
+        : '';
+      showToast(`Google Contacts : ${result.imported} importés, ${result.updated} mis à jour${pushPart}`);
     } catch (err: any) {
       showToast(err?.message || 'Erreur de synchronisation Google Contacts', 'error');
     } finally {
@@ -469,6 +478,14 @@ export default function Contacts() {
       result = result.filter(c => (c.company_name || '') === filterCompany);
     }
 
+    // Filter by building trade / specialty (Corps d'état, Spécialité)
+    if (filterCorpsEtat) {
+      result = result.filter(c => (c.corps_etat || []).includes(filterCorpsEtat));
+    }
+    if (filterSpecialite) {
+      result = result.filter(c => (c.specialite || []).includes(filterSpecialite));
+    }
+
     // Sort
     result.sort((a, b) => {
       const field = sortConfig.field;
@@ -487,7 +504,7 @@ export default function Contacts() {
     });
 
     return result;
-  }, [contacts, searchQuery, filterCategory, filterCompany, sortConfig]);
+  }, [contacts, searchQuery, filterCategory, filterCompany, filterCorpsEtat, filterSpecialite, sortConfig]);
 
   // Les organismes ne sont pas une table : ils sont saisis librement sur chaque
   // contact, la liste déroulante se déduit donc des contacts eux-mêmes.
@@ -498,6 +515,21 @@ export default function Contacts() {
       if (name) names.add(name);
     }
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [contacts]);
+
+  // Corps d'état / Spécialité ne sont pas non plus des tables : mêmes
+  // principe que companyOptions, déduit des puces déjà saisies sur les
+  // contacts existants — sert à la fois le filtre et la complétion du
+  // TagChipInput dans le formulaire.
+  const corpsEtatOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const c of contacts) for (const v of (c.corps_etat || [])) values.add(v);
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [contacts]);
+  const specialiteOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const c of contacts) for (const v of (c.specialite || [])) values.add(v);
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'fr'));
   }, [contacts]);
 
   const contactsPagination = usePagination(filteredAndSortedContacts);
@@ -634,6 +666,38 @@ export default function Contacts() {
               ))}
             </select>
           </div>
+          {corpsEtatOptions.length > 0 && (
+            <div className="relative">
+              <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+              <select
+                className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+                style={inputStyle}
+                value={filterCorpsEtat}
+                onChange={e => setFilterCorpsEtat(e.target.value)}
+              >
+                <option value="">{t('contacts_corps_etat_label')}</option>
+                {corpsEtatOptions.map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {specialiteOptions.length > 0 && (
+            <div className="relative">
+              <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+              <select
+                className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+                style={inputStyle}
+                value={filterSpecialite}
+                onChange={e => setFilterSpecialite(e.target.value)}
+              >
+                <option value="">{t('contacts_specialite_label')}</option>
+                {specialiteOptions.map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -656,7 +720,15 @@ export default function Contacts() {
                 </div>
               )},
               { label: t('contacts_col_company'), render: c => c.company_name || '---' },
-              { label: t('contacts_col_category'), render: c => c.category ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span> : '---' },
+              { label: t('contacts_col_category'), render: c => (
+                <div className="flex flex-wrap items-center gap-1">
+                  {c.category && <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span>}
+                  {[...(c.corps_etat || []), ...(c.specialite || [])].map(v => (
+                    <span key={v} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>{v}</span>
+                  ))}
+                  {!c.category && !(c.corps_etat?.length) && !(c.specialite?.length) && '---'}
+                </div>
+              ) },
               { label: t('phone'), render: c => c.phone || '---' },
               { label: t('email'), render: c => c.email || '---' },
               { label: t('city'), render: c => c.city || '---' },
@@ -728,6 +800,11 @@ export default function Contacts() {
                           À compléter
                         </span>
                       )}
+                      {contact.is_personal && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }} title={t('contacts_is_personal_hint')}>
+                          {t('contacts_is_personal_perso')}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.first_name}</td>
@@ -748,11 +825,18 @@ export default function Contacts() {
                     )}
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>
-                    {contact.category && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
-                        {contact.category}
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {contact.category && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                          {contact.category}
+                        </span>
+                      )}
+                      {[...(contact.corps_etat || []), ...(contact.specialite || [])].map(v => (
+                        <span key={v} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>
+                          {v}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.phone}</td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{contact.email}</td>
@@ -839,6 +923,8 @@ export default function Contacts() {
                 contact={newContact}
                 categories={categories}
                 onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+                corpsEtatSuggestions={corpsEtatOptions}
+                specialiteSuggestions={specialiteOptions}
               />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>

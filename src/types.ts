@@ -716,6 +716,15 @@ export interface Contact {
   website?: string;
   created_at: string;
   created_by: string;
+  // Excludes the contact from the Google Contacts push sync (server/routes/
+  // contactSync.ts) regardless of category — a family member or personal
+  // reference entered here for reminders/notes, not meant to leave the cabinet.
+  is_personal?: boolean;
+  // Free multi-value tags, shown/edited only for the matching category
+  // (src/components/ContactFormFields.tsx): corps_etat for "Entreprise"
+  // contacts, specialite for "Bureau d'études" ones.
+  corps_etat?: string[];
+  specialite?: string[];
 }
 
 export interface ContactCategory {
