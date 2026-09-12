@@ -2062,16 +2062,6 @@ export default function ProjectDetail() {
                     notes: '',
                   });
 
-                  // Libellé du payeur d'un sous-traitant, pour l'affichage sous son nom
-                  // de colonne : 'agence' (par défaut, rien à afficher), 'moa', ou l'id
-                  // d'un cotraitant du même contrat.
-                  const payeurLabel = (payeur: string | undefined) => {
-                    if (!payeur || payeur === 'agence') return null;
-                    if (payeur === 'moa') return "réglé par le MOA";
-                    const ct = cotraitants.find((c: any) => c.id === payeur);
-                    return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
-                  };
-
                   // Le nom de l'agence — jamais le mot générique "Agence" —
                   // pour rappeler qu'une note d'honoraires concerne toute
                   // l'équipe de maîtrise d'œuvre (le groupement), alors que
@@ -2094,6 +2084,44 @@ export default function ProjectDetail() {
                   const stDisplayName = (st: any) => {
                     const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
                     return rec?.contact_name || rec?.specialty || st.nom || 'Sous-traitant';
+                  };
+
+                  /**
+                   * Qui règle ce sous-traitant, pour la note en cours — relu sur le
+                   * CONTRAT (par `contact_id`), comme les noms juste au-dessus, et
+                   * non depuis la valeur figée dans la note à sa création : désigner
+                   * ou changer le payeur dans le contrat doit se répercuter
+                   * immédiatement sur la ventilation, y compris d'une note déjà
+                   * ouverte. La valeur figée ne sert de repli que si le
+                   * sous-traitant a depuis été retiré du contrat.
+                   *
+                   * Rend une clé canonique : `'agence'`, `'moa'`, ou l'`id` du
+                   * cotraitant payeur. Un payeur désigné mais introuvable dans le
+                   * contrat (cotraitant supprimé depuis) revient à l'agence, qui est
+                   * le mandataire : sans ça, le montant du sous-traitant sortait de
+                   * l'enveloppe de la mission sans revenir à personne, et les
+                   * montants de TOUS les membres baissaient.
+                   */
+                  const payeurEffectif = (st: any): string => {
+                    const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+                    const source = rec || st;
+                    const brut = source.payeur ?? (source.paiement_direct_moa ? 'moa' : 'agence');
+                    if (brut === 'moa' || brut === 'agence') return brut;
+                    // Un payeur cotraitant est enregistré par son `id` de contrat, mais
+                    // une note ancienne ou un import peuvent porter son `contact_id` :
+                    // les deux sont acceptés pour ne pas perdre l'imputation.
+                    const ct = cotraitants.find((c: any) => c.id === brut || c.contact_id === brut);
+                    return ct ? ct.id : 'agence';
+                  };
+
+                  // Libellé du payeur sous le nom de colonne d'un sous-traitant —
+                  // rien à afficher quand c'est l'agence, le cas par défaut.
+                  const payeurLabel = (st: any) => {
+                    const payeur = payeurEffectif(st);
+                    if (payeur === 'agence') return null;
+                    if (payeur === 'moa') return "réglé par le MOA";
+                    const ct = cotraitants.find((c: any) => c.id === payeur);
+                    return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
                   };
 
                   // Plafonds de ventilation : le cumul déjà facturé sur les notes
@@ -2143,15 +2171,23 @@ export default function ProjectDetail() {
                     // tableaux : `montant_phase` y est réécrit, et ces objets sont
                     // partagés avec l'état précédent du formulaire.
                     const cts = (form.cotraitants_facturation || []).map((ct: any) => ({ ...ct, phases: (ct.phases || []).map((p: any) => ({ ...p })) }));
-                    const sts = (form.sous_traitants_facturation || []).map((st: any) => ({ ...st, phases: (st.phases || []).map((p: any) => ({ ...p })) }));
+                    // `payeur` est réécrit avec la valeur résolue sur le contrat :
+                    // la note enregistrée porte ainsi le payeur qui a réellement
+                    // servi au calcul, et l'export PDF comme la facture brouillon
+                    // lisent la même imputation que l'écran.
+                    const sts = (form.sous_traitants_facturation || []).map((st: any) => ({
+                      ...st,
+                      payeur: payeurEffectif(st),
+                      paiement_direct_moa: undefined,
+                      phases: (st.phases || []).map((p: any) => ({ ...p })),
+                    }));
                     const phaseOf = (list: any[], phaseId: string) => list.find((p: any) => p.phase_id === phaseId);
 
                     const nextPhases = (form.phases || []).map((phase: any) => {
                       const montantGroupement = groupementPhaseBase(phase.phase_id) * (Number(phase.avancement_pct) || 0) / 100;
                       const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
-                      const payeurDe = (st: any) => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
                       const stPayePar = (payeurKey: string) => sts.reduce((s: number, st: any) =>
-                        payeurDe(st) === payeurKey ? s + stMission(st) : s, 0);
+                        payeurEffectif(st) === payeurKey ? s + stMission(st) : s, 0);
 
                       // Le montant facturé par le groupement sur une mission ne bouge
                       // PAS quand des sous-traitants sont saisis : ce qui leur est
@@ -2256,10 +2292,9 @@ export default function ProjectDetail() {
 
                     const phaseOf = (list: any[], phaseId: string) => (list || []).find((p: any) => p.phase_id === phaseId);
                     form.phases = (form.phases || []).map((phase: any) => {
-                      const payeurDe = (st: any) => st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
                       const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
                       const stPayePar = (payeurKey: string) => form.sous_traitants_facturation.reduce((s: number, st: any) =>
-                        payeurDe(st) === payeurKey ? s + stMission(st) : s, 0);
+                        payeurEffectif(st) === payeurKey ? s + stMission(st) : s, 0);
 
                       // Dans l'ancien modèle, les montants des sous-traitants
                       // s'ajoutaient à ceux des membres ; dans le nouveau, ceux
@@ -2273,9 +2308,9 @@ export default function ProjectDetail() {
                       const totalMembres = (Number(phase.montant_phase) || 0)
                         + form.cotraitants_facturation.reduce((s: number, ct: any) => s + (Number(phaseOf(ct.phases, phase.phase_id)?.montant_phase) || 0), 0);
                       const stMoa = form.sous_traitants_facturation.reduce((s: number, st: any) =>
-                        payeurDe(st) === 'moa' ? s + stMission(st) : s, 0);
+                        payeurEffectif(st) === 'moa' ? s + stMission(st) : s, 0);
                       const stMembres = form.sous_traitants_facturation.reduce((s: number, st: any) =>
-                        payeurDe(st) !== 'moa' ? s + stMission(st) : s, 0);
+                        payeurEffectif(st) !== 'moa' ? s + stMission(st) : s, 0);
                       const resteAPartager = totalMembres - stMembres;
                       const part = (montantFacture: number, reverse: number) =>
                         resteAPartager > 0 ? parseFloat((Math.max(0, montantFacture - reverse) / resteAPartager * 100).toFixed(4)) : 0;
@@ -2496,7 +2531,7 @@ export default function ProjectDetail() {
                                     {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
                                       <th key={`st-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">
                                         {stDisplayName(st)}
-                                        {payeurLabel(st.payeur) && <span className="block text-[9px] font-normal normal-case text-amber-600">{payeurLabel(st.payeur)}</span>}
+                                        {payeurLabel(st) && <span className="block text-[9px] font-normal normal-case text-amber-600">{payeurLabel(st)}</span>}
                                       </th>
                                     ))}
                                   </tr>
@@ -2526,14 +2561,22 @@ export default function ProjectDetail() {
                                     // Ce que chaque membre reverse à ses sous-traitants sur cette
                                     // mission : compris dans son montant facturé, donc affiché
                                     // sous celui-ci en « dont … » et jamais additionné en plus.
-                                    const stReverse = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) => {
-                                      const payeur = st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence');
-                                      return payeur === payeurKey ? s + (Number(stPhasesRow[i]?.montant_phase) || 0) : s;
-                                    }, 0);
+                                    const stReverse = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) =>
+                                      payeurEffectif(st) === payeurKey ? s + (Number(stPhasesRow[i]?.montant_phase) || 0) : s, 0);
                                     // Tous sous-traitants de la mission confondus : ce qui sort de
                                     // l'enveloppe avant répartition entre les membres.
                                     const stTotalMission = stPhasesRow.reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
                                     const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+                                    // Pourcentage RÉELLEMENT facturé par un membre sur cette
+                                    // mission : sa quote-part saisie porte sur ce qui reste après
+                                    // sous-traitance, celui qui règle un sous-traitant facture donc
+                                    // un pourcentage plus élevé (et les autres plus faible). On
+                                    // l'affiche sous le montant dès qu'il diffère de la part
+                                    // saisie, sinon la ligne semblerait contredire les 50/50 du
+                                    // contrat sans dire pourquoi.
+                                    const pctEffectif = (montant: number) =>
+                                      montantGroupement > 0 ? montant / montantGroupement * 100 : 0;
+                                    const pct1 = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(n);
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
                                         <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">
@@ -2578,9 +2621,13 @@ export default function ProjectDetail() {
                                         </td>
                                         <td className="p-2 text-right whitespace-nowrap">
                                           {eur(Number(phase.montant_phase) || 0)}
-                                          {stReverse('agence') > 0 && (
-                                            <span className="block text-[9px] font-normal text-amber-600" title="Sous-traitants réglés par l'agence : compris dans son montant facturé, qu'elle leur reverse">
-                                              dont {eur(stReverse('agence'))} ST
+                                          {stTotalMission > 0 && (
+                                            <span className="block text-[9px] font-normal text-amber-600"
+                                              title={stReverse('agence') > 0
+                                                ? "Pourcentage réellement facturé, sous-traitants réglés par l'agence compris — elle les reverse ensuite"
+                                                : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                              {pct1(pctEffectif(Number(phase.montant_phase) || 0))} %
+                                              {stReverse('agence') > 0 && ` · dont ${eur(stReverse('agence'))} ST`}
                                             </span>
                                           )}
                                         </td>
@@ -2601,9 +2648,13 @@ export default function ProjectDetail() {
                                               </td>
                                               <td className="p-2 text-right whitespace-nowrap">
                                                 {eur(Number(ctPhase.montant_phase) || 0)}
-                                                {reverse > 0 && (
-                                                  <span className="block text-[9px] font-normal text-amber-600" title={`Sous-traitants réglés par ${ctDisplayName(ct)} : compris dans son montant facturé, qu'il leur reverse`}>
-                                                    dont {eur(reverse)} ST
+                                                {stTotalMission > 0 && (
+                                                  <span className="block text-[9px] font-normal text-amber-600"
+                                                    title={reverse > 0
+                                                      ? `Pourcentage réellement facturé, sous-traitants réglés par ${ctDisplayName(ct)} compris — il les reverse ensuite`
+                                                      : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                                    {pct1(pctEffectif(Number(ctPhase.montant_phase) || 0))} %
+                                                    {reverse > 0 && ` · dont ${eur(reverse)} ST`}
                                                   </span>
                                                 )}
                                               </td>
