@@ -12,6 +12,7 @@
  */
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { oauthResultKey } from '../lib/googleAuth';
 
 export default function GoogleAuthCallback() {
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading');
@@ -59,6 +60,12 @@ export default function GoogleAuthCallback() {
         setMessage('Connexion réussie, fermeture…');
         setDiagnostic(diag);
 
+        // Two independent channels back to the opener — see googleAuth.ts.
+        // postMessage is the primary one but depends on window.opener
+        // surviving the redirect chain through accounts.google.com, which
+        // has proven unreliable in practice; localStorage + the 'storage'
+        // event works regardless of any opener/COOP relationship.
+        if (state) localStorage.setItem(oauthResultKey(state), JSON.stringify({ access_token }));
         window.opener?.postMessage({ type: 'google_oauth_token', access_token }, window.location.origin);
         setTimeout(() => window.close(), 1500);
       } catch (err: any) {
@@ -66,6 +73,8 @@ export default function GoogleAuthCallback() {
         setStatus('error');
         setMessage(err.message || 'Erreur de connexion');
         setDiagnostic(diag);
+        const state = new URLSearchParams(window.location.search).get('state');
+        if (state) localStorage.setItem(oauthResultKey(state), JSON.stringify({ error: err.message }));
         window.opener?.postMessage({ type: 'google_oauth_token', error: err.message }, window.location.origin);
         // No auto-close here on purpose — see file header comment: a failed
         // attempt needs to stay on screen long enough to actually read.
