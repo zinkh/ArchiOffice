@@ -149,9 +149,32 @@ export async function exportNoteHonorairesToPDF(
     }, 0);
     const groupementTotal = (note.montant_ht || 0) + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0) + sousTraitants.reduce((s, st) => s + (st.montant_ht || 0), 0);
 
+    // Montant d'une mission pour tout le groupement, base du pourcentage
+    // affiché dans la colonne « Groupement » — même convention que l'éditeur
+    // (`ProjectDetail.tsx`) : part agence du contrat + part de chaque
+    // cotraitant + part de chaque sous-traitant, celle des sous-traitants
+    // étant répartie au même pourcentage de mission faute de ventilation
+    // propre dans le contrat.
+    const totalContrat = contrat?.mode_honoraires === 'forfait'
+      ? (contrat?.montant_honoraires || 0)
+      : ((contrat?.budget_previsionnel || 0) * (contrat?.taux_honoraires || 0) / 100);
+    const groupementBase = (phaseId: string) => {
+      const pct = (contrat?.missions_list || []).find(m => m.id === phaseId)?.pct || 0;
+      return pct / 100 * (
+        totalContrat
+        + (contrat?.cotraitants || []).reduce((s, c) => s + (c.montant_honoraires || 0), 0)
+        + (contrat?.sous_traitants || []).reduce((s, st) => s + (st.montant || 0), 0)
+      );
+    };
+    const groupementCell = (phaseId: string) => {
+      const montant = groupementFor(phaseId);
+      const base = groupementBase(phaseId);
+      return base > 0 ? `${(montant / base * 100).toFixed(1)}% · ${fmt(montant)} €` : `${fmt(montant)} €`;
+    };
+
     const body = (note.phases || []).map(phase => [
       phase.phase_name?.split('—')[0].trim() || phase.phase_id,
-      `${fmt(groupementFor(phase.phase_id))} €`,
+      groupementCell(phase.phase_id),
       ...intervenants.map(iv => cellFor(iv.key, phase.phase_id)),
     ]);
     const totalsRow = ['Total HT', `${fmt(groupementTotal)} €`, ...intervenants.map(iv => `${fmt(totalFor(iv.key))} €`)];

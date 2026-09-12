@@ -351,6 +351,72 @@ depuis été retiré du contrat (pas de ligne à relire). Le calcul des
 montants (bases, plafonds) continue, lui, de faire cette même résolution
 par `contact_id` — seul l'affichage du nom manquait ce fil.
 
+### Le contrat MOE fait foi pour les montants du projet
+
+Trois changements qui tiennent au même principe : le contrat est la pièce, la
+fiche projet n'en est qu'une lecture.
+
+1. **Répartition par mission dans le contrat.** L'onglet Missions de la modale
+   de contrat (`src/pages/Contrats.tsx`) n'est plus une liste de cases à cocher
+   sur dix missions figées mais une répartition sur le modèle de celle des
+   propositions (`FeeDistributionGrid`, `Proposals.tsx`) : missions renommables,
+   supprimables (les missions de base comprises — le découpage MOP ne convient
+   pas à un diagnostic ou à une AMO) et créables, groupées par catégorie avec
+   un sous-total, et le montant HT déduit de la part appliquée au total des
+   honoraires du contrat. `ContratMOEMission.category`
+   (`'base' | 'exe' | 'complementaire'`, facultative, une mission sans
+   catégorie étant rattachée aux missions de base) porte ce classement dans le
+   jsonb `contrats_moe.missions_list` : **aucune migration SQL**, la colonne
+   étant déjà du jsonb et `server/routes/contratsMoe.ts` persistant le corps de
+   requête sans liste blanche de colonnes. Les deux préréglages visent
+   désormais des CATÉGORIES et non plus une liste d'ids figée, qui ne décrivait
+   plus le contenu réel d'un contrat dont les missions sont libres.
+   `server/routes/proposals.ts` traduit au passage les catégories de la
+   proposition acceptée (libellés d'affichage) vers ce vocabulaire fermé.
+2. **Les chiffres de l'onglet HONOS ne se saisissent plus** dès qu'un contrat
+   est lié à l'affaire (`src/pages/ProjectDetail.tsx`) : honoraires initiaux et
+   coût travaux prévisionnel passent en lecture seule, avec un renvoi vers le
+   contrat pour les corriger, et la synchronisation depuis le contrat devient
+   **inconditionnelle** — elle ne se limitait jusqu'ici qu'aux champs restés
+   vides côté projet, ce qui laissait une valeur saisie à la main diverger
+   indéfiniment de la pièce contractuelle. Les avenants continuent de
+   s'ajouter par-dessus (`honRevises`) sans toucher au montant initial, et
+   les deux champs redeviennent saisissables si aucun contrat n'est lié.
+3. **Taux d'honoraires à 10 décimales.** `step={0.1}` faisait refuser par la
+   validation du navigateur un taux issu d'une fraction (9,166667 % pour 55/6) :
+   `step="any"`, et `fmtPct()` affiche jusqu'à dix décimales sans jamais en
+   forcer (un taux rond reste écrit « 12 % »).
+
+**TVA par membre du groupement.** Tous les cotraitants ne sont pas assujettis
+(micro-entreprise, franchise en base) : `ContratMembreTVA`
+(`tva_applicable?`, `tva_rate?`), dont héritent `ContratCotraitant` et
+`ContratSousTraitant`, porte donc le régime de chacun plutôt qu'un taux unique
+au contrat. Absent vaut « assujetti au taux de droit commun » (20 %), le cas
+courant, donc aucun contrat déjà enregistré ne change de comportement. Un
+membre dé-assujetti garde son taux en base plutôt que de le perdre si
+l'assujettissement est rétabli — c'est `tvaRateOf()` qui le neutralise à
+l'affichage et dans le calcul du TTC.
+
+**Cliquer un contrat ouvre l'affaire liée** (liste de `/contrats`), avec
+`stopPropagation` sur la rangée d'actions de la carte : elles ne doivent pas
+naviguer. Une carte sans `project_id` reste inerte (ni curseur, ni handler)
+plutôt que de mener à une route `/projects/undefined`.
+
+**Colonne « Groupement » en deux parties** dans la ventilation d'une note
+d'honoraires : le pourcentage de la mission facturé par l'ensemble de l'équipe
+dans cette note, puis son montant. Sa base (`groupementPhaseBase`) additionne
+la part agence, celle de chaque cotraitant et celle de chaque sous-traitant ;
+les sous-traitants ne portant qu'un montant global dans le contrat, leur part
+y est répartie au même pourcentage de mission que les autres — une hypothèse
+d'AFFICHAGE, jamais un plafond, la saisie d'un sous-traitant restant plafonnée
+à son montant global (`stCap`). L'agence et les cotraitants passent sous une
+entête commune « Mandataire et cotraitants » (« Mandataire » seul s'il n'y a
+pas de cotraitant) : ce sont les titulaires du marché de maîtrise d'œuvre, par
+opposition aux sous-traitants regroupés à leur droite. L'export PDF
+(`src/lib/noteHonorairesExport.ts`) rend le même pourcentage dans sa cellule
+Groupement, au format « % · € » déjà utilisé par les colonnes d'intervenants,
+plutôt qu'en ajoutant une colonne à un tableau déjà large.
+
 ### Invitation d'un nouveau membre d'équipe
 
 `POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot

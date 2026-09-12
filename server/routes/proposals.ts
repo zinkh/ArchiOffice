@@ -142,9 +142,19 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
             const totalBaseAmount = missions
               .filter((m: any) => m.category === 'Mission base')
               .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+            // Les catégories de la répartition des propositions (libellés en
+            // clair) se traduisent dans le vocabulaire fermé du contrat
+            // (`ContratMissionCategory`) : les deux écrans classent alors les
+            // missions de la même façon, sans que le contrat hérite de
+            // libellés d'affichage.
+            const categoryOf = (label?: string) =>
+              label === 'Mission Exécution' ? 'exe'
+                : label === 'Missions complémentaires' ? 'complementaire'
+                : 'base';
             const missions_list = missions.map((m: any) => ({
               id: m.id, name: m.name, incluse: true,
               pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
+              category: categoryOf(m.category),
             }));
             const totalHonoraires = p.amount || totalBaseAmount || 1;
             const cotraitants = (specialties_list || []).map((spec: any) => {

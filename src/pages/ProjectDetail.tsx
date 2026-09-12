@@ -349,15 +349,25 @@ export default function ProjectDetail() {
     });
   }, [linkedContratsMoe, id]);
 
+  // Le contrat MOE fait foi pour les montants d'honoraires du projet : le
+  // contrat signé s'il en existe un, à défaut le premier contrat lié.
+  const contratHonoraires = useMemo(
+    () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
+    [linkedContratsMoe],
+  );
+
   // Rapatrie les honoraires initiaux et le coût travaux prévisionnel depuis le
-  // contrat MOE signé lié au projet, plutôt que de laisser ces montants — déjà
-  // saisis dans le contrat — à ressaisir manuellement ici. Ne renseigne que ce
-  // qui est encore vide côté projet : un montant déjà défini (ajusté à la main,
-  // ou par un avenant) n'est jamais écrasé par une resynchronisation ultérieure.
+  // contrat MOE lié, plutôt que de laisser ces montants — déjà saisis dans le
+  // contrat — à ressaisir manuellement ici. Dès qu'un contrat est lié, c'est
+  // LUI qui fait foi : la synchronisation est inconditionnelle (elle ne se
+  // limite plus aux champs restés vides côté projet) et les deux champs
+  // passent en lecture seule dans l'onglet HONOS, pour qu'une valeur saisie
+  // ici ne puisse plus diverger de la pièce contractuelle. Les avenants, eux,
+  // continuent de s'ajouter par-dessus (`honRevises`) sans toucher au montant
+  // initial.
   useEffect(() => {
     if (!project) return;
-    const contratSigne = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
-    if (!contratSigne) return;
+    if (!contratHonoraires) return;
 
     setProject(prev => {
       if (!prev) return prev;
@@ -365,17 +375,19 @@ export default function ProjectDetail() {
       // travaux déjà saisi côté projet (avant même la liaison au contrat)
       // reste utilisable pour calculer le montant tant que le contrat n'en
       // porte pas un lui-même.
-      const budgetTravaux = contratSigne.budget_previsionnel || prev.construction_cost;
-      const honorairesContrat = contratSigne.mode_honoraires === 'forfait'
-        ? contratSigne.montant_honoraires
-        : (budgetTravaux && contratSigne.taux_honoraires ? budgetTravaux * contratSigne.taux_honoraires / 100 : undefined);
+      const budgetTravaux = contratHonoraires.budget_previsionnel || prev.construction_cost;
+      const honorairesContrat = contratHonoraires.mode_honoraires === 'forfait'
+        ? contratHonoraires.montant_honoraires
+        : (budgetTravaux && contratHonoraires.taux_honoraires ? budgetTravaux * contratHonoraires.taux_honoraires / 100 : undefined);
 
       const patch: Partial<Project> = {};
-      if (!prev.remuneration && honorairesContrat) patch.remuneration = honorairesContrat;
-      if (!prev.construction_cost && contratSigne.budget_previsionnel) patch.construction_cost = contratSigne.budget_previsionnel;
+      if (honorairesContrat && prev.remuneration !== honorairesContrat) patch.remuneration = honorairesContrat;
+      if (contratHonoraires.budget_previsionnel && prev.construction_cost !== contratHonoraires.budget_previsionnel) {
+        patch.construction_cost = contratHonoraires.budget_previsionnel;
+      }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
-  }, [linkedContratsMoe, project?.id]);
+  }, [contratHonoraires, project?.id]);
 
   useEffect(() => {
     if (activeTab === 'HONOS' && id) {
@@ -1702,40 +1714,61 @@ export default function ProjectDetail() {
                       );
                     })()}
 
-                    {/* Champ rémunération éditable */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-[var(--tblr-border)]">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Honoraires initiaux HT (€)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                          <input type="number"
-                            className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
-                            value={project.remuneration || 0}
-                            onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                    {/* Honoraires initiaux et coût travaux : issus du contrat MOE
+                        lié (donc en lecture seule ici, à corriger dans le
+                        contrat). Ils ne redeviennent saisissables que si aucun
+                        contrat n'est lié à l'affaire. */}
+                    {(() => {
+                      const verrouille = !!contratHonoraires;
+                      const readOnlyCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default';
+                      const editCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold';
+                      const origine = verrouille
+                        ? `Issu du contrat ${contratHonoraires.numero || 'MOE'}`
+                        : undefined;
+                      return (
+                        <div className="space-y-2 pt-2 border-t border-[var(--tblr-border)]">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Honoraires initiaux HT (€)</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input type="number" readOnly={verrouille} title={origine}
+                                  className={verrouille ? readOnlyCls : editCls}
+                                  value={project.remuneration || 0}
+                                  onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input type="number" readOnly={verrouille} title={origine}
+                                  className={verrouille ? readOnlyCls : editCls}
+                                  value={project.construction_cost || 0}
+                                  onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux honoraires (%)</label>
+                              <div className="relative">
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
+                                <input type="number" readOnly
+                                  className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default"
+                                  value={project.construction_cost && project.remuneration
+                                    ? Number(((project.remuneration / project.construction_cost) * 100).toFixed(10))
+                                    : '—'} />
+                              </div>
+                            </div>
+                          </div>
+                          {verrouille && (
+                            <p className="text-xs text-[var(--tblr-muted)]">
+                              Ces montants proviennent du contrat {contratHonoraires.numero ? `N° ${contratHonoraires.numero}` : 'de maîtrise d\'œuvre'} lié à cette affaire.
+                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">Modifier le contrat</Link> pour les corriger.
+                            </p>
+                          )}
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                          <input type="number"
-                            className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
-                            value={project.construction_cost || 0}
-                            onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux honoraires (%)</label>
-                        <div className="relative">
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
-                          <input type="number" readOnly
-                            className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default"
-                            value={project.construction_cost && project.remuneration
-                              ? ((project.remuneration / project.construction_cost) * 100).toFixed(2)
-                              : '—'} />
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     {/* Répartition par phases */}
                     {(() => {
@@ -2071,6 +2104,22 @@ export default function ProjectDetail() {
                     return s + (st?.montant_ht || 0);
                   }, 0);
 
+                  // Montant d'une mission pour TOUT le groupement, base du
+                  // pourcentage affiché dans la colonne « Groupement » : la part
+                  // agence + celle de chaque cotraitant + celle de chaque
+                  // sous-traitant. Les sous-traitants ne portant qu'un montant
+                  // global dans le contrat (aucune ventilation par mission), leur
+                  // part est ici répartie au même pourcentage de mission que les
+                  // autres — une hypothèse d'affichage, pas un plafond : le
+                  // plafond de saisie d'un sous-traitant reste son montant global
+                  // (cf. `stCap` plus bas).
+                  const groupementPhaseBase = (phaseId: string) => {
+                    const pct = (contrat?.missions_list || []).find((m: any) => m.id === phaseId)?.pct || 0;
+                    return (honRevises * pct / 100)
+                      + cotraitants.reduce((s: number, c: any) => s + (Number(c.montant_honoraires) || 0) * pct / 100, 0)
+                      + sousTraitants.reduce((s: number, st: any) => s + (Number(st.montant) || 0) * pct / 100, 0);
+                  };
+
                   const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
                   const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
 
@@ -2244,16 +2293,24 @@ export default function ProjectDetail() {
                                 <thead>
                                   <tr className="bg-[var(--tblr-surface-2)]">
                                     <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom">Mission</th>
-                                    <th rowSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom">Groupement</th>
-                                    <th rowSpan={2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)] align-bottom" colSpan={2}>{agencyName}</th>
-                                    {(noteForm.cotraitants_facturation || []).length > 0 && (
-                                      <th colSpan={(noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Cotraitants</th>
-                                    )}
+                                    {/* Groupement : le pourcentage de la mission facturé par
+                                        l'ensemble de l'équipe dans cette note, et son montant. */}
+                                    <th colSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Groupement</th>
+                                    {/* L'agence (mandataire) et les cotraitants sous une même
+                                        entête : ce sont les membres du groupement titulaires du
+                                        marché de maîtrise d'œuvre, par opposition aux
+                                        sous-traitants regroupés à leur droite. */}
+                                    <th colSpan={2 + (noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">
+                                      {(noteForm.cotraitants_facturation || []).length > 0 ? 'Mandataire et cotraitants' : 'Mandataire'}
+                                    </th>
                                     {(noteForm.sous_traitants_facturation || []).length > 0 && (
                                       <th colSpan={(noteForm.sous_traitants_facturation || []).length} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Sous-traitants</th>
                                     )}
                                   </tr>
                                   <tr className="bg-[var(--tblr-surface-2)]">
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">%</th>
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2">€</th>
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{agencyName}</th>
                                     {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
                                       <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ctDisplayName(ct)}</th>
                                     ))}
@@ -2286,7 +2343,13 @@ export default function ProjectDetail() {
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
                                         <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">{basePhase?.name || phase.phase_name}</td>
-                                        <td className="p-2 border-l border-[var(--tblr-border)] text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                        <td className="p-2 border-l border-[var(--tblr-border)] text-center font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
+                                          title="Part de la mission facturée par l'ensemble du groupement dans cette note">
+                                          {groupementPhaseBase(phase.phase_id) > 0
+                                            ? `${(groupementPhaseTotal / groupementPhaseBase(phase.phase_id) * 100).toFixed(1)} %`
+                                            : '—'}
+                                        </td>
+                                        <td className="p-2 text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
                                           {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(groupementPhaseTotal)}
                                         </td>
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
@@ -2392,13 +2455,24 @@ export default function ProjectDetail() {
                                 <tfoot>
                                   <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
                                     <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
-                                    <td className="p-2 border-l border-[var(--tblr-border)] text-right whitespace-nowrap">
-                                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(
-                                        (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0)
+                                    {(() => {
+                                      const totalGroupement = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0)
                                         + (noteForm.cotraitants_facturation || []).reduce((s: number, ct: any) => s + (Number(ct.montant_ht) || 0), 0)
-                                        + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) => s + (Number(st.montant_ht) || 0), 0)
-                                      )}
-                                    </td>
+                                        + (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any) => s + (Number(st.montant_ht) || 0), 0);
+                                      // Base de l'ensemble des missions présentes dans la note,
+                                      // pour que le % du pied se lise comme la somme des lignes.
+                                      const baseGroupement = (noteForm.phases || []).reduce((s: number, p: any) => s + groupementPhaseBase(p.phase_id), 0);
+                                      return (
+                                        <>
+                                          <td className="p-2 border-l border-[var(--tblr-border)] text-center whitespace-nowrap">
+                                            {baseGroupement > 0 ? `${(totalGroupement / baseGroupement * 100).toFixed(1)} %` : '—'}
+                                          </td>
+                                          <td className="p-2 text-right whitespace-nowrap">
+                                            {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalGroupement)}
+                                          </td>
+                                        </>
+                                      );
+                                    })()}
                                     <td className="p-2 border-l border-[var(--tblr-border)]"></td>
                                     <td className="p-2 text-right text-blue-600 whitespace-nowrap">
                                       {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}
