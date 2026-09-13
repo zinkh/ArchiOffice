@@ -18,6 +18,12 @@
 //     junction tables with no tenant_id/id of their own — see
 //     JUNCTION_TABLES below instead.
 
+// N'ENTRE PAS DANS CETTE LISTE, et ne doit pas y entrer :
+// external_storage_connections. Propager des jetons OAuth et des mots de passe
+// d'application chiffrés vers une installation locale, dont la
+// MAIL_ENCRYPTION_KEY diffère, serait à la fois inutile (ils y seraient
+// indéchiffrables) et un essaimage d'identifiants. Un poste hors ligne sert
+// déjà ses fichiers depuis son propre disque.
 export const SYNC_TABLES: readonly string[] = [
   'act_data', 'article_prix_observations', 'articles_type', 'bpu_data', 'cctps',
   'contact_categories', 'contacts', 'contrats_moe',

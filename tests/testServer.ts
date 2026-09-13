@@ -3,6 +3,8 @@
 // real Supabase/PostgREST backend — see fakeSupabaseAdmin.ts for why.
 import { vi } from 'vitest';
 import { FakeSupabaseAdmin } from './fakeSupabaseAdmin';
+import { registerMemoryProvider } from '../server/externalStorage/memoryProvider';
+import { invalidateConnectionCache } from '../server/externalStorage/externalConnection';
 
 export const fakeSupabaseAdmin = new FakeSupabaseAdmin();
 
@@ -27,6 +29,11 @@ export async function getTestApp() {
       process.env.MAIL_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString('base64');
       const mod = await import('../server');
       const { app } = await mod.createApp();
+      // Aucun drive réel n'est joignable depuis les tests : les trois types de
+      // fournisseur sont servis par le double en mémoire. APRÈS l'import de
+      // server.ts, qui enregistre les vrais adaptateurs — sinon ce sont eux qui
+      // gagneraient, et les tests tenteraient de vraies requêtes réseau.
+      registerMemoryProvider();
       return app;
     })();
   }
@@ -88,4 +95,36 @@ export function tenantHeader(tenantId: string) {
 
 export function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * Branche un espace de stockage externe sur un cabinet, servi par le
+ * fournisseur en mémoire (server/externalStorage/memoryProvider.ts).
+ *
+ * fakeSupabaseAdmin émule PostgREST et Supabase Storage, mais aucun drive :
+ * sans ce double, impossible de vérifier qu'un dépôt part réellement chez le
+ * cabinet, que l'arborescence créée est la bonne, ou que le cache de dossiers
+ * évite bien des appels.
+ */
+export function connectExternalStorage(
+  tenantId: string,
+  overrides: Record<string, any> = {},
+): string {
+  const id = uniqueId('storage-conn');
+  fakeSupabaseAdmin.seed('external_storage_connections', [{
+    id,
+    tenant_id: tenantId,
+    provider: 'webdav',
+    webdav_flavor: 'nextcloud',
+    root_folder_path: 'ArchiOffice',
+    root_folder_external_id: null,
+    is_active: true,
+    status: 'ok',
+    ...overrides,
+  }]);
+  // getActiveConnection met en cache 30 s, y compris l'absence de connexion :
+  // un test qui aurait déjà déposé un fichier pour ce cabinet doit voir le
+  // branchement immédiatement.
+  invalidateConnectionCache(tenantId);
+  return id;
 }

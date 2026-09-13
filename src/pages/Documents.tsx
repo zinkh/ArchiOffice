@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX,
-  IconUpload, IconCloudOff, IconChevronDown, IconChevronRight, IconFolder,
+  IconUpload, IconCloudOff, IconCloud, IconChevronDown, IconChevronRight, IconFolder,
   IconFolderOpen, IconLayoutSidebar, IconCircleCheck, IconClock,
   IconAlertTriangle, IconSend, IconCheck, IconUsers, IconEye,
   IconPencil,
@@ -522,8 +522,11 @@ export default function Documents() {
                             <p className="text-sm font-semibold truncate max-w-[180px]" style={{ color: 'var(--tblr-text)', textDecoration: isPerime ? 'line-through' : 'none' }} title={doc.name}>
                               {doc.name}
                             </p>
-                            <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
-                              {projects.find(p => p.id === doc.project_id)?.name || '—'}
+                            <p className="text-[11px] truncate flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+                              {doc.storage_backend === 'external' && (
+                                <IconCloud size={12} className="shrink-0" title="Stocké sur l'espace de stockage du cabinet" />
+                              )}
+                              <span className="truncate">{projects.find(p => p.id === doc.project_id)?.name || '—'}</span>
                             </p>
                           </div>
                         </div>

@@ -25,6 +25,22 @@ import { MailAccountsCard } from '../components/MailAccountsCard';
 type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication' | 'compliance' | 'veille';
 type PluginStatus = 'active' | 'coming_soon';
 
+/** Ce que GET /api/external-storage/status rend — jamais un secret, seulement
+ *  de quoi afficher l'état (voir publicView dans server/routes/externalStorage.ts). */
+interface ExternalStorageStatus {
+  connected: boolean;
+  id?: string;
+  provider?: 'google_drive' | 'dropbox' | 'webdav';
+  webdavFlavor?: 'nextcloud' | 'kdrive' | null;
+  displayName?: string | null;
+  account?: string | null;
+  baseUrl?: string | null;
+  rootFolderPath?: string;
+  status?: 'ok' | 'needs_reauth' | 'error';
+  lastError?: string | null;
+  credentialsPresent?: boolean;
+}
+
 interface PluginDef {
   id: string;
   name: string;
@@ -86,9 +102,9 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     id: 'google_drive',
     name: 'Google Drive',
     vendor: 'Google',
-    description: 'Sauvegardez et partagez vos plans et documents directement sur Google Drive.',
+    description: 'Enregistrez vos documents et vos plans sur le Google Drive du cabinet, classés par affaire et par phase.',
     category: 'storage',
-    status: 'coming_soon',
+    status: 'active',
     iconBg: 'bg-blue-50',
     iconColor: 'text-blue-600',
     iconLabel: 'GD',
@@ -97,12 +113,34 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     id: 'dropbox',
     name: 'Dropbox',
     vendor: 'Dropbox',
-    description: 'Stockez vos plans et documents ArchiOffice directement sur Dropbox.',
+    description: 'Enregistrez vos documents et vos plans sur le Dropbox du cabinet, classés par affaire et par phase.',
     category: 'storage',
-    status: 'coming_soon',
+    status: 'active',
     iconBg: 'bg-blue-50',
     iconColor: 'text-blue-600',
     iconLabel: 'Db',
+  },
+  {
+    id: 'nextcloud',
+    name: 'Nextcloud',
+    vendor: 'Nextcloud GmbH',
+    description: 'Enregistrez vos documents et vos plans sur votre propre serveur Nextcloud, classés par affaire et par phase.',
+    category: 'storage',
+    status: 'active',
+    iconBg: 'bg-sky-50',
+    iconColor: 'text-sky-600',
+    iconLabel: 'NC',
+  },
+  {
+    id: 'kdrive',
+    name: 'kDrive',
+    vendor: 'Infomaniak',
+    description: 'Enregistrez vos documents et vos plans sur votre kDrive Infomaniak, hébergé en Suisse, classés par affaire et par phase.',
+    category: 'storage',
+    status: 'active',
+    iconBg: 'bg-indigo-50',
+    iconColor: 'text-indigo-600',
+    iconLabel: 'kD',
   },
   {
     id: 'salesforce',
@@ -354,6 +392,16 @@ export default function Settings() {
   const [isDisconnectingSuperpdp, setIsDisconnectingSuperpdp] = useState(false);
   const [superpdpNotice, setSuperpdpNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Stockage externe — l'espace de stockage du cabinet (Nextcloud, kDrive).
+  // Un seul espace actif à la fois, tous fournisseurs confondus : c'est un
+  // réglage du cabinet, pas un par personne.
+  const [externalStorage, setExternalStorage] = useState<ExternalStorageStatus | null>(null);
+  const [storageForm, setStorageForm] = useState({ baseUrl: '', username: '', password: '', rootFolderPath: 'ArchiOffice' });
+  const [isSavingStorage, setIsSavingStorage] = useState(false);
+  const [isTestingStorage, setIsTestingStorage] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [storageCallbackUrl, setStorageCallbackUrl] = useState<string>('');
+
   // RGPD — fermeture de cabinet (Zone dangereuse)
   const [tenantDeletion, setTenantDeletion] = useState<{ deletion_requested_at: string | null; grace_period_days: number } | null>(null);
   const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
@@ -468,6 +516,12 @@ export default function Settings() {
       apiFetch('/api/chorus-pro/status')
         .then(s => setChorusProStatus(s))
         .catch(() => {});
+      apiFetch('/api/external-storage/status')
+        .then((s: any) => setExternalStorage(s))
+        .catch(() => {});
+      apiFetch('/api/external-storage/callback-url')
+        .then((d: any) => setStorageCallbackUrl(d.url))
+        .catch(() => {});
       apiFetch('/api/settings/tenant-deletion')
         .then((s: any) => setTenantDeletion(s))
         .catch(() => {});
@@ -574,6 +628,18 @@ export default function Settings() {
     } else if (booksError) {
       setZohoBooksNotice({ type: 'error', message: zohoConnectErrorMessage(booksError) });
       setOpenPlugin('zoho_books');
+      window.history.replaceState({}, '', '/settings');
+    // Retour du consentement Google Drive. L'état est rechargé plutôt que
+    // deviné : le callback a pu remplacer un espace précédent, et seul le
+    // serveur sait lequel est désormais actif.
+    } else if (params.get('external_storage_connected') === '1') {
+      apiFetch('/api/external-storage/status')
+        .then((st: any) => setExternalStorage(st))
+        .catch(() => {});
+      setStorageNotice({ type: 'success', message: 'Espace de stockage connecté. Les nouveaux documents et plans y seront enregistrés.' });
+      window.history.replaceState({}, '', '/settings');
+    } else if (params.get('external_storage_error')) {
+      setStorageNotice({ type: 'error', message: "La connexion à l'espace de stockage a échoué. Réessayez, ou vérifiez que l'URL de redirection est bien déclarée chez le fournisseur." });
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
@@ -1100,6 +1166,12 @@ export default function Settings() {
     if (id === 'chorus_pro') return !!(chorusProStatus?.connected);
     if (id === 'boamp') return !!(settings as any).tender_boamp_enabled;
     if (id === 'ted') return !!(settings as any).tender_ted_enabled;
+    // Un seul espace de stockage est actif à la fois : seule la carte du
+    // fournisseur réellement branché s'affiche comme connectée.
+    if (id === 'nextcloud') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'nextcloud';
+    if (id === 'kdrive') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'kdrive';
+    if (id === 'google_drive') return externalStorage?.connected === true && externalStorage.provider === 'google_drive';
+    if (id === 'dropbox') return externalStorage?.connected === true && externalStorage.provider === 'dropbox';
     return false;
   };
 
@@ -1182,7 +1254,312 @@ export default function Settings() {
   // saved, permanently disabling "Connecter Zoho" until the user retypes it.
   const hasZohoSecret = !!settings.zoho_client_secret || !!(settings as any).zoho_client_secretSet;
 
+  // ── Stockage externe (Nextcloud, kDrive) ──────────────────────────────────
+  // Les deux offres parlent le même WebDAV et partagent donc un seul
+  // formulaire ; elles ne diffèrent que par le gabarit d'URL proposé.
+  // Google Drive se branche par consentement OAuth et non par formulaire : le
+  // cabinet ne saisit qu'un dossier racine, puis part chez Google.
+  const handleStorageOAuthConnect = async (provider: 'google_drive' | 'dropbox') => {
+    setIsSavingStorage(true);
+    setStorageNotice(null);
+    try {
+      const { url } = await apiFetch<{ url: string }>(
+        `/api/external-storage/${provider}/auth?rootFolderPath=${encodeURIComponent(storageForm.rootFolderPath)}`,
+      );
+      window.location.href = url;
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Connexion impossible.' });
+      setIsSavingStorage(false);
+    }
+  };
+
+  const refreshExternalStorage = async () => {
+    try {
+      setExternalStorage(await apiFetch('/api/external-storage/status'));
+    } catch { /* l'état précédent reste affiché */ }
+  };
+
+  const handleStorageConnect = async (flavor: 'nextcloud' | 'kdrive') => {
+    setIsSavingStorage(true);
+    setStorageNotice(null);
+    try {
+      await apiFetch('/api/external-storage/webdav', {
+        method: 'POST',
+        body: JSON.stringify({ flavor, ...storageForm }),
+      });
+      setStorageForm({ ...storageForm, password: '' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Espace de stockage connecté. Les nouveaux documents et plans y seront enregistrés.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Connexion impossible.' });
+    } finally {
+      setIsSavingStorage(false);
+    }
+  };
+
+  const handleStorageTest = async () => {
+    setIsTestingStorage(true);
+    setStorageNotice(null);
+    try {
+      await apiFetch('/api/external-storage/test', { method: 'POST' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Connexion vérifiée.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Test échoué.' });
+    } finally {
+      setIsTestingStorage(false);
+    }
+  };
+
+  // Deux gestes distincts, et c'est volontaire : déconnecter arrête les
+  // écritures, révoquer coupe aussi la lecture des fichiers déjà déposés.
+  const handleStorageDisable = async () => {
+    if (!externalStorage?.id) return;
+    if (!window.confirm("Déconnecter cet espace ?\n\nLes nouveaux documents et plans repartiront dans ArchiOffice. Ceux déjà déposés chez vous resteront consultables.")) return;
+    try {
+      await apiFetch(`/api/external-storage/${externalStorage.id}/disable`, { method: 'POST' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Espace déconnecté. Les nouveaux fichiers repartent dans ArchiOffice.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Déconnexion impossible.' });
+    }
+  };
+
+  const handleStorageRevoke = async () => {
+    if (!externalStorage?.id) return;
+    if (!window.confirm("Révoquer les accès ?\n\nArchiOffice oubliera votre mot de passe d'application. Les documents et plans déjà déposés ne seront PLUS consultables depuis ArchiOffice — ils restent dans votre espace de stockage, mais l'application ne saura plus aller les chercher.")) return;
+    try {
+      await apiFetch(`/api/external-storage/${externalStorage.id}`, { method: 'DELETE' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Accès révoqués.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Révocation impossible.' });
+    }
+  };
+
+  const STORAGE_CARDS: Record<string, { label: string; flavor: 'nextcloud' | 'kdrive' | null }> = {
+    nextcloud: { label: 'Nextcloud', flavor: 'nextcloud' },
+    kdrive: { label: 'kDrive', flavor: 'kdrive' },
+    google_drive: { label: 'Google Drive', flavor: null },
+    dropbox: { label: 'Dropbox', flavor: null },
+  };
+
+  const renderStorageConfig = (pluginId: string) => {
+    const { label, flavor } = STORAGE_CARDS[pluginId];
+    const connectedHere = flavor
+      ? externalStorage?.connected && externalStorage.webdavFlavor === flavor
+      : externalStorage?.connected && externalStorage.provider === pluginId;
+    // Un seul espace actif à la fois, tous fournisseurs confondus.
+    const otherConnected = externalStorage?.connected && !connectedHere;
+    const otherName = externalStorage?.displayName || externalStorage?.provider || 'un autre espace';
+    const canSubmitWebdav = !!(storageForm.baseUrl && storageForm.username && storageForm.password);
+
+    /** Rappel commun aux quatre cartes : rien n'est déplacé rétroactivement. */
+    const migrationNotice = (
+      <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+        Seuls les <strong>nouveaux</strong> documents et plans partiront sur votre espace. Ceux déjà enregistrés
+        dans ArchiOffice y restent et continuent de s'ouvrir normalement.
+      </div>
+    );
+
+    const rootFolderField = (
+      <div>
+        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Dossier racine</label>
+        <input
+          className="w-full p-2 rounded-lg text-sm font-mono"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+          value={storageForm.rootFolderPath}
+          onChange={e => setStorageForm({ ...storageForm, rootFolderPath: e.target.value })}
+        />
+        <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          ArchiOffice y créera un dossier par affaire, avec un sous-dossier par phase.
+        </p>
+      </div>
+    );
+
+    return (
+      <div className="space-y-4">
+        {storageNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={storageNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {storageNotice.message}
+          </div>
+        )}
+
+        {connectedHere && externalStorage?.status !== 'ok' && (
+          <div className="text-sm p-3 rounded-lg border" style={{ background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            <p className="font-bold">Cet espace ne répond plus.</p>
+            <p className="mt-1 opacity-90">
+              {externalStorage?.lastError || "L'accès a peut-être été révoqué."} Reconnectez-le pour reprendre les dépôts.
+            </p>
+          </div>
+        )}
+
+        {otherConnected ? (
+          <div className="text-sm p-3 rounded-lg border" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            Déconnectez d'abord <strong>{otherName}</strong> : un seul espace de stockage peut être actif à la fois.
+          </div>
+        ) : connectedHere ? (
+          <div className="space-y-3">
+            <div className="text-sm p-3 rounded-lg border" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+              <p>Connecté en tant que <strong>{externalStorage?.account || label}</strong></p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Dossier racine : <code>{externalStorage?.rootFolderPath}</code> — vos documents et plans y sont classés par affaire puis par phase.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                disabled={isTestingStorage}
+                onClick={handleStorageTest}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                {isTestingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester la connexion
+              </button>
+              <button
+                type="button"
+                onClick={handleStorageDisable}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+                <IconPlugConnectedX size={13} /> Déconnecter
+              </button>
+              <button
+                type="button"
+                onClick={handleStorageRevoke}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+                <IconTrash size={13} /> Révoquer les accès
+              </button>
+            </div>
+            {/* Les deux gestes ne font pas la même chose, et la différence
+                compte : révoquer coupe aussi la LECTURE des fichiers déjà
+                déposés. Le dire ici évite de le découvrir après coup. */}
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Déconnecter renvoie les nouveaux fichiers dans ArchiOffice ; ceux déjà déposés chez vous restent consultables.
+              Révoquer efface en plus les accès enregistrés : les fichiers déjà déposés ne seront plus consultables
+              depuis ArchiOffice, mais ils restent dans votre espace.
+            </p>
+          </div>
+        ) : flavor ? (
+          <>
+            {flavor === 'nextcloud' ? (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>URL WebDAV</label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm font-mono"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder="https://cloud.moncabinet.fr/remote.php/dav/files/identifiant/"
+                  value={storageForm.baseUrl}
+                  onChange={e => setStorageForm({ ...storageForm, baseUrl: e.target.value })}
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Dans Nextcloud : Fichiers → Paramètres, en bas à gauche, « WebDAV ».
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Identifiant kDrive</label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm font-mono"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder="123456"
+                  value={storageForm.baseUrl.replace('https://connect.drive.infomaniak.com/', '').replace(/\/$/, '')}
+                  onChange={e => setStorageForm({ ...storageForm, baseUrl: `https://connect.drive.infomaniak.com/${e.target.value.trim()}/` })}
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Le numéro de votre kDrive, visible dans l'adresse de kdrive.infomaniak.com. L'hôte, lui, est toujours le même.
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+                  {flavor === 'kdrive' ? 'Adresse e-mail Infomaniak' : 'Identifiant'}
+                </label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={storageForm.username}
+                  onChange={e => setStorageForm({ ...storageForm, username: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe d'application</label>
+                <input
+                  type="password"
+                  className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={storageForm.password}
+                  onChange={e => setStorageForm({ ...storageForm, password: e.target.value })}
+                />
+              </div>
+            </div>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Utilisez un <strong>mot de passe d'application</strong>, jamais celui de votre compte : il se révoque
+              séparément et ne donne accès à rien d'autre.
+              {flavor === 'kdrive'
+                ? " Manager Infomaniak → Mon profil → Mot de passe d'application."
+                : " Nextcloud → Paramètres → Sécurité → Créer un mot de passe d’application."}
+            </p>
+
+            {rootFolderField}
+            {migrationNotice}
+
+            <button
+              type="button"
+              disabled={isSavingStorage || !canSubmitWebdav}
+              onClick={() => handleStorageConnect(flavor)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              {isSavingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester et connecter {label}
+            </button>
+          </>
+        ) : (
+          <>
+            {rootFolderField}
+            {/* Scope drive.file : ArchiOffice ne voit que ce qu'il a lui-même
+                créé, donc il crée ce dossier plutôt que d'en désigner un
+                existant. C'est aussi ce qui lui interdit de lire le reste du
+                Drive du cabinet — ça vaut d'être dit avant le consentement. */}
+            {pluginId === 'google_drive' && (
+              <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+                ArchiOffice crée ce dossier dans votre Drive et n'accède qu'aux fichiers qu'il y dépose lui-même.
+                Le reste de votre Drive lui reste invisible.
+              </div>
+            )}
+            {migrationNotice}
+            {storageCallbackUrl && (
+              <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                <p className="font-bold mb-1">URL de redirection OAuth</p>
+                <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+                  {storageCallbackUrl}
+                </code>
+                <p className="mt-1 opacity-75">
+                  {pluginId === 'google_drive'
+                    ? 'À déclarer dans la console Google Cloud → Identifiants → URI de redirection autorisés.'
+                    : 'À déclarer dans la console Dropbox → App Console → OAuth 2 → Redirect URIs.'}
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={isSavingStorage}
+              onClick={() => handleStorageOAuthConnect(pluginId as 'google_drive' | 'dropbox')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              {isSavingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Connecter {label}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderPluginConfig = (pluginId: string) => {
+    if (STORAGE_CARDS[pluginId]) return renderStorageConfig(pluginId);
+
     if (pluginId === 'zoho_invoice') return (
       <div className="space-y-4">
         {zohoNotice && (

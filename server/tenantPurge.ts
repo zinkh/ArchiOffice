@@ -17,6 +17,15 @@ const DEFAULT_CHECK_INTERVAL_HOURS = 24;
 // once the referencing rows are gone, but avoids leaving orphaned files.
 const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos', 'support-attachments'];
 
+// Ce qui N'EST PAS supprimé, et ne doit pas l'être : les fichiers qu'un cabinet
+// a fait déposer sur SON propre espace de stockage (Google Drive, Dropbox,
+// Nextcloud, kDrive — voir server/externalStorage/). Ils vivent sur un compte
+// qui lui appartient ; les détruire reviendrait à anéantir son bien hors de
+// notre système, alors que l'effacement RGPD porte sur les données que NOUS
+// détenons. Les lignes external_storage_connections / external_storage_folders
+// disparaissent seules par la cascade sur tenants — c'est-à-dire qu'on oublie
+// comment aller chercher ces fichiers, sans y toucher.
+
 async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
   for (const bucket of TENANT_PREFIXED_BUCKETS) {
     try {

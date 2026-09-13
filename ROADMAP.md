@@ -45,8 +45,10 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | MAF submission (`/api/maf/v1/submit`) | 🚫 Returns HTTP 501, marked "Enterprise only — contact sales" |
 | Stripe | ⏳ Planned — listed in Settings, no backend |
 | QuickBooks | ⏳ Planned — listed in Settings, no backend |
-| Google Drive | ⏳ Planned — listed in Settings, no backend |
-| Dropbox | ⏳ Planned — listed in Settings, no backend |
+| Nextcloud | ✅ Active — WebDAV, documents and plans stored on the tenant's own server |
+| kDrive (Infomaniak) | ✅ Active — same WebDAV adapter as Nextcloud |
+| Google Drive | ✅ Active — OAuth (`drive.file` scope), documents and plans stored on the tenant's own Drive |
+| Dropbox | ✅ Active — OAuth, documents and plans stored on the tenant's own Dropbox |
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |
 | Microsoft Teams | ⏳ Planned — listed in Settings, no backend |
@@ -77,6 +79,38 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 - **Already in place**: `resolveLlmProvider()` takes `{ provider, model, apiKey }` and those win over everything else, and `platform_settings` shows the pattern for a stored selection. The per-tenant lookup slots in where `getPlatformAiConfig()` is called today — in `routes.ts` and `aiSuggestions.ts` — with the tenant's decrypted key as `apiKey`.
 - **Also required**: BYOK moves data processing to a provider the tenant picked, so the privacy policy (`src/pages/PrivacyPolicy.tsx`) and the subcontractor list need updating before it ships.
 
+### External storage — not built
+
+The storage layer itself is in place (`server/externalStorage/`, see CLAUDE.md's
+"Stockage sur l'espace du cabinet"). These are the pieces deliberately left out,
+recorded here so the reasoning doesn't have to be re-derived.
+
+- **Migrating files uploaded before the connection.** Today the saving is
+  gradual: old files stay on Supabase, new ones go to the tenant's space. A
+  backfill job would copy the existing ones over, rewrite `file_url` and
+  `storage_backend`, then delete the Supabase object. It is a bulk, hard-to-undo
+  operation over a tenant's entire archive, which is why it wasn't bundled with
+  the initial work — it deserves its own dry-run mode, per-file resumability and
+  a verification pass before anything is deleted.
+- **Widening the scope past `documents` and `plans`.** Mechanically easy —
+  `storeBusinessFile()` takes a bucket — but meeting photos, chat/feed
+  attachments and CVs don't weigh enough to justify it. `logos` and
+  `support-attachments` must never move (see the gaps section above).
+- **Google Shared Drives and Dropbox Business team spaces.** The Drive adapter
+  already sends `supportsAllDrives` on every call and the connection table has a
+  `drive_id` column reserved for it, but nothing selects a shared drive in the
+  UI. Dropbox Business would need the `Dropbox-API-Path-Root` /
+  `Dropbox-API-Select-User` headers. Both are additive.
+- **Following folder renames.** If someone renames an affaire's folder from
+  their own drive, the next upload recreates one under the canonical name next
+  to it, rather than chasing the rename (which would mean guessing). Files
+  already deposited are unaffected — they are addressed by their own id, never
+  by their folder's path.
+- **A local cache for the Electron client.** Offline mode serves files from the
+  workstation's own disk and returns HTTP 503 with an explicit message for an
+  externally stored file. Caching them locally is a feature in its own right.
+- **Per-provider direct upload.** See the memory-pressure gap above.
+
 ### TTS per provider — planned
 
 `resolveSpeechProvider()` (`packages/archioffice-agents/src/server/llm/index.ts`) always returns Gemini today, whatever the tenant's active chat provider is — see CLAUDE.md's "Synthèse vocale". That's not an oversight to fix, it's a limit of what Anthropic and Mistral currently expose: neither publishes a public text-to-speech endpoint (Claude has none; Mistral's audio work, Voxtral, is speech-to-text only), so there is no Claude/Mistral adapter to route to yet.
@@ -99,7 +133,27 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 ## Known gaps worth knowing about before you rely on something
 
 - **No pagination on most list endpoints** (`/api/documents`, `/api/tasks`, `/api/contacts`, `/api/tenders`, `/api/rfis`, `/api/reserves`, `/api/meetings`, and others) — large tenants get full, unpaged arrays back. `/api/projects` and `/api/invoices` got opt-in cursor pagination (`?limit=&cursor=`, returning `{ data, nextCursor }`) and dropped their per-row relational fan-out (cotraitants/lots/stakeholders/categories, line items) down to a single per-item detail fetch — see CLAUDE.md's "Pagination et fan-out sur les listes" — but the remaining endpoints above still return everything, unpaged, on every call.
-- **Uploads go through the server's memory**, not a direct signed upload to storage. Every route on the multer/`memoryStorage()` path (`server/documentUpload.ts`, `server/imageUpload.ts`) buffers the whole file (up to 50 Mo) in the Node process before it reaches Supabase Storage — several concurrent large uploads can add up to real memory pressure. A direct-to-storage signed-upload flow (client asks the server for a short-lived signed upload URL, then uploads straight to the now-private storage bucket) would remove the server from that hot path entirely; not started.
+- **Uploads go through the server's memory**, not a direct signed upload to storage. Every route on the multer/`memoryStorage()` path (`server/documentUpload.ts`, `server/imageUpload.ts`) buffers the whole file (up to 50 Mo) in the Node process before it reaches storage — Supabase's, or the tenant's own space. Several concurrent large uploads can add up to real memory pressure. A direct-to-storage signed-upload flow (client asks the server for a short-lived signed upload URL, then uploads straight to the now-private storage bucket) would remove the server from that hot path entirely; not started, and it would have to be reworked per provider now that three of them exist.
+- **External storage covers documents and plans only.** A tenant that connects
+  its own space (Google Drive, Dropbox, Nextcloud, kDrive) gets its `documents`
+  and `plans` files written there — including document versions and visa
+  attachments, which live in the `documents` bucket. Meeting photos, chat and
+  feed attachments and CVs stay on Supabase Storage: they don't weigh enough to
+  be worth the extra moving part. `logos` is public by design, and
+  `support-attachments` has to stay with us so the platform superadmin can still
+  read them from `/admin/support` — a tenant's own drive would be unreachable to
+  them.
+- **Files uploaded before a tenant connects its space are not migrated.** They
+  stay on Supabase and keep being served from there, which is why each row
+  records where its own file lives (`storage_backend`, derived from `file_url`).
+  The saving is therefore gradual, and a bulk migration of existing files is not
+  built — see "External storage — not built" above.
+- **Reads of externally stored files go through the server**, except on Dropbox,
+  which can mint a short-lived per-bearer download link the read route redirects
+  to. Google Drive and WebDAV have no equivalent that doesn't widen the file's
+  sharing inside the tenant's own space, so their bytes are streamed through us
+  (`Range` requests are passed upstream, so pdf.js still works on large plans).
+  That puts external reads back on the same hot path as uploads.
 - **Webhooks are inbound-only** (billing events from Stancer, sync notifications from Ragic) — there's no outbound event/webhook system for third parties wanting to react to changes in ArchiOffice.
 
 Screenshots and a demo GIF are also still on the list — see the TODO in [README.md](README.md#screenshots) if you'd like to contribute some.

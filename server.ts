@@ -81,6 +81,13 @@ import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
+import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
+import { registerStorageProviders } from "./server/externalStorage/providers";
+import { parseExternalRef } from "./server/externalStorage/externalRef";
+import { getConnectionById } from "./server/externalStorage/externalConnection";
+import { createProvider } from "./server/externalStorage/providerFactory";
+import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
@@ -604,8 +611,7 @@ export async function createApp() {
       throw err;
     }
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
-    const { data } = await supabaseAdmin.from('document_versions').select('size_bytes').eq('tenant_id', tenantId);
-    const usedBytes = (data || []).reduce((sum: number, r: any) => sum + (r.size_bytes || 0), 0);
+    const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
       const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
@@ -665,6 +671,30 @@ export async function createApp() {
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
+  // Les documents, plans et visas d'un cabinet qui a branché son propre espace
+  // (Google Drive, Dropbox, Nextcloud, kDrive) n'y vont plus. Cette couche est
+  // la seule à le savoir : les dix autres modules de routes continuent d'appeler
+  // uploadToStorage/deleteFromStorage directement, sans rien changer. Voir
+  // server/externalStorage/storeBusinessFile.ts.
+  const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
+    supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
+  });
+  registerStorageProviders(supabaseAdmin);
+
+  /** Les octets d'un fichier hébergé sur l'espace de stockage du cabinet, ou
+   *  null si la référence n'en est pas une (l'appelant reprend alors ses
+   *  chemins habituels). */
+  async function readExternalBusinessFile(tenantId: string, fileUrl: string) {
+    const ref = parseExternalRef(fileUrl);
+    if (!ref) return null;
+    const connection = await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+    if (!connection) return null;
+    const stream = await createProvider(connection).openReadStream(ref.externalId);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream.body) chunks.push(Buffer.from(chunk as any));
+    return { buffer: Buffer.concat(chunks), contentType: stream.contentType };
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
 
   // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
@@ -687,6 +717,17 @@ export async function createApp() {
     // inside the handler, not via our session auth. Was missing here, so
     // the auth middleware 401'd it before that check ever ran.
     "/api/ragic/webhook",
+    // Sert un fichier hébergé sur l'espace de stockage du cabinet. Atteinte
+    // par window.open() ou par le `src` d'une balise <img>, donc sans en-tête
+    // Authorization possible — exactement comme une URL signée Supabase. C'est
+    // le jeton signé du chemin qui authentifie, vérifié dans le handler
+    // (server/externalStorage/externalTicket.ts).
+    "/api/storage/external",
+    // La redirection de Google après consentement est une navigation nue, sans
+    // JWT : le cabinet est récupéré depuis le nonce à usage unique
+    // (server/oauthState.ts). Le préfixe est exact, donc
+    // /api/external-storage/callback-url, lui, reste authentifié.
+    "/api/external-storage/callback",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
@@ -910,21 +951,22 @@ export async function createApp() {
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
+  registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
@@ -941,7 +983,14 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader } = await import('@zinkh/archioffice-agents/server');
+  // Le package agents n'importe rien depuis server/ (module propriétaire
+  // autonome) et ne peut donc pas construire lui-même un adaptateur de
+  // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
+  // nonces OAuth : sans ça, un agent cesserait de lire les pièces jointes
+  // déposées depuis qu'un cabinet a branché son espace, en rapportant
+  // simplement que le document est vide.
+  setExternalFileReader(readExternalBusinessFile);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     reserveAiCredit,

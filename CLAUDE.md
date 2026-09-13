@@ -1618,6 +1618,145 @@ fourni par le renderer — c'est `main.cjs` qui résout le chemin réel depuis s
 propre variable interne, pour ne jamais ouvrir un chemin arbitraire à la
 demande du renderer.
 
+### Stockage sur l'espace du cabinet
+
+Les documents et les plans d'un cabinet peuvent vivre sur SON espace de
+stockage (Nextcloud, kDrive — Google Drive et Dropbox à suivre) plutôt que dans
+Supabase Storage, dont les octets sont facturés à l'opérateur et plafonnés par
+plan (`storage_mb`, `src/lib/billing.ts`).
+
+**Le périmètre est volontairement étroit** : les buckets `documents` (GED,
+versions, visas) et `plans`, les seuls qui pèsent. `logos` reste public par
+construction, et `support-attachments` reste chez nous — le superadmin
+plateforme doit pouvoir les lire depuis `/admin/support`, ce qu'un drive de
+cabinet lui interdirait.
+
+**Une couche de politique, pas une primitive mutée.** `uploadToStorage` /
+`deleteFromStorage` (`server.ts`) ne changent ni de signature ni de
+comportement : les dix modules de routes hors périmètre les appellent toujours
+tels quels. `createBusinessFileStore()`
+(`server/externalStorage/storeBusinessFile.ts`) se pose au-dessus et n'est
+utilisée que par `documents.ts`, `plans.ts` et `visas.ts`. `AsyncLocalStorage`
+ne pouvait pas servir de source du cabinet ici : `server/tenantContext.ts` rend
+`null` dès qu'une requête ne porte pas `X-Tenant-Id`, et le mode de panne
+aurait été « écrit silencieusement sur Supabase », invisible en test.
+
+**Échec bruyant, jamais de repli silencieux.** Un dépôt qui échoue chez le
+fournisseur rend 502 ; se rabattre sur Supabase remplirait précisément le quota
+que le cabinet cherche à éviter et laisserait deux fichiers de la même affaire
+à deux endroits sans que rien ne l'explique.
+
+**La référence est une URI dans `file_url`** :
+`archioffice+external://<fournisseur>/<connexion>/<base64url(identifiant)>?name=`.
+Pas de colonnes dédiées : `file_url` circule seule dans quatre tables et une
+douzaine de fichiers frontend qui ne passent que `doc.file_url`.
+`parseStorageRef()` rend `null` dessus, donc ses deux copies dans
+`packages/archioffice-agents` dégradent proprement. La colonne
+`storage_backend` existe malgré tout, **uniquement** comme filtre SQL dérivé :
+une requête PostgREST ne sait pas analyser une URI, et le quota en a besoin.
+
+**Aucun lien public n'est créé chez le fournisseur.** Élargir le partage d'un
+fichier dans le drive du cabinet sans qu'il l'ait demandé n'est pas acceptable.
+La lecture passe par un jeton HMAC **sans état**
+(`server/externalStorage/externalTicket.ts`, clé dérivée de
+`MAIL_ENCRYPTION_KEY`) : `openSignedUrl()` ouvre par `window.open()` et
+`<SignedImage>` pose l'URL dans un `src`, deux navigations sans JWT possible, et
+deux requêtes successives atterrissent sur des conteneurs différents — une Map
+par processus rejouerait le piège documenté dans `server/oauthState.ts`. Quand
+un fournisseur sait produire un lien temporaire propre au porteur (Dropbox), la
+route redirige en 302 ; sinon elle streame, **en retransmettant les requêtes
+`Range`** — pdf.js (`PlanAnnotator`) découpe les gros plans, les ignorer
+casserait l'affichage sans rien dire.
+
+**L'arborescence est `<racine>/<code affaire> - <nom affaire>/<phase>`**, avec
+`Plans` et `VISA` comme sous-dossiers pour les deux autres écritures du
+périmètre. Les phases sont celles que l'écran Documents affiche déjà, donc
+l'architecte retrouve dans son drive le classement qu'il voit dans
+l'application. `external_storage_folders` mémorise chaque niveau (index unique
+`(connection_id, folder_key)`, donc upsert idempotent) : sans ce cache, chaque
+dépôt coûterait deux à six appels d'API. Un dossier renommé ou supprimé côté
+drive fait échouer le dépôt en `ExternalFolderMissingError` ; on oublie alors le
+sous-arbre et on rejoue **une** fois. Conséquence assumée : un dossier renommé à
+la main voit réapparaître un dossier au nom d'origine à côté du sien — on ne
+poursuit pas les renommages. Les fichiers déjà déposés ne bougent pas, étant
+référencés par leur propre identifiant.
+
+**Ne pas réutiliser `sanitizeFilename` pour les noms de dossiers** : sa règle
+`[^a-zA-Z0-9._-] → _` transforme « Général » en « G_n_ral ». Acceptable pour un
+chemin d'objet Supabase que personne ne regarde, pas pour une arborescence que
+l'architecte ouvre dans son propre Drive. D'où
+`server/externalStorage/folderNaming.ts`.
+
+**Le quota cesse de compter ces octets, des deux côtés à la fois** :
+`checkStorageQuota` (le plafond) et `GET /api/billing/status` (la jauge) passent
+tous deux par `tenantSupabaseStorageBytes()`. Les filtrer d'un seul côté
+donnerait un écran qui monte sans jamais bloquer. `checkQuota(…, 'documents')`
+ne bouge pas : c'est un plafond sur le NOMBRE de documents, un élément de
+l'offre, pas un coût d'hébergement.
+
+**Déconnecter et révoquer sont deux gestes distincts.** Une référence n'est
+résoluble que tant que la connexion existe ET porte de quoi s'authentifier.
+`POST /api/external-storage/:id/disable` arrête les écritures en gardant les
+identifiants ; `DELETE /api/external-storage/:id` les efface **sans supprimer
+la ligne**, et l'écran avertit alors que les fichiers déjà déposés ne seront
+plus consultables depuis ArchiOffice. La ligne n'est supprimée que par la
+cascade de `tenantPurge.ts`, à la fermeture du cabinet — qui **ne supprime
+jamais** dans le drive du cabinet : ce sont ses fichiers, sur son espace.
+
+**Google Drive demande le scope `drive.file`, pas `drive`.** `drive` est un
+*restricted scope* chez Google : il impose une évaluation de sécurité CASA et un
+audit annuel à toute application publiée. `drive.file` n'est pas restreint et
+donne exactement ce qu'il faut — créer des dossiers et des fichiers, et gérer
+ceux qu'on a créés. La contrepartie, assumée et dite dans l'UI : l'application
+ne VOIT pas ce qu'elle n'a pas créé, donc la racine est créée par ArchiOffice
+(son identifiant est mémorisé sur la connexion) et on ne peut pas pointer un
+dossier existant choisi à la main. C'est précisément le cache de dossiers qui
+rend ce scope exploitable. Deux paramètres sont obligatoires sur CHAQUE appel
+(`supportsAllDrives`, `includeItemsFromAllDrives`) sous peine de 404 dès qu'un
+cabinet travaille sur un Drive partagé, l'apostrophe doit être échappée dans une
+requête `q` (« L'Atelier » est un nom d'affaire courant), et la suppression est
+une mise à la corbeille (`PATCH {trashed:true}`), jamais une destruction.
+
+**Dropbox : deux pièges, tous deux silencieux.** `token_access_type=offline`
+sur l'URL de consentement, sans quoi aucun refresh token n'est délivré et la
+connexion meurt au bout de quatre heures sans rien annoncer. Et l'en-tête
+`Dropbox-API-Arg` doit être en **ASCII strict** : il porte le chemin du fichier,
+donc le nom de l'affaire, et un « Réhabilitation Château » non échappé fait
+rejeter la requête en 400 — d'où `toAsciiJsonHeader()`. L'identifiant mémorisé
+est l'`id:xxxxxxx` renvoyé à l'écriture et non le chemin, pour qu'un fichier
+déplacé à la main dans le Dropbox du cabinet reste consultable. C'est aussi le
+seul des trois fournisseurs à produire un lien de lecture temporaire (quatre
+heures, propre au porteur, sans élargir le partage) : la route de lecture y
+redirige en 302 plutôt que de streamer.
+
+**Trois effets de bord traités, et qui ne doivent pas être défaits.** L'export
+ZIP RGPD (`server/tenantExport.ts`) verse les fichiers externes sous
+`fichiers/externe/` et nomme dans `manifest.json` ceux qu'il n'a pas pu lire :
+un export à motif légal ne peut pas mentir par omission, et il ne parcourait
+jusqu'ici que les buckets Supabase. `tenantPurge.ts` ne supprime **jamais** dans
+l'espace du cabinet — ces fichiers vivent sur un compte qui lui appartient, et
+l'effacement RGPD porte sur les données que NOUS détenons ; seule disparaît la
+connexion, donc la capacité à les rouvrir. Et `external_storage_connections`
+n'entre **pas** dans `SYNC_TABLES` : propager des identifiants chiffrés vers une
+installation locale dont la `MAIL_ENCRYPTION_KEY` diffère serait à la fois
+inutile et un essaimage de secrets.
+
+**Les agents IA lisent ces fichiers par un pont, pas par un import.** Le package
+`@zinkh/archioffice-agents` n'importe rien depuis `server/` ; `server.ts` lui
+dépose donc un lecteur au démarrage (`setExternalFileReader`), sur le patron de
+`initOAuthStateStore()`. Sans ce pont, un agent rapporterait simplement qu'une
+pièce jointe est vide dès qu'un cabinet a branché son espace.
+
+**Nextcloud et kDrive partagent un seul adaptateur WebDAV**
+(`server/externalStorage/providers/webdav.ts`, `MKCOL`/`PROPFIND`/`PUT`/`GET`/
+`DELETE` en `fetch`, aucune dépendance npm ajoutée). Ils ne diffèrent que par
+l'URL de base saisie par le cabinet. Trois pièges traités : le chemin s'encode
+**segment par segment** (un `encodeURIComponent` global détruirait les barres
+obliques), `MKCOL` répondant 405 vaut succès (la collection existe déjà), et un
+`PUT` écrase sans prévenir — d'où la recherche d'un nom libre avant dépôt.
+`assertPublicHttpUrl()` (`server/ssrfGuard.ts`) est appliqué à
+l'enregistrement **et** à chaque appel : c'est une URL fournie par le cabinet.
+
 ### Maps
 
 - `MapLibreCadastre.tsx` — Cadastral parcels via IGN WMTS tiles
