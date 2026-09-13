@@ -48,7 +48,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Nextcloud | ✅ Active — WebDAV, documents and plans stored on the tenant's own server |
 | kDrive (Infomaniak) | ✅ Active — same WebDAV adapter as Nextcloud |
 | Google Drive | ✅ Active — OAuth (`drive.file` scope), documents and plans stored on the tenant's own Drive |
-| Dropbox | ⏳ Planned — same |
+| Dropbox | ✅ Active — OAuth, documents and plans stored on the tenant's own Dropbox |
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |
 | Microsoft Teams | ⏳ Planned — listed in Settings, no backend |

@@ -113,9 +113,9 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     id: 'dropbox',
     name: 'Dropbox',
     vendor: 'Dropbox',
-    description: 'Stockez vos plans et documents ArchiOffice directement sur Dropbox.',
+    description: 'Enregistrez vos documents et vos plans sur le Dropbox du cabinet, classés par affaire et par phase.',
     category: 'storage',
-    status: 'coming_soon',
+    status: 'active',
     iconBg: 'bg-blue-50',
     iconColor: 'text-blue-600',
     iconLabel: 'Db',
@@ -637,11 +637,9 @@ export default function Settings() {
         .then((st: any) => setExternalStorage(st))
         .catch(() => {});
       setStorageNotice({ type: 'success', message: 'Espace de stockage connecté. Les nouveaux documents et plans y seront enregistrés.' });
-      setOpenPlugin('google_drive');
       window.history.replaceState({}, '', '/settings');
     } else if (params.get('external_storage_error')) {
       setStorageNotice({ type: 'error', message: "La connexion à l'espace de stockage a échoué. Réessayez, ou vérifiez que l'URL de redirection est bien déclarée chez le fournisseur." });
-      setOpenPlugin('google_drive');
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
@@ -1173,6 +1171,7 @@ export default function Settings() {
     if (id === 'nextcloud') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'nextcloud';
     if (id === 'kdrive') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'kdrive';
     if (id === 'google_drive') return externalStorage?.connected === true && externalStorage.provider === 'google_drive';
+    if (id === 'dropbox') return externalStorage?.connected === true && externalStorage.provider === 'dropbox';
     return false;
   };
 
@@ -1260,7 +1259,7 @@ export default function Settings() {
   // formulaire ; elles ne diffèrent que par le gabarit d'URL proposé.
   // Google Drive se branche par consentement OAuth et non par formulaire : le
   // cabinet ne saisit qu'un dossier racine, puis part chez Google.
-  const handleStorageOAuthConnect = async (provider: 'google_drive') => {
+  const handleStorageOAuthConnect = async (provider: 'google_drive' | 'dropbox') => {
     setIsSavingStorage(true);
     setStorageNotice(null);
     try {
@@ -1342,6 +1341,7 @@ export default function Settings() {
     nextcloud: { label: 'Nextcloud', flavor: 'nextcloud' },
     kdrive: { label: 'kDrive', flavor: 'kdrive' },
     google_drive: { label: 'Google Drive', flavor: null },
+    dropbox: { label: 'Dropbox', flavor: null },
   };
 
   const renderStorageConfig = (pluginId: string) => {
@@ -1522,11 +1522,13 @@ export default function Settings() {
             {/* Scope drive.file : ArchiOffice ne voit que ce qu'il a lui-même
                 créé, donc il crée ce dossier plutôt que d'en désigner un
                 existant. C'est aussi ce qui lui interdit de lire le reste du
-                Drive du cabinet. */}
-            <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-              ArchiOffice crée ce dossier dans votre Drive et n'accède qu'aux fichiers qu'il y dépose lui-même.
-              Le reste de votre Drive lui reste invisible.
-            </div>
+                Drive du cabinet — ça vaut d'être dit avant le consentement. */}
+            {pluginId === 'google_drive' && (
+              <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+                ArchiOffice crée ce dossier dans votre Drive et n'accède qu'aux fichiers qu'il y dépose lui-même.
+                Le reste de votre Drive lui reste invisible.
+              </div>
+            )}
             {migrationNotice}
             {storageCallbackUrl && (
               <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
@@ -1534,13 +1536,17 @@ export default function Settings() {
                 <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
                   {storageCallbackUrl}
                 </code>
-                <p className="mt-1 opacity-75">À déclarer dans la console Google Cloud → Identifiants → URI de redirection autorisés.</p>
+                <p className="mt-1 opacity-75">
+                  {pluginId === 'google_drive'
+                    ? 'À déclarer dans la console Google Cloud → Identifiants → URI de redirection autorisés.'
+                    : 'À déclarer dans la console Dropbox → App Console → OAuth 2 → Redirect URIs.'}
+                </p>
               </div>
             )}
             <button
               type="button"
               disabled={isSavingStorage}
-              onClick={() => handleStorageOAuthConnect('google_drive')}
+              onClick={() => handleStorageOAuthConnect(pluginId as 'google_drive' | 'dropbox')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
               {isSavingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Connecter {label}

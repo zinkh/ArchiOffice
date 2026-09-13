@@ -1717,6 +1717,18 @@ cabinet travaille sur un Drive partagé, l'apostrophe doit être échappée dans
 requête `q` (« L'Atelier » est un nom d'affaire courant), et la suppression est
 une mise à la corbeille (`PATCH {trashed:true}`), jamais une destruction.
 
+**Dropbox : deux pièges, tous deux silencieux.** `token_access_type=offline`
+sur l'URL de consentement, sans quoi aucun refresh token n'est délivré et la
+connexion meurt au bout de quatre heures sans rien annoncer. Et l'en-tête
+`Dropbox-API-Arg` doit être en **ASCII strict** : il porte le chemin du fichier,
+donc le nom de l'affaire, et un « Réhabilitation Château » non échappé fait
+rejeter la requête en 400 — d'où `toAsciiJsonHeader()`. L'identifiant mémorisé
+est l'`id:xxxxxxx` renvoyé à l'écriture et non le chemin, pour qu'un fichier
+déplacé à la main dans le Dropbox du cabinet reste consultable. C'est aussi le
+seul des trois fournisseurs à produire un lien de lecture temporaire (quatre
+heures, propre au porteur, sans élargir le partage) : la route de lecture y
+redirige en 302 plutôt que de streamer.
+
 **Nextcloud et kDrive partagent un seul adaptateur WebDAV**
 (`server/externalStorage/providers/webdav.ts`, `MKCOL`/`PROPFIND`/`PUT`/`GET`/
 `DELETE` en `fetch`, aucune dépendance npm ajoutée). Ils ne diffèrent que par

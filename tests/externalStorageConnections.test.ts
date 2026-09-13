@@ -304,3 +304,36 @@ describe('flux OAuth (Google Drive)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('flux OAuth (Dropbox)', () => {
+  it('demande token_access_type=offline, sans quoi aucun refresh token n’est délivré', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    process.env.DROPBOX_CLIENT_ID ||= 'app-de-test';
+    process.env.DROPBOX_CLIENT_SECRET ||= 'secret-de-test';
+
+    const res = await request(app).get('/api/external-storage/dropbox/auth').set(authHeader(token));
+    expect(res.status).toBe(200);
+
+    const url = new URL(res.body.url);
+    expect(url.origin + url.pathname).toBe('https://www.dropbox.com/oauth2/authorize');
+    // Sans ce paramètre, la connexion meurt au bout de quatre heures sans que
+    // rien ne l'ait annoncé.
+    expect(url.searchParams.get('token_access_type')).toBe('offline');
+    expect(url.searchParams.get('scope')).toContain('files.content.write');
+  });
+
+  it('rend 503, et non une redirection vers une page d’erreur du fournisseur, si la clé manque', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    const saved = process.env.DROPBOX_CLIENT_SECRET;
+    delete process.env.DROPBOX_CLIENT_SECRET;
+    try {
+      const res = await request(app).get('/api/external-storage/dropbox/auth').set(authHeader(token));
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain('Dropbox');
+    } finally {
+      if (saved) process.env.DROPBOX_CLIENT_SECRET = saved;
+    }
+  });
+});

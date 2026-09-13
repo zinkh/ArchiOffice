@@ -9,8 +9,10 @@
 // désignerait malgré tout échoue avec un message explicite (createProvider).
 import { registerWebdavProvider } from './webdav';
 import { registerGoogleDriveProvider } from './googleDrive';
+import { registerDropboxProvider } from './dropbox';
 
 export function registerStorageProviders(supabaseAdmin: any): void {
   registerWebdavProvider();
   registerGoogleDriveProvider(supabaseAdmin);
+  registerDropboxProvider(supabaseAdmin);
 }

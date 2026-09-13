@@ -24,6 +24,7 @@ import {
 import { sanitizeFolderSegment } from '../externalStorage/folderNaming';
 import { clearStorageTokenCache } from '../externalStorage/oauthTokens';
 import { GOOGLE_DRIVE_SCOPE, GOOGLE_TOKEN_URL } from '../externalStorage/providers/googleDrive';
+import { DROPBOX_AUTH_URL, DROPBOX_SCOPE, DROPBOX_TOKEN_URL } from '../externalStorage/providers/dropbox';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -80,6 +81,19 @@ const OAUTH_PROVIDERS: Record<string, {
     // mourrait au bout d'une heure.
     extraAuthParams: { access_type: 'offline', prompt: 'consent' },
   },
+  dropbox: {
+    label: 'Dropbox',
+    authUrl: DROPBOX_AUTH_URL,
+    tokenUrl: DROPBOX_TOKEN_URL,
+    scope: DROPBOX_SCOPE,
+    clientId: () => process.env.DROPBOX_CLIENT_ID,
+    clientSecret: () => process.env.DROPBOX_CLIENT_SECRET,
+    redirectEnv: 'DROPBOX_REDIRECT_URI',
+    // token_access_type=offline est LE piège de cette API : sans lui, Dropbox
+    // ne délivre aucun refresh token et la connexion meurt au bout de quatre
+    // heures, sans que rien ne l'ait annoncé.
+    extraAuthParams: { token_access_type: 'offline' },
+  },
 };
 
 export function registerExternalStorageRoutes(
@@ -102,7 +116,10 @@ export function registerExternalStorageRoutes(
   app.get('/api/external-storage/callback-url', async (req: any, res: any) => {
     try {
       await getTenantId(req.user.id);
-      res.json({ url: redirectUri(req, 'google_drive') });
+      // Les deux fournisseurs partagent le même chemin de retour ; seul un
+      // override d'environnement pourrait les distinguer, d'où le paramètre.
+      const provider = OAUTH_PROVIDERS[req.query.provider as string] ? (req.query.provider as string) : 'google_drive';
+      res.json({ url: redirectUri(req, provider) });
     } catch (e: any) {
       res.status(e.status || 500).json({ error: e.message || 'Échec' });
     }
@@ -178,13 +195,23 @@ export function registerExternalStorageRoutes(
         throw new Error(tokenData.error_description || tokenData.error || 'missing_refresh_token');
       }
 
+      // L'adresse du compte n'est qu'un confort d'affichage (« Connecté en tant
+      // que… ») : un échec ici ne doit pas faire échouer la connexion.
       let account: string | null = null;
       try {
-        const info = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        });
-        if (info.ok) account = (await info.json())?.email ?? null;
-      } catch { /* l'adresse n'est qu'un confort d'affichage */ }
+        if (providerId === 'google_drive') {
+          const info = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: { Authorization: `Bearer ${tokenData.access_token}` },
+          });
+          if (info.ok) account = (await info.json())?.email ?? null;
+        } else if (providerId === 'dropbox') {
+          const info = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokenData.access_token}` },
+          });
+          if (info.ok) account = (await info.json())?.email ?? null;
+        }
+      } catch { /* rien d'essentiel */ }
 
       await supabaseAdmin.from('external_storage_connections')
         .update({ is_active: false }).eq('tenant_id', stateData.tenantId).eq('is_active', true);
