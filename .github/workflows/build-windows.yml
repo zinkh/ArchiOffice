@@ -30,6 +30,24 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      # electron-builder takes the version from package.json, never from the
+      # git tag: with package.json left at 1.0.3, the v1.0.4 and v1.0.5 tag
+      # builds both produced "ArchiOffice Setup 1.0.3.exe" and tried to
+      # publish onto the OLD v1.0.3 release, which electron-builder skips
+      # ("existing release published more than 2 hours ago") — so the new
+      # release stayed empty, latest.yml kept saying 1.0.3, and no install
+      # ever updated. The tag is the release's identity, so it is what the
+      # build must use; package.json is aligned to it here, on the runner
+      # only (nothing is committed).
+      - name: Align package.json version with the release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          npm version --no-git-tag-version --allow-same-version "$version"
+          echo "Building version $version (from tag $GITHUB_REF_NAME)"
+
       - name: Build SPA (offline desktop build)
         run: npm run build
         env:
