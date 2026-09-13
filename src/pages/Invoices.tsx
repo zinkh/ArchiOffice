@@ -506,6 +506,20 @@ export default function Invoices() {
     }
   };
 
+  // Réservé aux brouillons (voir DELETE /api/invoices/:id) : une facture déjà
+  // envoyée porte un numéro légal qui doit rester dans la séquence, elle ne
+  // se supprime pas — elle s'annule par un avoir.
+  const handleDeleteInvoice = async (invoice: Invoice) => {
+    if (!window.confirm(`Supprimer définitivement la facture ${invoice.invoice_number || ''} ? Cette action est irréversible.`)) return;
+    try {
+      await fetchJson(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
+      setInvoices(invoices.filter(i => i.id !== invoice.id));
+    } catch (err: any) {
+      console.error('Delete invoice failed:', err);
+      alert(err.message || "La suppression de la facture a échoué.");
+    }
+  };
+
   // La liste (GET /api/invoices) ne porte plus les lignes chiffrées — voir
   // CLAUDE.md — donc ouvrir le générateur sur une facture existante va les
   // chercher à part plutôt que de compter sur ce que la liste avait déjà.
@@ -697,13 +711,19 @@ export default function Invoices() {
               { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                <div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                  {inv.accounting_deleted_at && (
+                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
+                  )}
+                </div>
               )},
             ]}
             actions={inv => (
               <div className="flex gap-2">
                 <button onClick={() => handleOpenGenerator(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
                 {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
+                {inv.status === 'Draft' && <button onClick={() => handleDeleteInvoice(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-danger)', background: '#ffe0e0' }} title="Supprimer"><IconTrash size={15} /></button>}
               </div>
             )}
           />
@@ -828,6 +848,11 @@ export default function Invoices() {
                           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
                             {invoice.status}
                           </span>
+                          {invoice.accounting_deleted_at && (
+                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                              Supprimée sur Zoho
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -841,6 +866,18 @@ export default function Invoices() {
                             >
                               <IconEdit size={18} />
                             </button>
+                            {invoice.status === 'Draft' && (
+                              <button
+                                onClick={() => handleDeleteInvoice(invoice)}
+                                className="p-1.5 rounded-lg transition-colors"
+                                style={{ color: 'var(--tblr-danger)' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#ffe0e0'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title="Supprimer"
+                              >
+                                <IconTrash size={18} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenGenerator(invoice)}
                               className="p-1.5 rounded-lg transition-colors"
@@ -956,6 +993,11 @@ export default function Invoices() {
                       <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
                         {invoice.status}
                       </span>
+                      {invoice.accounting_deleted_at && (
+                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                          Supprimée sur Zoho
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -969,6 +1011,18 @@ export default function Invoices() {
                         >
                           <IconEdit size={18} />
                         </button>
+                        {invoice.status === 'Draft' && (
+                          <button
+                            onClick={() => handleDeleteInvoice(invoice)}
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: 'var(--tblr-danger)' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#ffe0e0'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                            title="Supprimer"
+                          >
+                            <IconTrash size={18} />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenGenerator(invoice)}
                           className="p-1.5 rounded-lg transition-colors"

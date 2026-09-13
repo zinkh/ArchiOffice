@@ -233,6 +233,52 @@ describe('Invoices', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-b')?.amount).toBe(999);
   });
 
+  describe('DELETE /api/invoices/:id', () => {
+    it('deletes a Draft invoice and its items', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-draft', tenant_id: tenantId, status: 'Draft', invoice_number: 'FAC-2026-001' }]);
+      fakeSupabaseAdmin.seed('invoice_items', [{ id: 'it-draft', tenant_id: tenantId, invoice_id: 'inv-draft', description: 'Honoraires' }]);
+
+      const res = await request(app).delete('/api/invoices/inv-draft').set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-draft')).toBeUndefined();
+      expect(fakeSupabaseAdmin.getTable('invoice_items').find(i => i.invoice_id === 'inv-draft')).toBeUndefined();
+    });
+
+    it('refuses to delete a non-Draft invoice (already sent, legal numbering must not gap)', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-sent', tenant_id: tenantId, status: 'Sent', invoice_number: 'FAC-2026-002' }]);
+
+      const res = await request(app).delete('/api/invoices/inv-sent').set(authHeader(token));
+      expect(res.status).toBe(409);
+      expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-sent')).toBeDefined();
+    });
+
+    it('refuses to delete a Draft invoice whose number is already confirmed by a connector', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-synced', tenant_id: tenantId, status: 'Draft', invoice_number: 'ZOHO-9' }]);
+      fakeSupabaseAdmin.seed('invoice_accounting_sync', [{ id: 'sync-1', tenant_id: tenantId, local_invoice_id: 'inv-synced', provider: 'zoho_invoice', sync_status: 'synced', idempotency_key: 'k1' }]);
+
+      const res = await request(app).delete('/api/invoices/inv-synced').set(authHeader(token));
+      expect(res.status).toBe(409);
+      expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced')).toBeDefined();
+    });
+
+    it('never lets a caller delete another tenant\'s invoice', async () => {
+      const tenantB = makeTenant();
+      fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-b-del', tenant_id: tenantB, status: 'Draft' }]);
+      const tenantA = makeTenant();
+      const { token } = makeUser(tenantA);
+
+      const res = await request(app).delete('/api/invoices/inv-b-del').set(authHeader(token));
+      expect(res.status).toBe(404);
+      expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-b-del')).toBeDefined();
+    });
+  });
+
   // invoices.client_id (supabase/migrate_invoice_client_link.sql) — the
   // Maître d'Ouvrage a facture is billed to, independent of project_id (see
   // CLAUDE.md's "Le Maître d'Ouvrage d'une facture").

@@ -24,7 +24,6 @@ import {
   IconClipboardList,
   IconCalendarWeek,
   IconContract,
-  IconRobot,
   IconShieldLock,
   IconShieldCheck,
   IconCloudUpload,
@@ -55,7 +54,6 @@ export const NAV_ITEMS = [
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
   { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
-  { name: 'agents',         path: '/agents',         icon: IconRobot },
   { name: 'team',           path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
   { name: 'mailbox',        path: '/mailbox',        icon: IconMail },
@@ -76,34 +74,41 @@ const NAV_SECTIONS = [
     label: 'Gestion',
     items: [
       { name: 'dashboard',  path: '/',          icon: IconLayoutDashboard },
-      { name: 'projects',   path: '/projects',  icon: IconBriefcase },
-      { name: 'references', path: '/references',icon: IconArchive },
-      { name: 'documents',  path: '/documents', icon: IconFiles },
     ],
   },
   {
-    key: 'finances',
-    label: 'Finances',
+    key: 'affaires',
+    label: 'Affaires',
     items: [
-      { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
-      { name: 'invoices',  path: '/invoices',  icon: IconFileInvoice },
+      { name: 'projects',  path: '/projects',  icon: IconBriefcase },
       { name: 'tenders',   path: '/tenders',   icon: IconClipboardCheck },
+      { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
       { name: 'contrats',  path: '/contrats',  icon: IconContract },
+      { name: 'invoices',  path: '/invoices',  icon: IconFileInvoice },
     ],
   },
   {
     key: 'outils',
     label: 'Outils',
     items: [
-      { name: 'specifications', path: '/specifications', icon: IconBooks },
       { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
-      { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
+      { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
       { name: 'reunions',       path: '/reunions',        icon: IconMessages },
       { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
-      { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
       { name: 'mailbox',        path: '/mailbox',        icon: IconMail },
+    ],
+  },
+  {
+    key: 'ressources',
+    label: 'Ressources',
+    items: [
+      { name: 'documents',      path: '/documents',      icon: IconFiles },
+      { name: 'specifications', path: '/specifications', icon: IconBooks },
+      { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
       { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
+      { name: 'references',     path: '/references',     icon: IconArchive },
+      { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
     ],
   },
   {
@@ -112,15 +117,13 @@ const NAV_SECTIONS = [
     items: [
       { name: 'time_tracking', path: '/temps',  icon: IconClockHour4 },
       { name: 'leave',         path: '/conges', icon: IconPlaneDeparture },
+      { name: 'team',          path: '/team',   icon: IconUsers },
     ],
   },
   {
     key: 'administration',
     label: 'Administration',
     items: [
-      { name: 'agents',    path: '/agents',    icon: IconRobot },
-      { name: 'team',      path: '/team',      icon: IconUsers },
-      { name: 'templates', path: '/templates', icon: IconFileSpreadsheet },
       { name: 'settings',  path: '/settings',  icon: IconSettings },
       { name: 'billing',   path: '/billing',   icon: IconCreditCard },
       { name: 'support',   path: '/support',   icon: IconMessageCircle },
@@ -301,7 +304,7 @@ export function Sidebar() {
                     );
                   })}
                   {/* Super PDP portal — shown only when connected */}
-                  {section.key === 'finances' && superpdpConnected && (() => {
+                  {section.key === 'affaires' && superpdpConnected && (() => {
                     const isActive = location.pathname === '/superpdp';
                     return (
                       <Link
@@ -320,7 +323,7 @@ export function Sidebar() {
                     );
                   })()}
                   {/* Chorus Pro portal — shown only when connected */}
-                  {section.key === 'finances' && chorusProConnected && (() => {
+                  {section.key === 'affaires' && chorusProConnected && (() => {
                     const isActive = location.pathname === '/chorus-pro';
                     return (
                       <Link
@@ -339,7 +342,7 @@ export function Sidebar() {
                     );
                   })()}
                   {/* MAF declaration — shown only when plugin is enabled */}
-                  {section.key === 'finances' && mafEnabled && (() => {
+                  {section.key === 'affaires' && mafEnabled && (() => {
                     const isActive = location.pathname === '/maf-declaration';
                     return (
                       <Link

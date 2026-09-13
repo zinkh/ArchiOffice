@@ -27,7 +27,7 @@ import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow, type ZohoAffaireInfo,
+  zohoInvoiceToLocalRow, flagInvoicesDeletedUpstream, type ZohoAffaireInfo,
 } from '../zohoSync';
 import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
 
@@ -463,6 +463,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       const errors: string[] = [];
       let pushed = 0;
       let pulled = 0;
+      let deletedUpstream = 0;
 
       // 1. Push local invoices not yet in Zoho
       const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
@@ -525,6 +526,11 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         // tenant past 200 invoices in Zoho silently stopped receiving status
         // updates for everything after the first page.
         const zohoInvoices: any[] = [];
+        // Ne vaut « liste complète » que si la dernière page dit elle-même
+        // qu'il n'y en a plus — sinon le plafond a coupé la pagination avant
+        // la fin, et un id absent de ce lot ne veut rien dire (voir
+        // flagInvoicesDeletedUpstream, server/zohoSync.ts).
+        let fullyFetched = false;
         for (let page = 1; page <= ZOHO_MAX_PULL_PAGES; page++) {
           const resp = await axios.get(`${apiBase}/invoices`, {
             headers,
@@ -532,7 +538,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             timeout: ZOHO_TIMEOUT_MS,
           });
           zohoInvoices.push(...(resp.data?.invoices || []));
-          if (!resp.data?.page_context?.has_more_page) break;
+          if (!resp.data?.page_context?.has_more_page) { fullyFetched = true; break; }
         }
 
         // One query for the whole batch instead of one per Zoho invoice.
@@ -573,16 +579,28 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             pulled++;
           }
         }
+
+        // Une facture supprimée côté Zoho disparaît simplement de cette
+        // liste — sans ce passage, la ligne locale restait figée à son
+        // dernier statut connu pour toujours, sans que rien ne le signale.
+        // Seulement quand la pagination a couvert la liste entière : un
+        // plafond atteint en cours de route ne dit rien sur les pages
+        // restantes.
+        if (fullyFetched) {
+          deletedUpstream = await flagInvoicesDeletedUpstream(
+            supabaseAdmin, tenantId, zohoInvoices.map((z: any) => z.invoice_id),
+          );
+        }
       } catch (err: any) {
         console.error("[POST /api/zoho/sync]", err);
         errors.push(`Récupération échouée: ${err.response?.data?.message || err.message}`);
       }
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho (${pushed} envoyée(s), ${pulled} reçue(s)${deletedUpstream ? `, ${deletedUpstream} signalée(s) supprimée(s) côté Zoho` : ''})`, '', tenantId, 'integration', 'Intégrations');
       // `remaining` lets the UI say another run is needed instead of leaving the
       // user to guess why not everything went across.
-      res.json({ pushed, pulled, remaining, errors });
+      res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho sync error]', error.message);
       res.status(500).json({ error: error.message || 'Sync échouée' });

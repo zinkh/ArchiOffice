@@ -7,7 +7,9 @@ import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
   IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
-  IconArchive, IconCloud, IconFolder, IconFolderOpen, IconAddressBook
+  IconArchive, IconCloud, IconFolder, IconFolderOpen, IconAddressBook,
+  IconBuilding, IconRobot, IconCalendarTime, IconMailbox, IconBell,
+  IconShieldLock, IconUserCircle
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
@@ -558,10 +560,14 @@ export default function Settings() {
   // across — and report per-invoice failures instead of claiming success.
   const zohoSyncNotice = (
     prefix: string,
-    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[] },
+    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[]; deletedUpstream?: number },
   ): { type: 'success' | 'error'; message: string } => {
     const parts = [`${prefix} — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.`];
     if (data.remaining) parts.push(`${data.remaining} restante(s) : relancez la synchronisation.`);
+    // Jamais supprimées automatiquement ici (voir flagInvoicesDeletedUpstream,
+    // server/zohoSync.ts) — juste signalées, à traiter dans la liste des
+    // factures.
+    if (data.deletedUpstream) parts.push(`${data.deletedUpstream} facture(s) introuvable(s) côté Zoho, signalée(s) dans la liste des factures.`);
     const errors = data.errors ?? [];
     if (errors.length) parts.push(`Erreurs : ${errors.slice(0, 3).join(' | ')}`);
     return { type: errors.length ? 'error' : 'success', message: parts.join(' ') };
@@ -1153,6 +1159,28 @@ export default function Settings() {
   };
 
   const isAdmin = currentUser?.system_role === 'admin';
+
+  // ── Navigation par onglets verticaux ────────────────────────────────────────
+  // Découpe la page (auparavant un unique défilement de 16 sections) en
+  // catégories, sur le modèle d'un back-office de type Zoho : un menu vertical
+  // à gauche, une seule catégorie affichée à la fois à droite. Les onglets
+  // 1 à 7 sont réservés à l'administrateur du cabinet ; « Mon profil » reste
+  // visible de tous, comme l'était la section « Informations utilisateur ».
+  const SETTINGS_TABS = [
+    { key: 'cabinet', label: 'Cabinet', icon: IconBuilding, adminOnly: true },
+    { key: 'agents', label: 'Agents IA', icon: IconRobot, adminOnly: true },
+    { key: 'rh', label: 'RH', icon: IconCalendarTime, adminOnly: true },
+    { key: 'communication', label: 'Communication', icon: IconMailbox, adminOnly: true },
+    { key: 'notifications', label: 'Notifications', icon: IconBell, adminOnly: true },
+    { key: 'integrations', label: 'Intégrations', icon: IconPuzzle, adminOnly: true },
+    { key: 'donnees', label: 'Données et RGPD', icon: IconShieldLock, adminOnly: true },
+    { key: 'profil', label: 'Mon profil', icon: IconUserCircle, adminOnly: false },
+  ] as const;
+  const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
+  const [activeTab, setActiveTab] = useState<string>('cabinet');
+  useEffect(() => {
+    if (!isAdmin && activeTab !== 'profil') setActiveTab('profil');
+  }, [isAdmin]);
 
   // ── Marketplace helpers ────────────────────────────────────────────────────
 
@@ -2239,11 +2267,37 @@ export default function Settings() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      {isAdmin && (
-        <>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('general_settings')}</h1>
+    <div className="max-w-6xl">
+      <h1 className="text-2xl font-bold mb-6" style={{ color: 'var(--tblr-text)' }}>{t('general_settings')}</h1>
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        {/* ── Navigation verticale ── */}
+        <nav className="w-full md:w-56 shrink-0 space-y-1">
+          {visibleTabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors',
+                  isActive
+                    ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                    : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                )}
+              >
+                <Icon size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
+        {/* ── Contenu de l'onglet actif ── */}
+        <div className="flex-1 min-w-0 space-y-6">
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Agency info ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Informations du cabinet</h2>
@@ -2279,7 +2333,39 @@ export default function Settings() {
               logoUrl: settings.logoUrl,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'agents' && (
+        <>
+          {/* ── Agents IA ── */}
+          <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Agents IA</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Créez et configurez les agents du cabinet (métier, capacités, accès aux outils), et consultez leurs alertes.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => navigate('/agents')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Gérer les agents
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/agents/alertes')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Alertes des agents
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Numérotation des documents ── */}
           <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2420,7 +2506,11 @@ export default function Settings() {
               numAffaireDigits: settings.numAffaireDigits,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'rh' && (
+        <>
           {/* ── RH : congés par défaut ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2450,7 +2540,11 @@ export default function Settings() {
               defaultLeaveDaysRtt: settings.defaultLeaveDaysRtt,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'communication' && (
+        <>
           {/* ── SMTP ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2506,7 +2600,11 @@ export default function Settings() {
               senderOption: settings.senderOption, defaultEmailTemplate: settings.defaultEmailTemplate,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Domaines et catégories ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div className="flex items-center gap-2">
@@ -2542,7 +2640,11 @@ export default function Settings() {
               ))}
             </div>
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'notifications' && (
+        <>
           {/* ── Notifications système (Web Push / client de bureau) ── */}
           <PushNotificationsCard />
 
@@ -2591,7 +2693,11 @@ export default function Settings() {
               notificationArchiveDays: settings.notificationArchiveDays,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'integrations' && (
+        <>
           {/* ══════════════════ INTEGRATIONS MARKETPLACE ══════════════════ */}
           <div className="space-y-4">
             {/* Header */}
@@ -2728,7 +2834,11 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'donnees' && (
+        <>
           {/* ── Archivage — RGPD : export complet de l'activité du cabinet ── */}
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Archivage</h2>
@@ -2921,7 +3031,9 @@ export default function Settings() {
       )}
 
       {/* ── User section ── */}
-      <h2 className="text-xl font-bold mt-8" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>
+      {activeTab === 'profil' && (
+        <>
+      <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>
 
       <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         {/* Avatar */}
@@ -3026,6 +3138,10 @@ export default function Settings() {
           pas par saveSection/renderSaveButton : connecter/déconnecter/définir
           par défaut sont des actions immédiates, pas un formulaire à valider. */}
       <MailAccountsCard />
+        </>
+      )}
+        </div>
+      </div>
     </div>
   );
 }

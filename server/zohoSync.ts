@@ -152,6 +152,49 @@ export async function localInvoicesByZohoId(
 }
 
 /**
+ * Signale les factures locales dont le pendant Zoho a disparu (supprimé côté
+ * Zoho) — voir supabase/migrate_invoice_zoho_deleted.sql. Ne supprime jamais
+ * rien localement : une facture déjà numérotée doit rester dans la séquence
+ * légale, seul un humain doit décider quoi en faire.
+ *
+ * `seenZohoIds` doit couvrir la liste ENTIÈRE renvoyée par Zoho pour cet
+ * appel — un appelant qui n'a récupéré qu'une partie des pages (plafond
+ * ZOHO_MAX_PULL_PAGES atteint) doit s'abstenir d'appeler cette fonction :
+ * un id absent de la page fournie n'est pas forcément supprimé, seulement
+ * pas encore lu.
+ */
+export async function flagInvoicesDeletedUpstream(
+  supabaseAdmin: any,
+  tenantId: string,
+  seenZohoIds: string[],
+): Promise<number> {
+  const seen = new Set(seenZohoIds.filter(Boolean));
+  const { data: linked, error } = await supabaseAdmin
+    .from('invoices')
+    .select('id, zoho_invoice_id')
+    .eq('tenant_id', tenantId)
+    .not('zoho_invoice_id', 'is', null)
+    .is('accounting_deleted_at', null);
+  if (error) throw new Error(`Lecture des factures liées à Zoho échouée: ${error.message}`);
+
+  const missingIds = (linked || [])
+    .filter((row: any) => row.zoho_invoice_id && !seen.has(row.zoho_invoice_id))
+    .map((row: any) => row.id);
+  if (!missingIds.length) return 0;
+
+  const now = new Date().toISOString();
+  for (let i = 0; i < missingIds.length; i += ZOHO_PAGE_SIZE) {
+    const { error: updErr } = await supabaseAdmin
+      .from('invoices')
+      .update({ accounting_deleted_at: now })
+      .eq('tenant_id', tenantId)
+      .in('id', missingIds.slice(i, i + ZOHO_PAGE_SIZE));
+    if (updErr) throw new Error(`Marquage des factures supprimées côté Zoho échoué: ${updErr.message}`);
+  }
+  return missingIds.length;
+}
+
+/**
  * A local `invoices` row built from a Zoho invoice that ArchiOffice has never
  * seen. Zoho's list payload is the only source here — fetching each invoice's
  * detail would cost one API call per invoice — so the untaxed/tax split falls

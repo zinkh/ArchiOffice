@@ -365,6 +365,56 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
+  // DELETE /api/invoices/:id — réservé aux brouillons non numérotés par un
+  // connecteur : une facture déjà envoyée porte un numéro légal (Factur-X /
+  // EN 16931, séquence sans trou), la supprimer romprait la continuité de
+  // numérotation que la loi française impose. Une facture Draft, elle,
+  // n'a jamais été émise au client — même si elle porte déjà un numéro local
+  // (voir POST /api/invoices : la numérotation autonome l'assigne dès la
+  // création), elle peut être retirée sans laisser de trace comptable.
+  // Même verrou que PUT ci-dessus (isAccountingSynced) : un numéro confirmé
+  // par le connecteur reste gelé même si le statut local est encore Draft.
+  app.delete("/api/invoices/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: invoice } = await supabaseAdmin.from('invoices')
+        .select('status, invoice_number').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!invoice) return res.status(404).json({ error: "Facture introuvable." });
+
+      const { data: syncedRow } = await supabaseAdmin.from('invoice_accounting_sync')
+        .select('id').eq('local_invoice_id', id).eq('tenant_id', tenantId).eq('sync_status', 'synced').maybeSingle();
+
+      if ((invoice as any).status !== 'Draft' || syncedRow) {
+        return res.status(409).json({
+          error: syncedRow
+            ? "Cette facture est numérotée par le connecteur comptable connecté : elle ne peut plus être supprimée ici."
+            : "Seules les factures en brouillon peuvent être supprimées. Une facture déjà envoyée doit être annulée par un avoir."
+        });
+      }
+
+      // invoice_items et invoice_accounting_sync portent tous deux
+      // ON DELETE CASCADE sur invoices(id) — voir supabase/schema.sql et
+      // migrate_accounting_sync.sql — mais supprimés ici explicitement quand
+      // même, même principe que proposal_specialties dans DELETE
+      // /api/proposals/:id juste au-dessus : une ligne pending/error peut
+      // exister ici (un connecteur tenté puis jamais confirmé) et ce même
+      // geste couvre aussi bien la cascade DB que l'émulateur de test.
+      await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id).eq('tenant_id', tenantId);
+      await supabaseAdmin.from('invoice_accounting_sync').delete().eq('local_invoice_id', id).eq('tenant_id', tenantId);
+      const { error } = await supabaseAdmin.from('invoices').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      const label = (invoice as any).invoice_number || id.slice(0, 8);
+      logActivity(tenantId, req.user.id, userName, `Suppression de la facture N° ${label}`, '', id, 'invoice', 'Factures');
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting invoice:", error);
+      res.status(500).json({ error: "Failed to delete invoice: " + error.message });
+    }
+  });
+
   // POST /api/invoices/:id/sync-retry — replays the connector push for an
   // invoice that came out of POST /api/invoices numberless because the
   // first attempt errored (connector unreachable, rate-limited, ...). Safe

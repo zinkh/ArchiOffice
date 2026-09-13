@@ -343,6 +343,35 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-p2')?.status).toBe('Overdue');
   });
 
+  // supabase/migrate_invoice_zoho_deleted.sql — a local invoice never
+  // hard-deletes in mirror of Zoho (the legal numbering sequence must not
+  // gap), it's only flagged for a human to review.
+  it('flags a local invoice whose Zoho counterpart has disappeared, without deleting it', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-gone', tenant_id: tenantId, zoho_invoice_id: 'z-gone', status: 'Sent', invoice_number: 'ZOHO-1' },
+      { id: 'inv-still-there', tenant_id: tenantId, zoho_invoice_id: 'z-here', status: 'Sent', invoice_number: 'ZOHO-2' },
+    ]);
+
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (!url.endsWith('/invoices')) return { data: {} } as any;
+      // Only z-here comes back — z-gone was deleted in Zoho — and this is the
+      // full, un-truncated list (has_more_page: false).
+      return { data: { invoices: [{ invoice_id: 'z-here', status: 'sent' }], page_context: { has_more_page: false } } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.deletedUpstream).toBe(1);
+    const gone = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-gone');
+    expect(gone).toBeDefined();
+    expect(gone?.accounting_deleted_at).toBeTruthy();
+    const stillThere = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-still-there');
+    expect(stillThere?.accounting_deleted_at).toBeFalsy();
+  });
+
   // contact_name_contains matched substrings, so an invoice for "Dupont" bound
   // itself to the existing, unrelated "Dupont-Martin".
   it('binds an invoice only to an exactly-matching Zoho contact', async () => {

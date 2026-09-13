@@ -20,7 +20,7 @@ import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
   mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow, type ZohoAffaireInfo,
+  zohoInvoiceToLocalRow, flagInvoicesDeletedUpstream, type ZohoAffaireInfo,
 } from '../zohoSync';
 import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
 
@@ -403,7 +403,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         'Content-Type': 'application/json',
       };
 
-      let pushed = 0, pulled = 0, remaining = 0;
+      let pushed = 0, pulled = 0, remaining = 0, deletedUpstream = 0;
       const errors: string[] = [];
 
       // Push local invoices not yet in Zoho Books
@@ -477,6 +477,9 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         // Paginated: this used to fetch one default-sized page and stop, so a
         // tenant past that first page silently stopped receiving status updates.
         const zohoInvoices: any[] = [];
+        // Ne vaut « liste complète » que si la dernière page dit elle-même
+        // qu'il n'y en a plus — voir la même note dans zohoInvoice.ts.
+        let fullyFetched = false;
         for (let page = 1; page <= ZOHO_MAX_PULL_PAGES; page++) {
           const resp = await fetchWithTimeout(
             `${apiBase}/invoices?organization_id=${orgId}&status=all&page=${page}&per_page=${ZOHO_PAGE_SIZE}`,
@@ -485,7 +488,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
           );
           const respData = await resp.json() as any;
           zohoInvoices.push(...(respData?.invoices || []));
-          if (!respData?.page_context?.has_more_page) break;
+          if (!respData?.page_context?.has_more_page) { fullyFetched = true; break; }
         }
 
         // One query for the whole batch instead of one per Zoho invoice.
@@ -520,14 +523,24 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             pulled++;
           }
         }
+
+        // Voir la même note dans zohoInvoice.ts : une facture supprimée côté
+        // Zoho Books disparaît simplement de cette liste, sans que rien ne
+        // le signale localement — seulement quand la pagination a couvert
+        // la liste entière.
+        if (fullyFetched) {
+          deletedUpstream = await flagInvoicesDeletedUpstream(
+            supabaseAdmin, tenantId, zohoInvoices.map((z: any) => z.invoice_id),
+          );
+        }
       } catch (err: any) {
         console.error("[POST /api/zoho-books/sync]", err);
         errors.push(`Récupération échouée: ${err.message}`);
       }
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
-      res.json({ pushed, pulled, remaining, errors });
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s)${deletedUpstream ? `, ${deletedUpstream} signalée(s) supprimée(s) côté Zoho` : ''})`, '', tenantId, 'integration', 'Intégrations');
+      res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho Books sync error]', error.message);
       res.status(500).json({ error: error.message || 'Sync échouée' });
