@@ -311,6 +311,79 @@ Les deux lisent maintenant `invoice.client_id` via `loadInvoiceClientContact`
 SuperPDP) ; Chorus Pro (B2G, identifié par SIRET seul) gagne le même repli
 en plus de celui déjà existant sur `projects.client_siret`.
 
+### Réserves de chantier : fiche, photos, export PDF
+
+`src/components/pro/ReserveTracker.tsx` (les mêmes réserves d'OPR et
+réserves GPA, une table chacune, `apiBase` décide) est construit pour le
+téléphone d'abord, là où une réserve se relève : une liste de cartes sur
+mobile (`md:hidden`, numéro, intitulé, vignette de la première photo,
+entreprise en charge, échéance, statut), le tableau groupé par lot au bureau,
+et dans les deux cas **un appui sur la réserve ouvre sa fiche**
+(`ReserveDetail.tsx`, panneau plein écran sur mobile, modale au bureau).
+Plus d'édition en ligne dans le tableau : la fiche est le seul endroit où l'on
+modifie une réserve, le statut restant changeable d'une pastille depuis la
+liste. Ce que les deux partagent (statuts, pastille, retard, extrait de plan)
+vit dans `reserveShared.tsx`.
+
+**Photos.** `reserve_photos` (`supabase/migrate_reserves_photos_recent_views.sql`)
+sur le modèle de `meeting_photos`, bucket privé `reserve-photos` lu par URL
+signée comme les autres (`PRIVATE_STORAGE_BUCKETS`). Une seule table pour les
+deux jeux de réserves, distingués par `reserve_kind` (`'opr' | 'gpa'`) — une
+clé étrangère ne peut pas viser deux tables, donc **la suppression en cascade
+est faite par `deleteReservePhotos()`** (`server/reservePhotos.ts`) à la
+suppression d'une réserve, pas par la base. `GET /api/reserves` et
+`GET /api/gpa-reserves` (et la fiche `/api/projects/:id/full`) attachent
+`photos: []` à chaque réserve en UNE requête (`attachReservePhotos`), jamais
+une par réserve. Dans la fiche, `<input capture="environment">` ouvre
+directement l'appareil photo sur un téléphone ; en création, les photos
+prises avant l'enregistrement sont mises en file et envoyées une à une une
+fois la réserve créée (il faut son id pour les rattacher).
+
+**Extrait de plan.** Les repères sont stockés en pourcentage de la première
+page du plan (`x`/`y`, PlanAnnotator). `src/lib/planRender.ts` rend cette
+page (pdf.js, ou `<img>` pour un plan image) sur un canvas mis en cache par
+plan, et en découpe une fenêtre autour du repère (`renderPlanExcerpt`) pour la
+fiche et l'export. Le rendu se fait côté navigateur, jamais côté serveur :
+c'est le même pdf.js que PlanAnnotator, et le serveur n'a pas à rasteriser
+des A0.
+
+**Export PDF** (`src/lib/reservesExport.ts`, bouton « Exporter PDF », porte
+sur la liste FILTRÉE à l'écran) : page de garde avec récapitulatif et tableau,
+une page par plan avec tous les repères numérotés (paysage si le plan l'est),
+puis une fiche par réserve (champs, commentaire, extrait de plan, photos en
+vignettes de 42 mm). En-tête, pied et pagination « P1|2 » du cabinet via
+`pdfLetterhead.ts`, nuances de gris. Les images passent par
+`loadPhotoDataUrl` (réduites à 900 px) : embarquer les originaux ferait un
+PDF de plusieurs dizaines de Mo pour rien.
+
+### Projets ouverts récemment et jalons de mission
+
+**Classement par défaut de `/projects`** : les affaires ouvertes le plus
+récemment PAR LA PERSONNE CONNECTÉE en tête. `project_recent_views` (même
+migration que ci-dessus, une ligne par couple personne × projet) est écrite
+par `GET /api/projects/:id/full` (`recordProjectOpened`, meilleur effort) et
+relue par `GET /api/projects` sous `last_opened_at` (`attachLastOpenedAt`,
+`server/projectRecentViews.ts`). Stocké côté serveur et non dans le
+navigateur pour que le classement suive la personne d'un poste à l'autre.
+Un tri explicite du sélecteur remplace ce classement ; sans historique, la
+liste garde l'ordre de l'API.
+
+**Jalons en double.** `ProjectDetail.tsx` synchronise les jalons du projet
+avec les missions du contrat MOE lié (un jalon par mission incluse, apparié
+par titre). L'effet se déclenchait dès l'arrivée du contrat, alors que la
+liste des jalons n'était pas encore lue en base — il recréait donc tous les
+jalons de mission à chaque ouverture de la fiche. Il attend désormais
+`milestonesLoaded`, garde en mémoire les créations en cours
+(`milestoneCreationsInFlight`) et supprime les doublons laissés par l'ancien
+comportement (pour une même mission, seul le jalon coché ou à défaut le plus
+ancien est conservé). À ne pas défaire : un effet qui lit `milestones` sans
+attendre qu'ils soient chargés recrée le bug.
+
+**Stepper de mission sans historique de phase.** Sans ligne dans
+`project_phase_history`, la fiche affiche déjà « Phase ESQ » : le stepper de
+l'en-tête (et celui de la fiche complète) prend la première phase affichée
+comme phase en cours plutôt que de ne rien marquer.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

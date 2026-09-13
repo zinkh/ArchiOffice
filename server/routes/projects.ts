@@ -8,6 +8,8 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { attachReservePhotos } from '../reservePhotos';
+import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
 
 /** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
 async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
@@ -49,8 +51,12 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         query = query.lt('id', cursorId);
       }
       if (limit) query = query.limit(limit);
-      const { data, error } = await query;
+      const { data: rows, error } = await query;
       if (error) throw error;
+      // `last_opened_at` : la dernière ouverture de chaque affaire PAR la
+      // personne qui demande la liste — c'est le classement par défaut de
+      // /projects (« ouverts récemment »).
+      const data = await attachLastOpenedAt(supabaseAdmin, tenantId, req.user.id, rows || []);
       if (!limit) return res.json(data || []);
       const last = (data || [])[data.length - 1];
       const nextCursor = data.length === limit && last?.id
@@ -83,7 +89,11 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         stakeholders_list: project_stakeholders || [],
         categories_list: (project_categories_junction || []).map((j: any) => j.category_id),
       };
-      const [milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans] = await Promise.all([
+      // Ouvrir la fiche complète, c'est ouvrir l'affaire : c'est ce qui
+      // alimente le classement « ouverts récemment ». Meilleur effort : une
+      // instance non migrée ne doit pas perdre l'accès à ses projets pour ça.
+      recordProjectOpened(supabaseAdmin, tenantId, req.user.id, id).catch(() => {});
+      const [milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
@@ -95,6 +105,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         supabaseAdmin.from('reserves').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
       ]);
+      const reserves = await attachReservePhotos(supabaseAdmin, tenantId, 'opr', reservesRows);
       res.json({ project, milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
     } catch (e: any) {
       console.error(e);

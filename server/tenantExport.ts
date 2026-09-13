@@ -30,6 +30,9 @@ const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   'feed_posts', 'feed_comments', 'feed_likes',
   'gpa_reserves', 'join_requests', 'leave_balances', 'leave_requests',
   'meeting_attendees', 'meeting_photos', 'meetings', 'mentions',
+  // Photos de réserves (OPR et GPA) et dernières ouvertures d'affaires par
+  // personne — du contenu et de l'activité du cabinet, donc exportés.
+  'reserve_photos', 'project_recent_views',
   // L'historique des notifications système, au même titre que le flux
   // d'activité. push_subscriptions, en revanche, reste hors export : ce sont
   // des identifiants de transport propres à un navigateur (endpoint + clés de
@@ -67,7 +70,7 @@ const REDACTED_SETTINGS_COLUMNS = new Set([
 
 // Buckets whose objects are namespaced by `${tenantId}/...` — see
 // server.ts's uploadToStorage call sites.
-const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos'];
+const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'logos'];
 
 const PAGE_SIZE = 1000;
 

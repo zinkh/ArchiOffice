@@ -15,7 +15,7 @@ const DEFAULT_CHECK_INTERVAL_HOURS = 24;
 // Buckets whose files are namespaced by `${tenantId}/...` (see server.ts's
 // uploadToStorage call sites) — best-effort cleanup, not privacy-critical
 // once the referencing rows are gone, but avoids leaving orphaned files.
-const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos', 'support-attachments'];
+const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'logos', 'support-attachments'];
 
 // Ce qui N'EST PAS supprimé, et ne doit pas l'être : les fichiers qu'un cabinet
 // a fait déposer sur SON propre espace de stockage (Google Drive, Dropbox,
