@@ -160,7 +160,7 @@ function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
               <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                 <span>→</span>
                 <input
-                  type="number" min={0}
+                  type="number" min={0} step="0.01"
                   className="w-24 text-sm text-right rounded p-1 outline-none"
                   style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   value={phase.montant_phase}
@@ -1199,7 +1199,7 @@ export default function Invoices() {
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                   <input
-                    type="number"
+                    type="number" step="0.01"
                     required={newInvoice.invoice_type !== 'acompte' || newAcompteCalculated === null}
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
@@ -1281,7 +1281,23 @@ export default function Invoices() {
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={editForm.project_id || ''}
-                    onChange={e => setEditForm({ ...editForm, project_id: e.target.value || null })}
+                    onChange={e => {
+                      const newProjectId = e.target.value || null;
+                      const newProject = projects.find(p => p.id === newProjectId);
+                      // Le Maître d'Ouvrage d'une affaire est réputé être son
+                      // client — voir resolveInvoiceClientId côté serveur —
+                      // donc rattacher la facture à une affaire en reprend le
+                      // client directement plutôt que de forcer une nouvelle
+                      // recherche manuelle dans ContactAutocomplete juste en
+                      // dessous. Toujours corrigeable ensuite : une affaire
+                      // sans client_id (ou aucune affaire choisie) laisse le
+                      // Maître d'Ouvrage déjà saisi inchangé.
+                      setEditForm({
+                        ...editForm,
+                        project_id: newProjectId,
+                        client_id: newProject?.client_id || editForm.client_id,
+                      });
+                    }}
                   >
                     <option value="">{t('invoices_no_project_option')}</option>
                     {projects.map(p => (
@@ -1373,7 +1389,7 @@ export default function Invoices() {
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                     <input
-                      type="number"
+                      type="number" step="0.01"
                       className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
                       style={inputStyle}
                       value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
