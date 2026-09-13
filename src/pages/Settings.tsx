@@ -560,10 +560,14 @@ export default function Settings() {
   // across — and report per-invoice failures instead of claiming success.
   const zohoSyncNotice = (
     prefix: string,
-    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[] },
+    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[]; deletedUpstream?: number },
   ): { type: 'success' | 'error'; message: string } => {
     const parts = [`${prefix} — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.`];
     if (data.remaining) parts.push(`${data.remaining} restante(s) : relancez la synchronisation.`);
+    // Jamais supprimées automatiquement ici (voir flagInvoicesDeletedUpstream,
+    // server/zohoSync.ts) — juste signalées, à traiter dans la liste des
+    // factures.
+    if (data.deletedUpstream) parts.push(`${data.deletedUpstream} facture(s) introuvable(s) côté Zoho, signalée(s) dans la liste des factures.`);
     const errors = data.errors ?? [];
     if (errors.length) parts.push(`Erreurs : ${errors.slice(0, 3).join(' | ')}`);
     return { type: errors.length ? 'error' : 'success', message: parts.join(' ') };

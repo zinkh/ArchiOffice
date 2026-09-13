@@ -993,6 +993,11 @@ export interface Invoice {
   buyer_siret?: string;
   buyer_service_code?: string;
   engagement_number?: string;
+  // Posé par la synchro Zoho (server/zohoSync.ts::flagInvoicesDeletedUpstream)
+  // quand la facture liée a disparu de Zoho — jamais de suppression locale en
+  // miroir, une facture déjà numérotée doit rester dans la séquence légale.
+  zoho_invoice_id?: string;
+  accounting_deleted_at?: string | null;
 }
 
 export interface InvoiceItem {
