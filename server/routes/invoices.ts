@@ -179,16 +179,25 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       let accountingSyncResult: any = null;
       if (accountingProvider !== 'none') {
         let pushProjectName: string | null = null;
+        let pushProjectCode: string | null = null;
+        let pushProjectAddress: string | null = null;
         if (project_id) {
-          const { data: proj } = await supabaseAdmin.from('projects').select('name').eq('id', project_id).eq('tenant_id', tenantId).maybeSingle();
+          const { data: proj } = await supabaseAdmin.from('projects').select('name, project_code, address').eq('id', project_id).eq('tenant_id', tenantId).maybeSingle();
           pushProjectName = (proj as any)?.name || null;
+          // Numéro et adresse de l'affaire : portés jusqu'à l'article Zoho créé
+          // pour chaque ligne de la facture (zohoItemIdentity, server/zohoSync.ts)
+          // — c'est ce qui rend l'article repérable dans le catalogue Zoho, plutôt
+          // qu'une ligne libre anonyme.
+          pushProjectCode = (proj as any)?.project_code || null;
+          pushProjectAddress = (proj as any)?.address || null;
         }
         // Best effort, like the rest of this codebase's remontée/push
         // patterns: the invoice already exists locally (Draft, numberless),
         // so a connector outage here never loses it — it's retried via
         // POST /api/invoices/:id/sync-retry once the connector is reachable.
         accountingSyncResult = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, accountingProvider, {
-          project_id, client_id: finalClientId, project_name: pushProjectName, description,
+          project_id, client_id: finalClientId, project_name: pushProjectName,
+          project_code: pushProjectCode, project_address: pushProjectAddress, description,
           issue_date: issue_date || created_at.split('T')[0], due_date, amount, vat_rate, items: items || [],
         });
       }
@@ -372,12 +381,17 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         return res.status(400).json({ error: "Aucun connecteur comptable actif pour ce cabinet." });
       }
       const { data: inv } = await supabaseAdmin.from('invoices')
-        .select('*, projects(name)').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+        .select('*, projects(name, project_code, address)').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       if (!inv) return res.status(404).json({ error: "Facture introuvable." });
 
       const result = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, provider, {
         project_id: (inv as any).project_id, client_id: (inv as any).client_id,
         project_name: (inv as any).projects?.name || null,
+        // Numéro et adresse de l'affaire — voir le commentaire équivalent à la
+        // création de la facture : rattachent l'article Zoho créé pour chaque
+        // ligne à l'affaire facturée.
+        project_code: (inv as any).projects?.project_code || null,
+        project_address: (inv as any).projects?.address || null,
         description: (inv as any).description, issue_date: (inv as any).issue_date,
         due_date: (inv as any).due_date, amount: (inv as any).amount, vat_rate: (inv as any).vat_rate,
         items: (inv as any).invoice_items || [],

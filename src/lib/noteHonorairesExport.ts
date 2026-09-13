@@ -8,8 +8,16 @@ import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLette
 import { montantEnLettres } from './numberToFrenchWords';
 import type { NoteHonoraires, ContratMOE, NoteHonorairePhase } from '../types';
 
+// Intl.NumberFormat('fr-FR', …) sépare les milliers par une espace fine
+// insécable (U+202F) — jsPDF ne sait pas la placer dans les polices standard
+// (Helvetica/WinAnsi) et la remplace silencieusement par un « / » dans le flux
+// PDF généré (vérifié sur le contenu du PDF produit : `Tj` porte littéralement
+// "18/898,25" au lieu de "18 898,25"). Une espace normale est un caractère
+// WinAnsi ordinaire, correctement mesurée et rendue.
 const fmt = (n?: number) =>
-  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format(n || 0)
+    .replace(/[  ]/g, ' ');
 
 const sanitize = (s: string) => (s || 'note').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w-]+/g, '_');
 
@@ -40,28 +48,46 @@ export async function exportNoteHonorairesToPDF(
   };
   let y = drawAgencyHeader(doc, settings, letterhead);
 
-  // ── Parties ────────────────────────────────────────────────────────────
-  const champ = (label: string, value?: string) => {
-    if (!value) return;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(17, 24, 39);
-    doc.text(label, 14, y);
-    doc.setFont('helvetica', 'normal');
-    const wrapped = doc.splitTextToSize(value, 128) as string[];
-    doc.text(wrapped, 60, y);
-    y += 5 * Math.max(1, wrapped.length);
-  };
-
   const moeNames = [
     settings.agencyName,
     ...(contrat?.cotraitants || []).map(c => c.contact_name || c.specialty).filter(Boolean),
   ].filter(Boolean).join('\n');
 
+  // ── Parties ────────────────────────────────────────────────────────────
+  // La colonne des valeurs démarrait à un x fixe (60) sans rapport avec la
+  // largeur réelle des libellés : « Coût prévisionnel des travaux HT : » à
+  // 9 pt gras mesure ~52 mm, largement au-delà des 46 mm laissés entre le
+  // début du libellé (x=14) et cette colonne — la valeur s'imprimait donc
+  // par-dessus la fin du libellé. La position de la colonne est maintenant
+  // dérivée du libellé le plus large RÉELLEMENT affiché (les champs sont
+  // conditionnels — un projet sans coût prévisionnel n'affiche pas cette
+  // ligne, et ne doit pas pour autant réserver sa place), avec une marge de
+  // 3 mm avant la valeur.
+  const champs: [string, string | undefined][] = [
+    ['Concerne :', project.name],
+    ["Maître d'Ouvrage :", project.client],
+    ["Maître d'Œuvre :", moeNames],
+    ['Objet :', note.objet],
+    ...(project.construction_cost
+      ? ([['Coût prévisionnel des travaux HT :', `${fmt(project.construction_cost)} €`]] as [string, string][])
+      : []),
+  ];
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  const labelWidths = champs.filter(([, v]) => v).map(([label]) => doc.getTextWidth(label));
+  const valueX = 14 + Math.max(16, ...labelWidths) + 3;
+
+  const champ = (label: string, value?: string) => {
+    if (!value) return;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(17, 24, 39);
+    doc.text(label, 14, y);
+    doc.setFont('helvetica', 'normal');
+    const wrapped = doc.splitTextToSize(value, 196 - valueX) as string[];
+    doc.text(wrapped, valueX, y);
+    y += 5 * Math.max(1, wrapped.length);
+  };
+
   y += 2;
-  champ('Concerne :', project.name);
-  champ("Maître d'Ouvrage :", project.client);
-  champ("Maître d'Œuvre :", moeNames);
-  champ('Objet :', note.objet);
-  if (project.construction_cost) champ('Coût prévisionnel des travaux HT :', `${fmt(project.construction_cost)} €`);
+  champs.forEach(([label, value]) => champ(label, value));
   y += 4;
 
   // ── Récapitulatif financier ────────────────────────────────────────────

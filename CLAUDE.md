@@ -516,6 +516,98 @@ un bouton « Répartir » remet la ligne sur la répartition du contrat
 (`fee_pct` par cotraitant, le solde à l'agence) — qui sert aussi de valeur par
 défaut à la création d'une note.
 
+### Tableau de ventilation responsive et export PDF corrigé
+
+Deux défauts distincts repérés sur le même tableau (« Ventilation par
+mission » d'une note d'honoraires) : l'un dans l'écran, l'autre dans son
+export PDF.
+
+**Écran (`src/pages/ProjectDetail.tsx`).** Le tableau a désormais deux
+colonnes par membre (% et €) au lieu d'une, et dépasse vite la largeur de
+l'écran dès qu'il y a un cotraitant et plusieurs sous-traitants. `w-full` sur
+la balise `<table>` devient `min-w-full` : le tableau garde sa largeur
+naturelle sans jamais la plafonner à celle de son conteneur, pour que le
+débordement se traduise par le défilement horizontal de
+`overflow-x-auto` plutôt que par des colonnes tassées. Le bouton
+« Répartir » de la colonne Mission (sticky, donc de largeur fixe pendant le
+défilement) devient une icône (`IconRefresh`) plutôt qu'un libellé texte :
+chaque caractère de moins sur cette colonne laisse une part de plus aux
+colonnes financières sur un écran étroit.
+
+**Export PDF (`src/lib/noteHonorairesExport.ts`).** Deux bugs, une seule
+cause commune :
+
+1. **Chevauchement du libellé et de la valeur** sur la page de garde (ex. :
+   « Coût prévisionnel des travaux HT : » par-dessus « 190 262,00 € ») — la
+   colonne des valeurs démarrait à un x fixe (60 mm) sans rapport avec la
+   largeur réelle du libellé le plus long (~52 mm à 9 pt gras, pour 46 mm
+   disponibles). La position de cette colonne est désormais dérivée du
+   libellé le plus large RÉELLEMENT affiché parmi les champs de la note
+   (`champs.filter(([, v]) => v)`) — un projet sans coût prévisionnel
+   n'affiche pas cette ligne et ne réserve donc pas sa place.
+2. **Un « / » à la place de l'espace des milliers**, partout où un montant
+   est affiché (page de garde et annexe), qui donnait par endroits
+   l'impression d'un texte tronqué (« 100% · 4/896 » au lieu de
+   « 100 % · 4 896,44 € »). Cause : `Intl.NumberFormat('fr-FR', …)` sépare
+   les milliers par une espace fine insécable (U+202F) que les polices
+   standard de jsPDF (Helvetica/WinAnsi) ne savent pas placer — vérifié sur
+   le flux PDF généré, l'opérateur `Tj` porte littéralement le caractère
+   "/" à la place de cette espace. `fmt()` la remplace (ainsi que l'espace
+   insécable classique, U+00A0, par précaution) par une espace normale,
+   un caractère WinAnsi ordinaire correctement mesuré et rendu.
+
+### Chaque ligne facturée devient un article dans Zoho
+
+`server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres
+sur la facture Zoho (`name`/`rate`/`quantity`), jamais rattachées au
+catalogue d'articles (Items) de Zoho : une ligne facturée n'apparaissait
+donc nulle part en dehors de CETTE facture, et deux factures portant la
+même prestation ne se retrouvaient jamais reliées à un article commun.
+
+**`zohoItemIdentity(lineDescription, affaire)`** (pure, `zohoSync.ts`) décide
+du nom et de la description de l'article correspondant à une ligne :
+
+- Le **numéro et le nom d'affaire** vont dans le **nom** de l'article
+  (`"Honoraires ESQ — 26014 Villa Martin"`), pas seulement dans sa
+  description : Zoho impose un nom d'article unique par organisation, et
+  c'est ce nom qui doit rendre l'affaire repérable d'un coup d'œil dans la
+  liste des articles — pas seulement en ouvrant la fiche. Sans le numéro/nom
+  d'affaire dans le nom, deux affaires portant la même ligne générique
+  (« Honoraires ») auraient sinon partagé le même article, et donc le même
+  historique de facturation.
+- **L'adresse de l'affaire** va dans la **description** de l'article — une
+  information complémentaire, pas un repère d'identification.
+- Une facture sans affaire (facture générale, ou antérieure à
+  `invoices.client_id`) garde le seul intitulé de la ligne, comme avant
+  l'introduction des articles.
+
+**`getOrCreateZohoItem`/`getOrCreateZohoBooksItem`** (respectivement
+`zohoInvoice.ts` et `zohoBooks.ts`, dupliqués comme le reste des helpers
+Contacts de ces deux fichiers plutôt que partagés — même rationale que
+`buildZohoContactPayload`) recherchent l'article par **nom exact** avant
+d'en créer un, exactement comme `getOrCreateZohoCustomer` : une même ligne
+refacturée sur la MÊME affaire (un second acompte, par exemple) retrouve et
+réutilise le même article plutôt que d'en créer un nouveau à chaque facture.
+**Best-effort à dessein** : un article est un ajout, jamais une condition à
+la facturation — un échec (réseau, quota Zoho) laisse la ligne repartir
+libre, sans `item_id`, exactement comme avant l'introduction des articles ;
+il ne fait jamais échouer la facture elle-même.
+
+`item_id` fixe l'article facturé, il ne fige pas son prix : `rate`,
+`quantity` et `tax_percentage` restent portés par la ligne elle-même, pas
+par l'article — Zoho les respecte comme un prix ajusté pour cette facture
+précise, exactement comme dans son interface (choisir un article puis
+modifier son prix pour cette ligne).
+
+Le numéro et l'adresse de l'affaire remontent jusqu'à ces fonctions par le
+même chemin que `project_name` déjà en place : `server/routes/invoices.ts`
+étend son `SELECT` sur `projects` (`name, project_code, address`) à la
+création d'une facture, au retry de synchro (`POST
+/api/invoices/:id/sync-retry`) et dans la synchro en masse
+(`/api/zoho/sync`, `/api/zoho-books/sync`), et les transmet dans l'objet
+`ZohoAffaireInfo` (`projectCode`/`projectName`/`projectAddress`) donné au
+connecteur actif.
+
 ### Invitation d'un nouveau membre d'équipe
 
 `POST /api/team` (`server/routes/team.ts`) n'a jamais généré ni envoyé de mot

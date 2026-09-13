@@ -2502,11 +2502,17 @@ export default function ProjectDetail() {
                           {/* Ventilation par mission — agence, cotraitants et sous-traitants */}
                           <div>
                             <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Ventilation par mission</p>
+                            {/* min-w-full (et non w-full) : avec un cotraitant et plusieurs
+                                sous-traitants, cette ligne dépasse vite la largeur de l'écran
+                                (deux colonnes % + € par membre). min-w-full garde le tableau à
+                                sa largeur naturelle sans jamais la plafonner à celle du
+                                conteneur, pour que le débordement se traduise par le défilement
+                                horizontal de ce conteneur plutôt que par des colonnes tassées. */}
                             <div className="overflow-x-auto rounded-lg border border-[var(--tblr-border)]">
-                              <table className="w-full text-xs border-collapse">
+                              <table className="min-w-full text-xs border-collapse">
                                 <thead>
                                   <tr className="bg-[var(--tblr-surface-2)]">
-                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom">Mission</th>
+                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom whitespace-nowrap">Mission</th>
                                     {/* Groupement : le pourcentage de la mission facturé par
                                         l'ensemble de l'équipe dans cette note, et son montant. */}
                                     <th colSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Groupement</th>
@@ -2579,13 +2585,20 @@ export default function ProjectDetail() {
                                     const pct1 = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(n);
                                     return (
                                       <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
+                                        {/* Icône plutôt que le libellé « Répartir » : sur cette
+                                            colonne sticky, chaque caractère de plus s'ajoute à la
+                                            largeur qui reste fixe pendant le défilement horizontal
+                                            des colonnes financières — la garder compacte laisse plus
+                                            de place à ces dernières sur un écran étroit. */}
                                         <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">
-                                          {basePhase?.name || phase.phase_name}
-                                          {(noteForm.cotraitants_facturation || []).length > 0 && (
-                                            <button type="button" title="Reprendre la répartition du contrat pour cette mission"
-                                              className="ml-2 text-[10px] font-normal text-blue-500 hover:text-blue-700"
-                                              onClick={() => resetRepartition(idx)}>Répartir</button>
-                                          )}
+                                          <span className="inline-flex items-center gap-1.5">
+                                            {basePhase?.name || phase.phase_name}
+                                            {(noteForm.cotraitants_facturation || []).length > 0 && (
+                                              <button type="button" title="Reprendre la répartition du contrat pour cette mission"
+                                                className="p-0.5 rounded text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex-shrink-0"
+                                                onClick={() => resetRepartition(idx)}><IconRefresh size={12} /></button>
+                                            )}
+                                          </span>
                                         </td>
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1 justify-center">
