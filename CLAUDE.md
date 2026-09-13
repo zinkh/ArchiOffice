@@ -1729,6 +1729,24 @@ seul des trois fournisseurs à produire un lien de lecture temporaire (quatre
 heures, propre au porteur, sans élargir le partage) : la route de lecture y
 redirige en 302 plutôt que de streamer.
 
+**Trois effets de bord traités, et qui ne doivent pas être défaits.** L'export
+ZIP RGPD (`server/tenantExport.ts`) verse les fichiers externes sous
+`fichiers/externe/` et nomme dans `manifest.json` ceux qu'il n'a pas pu lire :
+un export à motif légal ne peut pas mentir par omission, et il ne parcourait
+jusqu'ici que les buckets Supabase. `tenantPurge.ts` ne supprime **jamais** dans
+l'espace du cabinet — ces fichiers vivent sur un compte qui lui appartient, et
+l'effacement RGPD porte sur les données que NOUS détenons ; seule disparaît la
+connexion, donc la capacité à les rouvrir. Et `external_storage_connections`
+n'entre **pas** dans `SYNC_TABLES` : propager des identifiants chiffrés vers une
+installation locale dont la `MAIL_ENCRYPTION_KEY` diffère serait à la fois
+inutile et un essaimage de secrets.
+
+**Les agents IA lisent ces fichiers par un pont, pas par un import.** Le package
+`@zinkh/archioffice-agents` n'importe rien depuis `server/` ; `server.ts` lui
+dépose donc un lecteur au démarrage (`setExternalFileReader`), sur le patron de
+`initOAuthStateStore()`. Sans ce pont, un agent rapporterait simplement qu'une
+pièce jointe est vide dès qu'un cabinet a branché son espace.
+
 **Nextcloud et kDrive partagent un seul adaptateur WebDAV**
 (`server/externalStorage/providers/webdav.ts`, `MKCOL`/`PROPFIND`/`PUT`/`GET`/
 `DELETE` en `fetch`, aucune dépendance npm ajoutée). Ils ne diffèrent que par

@@ -10,6 +10,7 @@ import { AGENT_RESOURCES } from '../types.js';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
+import { readExternalFile } from './externalFiles.js';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -68,7 +69,15 @@ function parseStorageRef(fileUrl: string): { bucket: string; path: string } | nu
 // plain fetch() against the stored reference URL, which would 401/403.
 // Falls back to a direct fetch for anything that isn't one of our own
 // storage refs (e.g. a document imported from an external link).
-async function readStorageObject(supabaseAdmin: any, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  // Un fichier hébergé sur l'espace de stockage du cabinet (Google Drive,
+  // Dropbox, Nextcloud, kDrive) n'est joignable ni par Storage ni par un fetch
+  // direct : seul l'hôte sait construire l'adaptateur. Sans ce passage, les
+  // agents cesseraient de lire les pièces jointes récentes en rapportant
+  // simplement que le document est vide.
+  const external = await readExternalFile(tenantId, fileUrl || '');
+  if (external) return external;
+
   const ref = parseStorageRef(fileUrl || '');
   if (ref) {
     const { data, error } = await supabaseAdmin.storage.from(ref.bucket).download(ref.path);
@@ -386,7 +395,7 @@ export async function buildAgentContext(
         // the object directly via Storage's download() API instead, which
         // bypasses the bucket's privacy the same way a table query bypasses
         // RLS — no signed URL needed.
-        const fetched = await readStorageObject(supabaseAdmin, doc.file_url);
+        const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
         if (!fetched) return;
         const { buffer, contentType } = fetched;
 

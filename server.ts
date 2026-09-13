@@ -84,6 +84,9 @@ import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
 import { registerStorageProviders } from "./server/externalStorage/providers";
+import { parseExternalRef } from "./server/externalStorage/externalRef";
+import { getConnectionById } from "./server/externalStorage/externalConnection";
+import { createProvider } from "./server/externalStorage/providerFactory";
 import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
@@ -678,6 +681,20 @@ export async function createApp() {
   });
   registerStorageProviders(supabaseAdmin);
 
+  /** Les octets d'un fichier hébergé sur l'espace de stockage du cabinet, ou
+   *  null si la référence n'en est pas une (l'appelant reprend alors ses
+   *  chemins habituels). */
+  async function readExternalBusinessFile(tenantId: string, fileUrl: string) {
+    const ref = parseExternalRef(fileUrl);
+    if (!ref) return null;
+    const connection = await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+    if (!connection) return null;
+    const stream = await createProvider(connection).openReadStream(ref.externalId);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream.body) chunks.push(Buffer.from(chunk as any));
+    return { buffer: Buffer.concat(chunks), contentType: stream.contentType };
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
 
   // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
@@ -966,7 +983,14 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader } = await import('@zinkh/archioffice-agents/server');
+  // Le package agents n'importe rien depuis server/ (module propriétaire
+  // autonome) et ne peut donc pas construire lui-même un adaptateur de
+  // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
+  // nonces OAuth : sans ça, un agent cesserait de lire les pièces jointes
+  // déposées depuis qu'un cabinet a branché son espace, en rapportant
+  // simplement que le document est vide.
+  setExternalFileReader(readExternalBusinessFile);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     reserveAiCredit,

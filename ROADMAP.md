@@ -111,8 +111,10 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
   they stay on Supabase and keep being served from there, which is why each row
   carries where its own file lives. The GDPR ZIP export
   (`server/tenantExport.ts`) still only walks Supabase buckets, so externally
-  stored files are currently absent from it — that gap is tracked and not yet
-  closed.
+  stored files are included in it (`fichiers/externe/`), each failure named in
+  `manifest.json` rather than silently dropped. Closing a tenant never deletes
+  anything on the tenant's own space: those files belong to them, and GDPR
+  erasure covers the data *we* hold.
 - **Webhooks are inbound-only** (billing events from Stancer, sync notifications from Ragic) — there's no outbound event/webhook system for third parties wanting to react to changes in ArchiOffice.
 
 Screenshots and a demo GIF are also still on the list — see the TODO in [README.md](README.md#screenshots) if you'd like to contribute some.
