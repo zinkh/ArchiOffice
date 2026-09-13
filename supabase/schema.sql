@@ -297,7 +297,7 @@ CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  invoice_number TEXT, project_id TEXT, amount NUMERIC,
+  invoice_number TEXT, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, amount NUMERIC,
   tax_amount NUMERIC, total_amount NUMERIC, status TEXT NOT NULL,
   due_date TEXT, issue_date TEXT, description TEXT, created_at TEXT,
   seller_name TEXT, seller_address TEXT, seller_siret TEXT,
