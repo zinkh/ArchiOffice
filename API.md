@@ -75,7 +75,7 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/PUT /api/profile`, `GET /api/profile/:userId`, `POST/DELETE /api/profile/cv`, `POST/PUT/DELETE /api/profile/education(/:id)`, `POST/PUT/DELETE /api/profile/experience(/:id)`.
 
 ### Projects & planning
-- `GET/POST/PUT/DELETE /api/projects(/:id)`, `GET /api/projects/:id/full` (full project payload for the detail page).
+- `GET/POST/PUT/DELETE /api/projects(/:id)`, `GET /api/projects/:id/full` (full project payload for the detail page; also records the opening in `project_recent_views`, which `GET /api/projects` reads back as a per-user `last_opened_at` — the default « ouverts récemment » order of the projects list).
 - `GET/POST/DELETE /api/project_categories(/:id)`.
 - `GET/POST/PUT/DELETE /api/project-templates(/:id)`.
 - `GET/POST/PUT/DELETE /api/tasks(/:id)` — Gantt tasks.
@@ -112,7 +112,8 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/POST/PUT/DELETE /api/ordres_de_service(/:id)`, `PATCH /api/ordres_de_service/:id/status`, `GET /api/ordres_de_service/next-number`.
 - `GET/POST/PUT/DELETE /api/visas(/:id)` (file upload on create/update).
 - `GET/POST/PUT/DELETE /api/receptions(/:id)`.
-- `GET/POST/PUT/DELETE /api/reserves(/:id)`, `GET/POST/PUT/DELETE /api/gpa-reserves(/:id)` (1-year warranty period).
+- `GET/POST/PUT/DELETE /api/reserves(/:id)`, `GET/POST/PUT/DELETE /api/gpa-reserves(/:id)` (1-year warranty period). Each listed reserve carries its `photos` and a free-text `description`.
+- `GET/POST /api/reserves/:id/photos`, `PATCH/DELETE /api/reserves/:id/photos/:photoId` (and the same under `/api/gpa-reserves`) — site photos of a reserve (multipart `file`, PNG/JPEG/WebP, private `reserve-photos` bucket).
 - `GET/POST/PUT/DELETE /api/permits(/:id)`.
 - `GET/POST/PUT/DELETE /api/rfis(/:id)`.
 - `GET/POST /api/projects/:projectId/reports`, `PUT /api/reports/:reportId` — site-visit reports.

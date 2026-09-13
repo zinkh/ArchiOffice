@@ -1,5 +1,5 @@
 // <img> for a file stored in one of the private buckets (documents/plans/cv/
-// message-attachments/feed-attachments/meeting-photos) — resolves `src` to a
+// message-attachments/feed-attachments/meeting-photos/reserve-photos) — resolves `src` to a
 // signed URL (see src/lib/signedStorageUrl.ts) before rendering, since the
 // raw file_url/attachment_url is no longer directly fetchable.
 import { useEffect, useState } from 'react';

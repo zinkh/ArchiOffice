@@ -267,6 +267,8 @@ export interface Project {
   categories_list?: ProjectCategory[];
   external_intervenants?: string;
   entreprises?: string;
+  /** Dernière ouverture de la fiche par la personne connectée (GET /api/projects) — classement « ouverts récemment ». */
+  last_opened_at?: string | null;
 
   // Fields from Proposal
   reference?: string;
@@ -417,6 +419,15 @@ export interface Reception {
   pv_valide?: boolean;
 }
 
+export interface ReservePhoto {
+  id: string;
+  reserve_id: string;
+  reserve_kind: 'opr' | 'gpa';
+  file_url: string;
+  caption?: string | null;
+  uploaded_at: string;
+}
+
 export interface Reserve {
   id: string;
   project_id: string;
@@ -433,6 +444,10 @@ export interface Reserve {
   x?: number;
   y?: number;
   number?: number;
+  /** Commentaire libre : l'état constaté, ce qui reste à faire. */
+  description?: string | null;
+  /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
+  photos?: ReservePhoto[];
 }
 
 export interface Permit {
@@ -478,6 +493,10 @@ export interface GpaReserve {
   x?: number;
   y?: number;
   number?: number;
+  /** Commentaire libre : l'état constaté, ce qui reste à faire. */
+  description?: string | null;
+  /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
+  photos?: ReservePhoto[];
 }
 
 export interface Plan {

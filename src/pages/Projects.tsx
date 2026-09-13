@@ -39,6 +39,19 @@ const PROJECT_SORT_OPTIONS: { key: keyof Project; labelKey: string; type: SortTy
   { key: 'end_date', labelKey: 'deadline', type: 'date' },
 ];
 
+/**
+ * Classement par défaut de la liste : les affaires ouvertes le plus
+ * récemment PAR LA PERSONNE CONNECTÉE en tête (`last_opened_at`, posé par le
+ * serveur à chaque ouverture de la fiche complète), celles jamais ouvertes
+ * ensuite, dans l'ordre où l'API les rend. Un tri explicite du sélecteur
+ * remplace ce classement.
+ */
+function compareRecentlyOpened(a: Project, b: Project): number {
+  const ta = a.last_opened_at ? new Date(a.last_opened_at).getTime() : 0;
+  const tb = b.last_opened_at ? new Date(b.last_opened_at).getTime() : 0;
+  return tb - ta;
+}
+
 const PROJECT_SORT_TYPES = new Map<keyof Project, SortType>(
   PROJECT_SORT_OPTIONS.map(option => [option.key, option.type]),
 );
@@ -225,7 +238,7 @@ export default function Projects() {
     const matchesCategory = filterCategory === 'All' || project.category === filterCategory;
     const matchesProjectManager = filterProjectManager === 'All' || project.project_manager === filterProjectManager;
     return matchesSearch && matchesStatus && matchesCategory && matchesProjectManager;
-  }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : 0));
+  }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : compareRecentlyOpened(a, b)));
 
   const projectsPagination = usePagination(filteredProjects);
 

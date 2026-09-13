@@ -171,6 +171,11 @@ export default function ProjectDetail() {
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  // Vrai une fois les jalons du projet réellement lus en base : la
+  // synchronisation avec le contrat MOE (plus bas) ne doit jamais tourner
+  // sur la liste vide initiale.
+  const [milestonesLoaded, setMilestonesLoaded] = useState(false);
+  const milestoneCreationsInFlight = useRef<Set<string>>(new Set());
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [visas, setVisas] = useState<Visa[]>([]);
   const [receptions, setReceptions] = useState<Reception[]>([]);
@@ -318,17 +323,27 @@ export default function ProjectDetail() {
   // Keep project milestones in sync with the missions included in the linked
   // ContratMOE (one milestone per included mission, matched by title — same
   // principle used for proposal milestones in Proposals.tsx's FeeDistributionGrid).
+  //
+  // Cet effet ne tourne qu'une fois les jalons LUS EN BASE (`milestonesLoaded`) :
+  // il se déclenchait auparavant dès l'arrivée du contrat, alors que la liste
+  // des jalons était encore vide, et recréait donc TOUS les jalons de mission
+  // à chaque ouverture de la fiche — d'où les « Esquisse (ESQ) » en double,
+  // triple, dans « Prochains jalons ». `milestoneCreationsInFlight` évite le
+  // même doublon entre deux exécutions rapprochées de l'effet (le contrat
+  // relu avant que la création précédente n'ait répondu).
   useEffect(() => {
-    if (!id) return;
+    if (!id || !milestonesLoaded) return;
     const primaryContrat = linkedContratsMoe[0];
     if (!primaryContrat) return;
     const includedMissions: any[] = (primaryContrat.missions_list || []).filter((m: any) => m.incluse);
     if (includedMissions.length === 0) return;
 
     const projectMilestones = milestones.filter(m => m.project_id === id);
+    const inFlight = milestoneCreationsInFlight.current;
 
     includedMissions.forEach(mission => {
-      if (!projectMilestones.some(m => m.title === mission.name)) {
+      if (!projectMilestones.some(m => m.title === mission.name) && !inFlight.has(mission.name)) {
+        inFlight.add(mission.name);
         fetch('/api/milestones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -336,18 +351,33 @@ export default function ProjectDetail() {
         })
           .then(res => res.ok ? res.json() : null)
           .then(created => { if (created) setMilestones(prev => [...prev, { ...created, completed: !!created.completed }]); })
-          .catch(console.error);
+          .catch(console.error)
+          .finally(() => inFlight.delete(mission.name));
       }
     });
 
-    projectMilestones.forEach(m => {
-      if (!includedMissions.some(mission => mission.name === m.title)) {
-        fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-          .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)))
-          .catch(console.error);
-      }
+    // Les doublons laissés par l'ancien comportement : pour chaque mission du
+    // contrat, un seul jalon reste — celui déjà coché, sinon le plus ancien
+    // — les autres sont supprimés.
+    const toDelete = new Set<string>();
+    includedMissions.forEach(mission => {
+      const sameTitle = projectMilestones.filter(m => m.title === mission.name);
+      if (sameTitle.length <= 1) return;
+      const keep = sameTitle.find(m => m.completed)
+        || [...sameTitle].sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))[0];
+      sameTitle.forEach(m => { if (m.id !== keep.id) toDelete.add(m.id); });
     });
-  }, [linkedContratsMoe, id]);
+
+    projectMilestones.forEach(m => {
+      if (!includedMissions.some(mission => mission.name === m.title)) toDelete.add(m.id);
+    });
+
+    toDelete.forEach(milestoneId => {
+      fetch(`/api/milestones/${milestoneId}`, { method: 'DELETE' })
+        .then(() => setMilestones(prev => prev.filter(x => x.id !== milestoneId)))
+        .catch(console.error);
+    });
+  }, [linkedContratsMoe, id, milestonesLoaded]);
 
   // Le contrat MOE fait foi pour les montants d'honoraires du projet : le
   // contrat signé s'il en existe un, à défaut le premier contrat lié.
@@ -506,6 +536,7 @@ export default function ProjectDetail() {
           is_chantier: isFlagTrue(data.project.is_chantier),
         });
         setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+        setMilestonesLoaded(true);
         setInvoices(data.invoices);
         setOrdresDeService(data.ordres_de_service);
         setAvenantsMoe(data.avenants_moe || []);
@@ -683,7 +714,7 @@ export default function ProjectDetail() {
         const text = await res.text();
         try {
           const data = JSON.parse(text);
-          if (Array.isArray(data)) setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
+          if (Array.isArray(data)) { setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed }))); setMilestonesLoaded(true); }
         } catch (e) {
           console.error("Failed to parse milestones JSON:", text);
         }
@@ -1506,7 +1537,11 @@ export default function ProjectDetail() {
             const filteredPhases = MISSION_PHASES.filter(phase =>
               !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
             );
-            const actualCurrentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+            // Sans historique de phase (affaire créée avant le suivi, ou jamais
+            // passée de phase), la fiche affiche déjà « Phase ESQ » — la première
+            // mission est donc la mission en cours, et le stepper doit la montrer
+            // comme telle plutôt que tous les jalons en attente.
+            const actualCurrentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
             const displayedPhase = viewedPhase || actualCurrentPhase;
             return (
               <PhaseStepper
@@ -3411,7 +3446,7 @@ export default function ProjectDetail() {
                         const filteredPhases = MISSION_PHASES.filter(phase =>
                           !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
                         );
-                        const currentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+                        const currentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
                         return (
                           <PhaseStepper
                             steps={filteredPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
@@ -4482,6 +4517,8 @@ export default function ProjectDetail() {
                   setReserves={setReserves}
                   plans={plans}
                   lotsList={project?.lots_list}
+                  project={project}
+                  settings={settings}
                 />
 
                 <ReserveTracker
@@ -4492,6 +4529,8 @@ export default function ProjectDetail() {
                   setReserves={setGpaReserves}
                   plans={plans}
                   lotsList={project?.lots_list}
+                  project={project}
+                  settings={settings}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

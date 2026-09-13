@@ -1016,3 +1016,35 @@ ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT 
 ALTER TABLE plans             ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
 CREATE INDEX IF NOT EXISTS idx_document_versions_tenant_backend
   ON document_versions(tenant_id, storage_backend);
+
+-- ── Réserves : commentaire, photos et projets ouverts récemment ──────────────
+-- Voir supabase/migrate_reserves_photos_recent_views.sql.
+-- (`gpa_reserves`, créée par migrate_add_manager_dashboard.sql, reçoit la même
+-- colonne dans la migration elle-même.)
+ALTER TABLE reserves ADD COLUMN IF NOT EXISTS description TEXT;
+
+CREATE TABLE IF NOT EXISTS reserve_photos (
+  id           TEXT PRIMARY KEY,
+  tenant_id    UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  reserve_id   TEXT NOT NULL,
+  reserve_kind TEXT NOT NULL DEFAULT 'opr' CHECK (reserve_kind IN ('opr', 'gpa')),
+  file_url     TEXT NOT NULL,
+  caption      TEXT,
+  uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_reserve_photos_reserve ON reserve_photos(tenant_id, reserve_kind, reserve_id);
+
+CREATE TABLE IF NOT EXISTS project_recent_views (
+  id         TEXT PRIMARY KEY,
+  tenant_id  UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id    UUID NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  opened_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_recent_views_user ON project_recent_views(tenant_id, user_id);
+
+ALTER TABLE reserve_photos       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_recent_views ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON reserve_photos       USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON project_recent_views USING (tenant_id = my_tenant_id());

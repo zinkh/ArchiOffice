@@ -70,6 +70,7 @@ import { registerVisaRoutes } from "./server/routes/visas";
 import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
+import { registerReservePhotoRoutes } from "./server/reservePhotos";
 import { registerPermitRoutes } from "./server/routes/permits";
 import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
@@ -632,7 +633,7 @@ export async function createApp() {
   // that reference for a short-lived signed URL after checking the caller's
   // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'support-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'support-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -953,8 +954,9 @@ export async function createApp() {
   registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
-  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerReservePhotoRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
