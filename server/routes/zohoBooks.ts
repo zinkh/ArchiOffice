@@ -19,8 +19,8 @@ import { fetchWithTimeout } from '../fetchWithTimeout';
 import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
-  mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow,
+  mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow, type ZohoAffaireInfo,
 } from '../zohoSync';
 import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
 
@@ -67,6 +67,45 @@ async function getOrCreateZohoBooksCustomer(apiBase: string, orgId: string, head
   const createBody = await createRes.json() as any;
   if (!createBody?.contact?.contact_id) throw new Error(createBody?.message || 'Création du contact Zoho Books échouée');
   return createBody.contact.contact_id;
+}
+
+/**
+ * Books equivalent of zohoInvoice.ts's getOrCreateZohoItem — same Items API
+ * shape on both Zoho products (search by exact name before create, so a
+ * line reused on the same affaire finds and reuses its article rather than
+ * duplicating it), same best-effort contract: a failure here never fails
+ * the invoice, the line just goes out free-form as before articles existed.
+ */
+async function getOrCreateZohoBooksItem(apiBase: string, orgId: string, headers: any, name: string, description: string | undefined, rate: number): Promise<string | undefined> {
+  try {
+    const searchRes = await fetchWithTimeout(
+      `${apiBase}/items?organization_id=${orgId}&name=${encodeURIComponent(name)}&per_page=${ZOHO_PAGE_SIZE}`,
+      { headers }, ZOHO_TIMEOUT_MS,
+    );
+    const searchBody = await searchRes.json() as any;
+    const match = (searchBody?.items || []).find(
+      (it: any) => typeof it?.name === 'string' && it.name.trim() === name.trim(),
+    );
+    if (match) return match.item_id;
+    const createRes = await fetchWithTimeout(`${apiBase}/items?organization_id=${orgId}`, {
+      method: 'POST', headers, body: JSON.stringify({ name, description, rate }),
+    }, ZOHO_TIMEOUT_MS);
+    const createBody = await createRes.json() as any;
+    return createBody?.item?.item_id;
+  } catch (err: any) {
+    console.error('[getOrCreateZohoBooksItem]', err?.message || err);
+    return undefined;
+  }
+}
+
+/** Books equivalent of zohoInvoice.ts's buildZohoLineItemsWithArticles. */
+async function buildZohoBooksLineItemsWithArticles(apiBase: string, orgId: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
+  const lines = zohoLineItems(inv);
+  return Promise.all(lines.map(async (line) => {
+    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const item_id = await getOrCreateZohoBooksItem(apiBase, orgId, headers, name, description, line.rate);
+    return item_id ? { ...line, item_id } : line;
+  }));
 }
 
 /** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
@@ -162,12 +201,13 @@ export async function pushInvoiceToZohoBooks(
   const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
   const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
 
+  const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
   const payload = {
     customer_id: customerId,
     reference_number: idempotencyKey,
     date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
     due_date: zohoDate(inv.due_date),
-    line_items: zohoLineItems(inv),
+    line_items: await buildZohoBooksLineItemsWithArticles(apiBase, orgId, headers, inv, affaire),
     notes: inv.description || undefined,
   };
   const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {
@@ -370,14 +410,17 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       try {
         const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
           .from('invoices')
-          .select('*, projects(name)')
+          .select('*, projects(name, project_code, address)')
           .eq('tenant_id', tenantId)
           .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
         // See the matching note in zohoInvoice.ts: a failed query used to be
         // silently treated as "no invoices to push".
         if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
 
-        const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
+        const invoicesArr = (localInvoices || []).map((inv: any) => ({
+          ...inv, project_name: inv.projects?.name || null,
+          project_code: inv.projects?.project_code || null, project_address: inv.projects?.address || null,
+        }));
         // Bounded per run — see the matching note in zohoInvoice.ts.
         const toPush = invoicesArr.slice(0, ZOHO_MAX_PUSH_PER_RUN);
         remaining = invoicesArr.length - toPush.length;
@@ -393,12 +436,13 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
             const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
             const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
+            const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
             const payload = {
               customer_id: customerId,
               invoice_number: inv.invoice_number || undefined,
               date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
               due_date: zohoDate(inv.due_date),
-              line_items: zohoLineItems(inv),
+              line_items: await buildZohoBooksLineItemsWithArticles(apiBase, orgId, headers, inv, affaire),
               notes: inv.description || undefined,
             };
             const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {

@@ -57,6 +57,40 @@ export function zohoDate(value: unknown): string | undefined {
 }
 
 /**
+ * Repère d'affaire d'une facture, transmis jusqu'à la construction de
+ * l'article Zoho de chaque ligne (server/routes/{zohoInvoice,zohoBooks}.ts) —
+ * numéro et nom d'affaire dans le NOM de l'article (directement visibles
+ * dans la liste des articles de Zoho), adresse dans sa description. Une
+ * facture sans projet (facture générale, ou antérieure à `client_id`) n'a
+ * pas de numéro d'affaire à indiquer : `zohoItemIdentity()` retombe alors sur
+ * le seul intitulé de la ligne, comme avant l'introduction des articles.
+ */
+export interface ZohoAffaireInfo {
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectAddress?: string | null;
+}
+
+/**
+ * Nom et description de l'article Zoho pour une ligne de facture donnée.
+ * Le numéro/nom d'affaire vit dans le NOM plutôt que dans la seule
+ * description : Zoho exige un nom d'article unique par organisation, et
+ * l'utilisateur veut ce repère visible d'un coup d'œil dans la liste des
+ * articles — pas seulement en ouvrant la fiche. Une même ligne (même
+ * intitulé) réutilisée sur une même affaire (un second acompte, par exemple)
+ * retrouve donc le même article plutôt que d'en créer un nouveau à chaque
+ * facture (voir getOrCreateZohoItem/getOrCreateZohoBooksItem).
+ */
+export function zohoItemIdentity(lineDescription: string | undefined, affaire: ZohoAffaireInfo | undefined): { name: string; description?: string } {
+  const base = lineDescription || 'Honoraires';
+  const affaireLabel = [affaire?.projectCode, affaire?.projectName].filter(Boolean).join(' ');
+  return {
+    name: affaireLabel ? `${base} — ${affaireLabel}` : base,
+    description: affaire?.projectAddress || undefined,
+  };
+}
+
+/**
  * Line items for a Zoho invoice payload, from our own invoice row. Falls back
  * to a single line carrying the invoice total when the row has no itemised
  * breakdown.

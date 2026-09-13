@@ -229,6 +229,97 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced')?.status).toBe('Paid');
   });
 
+  // Chaque ligne facturée doit être inscrite au catalogue d'articles (Items)
+  // de Zoho, pas seulement portée comme une ligne libre sur cette facture —
+  // voir getOrCreateZohoItem/buildZohoLineItemsWithArticles.
+  it('inscrit la ligne facturée dans les articles Zoho (Items), recherchés par nom exact avant création', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item', tenant_id: tenantId, description: 'Honoraires ESQ', amount: 1000, zoho_invoice_id: null }]);
+
+    const itemSearchNames: string[] = [];
+    let itemCreatePayload: any = null;
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) { itemCreatePayload = body; return { data: { item: { item_id: 'item-new' } } } as any; }
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string, config: any) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) { itemSearchNames.push(config.params.name); return { data: { items: [] } } as any; }
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    // Aucune affaire rattachée ici (le projet n'est pas résolu par la relation
+    // imbriquée dans ce banc de test — voir tests/fakeSupabaseAdmin.ts), donc
+    // l'article garde le seul intitulé de la ligne — c'est zohoItemIdentity()
+    // qui porte, elle, la logique d'affaire (tests/zohoSync.test.ts).
+    expect(itemSearchNames).toContain('Honoraires ESQ');
+    expect(itemCreatePayload).toMatchObject({ name: 'Honoraires ESQ', rate: 1000 });
+    expect(pushedLineItems[0].item_id).toBe('item-new');
+  });
+
+  it('réutilise un article Zoho déjà existant au lieu d\'en créer un doublon quand le nom correspond exactement', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-2', tenant_id: tenantId, description: 'Honoraires APS', amount: 500, zoho_invoice_id: null }]);
+
+    let itemCreateCalled = false;
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) { itemCreateCalled = true; return { data: { item: { item_id: 'should-not-be-used' } } } as any; }
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new-2' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) return { data: { items: [{ item_id: 'item-existing', name: 'Honoraires APS' }] } } as any;
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreateCalled).toBe(false);
+    expect(pushedLineItems[0].item_id).toBe('item-existing');
+  });
+
+  it('pousse la facture même si l\'API Items échoue — l\'article est un ajout, pas une condition à la facturation', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-3', tenant_id: tenantId, description: 'Honoraires', amount: 200, zoho_invoice_id: null }]);
+
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) throw new Error('Zoho Items indisponible');
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new-3' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) throw new Error('Zoho Items indisponible');
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(pushedLineItems[0].item_id).toBeUndefined();
+  });
+
   it('pages through every Zoho invoice instead of stopping at the first page', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
@@ -594,6 +685,58 @@ describe('Zoho Books', () => {
     expect(pushBody.invoice_number).toBe('FAC-001');
     expect(pushBody.date).toBe('2026-03-04');
     expect(pushBody.line_items[0].rate).toBe(3000);
+  });
+
+  // Même mécanique côté Books — voir getOrCreateZohoBooksItem/
+  // buildZohoBooksLineItemsWithArticles dans server/routes/zohoBooks.ts.
+  it('inscrit la ligne facturée dans les articles Zoho Books, recherchés par nom exact avant création', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-b', tenant_id: tenantId, description: 'Honoraires ESQ', amount: 1000, zoho_invoice_id: null }]);
+
+    let itemCreated = false;
+    let pushedLineItems: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
+      if (init?.method === 'POST' && u.includes('/items')) { itemCreated = true; return { ok: true, json: async () => ({ item: { item_id: 'item-b-new' } }) } as any; }
+      if (u.includes('/items')) return { ok: true, json: async () => ({ items: [] }) } as any;
+      if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [] }) } as any;
+      if (u.includes('/invoices')) { pushedLineItems = JSON.parse(init.body).line_items; return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new' } }) } as any; }
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreated).toBe(true);
+    expect(pushedLineItems[0].item_id).toBe('item-b-new');
+  });
+
+  it('réutilise un article Zoho Books déjà existant au lieu d\'en créer un doublon', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-b2', tenant_id: tenantId, description: 'Honoraires APS', amount: 500, zoho_invoice_id: null }]);
+
+    let itemCreated = false;
+    let pushedLineItems: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
+      if (init?.method === 'POST' && u.includes('/items')) { itemCreated = true; return { ok: true, json: async () => ({ item: { item_id: 'should-not-be-used' } }) } as any; }
+      if (u.includes('/items')) return { ok: true, json: async () => ({ items: [{ item_id: 'item-b-existing', name: 'Honoraires APS' }] }) } as any;
+      if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [] }) } as any;
+      if (u.includes('/invoices')) { pushedLineItems = JSON.parse(init.body).line_items; return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new-2' } }) } as any; }
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreated).toBe(false);
+    expect(pushedLineItems[0].item_id).toBe('item-b-existing');
   });
 
   it('pages through every Zoho Books invoice instead of stopping at the first page', async () => {

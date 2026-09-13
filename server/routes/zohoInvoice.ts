@@ -26,8 +26,8 @@ import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthSt
 import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
-  mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow,
+  mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow, type ZohoAffaireInfo,
 } from '../zohoSync';
 import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
 
@@ -53,6 +53,54 @@ function buildZohoContactPayload(info: ClientContactInfo) {
     } : undefined,
     notes: info.siret ? `SIRET : ${info.siret}` : undefined,
   };
+}
+
+/**
+ * Retrouve ou crée l'« article » (Items) Zoho correspondant à une ligne de
+ * facture ArchiOffice — pour que la ligne facturée soit réellement inscrite
+ * au catalogue d'articles du cabinet dans Zoho, et pas seulement une ligne
+ * libre propre à cette facture. Recherché par nom exact avant création,
+ * comme getOrCreateZohoCustomer ci-dessous : une même ligne réutilisée sur
+ * la même affaire (un second acompte, par exemple) retrouve et réutilise le
+ * même article.
+ *
+ * Best-effort à dessein : un article est un ajout, pas une condition à la
+ * facturation — un échec (réseau, quota, nom déjà pris par un article que le
+ * filtre par nom exact n'aurait pas reconnu) ne doit jamais faire échouer la
+ * facture elle-même. `undefined` renvoyé ici laisse la ligne repartir libre,
+ * exactement comme avant l'introduction des articles.
+ */
+async function getOrCreateZohoItem(apiBase: string, headers: any, name: string, description: string | undefined, rate: number): Promise<string | undefined> {
+  try {
+    const search = await axios.get(`${apiBase}/items`, {
+      headers, params: { name, per_page: ZOHO_PAGE_SIZE }, timeout: ZOHO_TIMEOUT_MS,
+    });
+    const match = (search.data?.items || []).find(
+      (it: any) => typeof it?.name === 'string' && it.name.trim() === name.trim(),
+    );
+    if (match) return match.item_id;
+    const create = await axios.post(`${apiBase}/items`, { name, description, rate }, { headers, timeout: ZOHO_TIMEOUT_MS });
+    return create.data?.item?.item_id;
+  } catch (err: any) {
+    console.error('[getOrCreateZohoItem]', err.response?.data ?? err.message);
+    return undefined;
+  }
+}
+
+/**
+ * Les lignes de zohoLineItems, chacune reliée à son article Zoho (`item_id`)
+ * quand la résolution réussit — le numéro/nom d'affaire vit dans le nom de
+ * l'article, l'adresse dans sa description (zohoItemIdentity), tandis que le
+ * montant/la quantité/la TVA de LA FACTURE restent portés par la ligne
+ * elle-même : `item_id` fixe l'article facturé, il ne fige pas son prix.
+ */
+async function buildZohoLineItemsWithArticles(apiBase: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
+  const lines = zohoLineItems(inv);
+  return Promise.all(lines.map(async (line) => {
+    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const item_id = await getOrCreateZohoItem(apiBase, headers, name, description, line.rate);
+    return item_id ? { ...line, item_id } : line;
+  }));
 }
 
 /** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
@@ -188,12 +236,13 @@ export async function pushInvoiceToZohoInvoice(
         { headers, timeout: ZOHO_TIMEOUT_MS },
       )).data.contact.contact_id;
 
+  const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
   const payload: any = {
     customer_id: customerId,
     reference_number: idempotencyKey,
     date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
     due_date: zohoDate(inv.due_date),
-    line_items: zohoLineItems(inv),
+    line_items: await buildZohoLineItemsWithArticles(apiBase, headers, inv, affaire),
     notes: inv.description || undefined,
   };
   const resp = await axios.post(`${apiBase}/invoices`, payload, { headers, timeout: ZOHO_TIMEOUT_MS });
@@ -417,7 +466,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
 
       // 1. Push local invoices not yet in Zoho
       const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
-        .from('invoices').select('*, projects(name)').eq('tenant_id', tenantId)
+        .from('invoices').select('*, projects(name, project_code, address)').eq('tenant_id', tenantId)
         .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
       // A failed query (e.g. a column PostgREST doesn't recognise — this table
       // was missing zoho_invoice_id in production for a while, see
@@ -425,7 +474,10 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       // treated as "no invoices to push", which let a completely broken sync
       // report success. Throw instead.
       if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
-      const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
+      const invoicesArr = (localInvoices || []).map((inv: any) => ({
+        ...inv, project_name: inv.projects?.name || null,
+        project_code: inv.projects?.project_code || null, project_address: inv.projects?.address || null,
+      }));
       // Bounded per run: the browser is waiting on this request, and each push
       // costs up to 3 Zoho calls. Each id is persisted as it goes, so the next
       // sync picks up exactly where this one stopped.
@@ -438,11 +490,12 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
           const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
           const customerId = await getOrCreateZohoCustomer(apiBase, headers, clientInfo || { name: customerName });
 
+          const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
           const payload: any = {
             customer_id: customerId,
             date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
             due_date: zohoDate(inv.due_date),
-            line_items: zohoLineItems(inv),
+            line_items: await buildZohoLineItemsWithArticles(apiBase, headers, inv, affaire),
             notes: inv.description || undefined,
           };
           if (inv.invoice_number) payload.invoice_number = inv.invoice_number;
