@@ -238,4 +238,6 @@ class WebdavProvider implements ExternalStorageProvider {
   }
 }
 
-registerProviderFactory('webdav', (connection) => new WebdavProvider(connection));
+export function registerWebdavProvider(): void {
+  registerProviderFactory('webdav', (connection) => new WebdavProvider(connection));
+}

@@ -14,6 +14,7 @@ import type { Express } from 'express';
 import crypto from 'crypto';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { encryptSecret } from '../secretsCrypto';
+import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
 import { createProvider, hasProviderFactory } from '../externalStorage/providerFactory';
 import {
   getActiveConnection,
@@ -21,6 +22,8 @@ import {
   type ExternalStorageConnection,
 } from '../externalStorage/externalConnection';
 import { sanitizeFolderSegment } from '../externalStorage/folderNaming';
+import { clearStorageTokenCache } from '../externalStorage/oauthTokens';
+import { GOOGLE_DRIVE_SCOPE, GOOGLE_TOKEN_URL } from '../externalStorage/providers/googleDrive';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -51,10 +54,165 @@ function publicView(connection: ExternalStorageConnection | null) {
   };
 }
 
+/** Les fournisseurs branchés par consentement OAuth, par opposition au WebDAV
+ *  qui se configure par formulaire. */
+const OAUTH_PROVIDERS: Record<string, {
+  label: string;
+  authUrl: string;
+  tokenUrl: string;
+  scope: string;
+  clientId: () => string | undefined;
+  clientSecret: () => string | undefined;
+  redirectEnv: string;
+  /** Paramètres propres au fournisseur sur l'URL de consentement. */
+  extraAuthParams: Record<string, string>;
+}> = {
+  google_drive: {
+    label: 'Google Drive',
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: GOOGLE_TOKEN_URL,
+    scope: `${GOOGLE_DRIVE_SCOPE} email`,
+    clientId: () => process.env.VITE_GOOGLE_CLIENT_ID,
+    clientSecret: () => process.env.GOOGLE_CLIENT_SECRET,
+    redirectEnv: 'GOOGLE_DRIVE_REDIRECT_URI',
+    // access_type=offline + prompt=consent : sans les deux, Google ne délivre
+    // pas de refresh token à une application déjà autorisée, et la connexion
+    // mourrait au bout d'une heure.
+    extraAuthParams: { access_type: 'offline', prompt: 'consent' },
+  },
+};
+
 export function registerExternalStorageRoutes(
   app: Express,
   { supabaseAdmin, getTenantId, requireTenantAdmin }: RouteDeps,
 ) {
+  /** L'URI de redirection : une variable d'environnement si l'exploitant en a
+   *  posé une, sinon déduite de la requête — même mécanique que
+   *  server/routes/googleCalendarSync.ts. */
+  function redirectUri(req: any, providerId: string): string {
+    const override = process.env[OAUTH_PROVIDERS[providerId].redirectEnv];
+    if (override) return override;
+    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host = (req.headers['x-forwarded-host'] as string) || req.get('host');
+    return `${proto}://${host}/api/external-storage/callback`;
+  }
+
+  // L'URI à recopier dans la console du fournisseur — même service rendu que
+  // GET /api/zoho/callback-url.
+  app.get('/api/external-storage/callback-url', async (req: any, res: any) => {
+    try {
+      await getTenantId(req.user.id);
+      res.json({ url: redirectUri(req, 'google_drive') });
+    } catch (e: any) {
+      res.status(e.status || 500).json({ error: e.message || 'Échec' });
+    }
+  });
+
+  // Rend l'URL de consentement en JSON : une navigation nue vers cette route ne
+  // porterait aucun JWT et serait refusée avant d'atteindre le fournisseur.
+  // C'est le frontend qui navigue ensuite (patron Zoho, Settings.tsx).
+  app.get('/api/external-storage/:provider/auth', async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const config = OAUTH_PROVIDERS[req.params.provider];
+      if (!config) return res.status(400).json({ error: 'Fournisseur inconnu.' });
+
+      const clientId = config.clientId();
+      // Refuser ici plutôt que de rediriger vers une page d'erreur du
+      // fournisseur, incompréhensible pour l'architecte.
+      if (!clientId || !config.clientSecret()) {
+        return res.status(503).json({ error: `${config.label} n'est pas configuré sur cette instance.` });
+      }
+
+      const url = new URL(config.authUrl);
+      url.searchParams.set('client_id', clientId);
+      url.searchParams.set('response_type', 'code');
+      url.searchParams.set('redirect_uri', redirectUri(req, req.params.provider));
+      url.searchParams.set('scope', config.scope);
+      for (const [k, v] of Object.entries(config.extraAuthParams)) url.searchParams.set(k, v);
+      // Nonce à usage unique : sans lui, quiconque connaît l'identifiant d'un
+      // cabinet pourrait rattacher SON espace de stockage à celui d'un autre.
+      // La racine choisie voyage avec, la redirection du fournisseur ne pouvant
+      // rien porter d'autre.
+      const rootFolderPath = sanitizeFolderSegment((req.query.rootFolderPath as string) || 'ArchiOffice');
+      url.searchParams.set('state', await createOAuthState(tenantId, req.user.id, `${req.params.provider}|${rootFolderPath}`));
+
+      res.json({ url: url.toString() });
+    } catch (e: any) {
+      console.error('[GET /api/external-storage/:provider/auth]', e);
+      res.status(e.status || 500).json({ error: e.message || 'Échec' });
+    }
+  });
+
+  // La redirection du fournisseur est une navigation nue : aucun JWT. Le
+  // cabinet est récupéré depuis le nonce, jamais depuis req.user (inexistant
+  // ici). Route inscrite dans AUTH_EXEMPT (server.ts).
+  app.get('/api/external-storage/callback', async (req: any, res: any) => {
+    const { code, error: oauthError, state } = req.query as any;
+    const back = (reason?: unknown) =>
+      res.redirect(reason ? `/settings?external_storage_error=${oauthErrorParam(reason)}` : '/settings?external_storage_connected=1');
+
+    const stateData = await consumeOAuthState(state);
+    if (oauthError || !code || !stateData?.tenantId) return back(oauthError || 'invalid_request');
+
+    const [providerId, rootFolderPath] = String(stateData.returnTo || 'google_drive|ArchiOffice').split('|');
+    const config = OAUTH_PROVIDERS[providerId];
+    if (!config) return back('invalid_request');
+
+    try {
+      const tokenResp = await fetch(config.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: String(code),
+          client_id: config.clientId() || '',
+          client_secret: config.clientSecret() || '',
+          redirect_uri: redirectUri(req, providerId),
+          grant_type: 'authorization_code',
+        }).toString(),
+      });
+      const tokenData: any = await tokenResp.json().catch(() => ({}));
+      // Sans refresh token, la connexion mourrait à l'expiration du premier
+      // jeton d'accès : mieux vaut refuser tout de suite que plus tard.
+      if (!tokenResp.ok || !tokenData.refresh_token) {
+        throw new Error(tokenData.error_description || tokenData.error || 'missing_refresh_token');
+      }
+
+      let account: string | null = null;
+      try {
+        const info = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        });
+        if (info.ok) account = (await info.json())?.email ?? null;
+      } catch { /* l'adresse n'est qu'un confort d'affichage */ }
+
+      await supabaseAdmin.from('external_storage_connections')
+        .update({ is_active: false }).eq('tenant_id', stateData.tenantId).eq('is_active', true);
+
+      const { error } = await supabaseAdmin.from('external_storage_connections').insert({
+        id: crypto.randomUUID(),
+        tenant_id: stateData.tenantId,
+        provider: providerId,
+        display_name: config.label,
+        external_account_email: account,
+        refresh_token: encryptSecret(tokenData.refresh_token),
+        scopes: config.scope,
+        root_folder_path: sanitizeFolderSegment(rootFolderPath || 'ArchiOffice'),
+        is_active: true,
+        status: 'ok',
+        created_by: stateData.userId ?? null,
+        created_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+
+      invalidateConnectionCache(stateData.tenantId);
+      return back();
+    } catch (err: any) {
+      console.error('[GET /api/external-storage/callback]', err);
+      return back(err?.message);
+    }
+  });
+
   app.get('/api/external-storage/status', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -156,6 +314,7 @@ export function registerExternalStorageRoutes(
         .update({ is_active: false }).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       invalidateConnectionCache(tenantId);
+      clearStorageTokenCache(req.params.id);
       res.json({ success: true });
     } catch (e: any) {
       console.error('[POST /api/external-storage/:id/disable]', e);
@@ -183,6 +342,7 @@ export function registerExternalStorageRoutes(
         .eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
       invalidateConnectionCache(tenantId);
+      clearStorageTokenCache(req.params.id);
       res.json({ success: true });
     } catch (e: any) {
       console.error('[DELETE /api/external-storage/:id]', e);

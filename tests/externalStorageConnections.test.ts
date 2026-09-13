@@ -241,3 +241,66 @@ describe('POST /api/external-storage/test', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('flux OAuth (Google Drive)', () => {
+  it('rend l’URL de consentement en JSON, pour que le frontend navigue lui-même', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    process.env.VITE_GOOGLE_CLIENT_ID ||= 'client-de-test.apps.googleusercontent.com';
+    process.env.GOOGLE_CLIENT_SECRET ||= 'secret-de-test';
+
+    const res = await request(app).get('/api/external-storage/google_drive/auth')
+      .set(authHeader(token)).query({ rootFolderPath: 'Agence AAZS' });
+    expect(res.status).toBe(200);
+
+    const url = new URL(res.body.url);
+    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    // Sans les deux, Google ne délivre pas de refresh token à une application
+    // déjà autorisée, et la connexion mourrait au bout d'une heure.
+    expect(url.searchParams.get('access_type')).toBe('offline');
+    expect(url.searchParams.get('prompt')).toBe('consent');
+    // Le scope étroit, pas le scope restreint qui impose un audit annuel.
+    expect(url.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/drive.file');
+    expect(url.searchParams.get('scope')).not.toContain('auth/drive ');
+    // Nonce à usage unique : sans lui, quiconque connaît l'identifiant d'un
+    // cabinet pourrait rattacher SON espace à celui d'un autre.
+    expect(url.searchParams.get('state')).toBeTruthy();
+  });
+
+  it('est réservé aux administrateurs du cabinet', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'manager');
+    const res = await request(app).get('/api/external-storage/google_drive/auth').set(authHeader(token));
+    expect(res.status).toBe(403);
+  });
+
+  it('refuse un fournisseur qui n’a pas de flux OAuth', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    const res = await request(app).get('/api/external-storage/webdav/auth').set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  // Le callback est atteint par une navigation nue, sans JWT : il doit traverser
+  // l'authentification globale (AUTH_EXEMPT) et non répondre 401.
+  it('le callback n’exige pas de JWT et redirige vers les Réglages', async () => {
+    const res = await request(app).get('/api/external-storage/callback').query({ error: 'access_denied' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/settings?external_storage_error=access_denied');
+  });
+
+  it('refuse un état inconnu plutôt que de rattacher un espace à l’aveugle', async () => {
+    const res = await request(app).get('/api/external-storage/callback')
+      .query({ code: 'un-code', state: 'un-nonce-jamais-emis' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('external_storage_error=');
+    expect(res.headers.location).not.toContain('connected=1');
+  });
+
+  // /callback-url partage le préfixe de /callback : il ne doit PAS hériter de
+  // son exemption d'authentification.
+  it('l’URL de redirection à recopier reste, elle, authentifiée', async () => {
+    const res = await request(app).get('/api/external-storage/callback-url');
+    expect(res.status).toBe(401);
+  });
+});

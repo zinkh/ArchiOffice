@@ -1703,6 +1703,20 @@ plus consultables depuis ArchiOffice. La ligne n'est supprimée que par la
 cascade de `tenantPurge.ts`, à la fermeture du cabinet — qui **ne supprime
 jamais** dans le drive du cabinet : ce sont ses fichiers, sur son espace.
 
+**Google Drive demande le scope `drive.file`, pas `drive`.** `drive` est un
+*restricted scope* chez Google : il impose une évaluation de sécurité CASA et un
+audit annuel à toute application publiée. `drive.file` n'est pas restreint et
+donne exactement ce qu'il faut — créer des dossiers et des fichiers, et gérer
+ceux qu'on a créés. La contrepartie, assumée et dite dans l'UI : l'application
+ne VOIT pas ce qu'elle n'a pas créé, donc la racine est créée par ArchiOffice
+(son identifiant est mémorisé sur la connexion) et on ne peut pas pointer un
+dossier existant choisi à la main. C'est précisément le cache de dossiers qui
+rend ce scope exploitable. Deux paramètres sont obligatoires sur CHAQUE appel
+(`supportsAllDrives`, `includeItemsFromAllDrives`) sous peine de 404 dès qu'un
+cabinet travaille sur un Drive partagé, l'apostrophe doit être échappée dans une
+requête `q` (« L'Atelier » est un nom d'affaire courant), et la suppression est
+une mise à la corbeille (`PATCH {trashed:true}`), jamais une destruction.
+
 **Nextcloud et kDrive partagent un seul adaptateur WebDAV**
 (`server/externalStorage/providers/webdav.ts`, `MKCOL`/`PROPFIND`/`PUT`/`GET`/
 `DELETE` en `fetch`, aucune dépendance npm ajoutée). Ils ne diffèrent que par

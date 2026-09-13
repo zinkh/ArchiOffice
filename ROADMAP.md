@@ -47,7 +47,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | QuickBooks | ⏳ Planned — listed in Settings, no backend |
 | Nextcloud | ✅ Active — WebDAV, documents and plans stored on the tenant's own server |
 | kDrive (Infomaniak) | ✅ Active — same WebDAV adapter as Nextcloud |
-| Google Drive | ⏳ Planned — the storage layer is in place, the OAuth adapter is not |
+| Google Drive | ✅ Active — OAuth (`drive.file` scope), documents and plans stored on the tenant's own Drive |
 | Dropbox | ⏳ Planned — same |
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |

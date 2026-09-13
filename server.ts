@@ -83,8 +83,7 @@ import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
-// Effet de bord : chaque adaptateur de stockage externe s'enregistre au chargement.
-import "./server/externalStorage/providers";
+import { registerStorageProviders } from "./server/externalStorage/providers";
 import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
@@ -677,6 +676,7 @@ export async function createApp() {
   const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
     supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
   });
+  registerStorageProviders(supabaseAdmin);
 
   // ───────────────────────────────────────────────────────────────────────────
 
@@ -706,6 +706,11 @@ export async function createApp() {
     // le jeton signé du chemin qui authentifie, vérifié dans le handler
     // (server/externalStorage/externalTicket.ts).
     "/api/storage/external",
+    // La redirection de Google après consentement est une navigation nue, sans
+    // JWT : le cabinet est récupéré depuis le nonce à usage unique
+    // (server/oauthState.ts). Le préfixe est exact, donc
+    // /api/external-storage/callback-url, lui, reste authentifié.
+    "/api/external-storage/callback",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {

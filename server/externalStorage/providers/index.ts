@@ -1,7 +1,16 @@
-// Importé une fois par server.ts pour son effet de bord : chaque adaptateur
-// s'enregistre lui-même auprès de providerFactory.ts au chargement.
+// Enregistre les adaptateurs de stockage externe auprès de providerFactory.ts.
 //
-// Un fournisseur absent de cette liste n'est pas « à moitié branché » : sa carte
-// n'apparaît pas dans les Réglages, et une ligne de connexion qui le désignerait
-// malgré tout échoue avec un message explicite (voir createProvider).
-import './webdav';
+// Une fonction plutôt qu'un import à effet de bord : Google Drive a besoin de
+// `supabaseAdmin` pour repersister l'identifiant de son dossier racine et un
+// jeton renouvelé, et un import ne peut rien recevoir.
+//
+// Un fournisseur absent d'ici n'est pas « à moitié branché » : sa carte
+// n'apparaît pas dans les Réglages, et une ligne de connexion qui le
+// désignerait malgré tout échoue avec un message explicite (createProvider).
+import { registerWebdavProvider } from './webdav';
+import { registerGoogleDriveProvider } from './googleDrive';
+
+export function registerStorageProviders(supabaseAdmin: any): void {
+  registerWebdavProvider();
+  registerGoogleDriveProvider(supabaseAdmin);
+}
