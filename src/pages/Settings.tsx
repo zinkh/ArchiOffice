@@ -2280,6 +2280,30 @@ export default function Settings() {
             }))}
           </div>
 
+          {/* ── Agents IA ── */}
+          <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Agents IA</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Créez et configurez les agents du cabinet (métier, capacités, accès aux outils), et consultez leurs alertes.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => navigate('/agents')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Gérer les agents
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/agents/alertes')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Alertes des agents
+              </button>
+            </div>
+          </div>
+
           {/* ── Numérotation des documents ── */}
           <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
