@@ -16,6 +16,10 @@ export interface Document {
   phase?: DocumentPhase;
   version: number;
   file_url: string;
+  /** Où vit le fichier. Dérivé de file_url, jamais la source de vérité de la
+   *  résolution — voir server/externalStorage/externalRef.ts. Absent sur une
+   *  ligne écrite avant l'arrivée du stockage externe : vaut alors 'supabase'. */
+  storage_backend?: 'supabase' | 'external';
   uploaded_by: string; // TeamMember ID
   uploaded_at: string;
   description?: string;

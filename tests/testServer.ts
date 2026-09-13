@@ -27,11 +27,13 @@ export async function getTestApp() {
       // Needed by server/secretsCrypto.ts, used to encrypt IMAP passwords and
       // (since the 2026-08 compliance pass) OAuth refresh tokens at rest.
       process.env.MAIL_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString('base64');
-      // Aucun drive réel n'est joignable depuis les tests : les trois types de
-      // fournisseur sont servis par le double en mémoire.
-      registerMemoryProvider();
       const mod = await import('../server');
       const { app } = await mod.createApp();
+      // Aucun drive réel n'est joignable depuis les tests : les trois types de
+      // fournisseur sont servis par le double en mémoire. APRÈS l'import de
+      // server.ts, qui enregistre les vrais adaptateurs — sinon ce sont eux qui
+      // gagneraient, et les tests tenteraient de vraies requêtes réseau.
+      registerMemoryProvider();
       return app;
     })();
   }

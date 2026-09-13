@@ -81,7 +81,10 @@ import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
+import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
+// Effet de bord : chaque adaptateur de stockage externe s'enregistre au chargement.
+import "./server/externalStorage/providers";
 import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
@@ -941,6 +944,7 @@ export async function createApp() {
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
+  registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });

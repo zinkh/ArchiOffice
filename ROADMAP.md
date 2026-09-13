@@ -45,8 +45,10 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | MAF submission (`/api/maf/v1/submit`) | 🚫 Returns HTTP 501, marked "Enterprise only — contact sales" |
 | Stripe | ⏳ Planned — listed in Settings, no backend |
 | QuickBooks | ⏳ Planned — listed in Settings, no backend |
-| Google Drive | ⏳ Planned — listed in Settings, no backend |
-| Dropbox | ⏳ Planned — listed in Settings, no backend |
+| Nextcloud | ✅ Active — WebDAV, documents and plans stored on the tenant's own server |
+| kDrive (Infomaniak) | ✅ Active — same WebDAV adapter as Nextcloud |
+| Google Drive | ⏳ Planned — the storage layer is in place, the OAuth adapter is not |
+| Dropbox | ⏳ Planned — same |
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |
 | Microsoft Teams | ⏳ Planned — listed in Settings, no backend |
@@ -100,6 +102,17 @@ The remaining step of the multi-provider work. Nothing is built yet; this record
 
 - **No pagination on most list endpoints** (`/api/documents`, `/api/tasks`, `/api/contacts`, `/api/tenders`, `/api/rfis`, `/api/reserves`, `/api/meetings`, and others) — large tenants get full, unpaged arrays back. `/api/projects` and `/api/invoices` got opt-in cursor pagination (`?limit=&cursor=`, returning `{ data, nextCursor }`) and dropped their per-row relational fan-out (cotraitants/lots/stakeholders/categories, line items) down to a single per-item detail fetch — see CLAUDE.md's "Pagination et fan-out sur les listes" — but the remaining endpoints above still return everything, unpaged, on every call.
 - **Uploads go through the server's memory**, not a direct signed upload to storage. Every route on the multer/`memoryStorage()` path (`server/documentUpload.ts`, `server/imageUpload.ts`) buffers the whole file (up to 50 Mo) in the Node process before it reaches Supabase Storage — several concurrent large uploads can add up to real memory pressure. A direct-to-storage signed-upload flow (client asks the server for a short-lived signed upload URL, then uploads straight to the now-private storage bucket) would remove the server from that hot path entirely; not started.
+- **External storage covers documents and plans only.** A tenant that connects
+  its own space (Nextcloud, kDrive) gets its `documents` and `plans` files
+  written there; meeting photos, chat and feed attachments and CVs stay on
+  Supabase Storage. `logos` is public by design, and `support-attachments` has
+  to stay with us so the platform superadmin can still read them from
+  `/admin/support`. Files uploaded *before* the connection are not migrated:
+  they stay on Supabase and keep being served from there, which is why each row
+  carries where its own file lives. The GDPR ZIP export
+  (`server/tenantExport.ts`) still only walks Supabase buckets, so externally
+  stored files are currently absent from it — that gap is tracked and not yet
+  closed.
 - **Webhooks are inbound-only** (billing events from Stancer, sync notifications from Ragic) — there's no outbound event/webhook system for third parties wanting to react to changes in ArchiOffice.
 
 Screenshots and a demo GIF are also still on the list — see the TODO in [README.md](README.md#screenshots) if you'd like to contribute some.

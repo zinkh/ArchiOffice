@@ -1618,6 +1618,101 @@ fourni par le renderer — c'est `main.cjs` qui résout le chemin réel depuis s
 propre variable interne, pour ne jamais ouvrir un chemin arbitraire à la
 demande du renderer.
 
+### Stockage sur l'espace du cabinet
+
+Les documents et les plans d'un cabinet peuvent vivre sur SON espace de
+stockage (Nextcloud, kDrive — Google Drive et Dropbox à suivre) plutôt que dans
+Supabase Storage, dont les octets sont facturés à l'opérateur et plafonnés par
+plan (`storage_mb`, `src/lib/billing.ts`).
+
+**Le périmètre est volontairement étroit** : les buckets `documents` (GED,
+versions, visas) et `plans`, les seuls qui pèsent. `logos` reste public par
+construction, et `support-attachments` reste chez nous — le superadmin
+plateforme doit pouvoir les lire depuis `/admin/support`, ce qu'un drive de
+cabinet lui interdirait.
+
+**Une couche de politique, pas une primitive mutée.** `uploadToStorage` /
+`deleteFromStorage` (`server.ts`) ne changent ni de signature ni de
+comportement : les dix modules de routes hors périmètre les appellent toujours
+tels quels. `createBusinessFileStore()`
+(`server/externalStorage/storeBusinessFile.ts`) se pose au-dessus et n'est
+utilisée que par `documents.ts`, `plans.ts` et `visas.ts`. `AsyncLocalStorage`
+ne pouvait pas servir de source du cabinet ici : `server/tenantContext.ts` rend
+`null` dès qu'une requête ne porte pas `X-Tenant-Id`, et le mode de panne
+aurait été « écrit silencieusement sur Supabase », invisible en test.
+
+**Échec bruyant, jamais de repli silencieux.** Un dépôt qui échoue chez le
+fournisseur rend 502 ; se rabattre sur Supabase remplirait précisément le quota
+que le cabinet cherche à éviter et laisserait deux fichiers de la même affaire
+à deux endroits sans que rien ne l'explique.
+
+**La référence est une URI dans `file_url`** :
+`archioffice+external://<fournisseur>/<connexion>/<base64url(identifiant)>?name=`.
+Pas de colonnes dédiées : `file_url` circule seule dans quatre tables et une
+douzaine de fichiers frontend qui ne passent que `doc.file_url`.
+`parseStorageRef()` rend `null` dessus, donc ses deux copies dans
+`packages/archioffice-agents` dégradent proprement. La colonne
+`storage_backend` existe malgré tout, **uniquement** comme filtre SQL dérivé :
+une requête PostgREST ne sait pas analyser une URI, et le quota en a besoin.
+
+**Aucun lien public n'est créé chez le fournisseur.** Élargir le partage d'un
+fichier dans le drive du cabinet sans qu'il l'ait demandé n'est pas acceptable.
+La lecture passe par un jeton HMAC **sans état**
+(`server/externalStorage/externalTicket.ts`, clé dérivée de
+`MAIL_ENCRYPTION_KEY`) : `openSignedUrl()` ouvre par `window.open()` et
+`<SignedImage>` pose l'URL dans un `src`, deux navigations sans JWT possible, et
+deux requêtes successives atterrissent sur des conteneurs différents — une Map
+par processus rejouerait le piège documenté dans `server/oauthState.ts`. Quand
+un fournisseur sait produire un lien temporaire propre au porteur (Dropbox), la
+route redirige en 302 ; sinon elle streame, **en retransmettant les requêtes
+`Range`** — pdf.js (`PlanAnnotator`) découpe les gros plans, les ignorer
+casserait l'affichage sans rien dire.
+
+**L'arborescence est `<racine>/<code affaire> - <nom affaire>/<phase>`**, avec
+`Plans` et `VISA` comme sous-dossiers pour les deux autres écritures du
+périmètre. Les phases sont celles que l'écran Documents affiche déjà, donc
+l'architecte retrouve dans son drive le classement qu'il voit dans
+l'application. `external_storage_folders` mémorise chaque niveau (index unique
+`(connection_id, folder_key)`, donc upsert idempotent) : sans ce cache, chaque
+dépôt coûterait deux à six appels d'API. Un dossier renommé ou supprimé côté
+drive fait échouer le dépôt en `ExternalFolderMissingError` ; on oublie alors le
+sous-arbre et on rejoue **une** fois. Conséquence assumée : un dossier renommé à
+la main voit réapparaître un dossier au nom d'origine à côté du sien — on ne
+poursuit pas les renommages. Les fichiers déjà déposés ne bougent pas, étant
+référencés par leur propre identifiant.
+
+**Ne pas réutiliser `sanitizeFilename` pour les noms de dossiers** : sa règle
+`[^a-zA-Z0-9._-] → _` transforme « Général » en « G_n_ral ». Acceptable pour un
+chemin d'objet Supabase que personne ne regarde, pas pour une arborescence que
+l'architecte ouvre dans son propre Drive. D'où
+`server/externalStorage/folderNaming.ts`.
+
+**Le quota cesse de compter ces octets, des deux côtés à la fois** :
+`checkStorageQuota` (le plafond) et `GET /api/billing/status` (la jauge) passent
+tous deux par `tenantSupabaseStorageBytes()`. Les filtrer d'un seul côté
+donnerait un écran qui monte sans jamais bloquer. `checkQuota(…, 'documents')`
+ne bouge pas : c'est un plafond sur le NOMBRE de documents, un élément de
+l'offre, pas un coût d'hébergement.
+
+**Déconnecter et révoquer sont deux gestes distincts.** Une référence n'est
+résoluble que tant que la connexion existe ET porte de quoi s'authentifier.
+`POST /api/external-storage/:id/disable` arrête les écritures en gardant les
+identifiants ; `DELETE /api/external-storage/:id` les efface **sans supprimer
+la ligne**, et l'écran avertit alors que les fichiers déjà déposés ne seront
+plus consultables depuis ArchiOffice. La ligne n'est supprimée que par la
+cascade de `tenantPurge.ts`, à la fermeture du cabinet — qui **ne supprime
+jamais** dans le drive du cabinet : ce sont ses fichiers, sur son espace.
+
+**Nextcloud et kDrive partagent un seul adaptateur WebDAV**
+(`server/externalStorage/providers/webdav.ts`, `MKCOL`/`PROPFIND`/`PUT`/`GET`/
+`DELETE` en `fetch`, aucune dépendance npm ajoutée). Ils ne diffèrent que par
+l'URL de base saisie par le cabinet. Trois pièges traités : le chemin s'encode
+**segment par segment** (un `encodeURIComponent` global détruirait les barres
+obliques), `MKCOL` répondant 405 vaut succès (la collection existe déjà), et un
+`PUT` écrase sans prévenir — d'où la recherche d'un nom libre avant dépôt.
+`assertPublicHttpUrl()` (`server/ssrfGuard.ts`) est appliqué à
+l'enregistrement **et** à chaque appel : c'est une URL fournie par le cabinet.
+
 ### Maps
 
 - `MapLibreCadastre.tsx` — Cadastral parcels via IGN WMTS tiles
