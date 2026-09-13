@@ -1,13 +1,22 @@
 // Phase 7 extraction — moved out of server.ts's Document Routes section
 // (CRUD, versioning, statut transitions, diffusions to external contacts).
 // Distinct from documentTemplates.ts (lot 4, generated documents from a
-// template) — this is the general document repository. Same
-// uploadToStorage/deleteFromStorage/upload/sanitizeFilename dependency set
-// as meetings.ts/visas.ts/plans.ts for file attachments and versioning.
+// template) — this is the general document repository.
+//
+// Les fichiers passent par storeBusinessFile/removeBusinessFile
+// (server/externalStorage/storeBusinessFile.ts) et non plus par
+// uploadToStorage/deleteFromStorage : c'est cette couche qui décide, selon le
+// cabinet, entre Supabase Storage et l'espace de stockage qu'il a branché
+// (Google Drive, Dropbox, Nextcloud, kDrive). C'est elle aussi qui porte
+// désormais le contrôle de quota, qui était appelé ici avant même qu'on sache
+// où le fichier irait.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { isOwnStorageRef } from '../externalStorage/externalRef';
+import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
+import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -15,13 +24,23 @@ export interface RouteDeps {
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
-  checkStorageQuota: (tenantId: string, incomingBytes: number) => Promise<void>;
-  uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  storeBusinessFile: StoreBusinessFile;
+  removeBusinessFile: RemoveBusinessFile;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole }: RouteDeps) {
+  // Le numéro et le nom de l'affaire nomment son dossier sur l'espace du
+  // cabinet (« 26014 - Villa Martin »). Lecture sautée pour un document sans
+  // affaire, et sans incidence quand le cabinet n'a branché aucun espace :
+  // storeBusinessFile ignore alors le chemin logique.
+  async function loadFolderProject(projectId: string | null, tenantId: string) {
+    if (!projectId) return null;
+    const { data } = await supabaseAdmin.from('projects')
+      .select('project_code, name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
+    return (data as any) || null;
+  }
+
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -40,7 +59,6 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       await checkQuota(tenantId, 'documents');
-      await checkStorageQuota(tenantId, file.size);
       const { project_id, name, category, phase, description } = req.body;
       // Derived from the authenticated caller, never trusted from the request
       // body — the client used to be able to submit any uploaded_by value and
@@ -57,12 +75,18 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const phaseVal = phase || null;
       const id = crypto.randomUUID();
       const phaseSegment = phaseVal ? `${phaseVal}/` : '';
-      const storagePath = `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`;
-      const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
+      const stored = await storeBusinessFile({
+        tenantId,
+        bucket: 'documents',
+        folderPath: buildDocumentFolderPath(await loadFolderProject(projectIdVal, tenantId), phaseVal),
+        fileName: file.originalname,
+        supabasePath: `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`,
+      }, file.buffer, file.mimetype);
+      const file_url = stored.fileUrl;
       const uploaded_at = new Date().toISOString();
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
-      await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, uploaded_by, uploaded_at, description, size_bytes: file.size });
+      await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, size_bytes: stored.sizeBytes });
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
@@ -82,11 +106,14 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       await supabaseAdmin.from('document_versions').delete().eq('document_id', id).eq('tenant_id', tenantId);
       const { error } = await supabaseAdmin.from('documents').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
-      // Delete storage files (best-effort, don't fail if storage cleanup fails)
+      // Delete storage files (best-effort, don't fail if storage cleanup fails).
+      // isOwnStorageRef reconnaît les deux formes de référence : un document
+      // déposé sur l'espace du cabinet doit y être supprimé aussi, sans quoi il
+      // y resterait orphelin, sans plus rien pour le désigner.
       if (versions?.length) {
         for (const v of versions) {
-          if (v.file_url?.includes('/object/public/documents/')) {
-            deleteFromStorage('documents', v.file_url).catch(() => {});
+          if (isOwnStorageRef(v.file_url, 'documents')) {
+            removeBusinessFile(tenantId, 'documents', v.file_url).catch(() => {});
           }
         }
       }
@@ -108,7 +135,6 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const file = req.file;
       const phaseVal = phase || null;
       if (file) {
-        await checkStorageQuota(tenantId, file.size);
         // Derived from the authenticated caller, not the request body — see the
         // same fix on POST /api/documents above.
         const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
@@ -119,10 +145,19 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const existingPhase = phaseVal || (doc as any)?.phase || null;
         const projectId = (doc as any)?.project_id || 'general';
         const phaseSegment = existingPhase ? `${existingPhase}/` : '';
-        const storagePath = `${tenantId}/${projectId}/${phaseSegment}${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`;
-        const file_url = await uploadToStorage('documents', storagePath, file.buffer, file.mimetype);
+        // Une nouvelle version rejoint le dossier de sa phase, à côté des
+        // précédentes — le « v2- » du chemin Supabase n'a pas d'équivalent ici :
+        // les fournisseurs versionnent eux-mêmes un fichier de même nom.
+        const stored = await storeBusinessFile({
+          tenantId,
+          bucket: 'documents',
+          folderPath: buildDocumentFolderPath(await loadFolderProject((doc as any)?.project_id || null, tenantId), existingPhase),
+          fileName: file.originalname,
+          supabasePath: `${tenantId}/${projectId}/${phaseSegment}${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`,
+        }, file.buffer, file.mimetype);
+        const file_url = stored.fileUrl;
         const uploaded_at = new Date().toISOString();
-        const updateFields: any = { name, category, description, version: newVersion, file_url, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
+        const updateFields: any = { name, category, description, version: newVersion, file_url, storage_backend: stored.storageBackend, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
         if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
         if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
@@ -130,7 +165,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
         if (error) throw error;
-        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, uploaded_by, uploaded_at, description, size_bytes: file.size });
+        await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: newVersion, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, size_bytes: stored.sizeBytes });
       } else {
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;

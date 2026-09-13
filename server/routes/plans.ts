@@ -1,19 +1,26 @@
-// Phase 7 extraction — moved out of server.ts's Plans section. Same
-// uploadToStorage/deleteFromStorage/upload/sanitizeFilename dependency set
-// as meetings.ts/visas.ts for the plan file attachment.
+// Phase 7 extraction — moved out of server.ts's Plans section.
+//
+// Le fichier passe par storeBusinessFile/removeBusinessFile
+// (server/externalStorage/storeBusinessFile.ts), qui décide selon le cabinet
+// entre Supabase Storage et l'espace qu'il a branché. Les plans sont, avec les
+// documents, le poste de stockage qui pèse réellement — d'où leur présence dans
+// le périmètre.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { isOwnStorageRef } from '../externalStorage/externalRef';
+import { buildPlanFolderPath } from '../externalStorage/businessFolderPath';
+import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
-  uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
-  deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+  storeBusinessFile: StoreBusinessFile;
+  removeBusinessFile: RemoveBusinessFile;
 }
 
-export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage }: RouteDeps) {
+export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile }: RouteDeps) {
   app.get("/api/plans", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -38,11 +45,20 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
       }
       const id = bodyId || crypto.randomUUID();
       const uploaded_at = new Date().toISOString();
-      const storagePath = `${tenantId}/${project_id}/${id}/${sanitizeFilename(file.originalname)}`;
-      const file_url = await uploadToStorage('plans', storagePath, file.buffer, file.mimetype);
+      const { data: project } = project_id
+        ? await supabaseAdmin.from('projects').select('project_code, name').eq('id', project_id).eq('tenant_id', tenantId).maybeSingle()
+        : { data: null };
+      const stored = await storeBusinessFile({
+        tenantId,
+        bucket: 'plans',
+        folderPath: buildPlanFolderPath(project as any),
+        fileName: file.originalname,
+        supabasePath: `${tenantId}/${project_id}/${id}/${sanitizeFilename(file.originalname)}`,
+      }, file.buffer, file.mimetype);
+      const file_url = stored.fileUrl;
       const versionVal = version ? Number(version) : 1;
       const { error } = await supabaseAdmin.from('plans').insert({
-        id, tenant_id: tenantId, project_id, name, file_url, uploaded_at,
+        id, tenant_id: tenantId, project_id, name, file_url, storage_backend: stored.storageBackend, uploaded_at,
         index: index || 'A', version: versionVal, parent_id: parent_id || null, category: category || null
       });
       if (error) throw error;
@@ -56,8 +72,10 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, u
       const { data: plan } = await supabaseAdmin.from('plans').select('file_url').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('plans').delete().eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
-      if ((plan as any)?.file_url?.includes('/object/public/plans/')) {
-        deleteFromStorage('plans', (plan as any).file_url).catch(() => {});
+      // Reconnaît les deux formes de référence : un plan déposé sur l'espace du
+      // cabinet doit y être supprimé aussi, sans quoi il y resterait orphelin.
+      if (isOwnStorageRef((plan as any)?.file_url, 'plans')) {
+        removeBusinessFile(tenantId, 'plans', (plan as any).file_url).catch(() => {});
       }
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to delete plan" }); }

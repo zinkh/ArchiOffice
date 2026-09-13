@@ -954,3 +954,65 @@ CREATE POLICY "tenant_isolation" ON leave_balances USING (tenant_id = my_tenant_
 
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_conges_payes NUMERIC DEFAULT 25;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_rtt NUMERIC DEFAULT 0;
+
+-- ============================================================
+-- STOCKAGE EXTERNE — l'espace de stockage du cabinet
+-- (voir supabase/migrate_stockage_externe.sql)
+-- ============================================================
+-- Les documents et les plans peuvent être déposés sur le Google Drive, le
+-- Dropbox, le Nextcloud ou le kDrive du cabinet plutôt que dans Supabase
+-- Storage. Réglage du CABINET et non d'une personne : pas de user_id, et la
+-- policy ne porte que sur tenant_id.
+
+CREATE TABLE IF NOT EXISTS external_storage_connections (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  provider      TEXT NOT NULL,          -- 'google_drive' | 'dropbox' | 'webdav'
+  webdav_flavor TEXT,                   -- 'nextcloud' | 'kdrive' (affichage seulement)
+  display_name  TEXT,
+  external_account_email TEXT,
+  refresh_token TEXT, access_token TEXT, expires_at TIMESTAMPTZ, scopes TEXT,
+  drive_id      TEXT,
+  base_url      TEXT, username TEXT, password_encrypted TEXT,
+  root_folder_path        TEXT NOT NULL DEFAULT 'ArchiOffice',
+  root_folder_external_id TEXT,
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  status        TEXT NOT NULL DEFAULT 'ok',   -- 'ok' | 'needs_reauth' | 'error'
+  last_error    TEXT, last_error_at TIMESTAMPTZ, last_used_at TIMESTAMPTZ,
+  created_by    UUID,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+-- Un seul espace actif par cabinet, sans supprimer les connexions passées :
+-- les références déjà écrites citent leur connexion par identifiant.
+CREATE UNIQUE INDEX IF NOT EXISTS external_storage_connections_one_active_per_tenant_idx
+  ON external_storage_connections(tenant_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_external_storage_connections_tenant
+  ON external_storage_connections(tenant_id);
+
+CREATE TABLE IF NOT EXISTS external_storage_folders (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  connection_id UUID REFERENCES external_storage_connections(id) ON DELETE CASCADE NOT NULL,
+  folder_key    TEXT NOT NULL,
+  external_id   TEXT NOT NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  last_verified_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS external_storage_folders_connection_key_idx
+  ON external_storage_folders(connection_id, folder_key);
+CREATE INDEX IF NOT EXISTS idx_external_storage_folders_tenant
+  ON external_storage_folders(tenant_id);
+
+ALTER TABLE external_storage_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE external_storage_folders     ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON external_storage_connections USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON external_storage_folders     USING (tenant_id = my_tenant_id());
+
+-- Colonne DÉRIVÉE de file_url, jamais la source de vérité de la résolution :
+-- elle n'existe que pour les filtres SQL du quota (server.ts) et de la jauge
+-- d'abonnement (server/routes/billing.ts), qui ne peuvent pas analyser une URI.
+ALTER TABLE documents         ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+ALTER TABLE plans             ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+CREATE INDEX IF NOT EXISTS idx_document_versions_tenant_backend
+  ON document_versions(tenant_id, storage_backend);

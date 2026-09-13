@@ -81,6 +81,8 @@ import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
+import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
+import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
@@ -604,8 +606,7 @@ export async function createApp() {
       throw err;
     }
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
-    const { data } = await supabaseAdmin.from('document_versions').select('size_bytes').eq('tenant_id', tenantId);
-    const usedBytes = (data || []).reduce((sum: number, r: any) => sum + (r.size_bytes || 0), 0);
+    const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
       const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
@@ -665,6 +666,15 @@ export async function createApp() {
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
+  // Les documents, plans et visas d'un cabinet qui a branché son propre espace
+  // (Google Drive, Dropbox, Nextcloud, kDrive) n'y vont plus. Cette couche est
+  // la seule à le savoir : les dix autres modules de routes continuent d'appeler
+  // uploadToStorage/deleteFromStorage directement, sans rien changer. Voir
+  // server/externalStorage/storeBusinessFile.ts.
+  const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
+    supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
 
   // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
@@ -687,6 +697,12 @@ export async function createApp() {
     // inside the handler, not via our session auth. Was missing here, so
     // the auth middleware 401'd it before that check ever ran.
     "/api/ragic/webhook",
+    // Sert un fichier hébergé sur l'espace de stockage du cabinet. Atteinte
+    // par window.open() ou par le `src` d'une balise <img>, donc sans en-tête
+    // Authorization possible — exactement comme une URL signée Supabase. C'est
+    // le jeton signé du chemin qui authentifie, vérifié dans le handler
+    // (server/externalStorage/externalTicket.ts).
+    "/api/storage/external",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
@@ -910,15 +926,15 @@ export async function createApp() {
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
