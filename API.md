@@ -49,9 +49,10 @@ Omit the header and the server serves the user's **default** tenant (`profiles.t
   | 409 | Conflict — duplicate slug, no tenant attached, etc. |
   | 500 | Unhandled server error (message usually includes the underlying cause) |
   | 503 | A required integration isn't configured (e.g. `GEMINI_API_KEY` unset) |
-- **No pagination.** List endpoints return the full tenant-scoped table. Large tenants will get large responses — don't assume `limit`/`offset`/cursor query parameters exist.
+- **Almost no pagination.** List endpoints return the full tenant-scoped table, so large tenants get large responses. The two exceptions are `GET /api/projects` and `GET /api/invoices`, which accept optional `limit` + `cursor` and then answer `{ data, nextCursor }` instead of a bare array; pass neither and they behave exactly as before. Don't assume any other list endpoint takes them.
 - **No API versioning**, except the self-contained `/api/maf/v1/*` namespace.
-- **File uploads** use `multipart/form-data` with a `file` field (50 MB limit), handled by `multer` in memory and pushed to Supabase Storage. Used by the visas, plans, documents, proposal import, meeting photos, profile CV/avatar, and chat-attachment endpoints.
+- **File uploads** use `multipart/form-data` with a `file` field (50 MB limit), handled by `multer` in memory. Used by the visas, plans, documents, proposal import, meeting photos, profile CV/avatar, and chat-attachment endpoints. Most land in Supabase Storage; documents, document versions, visa attachments and plans instead go to the tenant's **own** storage space when it has connected one (see *Storage* below).
+- **A stored file reference is not a fetchable URL.** Whatever `file_url` / `document_url` / `attachment_url` a response returns is an opaque reference the server resolves — a private Supabase object, or an object on the tenant's own Drive. Exchange it for a link with `GET /api/storage/signed-url?url=<reference>`; never fetch it directly.
 
 ## Endpoint catalog
 
@@ -121,6 +122,20 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 ### Documents & plans
 - `GET/POST/PUT/DELETE /api/documents(/:id)` (file upload), `GET /api/documents/:id/versions`, `PATCH /api/documents/:id/statut`, `GET/POST /api/documents/:id/diffusions`, `PATCH /api/documents/:id/diffusions/:diffId/acknowledge`.
 - `GET/POST/DELETE /api/plans(/:id)` (file upload).
+
+### Storage
+- `GET /api/storage/signed-url?url=<reference>` — turns a stored file reference into a link valid for one hour. For a Supabase object it returns a signed Storage URL; for a file on the tenant's own space it returns an `/api/storage/external/<ticket>` URL on this same origin. Checks the caller's tenant owns the object (the `<tenantId>/` path prefix, or ownership of the storage connection) and answers `403` otherwise.
+- `GET /api/storage/external/:ticket` — serves a file held on the tenant's own space. **No bearer token**: the signed ticket in the path authenticates, exactly as a Supabase signed URL does, because this URL is opened by `window.open()` or set as an `<img src>`. Honours `Range` and replays `206`. Redirects (`302`) to a short-lived provider link where the provider offers one (Dropbox), streams otherwise.
+- `GET /api/external-storage/status` — the connected space, if any: provider, account, root folder, health. Never returns a token or password. Readable by any tenant member.
+- `POST /api/external-storage/webdav` `{ flavor: 'nextcloud'|'kdrive', baseUrl, username, password, rootFolderPath }` — connects a WebDAV space. The connection is **probed before being saved**, so a bad configuration fails here (`400`) rather than at the first upload. The URL is checked against the SSRF guard (`403` for a private/internal address).
+- `GET /api/external-storage/:provider/auth` — `google_drive` or `dropbox`. Returns `{ url }` for the consent screen; the client navigates there itself, since a bare navigation to this route would carry no JWT. `503` if the instance has no credentials for that provider.
+- `GET /api/external-storage/callback` — the provider's redirect back. No auth (the tenant comes from a one-time state nonce).
+- `GET /api/external-storage/callback-url?provider=` — the redirect URI to declare in the provider's console.
+- `POST /api/external-storage/test` — re-probes the active connection.
+- `POST /api/external-storage/:id/disable` — stops new writes; files already deposited stay readable.
+- `DELETE /api/external-storage/:id` — **revokes the stored credentials**, keeping the row. Files already deposited stop being readable from ArchiOffice (they remain in the tenant's own space). Not the same thing as `disable`.
+
+Writes on `/api/external-storage/*` require a tenant admin.
 
 ### Contacts
 - `GET/POST/PUT/DELETE /api/contacts(/:id)`.

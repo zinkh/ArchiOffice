@@ -12,6 +12,7 @@
 - **Contacts & team** — a lightweight CRM for clients and contractors, plus team/role management per cabinet.
 - **Maps & urban planning data** — cadastral parcel maps, PLU zoning lookups, heritage monument and geological risk data via French government APIs (IGN, APICARTO, Géorisques).
 - **Document generation & export** — PDF export throughout, plus Word (.docx) export for meeting minutes. (Word/Excel export from the Specifications page is a known gap — see [ROADMAP.md](ROADMAP.md#document-export).)
+- **Your own file storage (optional)** — connect the cabinet's Google Drive, Dropbox, Nextcloud or kDrive, and new documents and plans are written there instead, one folder per affaire and one sub-folder per mission phase.
 - **Offline-first desktop option** — an Electron build with local storage and cloud sync for working without a constant connection.
 
 Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](ROADMAP.md). Building an integration or calling the API directly? See [API.md](API.md).
@@ -143,7 +144,16 @@ Everything above is reachable from four sidebar groups: **Gestion** (Dashboard, 
 
 ### 4. Connect integrations (optional)
 
-**Paramètres → Intégrations** (`/settings`) lists third-party connectors. Some are fully wired up today (Zoho Invoice, Zoho Books, Odoo, Ragic, Super PDP, Chorus Pro, MAF declaration); others are shown as **"coming soon"** placeholders in the UI with no backend yet (Stripe, QuickBooks, Google Drive, Dropbox, Salesforce, Slack, Microsoft Teams) — see [ROADMAP.md](ROADMAP.md) for current status before relying on one of those.
+**Paramètres → Intégrations** (`/settings`) lists third-party connectors. Some are fully wired up today (Zoho Invoice, Zoho Books, Odoo, Ragic, Super PDP, Chorus Pro, MAF declaration, and the four storage connectors below); others are shown as **"coming soon"** placeholders in the UI with no backend yet (Stripe, QuickBooks, Salesforce, Slack, Microsoft Teams) — see [ROADMAP.md](ROADMAP.md) for current status before relying on one of those.
+
+**Store your files on your own space (optional).** A cabinet can connect its
+**Google Drive**, **Dropbox**, **Nextcloud** or **kDrive**, and ArchiOffice then
+writes its new documents and plans there — one folder per affaire, one
+sub-folder per mission phase — instead of on the platform's storage. Files
+uploaded before the connection stay where they are and keep opening normally;
+nothing is migrated behind your back. Nextcloud and kDrive need nothing but an
+app password. Google Drive and Dropbox need OAuth credentials on the instance
+(see `.env.example`).
 
 ## Docker
 
