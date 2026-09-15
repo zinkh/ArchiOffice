@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
+import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -1033,6 +1034,12 @@ export async function createApp() {
   // Voir packages/archioffice-agents/src/server/mcp/*.ts. Fournisseur OAuth
   // (pas consommateur comme Gmail/Calendar/Zoho) + endpoint StreamableHTTP,
   // un sous-ensemble volontairement restreint des outils d'agent.
+  // Postés ici plutôt que dans mcp/*.ts (qui n'importe rien depuis server/,
+  // voir plus haut) : l'ordre d'enregistrement Express suffit à les appliquer
+  // aux routes que registerMcpOAuthRoutes/registerMcpEndpoint définissent
+  // juste après, quel que soit le module qui porte le handler final.
+  app.use('/oauth/mcp', mcpOAuthLimiter);
+  app.use('/mcp', mcpToolLimiter);
   const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
   registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
   registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
