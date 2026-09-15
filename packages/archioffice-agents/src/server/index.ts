@@ -5,3 +5,6 @@ export { parseArtifactFromText, generateArtifact } from './artifacts.js';
 export { startAgentScheduler, runDueSchedules, runSchedule, computeNextRun, backfillNextRuns } from './scheduler.js';
 export { registerAgentScheduleRoutes } from './scheduleRoutes.js';
 export { setExternalFileReader, type ExternalFileReader } from './externalFiles.js';
+export { registerMcpOAuthRoutes } from './mcp/oauthRoutes.js';
+export { registerMcpEndpoint } from './mcp/httpServer.js';
+export { resolveAccessToken as resolveMcpAccessToken } from './mcp/store.js';

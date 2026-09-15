@@ -58,6 +58,7 @@ const CloudImportProgress = lazy(() => import('./pages/CloudImportProgress'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const McpAuthorize = lazy(() => import('./pages/McpAuthorize'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const AgencySetup = lazy(() => import('./pages/AgencySetup'));
 import { TenantSwitcher } from './components/TenantSwitcher';
@@ -850,6 +851,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/mcp/authorize" element={<McpAuthorize />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/:userId" element={<Profile />} />
               <Route path="/messages" element={<Messages />} />
