@@ -1040,6 +1040,17 @@ export async function createApp() {
   // juste après, quel que soit le module qui porte le handler final.
   app.use('/oauth/mcp', mcpOAuthLimiter);
   app.use('/mcp', mcpToolLimiter);
+  if (!process.env.APP_URL) {
+    // Contrairement aux autres usages d'APP_URL (liens dans un email, callback
+    // OAuth qu'on redéclenche soi-même), celui-ci est publié tel quel dans le
+    // document de découverte OAuth que Gemini lit — une valeur de repli
+    // inatteignable (127.0.0.1) casse la connexion sans qu'aucune requête ne
+    // remonte d'erreur explicite côté ArchiOffice : Gemini échoue en silence
+    // à joindre son propre `issuer`. Vaut la peine d'un avertissement au
+    // démarrage plutôt que de laisser deviner pourquoi la liaison ne marche
+    // jamais sur une instance où la variable a été oubliée.
+    console.warn('[mcp] APP_URL non défini — le lien Gemini/MCP ne fonctionnera pas tant que cette variable ne pointe pas sur le domaine public HTTPS de cette instance.');
+  }
   const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
   registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
   registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
