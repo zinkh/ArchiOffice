@@ -21,6 +21,7 @@ import { changeLanguageLazy } from '../i18n';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
+import { McpConnectionsCard } from '../components/McpConnectionsCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -3138,6 +3139,10 @@ export default function Settings() {
           pas par saveSection/renderSaveButton : connecter/déconnecter/définir
           par défaut sont des actions immédiates, pas un formulaire à valider. */}
       <MailAccountsCard />
+
+      {/* Liaison Gemini (MCP) — même principe : action immédiate (révoquer),
+          pas de formulaire à valider via saveSection/renderSaveButton. */}
+      <McpConnectionsCard />
         </>
       )}
         </div>
