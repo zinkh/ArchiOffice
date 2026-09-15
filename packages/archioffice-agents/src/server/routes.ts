@@ -284,6 +284,7 @@ export function registerAgentRoutes(
       const { data: conv } = await supabaseAdmin.from('agent_conversations').select('id').eq('agent_id', agentId).eq('user_id', req.user.id).eq('tenant_id', tenantId).single();
       if (conv) {
         await supabaseAdmin.from('agent_messages').delete().eq('conversation_id', (conv as any).id);
+        await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: [] }).eq('id', (conv as any).id);
       }
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -471,7 +472,7 @@ export function registerAgentRoutes(
       const { id: agentId } = req.params;
       const { message, document_ids } = req.body;
       if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
-      const attachedDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
+      const requestDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
 
       const { plan } = await getTenantPlan(tenantId);
       if (plan !== 'enterprise') {
@@ -501,6 +502,24 @@ export function registerAgentRoutes(
         conv = newConv;
       }
       const convId = (conv as any).id;
+
+      // Un document joint reste lisible par l'agent pour toute la suite de
+      // CETTE conversation, pas seulement le tour où il est envoyé : sans
+      // ça, buildAgentContext ci-dessous ne recevrait que `document_ids` de
+      // CE message, et l'extraction de texte/vision faite au tour précédent
+      // (coûteuse) serait relue pour rien — l'agent la perd dès le message
+      // suivant alors que le fichier est toujours affiché comme joint dans
+      // l'historique. Plafonné pour ne pas faire grossir indéfiniment le
+      // prompt d'une conversation ancienne ; au-delà, les plus anciens
+      // sortent en premier — « Nouvelle conversation » (DELETE ci-dessous)
+      // remet ce plafond à zéro plutôt que d'être la seule échappatoire.
+      const MAX_STICKY_DOCUMENTS = 8;
+      const stickyDocumentIds: string[] = Array.isArray((conv as any).attached_document_ids) ? (conv as any).attached_document_ids : [];
+      const mergedDocumentIds = [...stickyDocumentIds, ...requestDocumentIds.filter(id => !stickyDocumentIds.includes(id))];
+      const attachedDocumentIds = mergedDocumentIds.slice(-MAX_STICKY_DOCUMENTS);
+      if (attachedDocumentIds.length !== stickyDocumentIds.length || attachedDocumentIds.some((id, i) => id !== stickyDocumentIds[i])) {
+        await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: attachedDocumentIds }).eq('id', convId);
+      }
 
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
 
