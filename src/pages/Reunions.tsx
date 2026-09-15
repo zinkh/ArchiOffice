@@ -944,7 +944,7 @@ export default function Reunions() {
         loadingDetail ? (
           <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
         ) : (
-          <div className="max-w-3xl mx-auto p-4 sm:p-6">
+          <div className="w-full p-4 sm:p-6">
             {/* Header */}
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
@@ -1071,7 +1071,7 @@ export default function Reunions() {
                   <span className="text-xs opacity-70">Depuis l'appareil photo ou la galerie</span>
                 </button>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                   {(selectedMeeting.photos || []).map(photo => (
                     <div key={photo.id} className="group relative rounded-xl overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
                       <SignedImage
