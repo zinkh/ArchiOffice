@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
+import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -745,7 +746,24 @@ export async function createApp() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Authentification requise" });
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: "Token invalide" });
+    if (error || !user) {
+      // Pas un JWT Supabase — peut être un jeton MCP (voir
+      // packages/archioffice-agents/src/server/mcp/*.ts) : les outils MCP
+      // rappellent cette même API en boucle locale avec leur propre jeton,
+      // exactement comme les outils d'agent le font avec le JWT de
+      // l'utilisateur (internalApi.ts). Préfixe reconnaissable (mcp_at_),
+      // donc pas de lookup en base pour un JWT Supabase mal formé.
+      if (token.startsWith('mcp_at_')) {
+        const { resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
+        const resolved = await resolveMcpAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      return res.status(401).json({ error: "Token invalide" });
+    }
     req.user = user;
 
     // Cabinet actif de la requête. L'en-tête n'est jamais cru sur parole :
@@ -985,7 +1003,7 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
   // Le package agents n'importe rien depuis server/ (module propriétaire
   // autonome) et ne peut donc pas construire lui-même un adaptateur de
   // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
@@ -1011,6 +1029,31 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
+
+  // ── Serveur MCP (Gemini Spark, "Connected Apps → Custom apps for Spark") ──
+  // Voir packages/archioffice-agents/src/server/mcp/*.ts. Fournisseur OAuth
+  // (pas consommateur comme Gmail/Calendar/Zoho) + endpoint StreamableHTTP,
+  // un sous-ensemble volontairement restreint des outils d'agent.
+  // Postés ici plutôt que dans mcp/*.ts (qui n'importe rien depuis server/,
+  // voir plus haut) : l'ordre d'enregistrement Express suffit à les appliquer
+  // aux routes que registerMcpOAuthRoutes/registerMcpEndpoint définissent
+  // juste après, quel que soit le module qui porte le handler final.
+  app.use('/oauth/mcp', mcpOAuthLimiter);
+  app.use('/mcp', mcpToolLimiter);
+  if (!process.env.APP_URL) {
+    // Contrairement aux autres usages d'APP_URL (liens dans un email, callback
+    // OAuth qu'on redéclenche soi-même), celui-ci est publié tel quel dans le
+    // document de découverte OAuth que Gemini lit — une valeur de repli
+    // inatteignable (127.0.0.1) casse la connexion sans qu'aucune requête ne
+    // remonte d'erreur explicite côté ArchiOffice : Gemini échoue en silence
+    // à joindre son propre `issuer`. Vaut la peine d'un avertissement au
+    // démarrage plutôt que de laisser deviner pourquoi la liaison ne marche
+    // jamais sur une instance où la variable a été oubliée.
+    console.warn('[mcp] APP_URL non défini — le lien Gemini/MCP ne fonctionnera pas tant que cette variable ne pointe pas sur le domaine public HTTPS de cette instance.');
+  }
+  const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
+  registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
+  registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
 
   // Must be registered after all routes but before the SPA fallback below —
