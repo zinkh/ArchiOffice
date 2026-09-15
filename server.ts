@@ -6,6 +6,8 @@ import helmet from "helmet";
 import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
 import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
+import { registerTelegramRoutes } from "./server/routes/telegram";
+import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -730,6 +732,10 @@ export async function createApp() {
     // (server/oauthState.ts). Le préfixe est exact, donc
     // /api/external-storage/callback-url, lui, reste authentifié.
     "/api/external-storage/callback",
+    // Appelée par Telegram lui-même (pas de JWT possible) — authentifiée par
+    // le secret de webhook vérifié dans le handler (server/routes/telegram.ts),
+    // sur le même principe que /api/ragic/webhook ci-dessus.
+    "/api/telegram/webhook",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
@@ -756,6 +762,17 @@ export async function createApp() {
       if (token.startsWith('mcp_at_')) {
         const { resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
         const resolved = await resolveMcpAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Même principe pour le bot Telegram (server/telegramBot.ts) : le
+      // webhook rappelle /api/agents/:id/chat avec le jeton de la liaison
+      // plutôt qu'un JWT, puisque Telegram n'en fournit aucun.
+      if (token.startsWith('tg_at_')) {
+        const resolved = await resolveTelegramAccessToken(supabaseAdmin, token);
         if (resolved) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
@@ -981,6 +998,7 @@ export async function createApp() {
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
