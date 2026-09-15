@@ -214,6 +214,29 @@ describe('Meeting Attendees', () => {
     expect(fakeSupabaseAdmin.getTable('meeting_attendees').find(a => a.id === res.body.id)?.tenant_id).toBe(tenantId);
   });
 
+  it('attaches a contact created from a project meeting as a project stakeholder too', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('meetings', [{ id: 'meeting-proj', tenant_id: tenantId, project_id: 'project-1', type: 'projet', title: 'Réunion', date: '2026-01-01' }]);
+
+    const res = await request(app).post('/api/meetings/meeting-proj/attendees/new-contact').set(authHeader(token))
+      .send({ first_name: 'Yohan', last_name: 'Medina', company_name: 'XEO', role: 'BET sol' });
+    expect(res.status).toBe(201);
+
+    const stakeholder = fakeSupabaseAdmin.getTable('project_stakeholders').find(s => s.contact_id === res.body.contact_id);
+    expect(stakeholder).toBeDefined();
+    expect(stakeholder?.tenant_id).toBe(tenantId);
+    expect(stakeholder?.project_id).toBe('project-1');
+    expect(stakeholder?.name).toBe('Yohan Medina');
+    expect(stakeholder?.role).toBe('BET sol');
+
+    // Adding a second contact for the same project meeting must not duplicate the first stakeholder link
+    const dupContactAgain = await request(app).post('/api/meetings/meeting-proj/attendees/new-contact').set(authHeader(token))
+      .send({ first_name: 'Autre', last_name: 'Personne' });
+    expect(dupContactAgain.status).toBe(201);
+    expect(fakeSupabaseAdmin.getTable('project_stakeholders').filter(s => s.project_id === 'project-1').length).toBe(2);
+  });
+
   it('never removes another tenant\'s meeting attendee', async () => {
     const tenantB = makeTenant();
     fakeSupabaseAdmin.seed('meeting_attendees', [{ id: 'att-b', tenant_id: tenantB, meeting_id: 'meeting-b', contact_id: 'contact-b', role: 'MOE' }]);
