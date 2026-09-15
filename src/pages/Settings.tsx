@@ -22,6 +22,7 @@ import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
+import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -3143,6 +3144,10 @@ export default function Settings() {
       {/* Liaison Gemini (MCP) — même principe : action immédiate (révoquer),
           pas de formulaire à valider via saveSection/renderSaveButton. */}
       <McpConnectionsCard />
+
+      {/* Bot Telegram — même principe : actions immédiates (générer un code,
+          révoquer), pas de formulaire via saveSection/renderSaveButton. */}
+      <TelegramConnectionsCard />
         </>
       )}
         </div>
