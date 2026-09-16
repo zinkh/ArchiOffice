@@ -1,12 +1,27 @@
-// Outils exposés au serveur MCP (voir httpServer.ts) — volontairement un
-// sous-ensemble FIXE et restreint, distinct de action_scopes (qui, lui,
-// gouverne le chat des agents internes) : la personne qui parle ici est
-// Gemini Spark, une tâche de fond côté Google, pas l'architecte devant son
-// écran. Lecture large, écriture limitée à ce qui ne peut pas nuire si Spark
-// se trompe (créer une tâche, ajouter une remarque) — jamais de suppression,
-// de validation de facture ou d'envoi de mail depuis cette surface.
+// Outils exposés au serveur MCP (voir httpServer.ts). Deux familles :
+//
+//   - Cinq outils de lecture "riches", écrits à la main pour les cas les
+//     plus courants (le détail complet d'une affaire, une liste simple sans
+//     mot-clé) — rien d'équivalent n'existe dans buildAgentTools, qui ne sait
+//     que chercher par mot-clé ou lire un enregistrement après l'avoir trouvé.
+//   - Le jeu générique create_record / update_record / search_records —
+//     ainsi que mail/géo/CCTP-DPGF — RÉUTILISÉ tel quel depuis tools.ts, le
+//     même que le chat des agents internes. C'est ce qui permet d'ouvrir
+//     d'un coup toutes les ressources du cabinet (contacts, devis, appels
+//     d'offres, réunions, jalons, réserves, contrats MOE...) sans écrire un
+//     outil par ressource : AGENT_RESOURCES en est la seule source, une
+//     ressource qui y gagne une entrée devient disponible ici sans y toucher.
+//
+// Restriction volontaire par rapport au chat interne, quel que soit
+// AGENT_RESOURCES : jamais delete_record (aucune suppression depuis une
+// liaison externe, quel que soit le connecteur), jamais l'envoi réel de mail
+// (mailSend: false — create_draft suffit, voir mailTools.ts), jamais
+// fetch_url/consulter un collègue/publier au flux d'activité (des capacités
+// pensées pour un agent interne du cabinet, pas pour Claude/Gemini).
 import { internalHeaders, type InternalAuth } from '../internalApi.js';
 import type { FunctionDeclarationLike } from '../toolTypes.js';
+import { buildAgentTools, executeAgentAction, describeAuthorizedResources } from '../tools.js';
+import { AGENT_RESOURCES, type AgentCapabilities } from '../../types.js';
 
 async function callApi(baseUrl: string, auth: InternalAuth, method: string, path: string, body?: unknown) {
   try {
@@ -23,7 +38,7 @@ async function callApi(baseUrl: string, auth: InternalAuth, method: string, path
   }
 }
 
-export const MCP_TOOLS: FunctionDeclarationLike[] = [
+const RICH_TOOLS: FunctionDeclarationLike[] = [
   {
     name: 'list_projects',
     description: "Liste les affaires (projets) du cabinet : id, nom, code, adresse, statut. Utilise-le pour retrouver l'id d'une affaire nommée avant d'appeler get_project.",
@@ -58,10 +73,9 @@ export const MCP_TOOLS: FunctionDeclarationLike[] = [
     parametersJsonSchema: { type: 'object', properties: { project_id: { type: 'string', description: 'Optionnel — id d\'affaire pour filtrer' } } },
   },
 ];
+const RICH_TOOL_NAMES = RICH_TOOLS.map(t => t.name);
 
-export const MCP_TOOL_NAMES = MCP_TOOLS.map(t => t.name);
-
-export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
+async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
   switch (name) {
     case 'list_projects':
       return callApi(baseUrl, auth, 'GET', '/api/projects');
@@ -84,4 +98,45 @@ export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: 
     default:
       return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `Outil inconnu : ${name}` }) }], isError: true };
   }
+}
+
+// Toutes les ressources du cabinet (contacts, devis, appels d'offres,
+// réunions, jalons, réserves, contrats MOE, bibliothèque d'ouvrages...),
+// jamais la suppression, jamais l'envoi de mail réel (create_draft suffit),
+// jamais fetch_url/consulter un collègue/publier au flux d'activité.
+const MCP_CAPS: AgentCapabilities = {
+  actionScopes: AGENT_RESOURCES.map(r => r.key),
+  webFetch: false,
+  mailRead: true,
+  mailSend: false,
+  geo: true,
+  docsRead: true,
+  delegate: false,
+  notifyUsers: false,
+  webSearch: false,
+};
+
+function genericTools(): FunctionDeclarationLike[] {
+  const schema = describeAuthorizedResources(MCP_CAPS.actionScopes);
+  return buildAgentTools(MCP_CAPS)
+    .filter(t => t.name !== 'delete_record') // jamais depuis une liaison externe, quel que soit le connecteur
+    .map(t => (
+      ['create_record', 'update_record', 'search_records'].includes(t.name)
+        ? { ...t, description: `${t.description}\n\nSCHÉMA DES RESSOURCES :\n${schema}` }
+        : t
+    ));
+}
+
+export const MCP_TOOLS: FunctionDeclarationLike[] = [...RICH_TOOLS, ...genericTools()];
+export const MCP_TOOL_NAMES = MCP_TOOLS.map(t => t.name);
+
+export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
+  if (name === 'delete_record') {
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Action non autorisée depuis cette liaison.' }) }], isError: true };
+  }
+  if (RICH_TOOL_NAMES.includes(name)) return executeRichTool(baseUrl, auth, name, args);
+
+  const result = await executeAgentAction(baseUrl, auth, MCP_CAPS, { name, args });
+  const isError = typeof (result.response as any)?.error === 'string';
+  return { content: [{ type: 'text' as const, text: JSON.stringify(result.response) }], isError };
 }

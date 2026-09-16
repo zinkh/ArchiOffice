@@ -55,9 +55,10 @@ export default function McpAuthorize() {
         ) : (
           <>
             <ul className="mt-4 space-y-1 text-left text-sm text-muted-foreground">
-              <li>• {t('mcp_authorize_scope_projects')}</li>
-              <li>• {t('mcp_authorize_scope_tasks')}</li>
-              <li>• {t('mcp_authorize_scope_invoices')}</li>
+              <li>• {t('mcp_authorize_scope_read')}</li>
+              <li>• {t('mcp_authorize_scope_write')}</li>
+              <li>• {t('mcp_authorize_scope_drafts')}</li>
+              <li>• {t('mcp_authorize_scope_never')}</li>
             </ul>
             {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
             <button
