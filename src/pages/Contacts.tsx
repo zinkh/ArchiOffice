@@ -214,7 +214,7 @@ export default function Contacts() {
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!confirm('Supprimer cette catégorie ?')) return;
+    if (!confirm(t('contacts_confirm_delete_category'))) return;
     try {
       await apiFetch(`/api/contact-categories/${id}`, { method: 'DELETE' });
       fetchCategories();
@@ -232,7 +232,7 @@ export default function Contacts() {
   };
 
   const handleDeleteContact = async (id: string) => {
-    if (!confirm('Supprimer ce contact ?')) return;
+    if (!confirm(t('contacts_confirm_delete_contact'))) return;
     try {
       await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
       fetchContacts();
@@ -435,7 +435,7 @@ export default function Contacts() {
           setIsMappingModalOpen(true);
         });
       } else {
-        alert('File format not supported yet. Please use Excel or CSV.');
+        alert(t('contacts_import_format_unsupported'));
       }
     };
     reader.readAsArrayBuffer(file);

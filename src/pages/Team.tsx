@@ -54,7 +54,7 @@ export default function Team() {
       window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
       if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
     } catch (err: any) {
-      alert(err.message || 'Erreur lors du traitement de la demande.');
+      alert(err.message || t('team_join_request_process_failed'));
     } finally {
       setDecidingId(null);
     }
@@ -66,7 +66,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
     } catch (err) {
       console.error(err);
-      alert('Failed to update role.');
+      alert(t('team_update_role_failed'));
     }
   };
 
@@ -76,7 +76,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, manager_id: managerId || null } : member));
     } catch (err) {
       console.error(err);
-      alert('Failed to update manager.');
+      alert(t('team_update_manager_failed'));
     }
   };
 
@@ -90,13 +90,13 @@ export default function Team() {
       setNewUser({ name: '', email: '', system_role: 'user', role: 'Member' });
       
       if (result.emailSent) {
-        alert('User created successfully. Credentials have been sent by email.');
+        alert(t('team_user_created_email_sent'));
       } else {
-        alert(`User created successfully, but email could not be sent: ${result.emailError || 'Unknown error'}. Please provide the credentials manually.`);
+        alert(t('team_user_created_email_failed', { error: result.emailError || t('team_unknown_error') }));
       }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to create user.');
+      alert(err.message || t('team_create_user_failed'));
     } finally {
       setIsSubmitting(false);
     }

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
@@ -26,6 +27,7 @@ interface InvoiceGeneratorProps {
 }
 
 export function InvoiceGenerator({ onClose, onSave, initialData, project }: InvoiceGeneratorProps) {
+  const { t } = useTranslation();
   const isAcompte = initialData?.invoice_type === 'acompte';
   const [data, setData] = useState<Partial<Invoice>>({
     invoice_number: `${isAcompte ? 'A' : 'F'}${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
@@ -145,10 +147,10 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
         body: JSON.stringify(payload)
       });
       onSave?.(updated);
-      alert('Facture enregistrée avec succès.');
+      alert(t('invoice_generator_save_success'));
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || 'Erreur lors de l\'enregistrement.');
+      alert(err?.message || t('invoice_generator_save_failed'));
     } finally {
       setIsSaving(false);
     }
@@ -207,7 +209,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      alert('Erreur lors de la génération de la facture.');
+      alert(t('invoice_generator_pdf_generation_failed'));
     } finally {
       // Restore icons
       icons.forEach(icon => icon.style.display = '');

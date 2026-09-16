@@ -102,6 +102,9 @@ export default function Projects() {
   // sans elle le nouveau contact sortait aussitôt des listes filtrées.
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_CLIENT);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -169,7 +172,7 @@ export default function Projects() {
       setEditForm(prev => prev ? ({ ...prev, image_url: optimizedBase64 }) : null);
     } catch (err) {
       console.error('Failed to optimize image:', err);
-      alert('Failed to process image. Please try another one.');
+      alert(t('projects_image_process_failed'));
     }
   };
 
@@ -448,7 +451,7 @@ export default function Projects() {
   };
 
   const handleDeleteMilestone = async (id: string) => {
-    if (!confirm('Delete this milestone?')) return;
+    if (!confirm(t('projects_confirm_delete_milestone'))) return;
     try {
       const res = await fetch(`/api/milestones/${id}`, {
         method: 'DELETE'
@@ -498,7 +501,7 @@ export default function Projects() {
 
     // Basic validation
     if (!editForm.name.trim() || !editForm.client.trim()) {
-      alert('Project name and client are required');
+      alert(t('projects_name_client_required'));
       return;
     }
 
@@ -545,12 +548,12 @@ export default function Projects() {
         }
       } catch (err) {
         console.error('Failed to save project:', err);
-        alert('Failed to save project to server. It has been saved locally and will sync when online.');
+        alert(t('projects_save_server_failed'));
       }
     } else {
       // 3. Queue for sync
       await db.syncQueue.add({ table: 'projects', method, data: editForm });
-      alert('You are offline. Project saved locally and will sync when online.');
+      alert(t('projects_save_offline'));
       setIsEditing(false);
       if (isNew) setIsModalOpen(false);
     }
@@ -574,7 +577,7 @@ export default function Projects() {
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this category?')) return;
+    if (!confirm(t('projects_confirm_delete_category'))) return;
     try {
       await apiFetch(`/api/project_categories/${id}`, { method: 'DELETE' });
       fetchCategories();
@@ -583,27 +586,29 @@ export default function Projects() {
     }
   };
 
-  const handleDeleteProject = async (id: string) => {
-    console.log('handleDeleteProject called for id:', id);
-    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) return;
+  const deleteConfirmWord = t('projects_delete_confirm_word');
 
+  const handleDeleteProject = async (id: string) => {
+    setIsDeletingProject(true);
     try {
-      console.log('Sending DELETE request for project:', id);
       const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
 
       if (res.ok) {
-        console.log('Delete successful, updating state');
         setProjects(prev => prev.filter(p => p.id !== id));
         setIsModalOpen(false);
         setSelectedProject(null);
+        setDeleteTarget(null);
+        setDeleteConfirmInput('');
       } else {
         const errorData = await res.json();
         console.error('Delete failed:', errorData.error);
-        alert(`Failed to delete project: ${errorData.error}`);
+        window.alert(t('projects_delete_failed', { error: errorData.error || '' }));
       }
     } catch (err) {
       console.error('Failed to delete project:', err);
-      alert('Failed to delete project. Please try again.');
+      window.alert(t('projects_delete_failed_retry'));
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -1029,10 +1034,10 @@ export default function Projects() {
                   </div>
                   <div className="flex items-center gap-2">
                     {currentUser?.system_role === 'admin' && !isEditing && (
-                      <button 
-                        onClick={() => handleDeleteProject(selectedProject.id)}
+                      <button
+                        onClick={() => { setDeleteTarget(selectedProject); setDeleteConfirmInput(''); }}
                         className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        title="Delete Project"
+                        title={t('projects_delete_title')}
                       >
                         <IconTrash size={20} />
                       </button>
@@ -1730,7 +1735,55 @@ export default function Projects() {
         </div>
       )}
 
-      <ContactModal 
+      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700">
+              <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('projects_delete_confirm_title')}</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                {t('projects_delete_confirm_body', { name: deleteTarget.name })}
+              </p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
+              </p>
+              <input
+                autoFocus
+                className="mt-3 w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-zinc-900 dark:text-white"
+                value={deleteConfirmInput}
+                onChange={e => setDeleteConfirmInput(e.target.value)}
+                placeholder={deleteConfirmWord}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
+                    handleDeleteProject(deleteTarget.id);
+                  }
+                }}
+              />
+            </div>
+            <div className="p-6 pt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+              >
+                {t('btn_cancel')}
+              </button>
+              <button
+                disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
+                onClick={() => handleDeleteProject(deleteTarget.id)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      <ContactModal
         isOpen={isContactModalOpen}
         initialCategory={contactModalCategory}
         onClose={() => setIsContactModalOpen(false)}

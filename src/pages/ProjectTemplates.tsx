@@ -55,7 +55,7 @@ export default function ProjectTemplates() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this template?')) return;
+    if (!confirm(t('project_templates_confirm_delete'))) return;
     // 1. Delete locally
     await db.projectTemplates.delete(id);
     // 2. Sync to API

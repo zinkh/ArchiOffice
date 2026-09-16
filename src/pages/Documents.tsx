@@ -7,6 +7,7 @@ import {
   IconPencil,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useTranslation } from 'react-i18next';
 import { Document, DocumentPhase, DocumentDiffusion, Project } from '../types';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
@@ -61,6 +62,7 @@ const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-b
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
 export default function Documents() {
+  const { t } = useTranslation();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const { currentUser } = useUser();
@@ -191,10 +193,10 @@ export default function Documents() {
         setUploadDocType('');
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        alert(`Échec de l'upload: ${errorData.error || response.statusText}`);
+        alert(t('documents_upload_failed', { error: errorData.error || response.statusText }));
       }
     } catch (error) {
-      alert('Erreur: ' + error);
+      alert(t('documents_error', { error }));
     } finally {
       setIsUploading(false);
     }
@@ -239,10 +241,10 @@ export default function Documents() {
         setEditingDoc(null);
         setEditFile(null);
       } else {
-        alert(`Échec: ${response.statusText}`);
+        alert(t('documents_update_failed', { error: response.statusText }));
       }
     } catch (error) {
-      alert('Erreur: ' + error);
+      alert(t('documents_error', { error }));
     } finally {
       setIsUploading(false);
     }
@@ -256,7 +258,7 @@ export default function Documents() {
       refreshDocuments();
       setDocToDelete(null);
     } catch (error) {
-      alert('Erreur: ' + error);
+      alert(t('documents_error', { error }));
     }
   };
 
@@ -270,7 +272,7 @@ export default function Documents() {
       });
       refreshDocuments();
     } catch (e) {
-      alert('Erreur changement statut: ' + e);
+      alert(t('documents_status_change_error', { error: e }));
     }
   };
 
@@ -295,7 +297,7 @@ export default function Documents() {
       setNewDiffName('');
       setNewDiffEmail('');
     } catch (e) {
-      alert('Erreur diffusion: ' + e);
+      alert(t('documents_diffusion_error', { error: e }));
     } finally {
       setIsDiffSending(false);
     }
@@ -308,7 +310,7 @@ export default function Documents() {
       const data = await apiFetch<DocumentDiffusion[]>(`/api/documents/${diffusionDoc.id}/diffusions`);
       setDiffusions(data || []);
     } catch (e) {
-      alert('Erreur: ' + e);
+      alert(t('documents_error', { error: e }));
     }
   };
 
@@ -321,7 +323,7 @@ export default function Documents() {
 
   const handleDownload = (doc: Document) => {
     if (doc.doc_statut === 'perime') {
-      if (!window.confirm('⚠️ Ce document est PÉRIMÉ. Son utilisation peut entraîner des erreurs. Voulez-vous tout de même le télécharger ?')) return;
+      if (!window.confirm(t('documents_confirm_outdated_download'))) return;
     }
     openSignedUrl(doc.file_url);
   };

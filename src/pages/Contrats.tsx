@@ -1131,7 +1131,7 @@ export default function Contrats() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Supprimer ce contrat ?')) return;
+    if (!confirm(t('contrats_confirm_delete'))) return;
     await apiFetch(`/api/contrats_moe/${id}`, { method: 'DELETE' });
     load();
   };

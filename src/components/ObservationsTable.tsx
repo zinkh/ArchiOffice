@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useReactTable,
   getCoreRowModel,
@@ -55,6 +56,7 @@ const COLUMN_LABELS: Record<string, string> = {
 };
 
 export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
+  const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -132,7 +134,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   };
 
   const deleteRow = useCallback((id: string) => {
-    if (!confirm('Supprimer cette observation ?')) return;
+    if (!confirm(t('observations_table_confirm_delete'))) return;
     fetch(`/api/observations/${id}`, { method: 'DELETE' })
       .then(() => setObservations(prev => prev.filter(o => o.id !== id)))
       .catch(console.error);

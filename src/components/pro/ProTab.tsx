@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
@@ -70,6 +71,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
+  const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
 
   // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
@@ -139,17 +141,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     if (!bpu || !dpgf) return;
     const { dpgf: next, diff } = bpuToDpgf(bpu, dpgf);
     const lignes = [
-      `${diff.modifies.length} prix unitaire(s) seront modifiés dans le DPGF.`,
-      diff.nonChiffres.length ? `${diff.nonChiffres.length} article(s) du DPGF ne sont pas chiffrés au bordereau et resteront inchangés.` : '',
-      diff.absentsDuDpgf.length ? `${diff.absentsDuDpgf.length} article(s) n'existent que dans le bordereau et ne seront pas ajoutés.` : '',
+      t('pro_tab_bpu_revert_modified_count', { count: diff.modifies.length }),
+      diff.nonChiffres.length ? t('pro_tab_bpu_revert_not_priced_count', { count: diff.nonChiffres.length }) : '',
+      diff.absentsDuDpgf.length ? t('pro_tab_bpu_revert_absent_count', { count: diff.absentsDuDpgf.length }) : '',
       '',
       ...diff.modifies.slice(0, 12).map(m => `  ${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
-      diff.modifies.length > 12 ? `  … et ${diff.modifies.length - 12} autre(s).` : '',
+      diff.modifies.length > 12 ? t('pro_tab_bpu_revert_more_count', { count: diff.modifies.length - 12 }) : '',
       '',
-      'Confirmer le reversement ?',
+      t('pro_tab_bpu_revert_confirm'),
     ].filter(Boolean).join('\n');
     if (window.confirm(lignes)) setDpgf(next);
-  }, [bpu, dpgf, setDpgf]);
+  }, [bpu, dpgf, setDpgf, t]);
 
   // Les exports portent la charte du cabinet : en-tête avec logo et
   // coordonnées, pied de page adresse et SIRET, pagination « P1|2 ».
@@ -198,13 +200,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         }),
       });
       const historique = res.prixRemontes
-        ? `, ${res.prixRemontes} prix enregistré(s) dans l’historique`
+        ? t('pro_tab_library_history_suffix', { count: res.prixRemontes })
         : '';
-      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour${historique}.`);
+      window.alert(t('pro_tab_library_updated', { created: res.created, updated: res.updated, historique }));
     } catch (e: any) {
-      window.alert(`L'envoi vers la bibliothèque a échoué : ${e?.message ?? 'erreur inconnue'}`);
+      window.alert(t('pro_tab_library_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   // ── Offres reçues des entreprises ───────────────────────────────────────────
   // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
@@ -227,10 +229,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     // fait dans le dos de l'architecte et il ne pensera pas à aller le lire.
     if (saved.prixRemontes) {
       window.alert(
-        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
       );
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   /** Même chose côté DPGF, sur sa propre route et son propre état d'offres. */
   const enregistrerOffreDpgf = useCallback(async (offre: any) => {
@@ -241,10 +243,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     setDpgfOffres(prev => [...prev, saved]);
     if (saved.prixRemontes) {
       window.alert(
-        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
       );
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   /**
    * Verse un résultat de versComparatif (DPGF ou BPU) dans le comparatif
@@ -260,11 +262,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     if (lotsNonRattaches.length) {
       const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
       if (!window.confirm(
-        `Ces lots du ${docLabel} ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
+        t('pro_tab_lots_not_linked_confirm', { docLabel, liste }),
       )) return;
     }
     if (!comparatif.length) {
-      window.alert(`Aucun lot du ${docLabel} n'est rattaché à un lot du projet : rien à verser.`);
+      window.alert(t('pro_tab_no_lots_linked', { docLabel }));
       return;
     }
     try {
@@ -274,11 +276,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         method: 'PUT',
         body: JSON.stringify({ ...(act ?? {}), consultation }),
       });
-      window.alert(`Comparatif mis à jour : ${comparatif.length} lot(s) versé(s). Onglet ACT du projet.`);
+      window.alert(t('pro_tab_comparatif_updated', { count: comparatif.length }));
     } catch (e: any) {
-      window.alert(`Le versement a échoué : ${e?.message ?? 'erreur inconnue'}`);
+      window.alert(t('pro_tab_comparatif_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   const verserAuComparatifAct = useCallback(async () => {
     if (!bpu) return;

@@ -284,7 +284,7 @@ export default function Proposals() {
         const updated = await res.json();
         setProposals(proposals.map(p => p.id === updated.id ? updated : p));
         if (newStatus === 'Accepted') {
-          alert('Proposal accepted! A new project has been created.');
+          alert(t('proposals_accepted_project_created'));
         }
       }
     } catch (err) {
@@ -300,18 +300,18 @@ export default function Proposals() {
     if (proposal.status !== 'Draft') {
       return handleUpdateStatus(proposal, 'Rejected');
     }
-    if (!confirm(`Supprimer définitivement le brouillon "${proposal.title}" ?`)) return;
+    if (!confirm(t('proposals_confirm_delete_draft', { title: proposal.title }))) return;
     try {
       const res = await fetch(`/api/proposals/${proposal.id}`, { method: 'DELETE' });
       if (res.ok) {
         setProposals(proposals.filter(p => p.id !== proposal.id));
       } else {
         const errorData = await res.json().catch(() => ({}));
-        alert(`Échec de la suppression : ${errorData.error || 'Erreur inconnue'}`);
+        alert(t('proposals_delete_failed', { error: errorData.error || t('proposals_unknown_error') }));
       }
     } catch (err) {
       console.error(err);
-      alert('Échec de la suppression du devis.');
+      alert(t('proposals_delete_failed_generic'));
     }
   };
 
@@ -345,13 +345,13 @@ export default function Proposals() {
       });
       if (res.ok) {
         fetchProposals();
-        alert('Proposal imported successfully');
+        alert(t('proposals_import_success'));
       } else {
-        alert('Failed to import proposal');
+        alert(t('proposals_import_failed'));
       }
     } catch (err) {
       console.error(err);
-      alert('Error importing proposal');
+      alert(t('proposals_import_error'));
     }
   };
 

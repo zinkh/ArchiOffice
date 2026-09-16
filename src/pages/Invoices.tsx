@@ -510,13 +510,13 @@ export default function Invoices() {
   // envoyée porte un numéro légal qui doit rester dans la séquence, elle ne
   // se supprime pas — elle s'annule par un avoir.
   const handleDeleteInvoice = async (invoice: Invoice) => {
-    if (!window.confirm(`Supprimer définitivement la facture ${invoice.invoice_number || ''} ? Cette action est irréversible.`)) return;
+    if (!window.confirm(t('invoices_confirm_delete', { number: invoice.invoice_number || '' }))) return;
     try {
       await fetchJson(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
       setInvoices(invoices.filter(i => i.id !== invoice.id));
     } catch (err: any) {
       console.error('Delete invoice failed:', err);
-      alert(err.message || "La suppression de la facture a échoué.");
+      alert(err.message || t('invoices_delete_failed'));
     }
   };
 

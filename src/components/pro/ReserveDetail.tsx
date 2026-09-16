@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Select from 'react-select';
 import {
   IconX, IconCamera, IconPhotoPlus, IconTrash, IconDeviceFloppy, IconMapPin, IconLoader2,
@@ -73,6 +74,7 @@ const labelClass = 'text-[10px] font-bold text-[var(--tblr-muted)] uppercase tra
  * rattacher) ; en modification, chaque photo part immédiatement.
  */
 export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, onClose, onSaved, onDeleted }: ReserveDetailProps) {
+  const { t } = useTranslation();
   const isNew = !reserve;
   const [form, setForm] = useState<FormState>(() => formFromReserve(reserve));
   const [photos, setPhotos] = useState<ReservePhoto[]>(reserve?.photos || []);
@@ -139,7 +141,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
 
   const removePhoto = async (photo: ReservePhoto) => {
     if (!reserve) return;
-    if (!confirm('Supprimer cette photo ?')) return;
+    if (!confirm(t('reserve_detail_confirm_delete_photo'))) return;
     const res = await fetch(`${apiBase}/${reserve.id}/photos/${photo.id}`, { method: 'DELETE' });
     if (res.ok) setPhotos(prev => prev.filter(p => p.id !== photo.id));
   };
@@ -208,7 +210,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
 
   const handleDelete = async () => {
     if (!reserve) return;
-    if (!confirm(`Supprimer la réserve N° ${reserve.number ?? ''} ?`)) return;
+    if (!confirm(t('reserve_detail_confirm_delete_reserve', { number: reserve.number ?? '' }))) return;
     const res = await fetch(`${apiBase}/${reserve.id}`, { method: 'DELETE' });
     if (res.ok) { onDeleted(reserve.id); onClose(); }
   };

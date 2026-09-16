@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
@@ -137,6 +138,7 @@ function SendEmailDialog({ tenantId, target, onClose, onSent }: {
 }
 
 export default function AdminTenantDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [tenant, setTenant] = useState<TenantDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -170,7 +172,7 @@ export default function AdminTenantDetail() {
 
   async function handleImpersonate(memberId: string, memberEmail: string) {
     if (!id) return;
-    if (!window.confirm(`Vous connecter en tant que ${memberEmail} ?\n\nCette action est enregistrée dans le journal d'audit.`)) return;
+    if (!window.confirm(t('admin_tenant_detail_confirm_impersonate', { email: memberEmail }))) return;
     setImpersonating(memberId);
     try {
       const res = await apiFetch<{ action_link: string }>(`/api/admin/tenants/${id}/impersonate`, {
@@ -179,7 +181,7 @@ export default function AdminTenantDetail() {
       window.open(res.action_link, '_blank');
       await load();
     } catch (e: any) {
-      alert(e.message ?? 'Erreur lors de la connexion');
+      alert(e.message ?? t('admin_tenant_detail_impersonate_failed'));
     } finally {
       setImpersonating(null);
     }
@@ -191,7 +193,7 @@ export default function AdminTenantDetail() {
     try {
       await apiFetch(`/api/admin/tenants/${id}/notes`, { method: 'PATCH', body: JSON.stringify({ notes }) });
     } catch (e: any) {
-      alert(e.message ?? "Erreur lors de l'enregistrement des notes");
+      alert(e.message ?? t('admin_tenant_detail_notes_save_failed'));
     } finally {
       setSavingNotes(false);
     }

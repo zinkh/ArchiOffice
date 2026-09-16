@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import i18n from '../i18n';
 
 export interface TeamMemberLite {
   id: string;
@@ -200,7 +201,7 @@ function insertAtCursor(composer: InsertableComposer, buildInsertion: (before: s
 // "Insérer un lien" toolbar button: prompts for a URL and inserts it at the
 // cursor — renderTextWithMentions then turns it into a clickable link.
 export function insertLinkInto(composer: InsertableComposer) {
-  const url = window.prompt('URL du lien :')?.trim();
+  const url = window.prompt(i18n.t('mentions_prompt_url'))?.trim();
   if (!url) return;
   insertAtCursor(composer, before => (before && !/[\s\n]$/.test(before) ? ' ' : '') + url + ' ');
 }

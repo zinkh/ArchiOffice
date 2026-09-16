@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconCheck, IconChevronRight, IconChevronLeft,
   IconFileText, IconBuilding, IconUsers, IconScale, IconTrophy,
@@ -382,6 +383,7 @@ interface ACTModuleProps {
 }
 
 export default function ACTModule({ projectId, projectName, lots, contacts, onLotsChange }: ACTModuleProps) {
+  const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
   const [saving, setSaving] = useState(false);
@@ -459,7 +461,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
   };
 
   const removeLot = (id: string) => {
-    if (!confirm('Supprimer ce lot ?')) return;
+    if (!confirm(t('act_module_confirm_delete_lot'))) return;
     onLotsChange(lots.filter(l => l.id !== id));
   };
 
