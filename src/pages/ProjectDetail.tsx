@@ -56,7 +56,8 @@ import { openSignedUrl } from '../lib/signedStorageUrl';
 import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
-import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import ACTModule from '../components/ACTModule';
@@ -3059,14 +3060,26 @@ export default function ProjectDetail() {
                             <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={project.address} /></InfoPanelBoundary>
                           </div>
                           <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-hidden border border-[var(--tblr-border)]">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
-                              <div className="bg-white dark:bg-zinc-900 relative">
-                                <InfoPanelBoundary label="Cadastre"><GeoportailMap address={project.address} /></InfoPanelBoundary>
-                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">Cadastre</div>
-                              </div>
-                              <div className="bg-white dark:bg-zinc-900 relative">
-                                <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={project.address} /></InfoPanelBoundary>
-                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">OpenStreetMap</div>
+                            <div className="bg-white dark:bg-zinc-900 relative h-[500px]">
+                              <InfoPanelBoundary label="Cadastre">
+                                <GeoportailMap
+                                  address={project.address}
+                                  onParcelSelect={(parcel: CadastreParcel) => {
+                                    const reference = [
+                                      parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                                      parcel.section,
+                                      parcel.numero,
+                                    ].filter(Boolean).join(' ');
+                                    setProject(prev => prev ? ({
+                                      ...prev,
+                                      ref_cadastrale: reference || prev.ref_cadastrale,
+                                      surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                                    }) : null);
+                                  }}
+                                />
+                              </InfoPanelBoundary>
+                              <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">
+                                Vue aérienne · Cadastre — cliquez une parcelle pour la renseigner
                               </div>
                             </div>
                           </div>
