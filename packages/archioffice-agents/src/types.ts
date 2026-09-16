@@ -136,7 +136,13 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     required: ['title', 'date'],
     enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
     defaults: { type: 'projet' },
-    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes" },
+    // Une « réunion de chantier » est le vocabulaire de l'utilisateur pour
+    // une réunion de type 'projet' rattachée à un project_id : c'est cette
+    // réunion-là qui apparaît dans l'onglet DET (Direction de l'Exécution
+    // des Travaux) de la fiche projet. visite_candidature/visite_proposition
+    // servent d'autres réunions (visite de site pour un appel d'offres ou
+    // une proposition), jamais celles qu'on appelle « réunion de chantier ».
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition — 'projet' avec project_id est LA réunion de chantier, celle de l'onglet DET du projet), project_id, notes" },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
