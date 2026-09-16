@@ -7,7 +7,8 @@ import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
-import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -943,14 +944,29 @@ export default function Proposals() {
 
                     <div className="space-y-4">
                       <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="Cadastre"><GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Cadastre</div>
-                        </div>
-                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">OpenStreetMap</div>
+                          <InfoPanelBoundary label="Cadastre">
+                            <GeoportailMap
+                              address={newProposal.adresse_terrain || ''}
+                              banId={newProposal.ban_id_terrain}
+                              onParcelSelect={(parcel: CadastreParcel) => {
+                                const reference = [
+                                  parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                                  parcel.section,
+                                  parcel.numero,
+                                ].filter(Boolean).join(' ');
+                                setNewProposal(prev => ({
+                                  ...prev,
+                                  ref_cadastrale: reference || prev.ref_cadastrale,
+                                  surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                                }));
+                              }}
+                            />
+                          </InfoPanelBoundary>
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">
+                            Vue aérienne · Cadastre
+                          </div>
                         </div>
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <InfoPanelBoundary label="Géorisques"><GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
