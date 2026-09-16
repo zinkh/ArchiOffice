@@ -192,8 +192,9 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
         client = new GoogleGenAI({ apiKey: opts.apiKey });
       }
 
+      const hasFunctionDeclarations = !!tools && tools.length > 0;
       const geminiTools: Record<string, unknown>[] = [];
-      if (tools && tools.length > 0) geminiTools.push({ functionDeclarations: tools as any });
+      if (hasFunctionDeclarations) geminiTools.push({ functionDeclarations: tools as any });
       if (webSearch) geminiTools.push({ googleSearch: {} });
 
       const response = await client.models.generateContent({
@@ -202,6 +203,13 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
         config: {
           ...(system ? { systemInstruction: system } : {}),
           ...(geminiTools.length > 0 ? { tools: geminiTools } : {}),
+          // Mélanger un tool natif (googleSearch) avec des functionDeclarations
+          // dans la même requête est refusé par l'API (400 « Please enable
+          // tool_config.include_server_side_tool_invocations... ») sans ce
+          // réglage explicite — sans lui, un agent avec à la fois la recherche
+          // web ET une ressource en écriture voyait TOUT l'échange échouer, pas
+          // seulement la recherche.
+          ...(hasFunctionDeclarations && webSearch ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
         },
       });
 
