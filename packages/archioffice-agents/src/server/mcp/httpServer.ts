@@ -17,6 +17,9 @@ import type { InternalAuth } from '../internalApi.js';
 
 export function registerMcpEndpoint(app: any, supabaseAdmin: any, baseUrl: string): void {
   app.post('/mcp', async (req: any, res: any) => {
+    // Chaque réponse dépend du jeton présenté et de l'outil appelé — jamais
+    // la même deux fois, jamais à mettre en cache par un CDN devant l'app.
+    res.set('Cache-Control', 'no-store');
     const authHeader = req.headers.authorization as string | undefined;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
     const resolved = token ? await resolveAccessToken(supabaseAdmin, token) : null;

@@ -32,6 +32,17 @@ function verifyPkce(verifier: string, challenge: string, method: string): boolea
 export function registerMcpOAuthRoutes(app: any, supabaseAdmin: any, getTenantId: (userId: string) => Promise<string>, baseUrl: string): void {
   const issuer = baseUrl.replace(/\/$/, '');
 
+  // Aucune de ces réponses n'est jamais la même deux fois pour deux
+  // utilisateurs (jetons, état, code par usage unique) : un CDN devant
+  // l'app (Cloudflare, ici) qui en mettrait une seule en cache — même par
+  // accident, avant l'existence de cette route, quand le chemin tombait sur
+  // le fallback SPA — la resservirait indéfiniment à la place du serveur, et
+  // personne côté application ne verrait jamais passer la requête suivante.
+  app.use(['/oauth/mcp', '/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource'], (_req: any, res: any, next: any) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
+
   app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
     res.json({
       issuer,
