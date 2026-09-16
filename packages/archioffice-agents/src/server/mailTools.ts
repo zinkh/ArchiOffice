@@ -150,9 +150,8 @@ export function buildMailTools(canSend: boolean): FunctionDeclarationLike[] {
     {
       name: 'create_draft',
       description:
-        "Crée un brouillon dans une messagerie Gmail ou Outlook connectée (visible dans le dossier Brouillons, PAS envoyé). " +
-        "Contrairement à send_email, aucune confirmation en deux temps n'est nécessaire : rien ne part vers l'extérieur tant qu'un humain n'a pas explicitement envoyé ce brouillon depuis sa messagerie. " +
-        "Fonctionne uniquement pour un compte Gmail/Outlook — une boîte IMAP seule n'a pas cette capacité.",
+        "Crée un brouillon dans une messagerie connectée (Gmail, Outlook ou IMAP), visible dans le dossier Brouillons, PAS envoyé. " +
+        "Contrairement à send_email, aucune confirmation en deux temps n'est nécessaire : rien ne part vers l'extérieur tant qu'un humain n'a pas explicitement envoyé ce brouillon depuis sa messagerie.",
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -341,9 +340,6 @@ export async function executeMailTool(
   }
 
   if (name === 'create_draft') {
-    if (account.provider === 'infomaniak') {
-      return { response: { error: "Ce compte (IMAP) ne permet pas de créer un brouillon — connectez une boîte Gmail ou Outlook pour cette action." } };
-    }
     const to = String(args.to || '').trim();
     const subject = String(args.subject || '').trim();
     const bodyText = String(args.body || '');
