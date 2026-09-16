@@ -238,14 +238,22 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       } = req.body;
-      if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Une mise à jour partielle (un agent qui ne touche qu'un champ, par
+      // exemple) ne doit pas être bloquée faute de renvoyer le nom et le
+      // client déjà en base : ils ne sont exigés qu'à la création. Absents du
+      // corps de la requête, on retombe sur les valeurs déjà enregistrées.
+      const { data: existingProject } = await supabaseAdmin.from('projects').select('name, client')
+        .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      const finalName = name ?? (existingProject as any)?.name;
+      const finalClient = client ?? (existingProject as any)?.client;
+      if (!finalName || !finalClient) return res.status(400).json({ error: "Name and client are required" });
       if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
       const { error: ue } = await supabaseAdmin.from('projects').update({
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        name: finalName, client: finalClient, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,

@@ -442,6 +442,37 @@ describe('préparation des écritures', () => {
     expect(prepared.normalizedValues).toEqual({});
   });
 
+  // Incident réel (16/09/2026) : un agent a deviné 'nom' puis 'title' pour le
+  // nom d'un projet (le vrai champ est 'name'), a échoué deux fois de suite,
+  // et a abandonné en s'excusant plutôt que de retenter avec le bon champ.
+  // Un synonyme plausible du "nom" de la ressource ou du "client" ne doit
+  // plus se perdre : il se redirige vers le champ réel au lieu d'être écarté.
+  it('redirige un synonyme plausible du champ identité vers le vrai champ au lieu de le perdre', () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    const prepared = prepareRecord(projects, { nom: 'Villa Martin', client: 'M. Martin' });
+    expect(prepared.data.name).toBe('Villa Martin');
+    expect(prepared.aliasedFields).toEqual({ nom: 'name' });
+    expect(prepared.ignoredFields).toEqual([]);
+    expect(prepared.missingRequired).toEqual([]);
+  });
+
+  it("redirige un synonyme du champ client, sans écraser un champ 'name' déjà correct", () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    const prepared = prepareRecord(projects, { name: 'Villa Martin', maitre_ouvrage: 'M. Martin' });
+    expect(prepared.data).toMatchObject({ name: 'Villa Martin', client: 'M. Martin' });
+    expect(prepared.aliasedFields).toEqual({ maitre_ouvrage: 'client' });
+  });
+
+  it("ne redirige jamais vers un champ déjà fourni sous son vrai nom", () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    // 'name' est déjà donné correctement : un 'titre' redondant ne doit pas
+    // l'écraser, il est simplement écarté comme un champ inconnu ordinaire.
+    const prepared = prepareRecord(projects, { name: 'Villa Martin', titre: 'Autre intitulé', client: 'M. Martin' });
+    expect(prepared.data.name).toBe('Villa Martin');
+    expect(prepared.ignoredFields).toEqual(['titre']);
+    expect(prepared.aliasedFields).toEqual({});
+  });
+
   it('déclare un vocabulaire cohérent avec les champs connus de chaque ressource', () => {
     for (const resource of AGENT_RESOURCES) {
       expect(resource.knownFields.length).toBeGreaterThan(0);

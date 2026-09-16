@@ -1096,6 +1096,7 @@ export default {
       "agent_chat_new": "Nouvelle conversation",
       "agent_chat_expand": "Agrandir la conversation",
       "agent_chat_collapse": "Réduire la conversation",
+      "agent_chat_open_page": "Ouvrir dans une page dédiée",
       "agent_chat_empty": "Pas encore de messages. Dites bonjour !",
       "agent_chat_ai_disclaimer": "Réponses et actions générées par IA — à vérifier avant tout usage contractuel.",
       "agent_chat_error": "Une erreur s'est produite. Veuillez réessayer.",

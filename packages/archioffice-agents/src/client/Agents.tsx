@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { IconRobot, IconMessageCircle, IconPencil, IconPlus, IconCheck, IconBell } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
 import { useUser } from '@/src/UserContext';
-import { useAgentChat } from './AgentChat.js';
 import type { Agent } from '../types.js';
 
 function AgentAvatar({ agent, size = 44 }: { agent: Agent; size?: number }) {
@@ -20,7 +19,6 @@ function AgentAvatar({ agent, size = 44 }: { agent: Agent; size?: number }) {
 
 function AgentCard({ agent, isAdmin, onActivate }: { agent: Agent; isAdmin: boolean; onActivate?: (id: string) => void }) {
   const { t } = useTranslation();
-  const { openChat } = useAgentChat();
   const [activating, setActivating] = useState(false);
 
   const handleActivate = async () => {
@@ -70,14 +68,14 @@ function AgentCard({ agent, isAdmin, onActivate }: { agent: Agent; isAdmin: bool
 
       <div className="flex gap-2 mt-auto">
         {agent.is_active ? (
-          <button
-            onClick={() => openChat(agent.id)}
+          <Link
+            to={`/agents/${agent.id}/chat`}
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors"
             style={{ background: 'var(--tblr-primary)', color: 'white' }}
           >
             <IconMessageCircle size={14} />
             {t('agent_start_chat')}
-          </button>
+          </Link>
         ) : (
           <button
             onClick={handleActivate}

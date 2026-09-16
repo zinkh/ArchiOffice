@@ -1082,6 +1082,7 @@ export default {
       // AI agent chat — loading feedback
       "agent_chat_expand": "Expand conversation",
       "agent_chat_collapse": "Collapse conversation",
+      "agent_chat_open_page": "Open in a dedicated page",
       "agent_chat_ai_disclaimer": "Replies and actions are AI-generated — review before any contractual use.",
       "agent_chat_thinking_slow": "Still working on it…",
       "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",

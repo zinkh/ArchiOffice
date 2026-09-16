@@ -83,7 +83,7 @@ const DocumentTemplates = lazy(() => import('./pages/DocumentTemplates'));
 const TimeTracking = lazy(() => import('./pages/TimeTracking'));
 const Leave = lazy(() => import('./pages/Leave'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
-import { AgentChatProvider, Agents, AgentConfig, AgentAlerts } from '@zinkh/archioffice-agents/client';
+import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentChatPage } from '@zinkh/archioffice-agents/client';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -761,7 +761,7 @@ function ProtectedLayout() {
   // per-column-scroll treatment only makes sense once there's room for the
   // columns to sit side by side (lg+); below that the page falls back to
   // normal, page-level scrolling like every other route.
-  const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname);
+  const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname) || /^\/agents\/[^/]+\/chat$/.test(location.pathname);
 
   return (
     <AgentChatProvider>
@@ -862,6 +862,7 @@ export default function App() {
               <Route path="/temps" element={<TimeTracking />} />
               <Route path="/conges" element={<Leave />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/agents/:id/chat" element={<AgentChatPage />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
               <Route path="/agents/alertes" element={<AgentAlerts />} />
               <Route path="/admin" element={<RequireSuperAdmin><AdminDashboard /></RequireSuperAdmin>} />
