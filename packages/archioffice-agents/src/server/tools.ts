@@ -167,6 +167,7 @@ export interface PreparedRecord {
   appliedDefaults: Record<string, unknown>;
   normalizedValues: Record<string, string>;
   missingRequired: string[];
+  aliasedFields: Record<string, string>;
 }
 
 function resolveDefault(value: string | number, now = new Date()): string | number {
@@ -176,6 +177,22 @@ function resolveDefault(value: string | number, now = new Date()): string | numb
   return date.toISOString().slice(0, 10);
 }
 
+// Un modèle qui connaît la ressource mais pas son schéma exact devine
+// souvent un nom de champ plausible pour « le nom de la chose » ou
+// « le client » (nom, titre, intitulé... au lieu de name/title/designation
+// selon la ressource) — vu en usage réel : un projet resoumis deux fois de
+// suite avec `nom` puis `title` au lieu de `name`, abandonné faute d'avoir
+// trouvé le bon champ. Plutôt que d'écarter silencieusement une valeur que
+// l'utilisateur a bien fournie, un synonyme plausible est redirigé vers le
+// champ "identité" réel de la ressource (resource.identityField) ou vers
+// `client` quand la ressource en a un — jamais vers un autre champ, pour ne
+// pas deviner au hasard au-delà de ces deux cas très fréquents.
+function normalizeAliasKey(key: string): string {
+  return key.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+const NAME_LIKE_ALIASES = new Set(['nom', 'titre', 'intitule', 'designation', 'appellation', 'libelle', 'name', 'title', 'objet']);
+const CLIENT_LIKE_ALIASES = new Set(['client', 'client_nom', 'nom_client', 'maitre_ouvrage', 'moa']);
+
 export function prepareRecord(
   resource: AgentResourceDef,
   input: Record<string, unknown>,
@@ -184,9 +201,25 @@ export function prepareRecord(
   const data: Record<string, unknown> = {};
   const ignoredFields: string[] = [];
   const normalizedValues: Record<string, string> = {};
+  const aliasedFields: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(input || {})) {
-    if (!resource.knownFields.includes(key)) { ignoredFields.push(key); continue; }
+    if (!resource.knownFields.includes(key)) {
+      const normalizedKey = normalizeAliasKey(key);
+      const identityTarget = resource.identityField && resource.knownFields.includes(resource.identityField) ? resource.identityField : undefined;
+      if (identityTarget && key !== identityTarget && data[identityTarget] === undefined && NAME_LIKE_ALIASES.has(normalizedKey)) {
+        data[identityTarget] = value;
+        aliasedFields[key] = identityTarget;
+        continue;
+      }
+      if (resource.knownFields.includes('client') && key !== 'client' && data.client === undefined && CLIENT_LIKE_ALIASES.has(normalizedKey)) {
+        data.client = value;
+        aliasedFields[key] = 'client';
+        continue;
+      }
+      ignoredFields.push(key);
+      continue;
+    }
     const allowed = resource.enums?.[key];
     if (allowed && typeof value === 'string') {
       const canonical = allowed.find(v => v.toLowerCase() === value.toLowerCase().trim());
@@ -217,7 +250,7 @@ export function prepareRecord(
     ? (resource.required || []).filter(f => data[f] === undefined || data[f] === null || String(data[f]).trim() === '')
     : [];
 
-  return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired };
+  return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired, aliasedFields };
 }
 
 export interface AgentActionCall {
@@ -517,6 +550,14 @@ export async function executeAgentAction(
               champs_ignores_note:
                 `Ces champs n'existent pas sur « ${resource.label} » et n'ont pas été enregistrés. Dis-le à l'utilisateur en une phrase, ` +
                 `et propose de mettre l'information dans un champ existant (description ou notes) si elle compte.`,
+            }
+          : {}),
+        ...(prepared && Object.keys(prepared.aliasedFields).length
+          ? {
+              champs_renommes: prepared.aliasedFields,
+              champs_renommes_note:
+                `Ces champs n'existent pas tels quels mais ont été reconnus et enregistrés sous le bon nom (clé : nom envoyé, valeur : champ réel). ` +
+                `Utilise directement le champ réel la prochaine fois.`,
             }
           : {}),
         ...(prepared && Object.keys(prepared.appliedDefaults).length

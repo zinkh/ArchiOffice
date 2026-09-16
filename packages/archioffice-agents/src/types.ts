@@ -68,11 +68,12 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     defaults: { status: 'Draft', amount: 0 },
     fields: 'title*, client_id, amount, status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
-    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address'],
+    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address', 'ref_cadastrale'],
     required: ['name', 'client'],
     enums: { status: ['Planning', 'In Progress', 'Completed', 'On Hold'] },
     defaults: { status: 'Planning' },
-    fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address' },
+    fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address, ref_cadastrale (référence cadastrale du terrain). ' +
+      "Une mise à jour (update_record) ne touche que les champs fournis : pas besoin de renvoyer name/client pour ne changer qu'un seul champ." },
   { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
     knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],
     required: ['name'],
@@ -167,6 +168,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['project_id', 'contrat_id', 'numero', 'date', 'objet', 'montant_ht', 'status', 'tva_rate'],
     defaults: { status: 'Brouillon' },
     fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
+  // GET /api/permits?project_id=... est filtré par projet côté client, mais
+  // renvoie bien la liste complète du cabinet sans le paramètre (list: true) —
+  // nécessaire pour search_records et la détection de doublons.
+  { key: 'permits', label: 'Permis (PC/DP/AT)', basePath: '/api/permits', create: true, update: true, delete: true, list: true, identityField: 'reference',
+    knownFields: ['project_id', 'type', 'reference', 'submission_date', 'decision_date', 'status', 'notes'],
+    required: ['project_id', 'type'],
+    enums: { type: ['PC', 'DP', 'AT'], status: ['en_instruction', 'accorde', 'refuse', 'recours'] },
+    defaults: { status: 'en_instruction' },
+    fields: 'project_id*, type* (PC/DP/AT), reference (numéro de permis), submission_date, decision_date, status (en_instruction/accorde/refuse/recours), notes. ' +
+      "Utilise cette ressource pour le numéro, la date de dépôt/décision et le statut d'un permis — jamais la description du projet, qui n'est pas exploitable ailleurs dans l'application." },
 ];
 
 // Périmètre d'écriture par défaut d'un métier, appliqué quand un cabinet
@@ -175,8 +186,8 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // le template reste la source, cette table n'intervient que s'il arrive vide,
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
-  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves'],
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
   'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
