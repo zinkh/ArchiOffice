@@ -17,14 +17,21 @@ export interface CadastreParcel {
   contenance?: number;
 }
 
+// Vue aérienne officielle (IGN Géoplateforme, sans clé) — remplace les tuiles
+// raster OpenStreetMap, dont l'usage en production dépasse la politique des
+// serveurs bénévoles du projet (d'où le blocage visible sur le fond de carte).
 const MAP_STYLE = (lon: number, lat: number): any => ({
   version: 8,
   sources: {
-    osm: {
+    ortho: {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: [
+        'https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile' +
+          '&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM' +
+          '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+      ],
       tileSize: 256,
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '&copy; IGN-F/Géoportail',
     },
     parcelles: {
       type: 'geojson',
@@ -33,7 +40,7 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
     },
   },
   layers: [
-    { id: 'osm-layer', type: 'raster', source: 'osm' },
+    { id: 'ortho-layer', type: 'raster', source: 'ortho' },
     {
       id: 'parcelles-fill',
       type: 'fill',
