@@ -6,9 +6,12 @@ import {
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
   IconX, IconEdit, IconEye, IconSend, IconCircleCheck,
 } from '@tabler/icons-react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, fetchJson } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
+import type { Referentiels, CorpsEtat } from '../types/library';
+import { useSettings } from '../hooks/useSettings';
+import { exportEntreprisesConsulteesToExcel, exportEntreprisesConsulteesToPDF, groupByCorpsEtat } from '../lib/actExport';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +30,12 @@ interface EntrepriseConsultee {
   email?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
+  /** Code de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages). */
+  corps_etat_code?: string;
+  dce_transmis_le?: string;
+  relance_le?: string;
+  offre_recue_le?: string;
+  ne_repond_pas?: boolean;
 }
 
 interface CritereNotation {
@@ -377,6 +386,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const { settings } = useSettings();
+  const [corpsEtat, setCorpsEtat] = useState<CorpsEtat[]>([]);
+
+  useEffect(() => {
+    fetchJson<Referentiels>('/api/referentiels')
+      .then(r => setCorpsEtat(r.corpsEtat || []))
+      .catch(() => { /* le classement par corps d'état reste facultatif */ });
+  }, []);
 
   // Lot form
   const [showLotForm, setShowLotForm] = useState(false);
@@ -420,6 +437,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
   const update = (c: Consultation) => {
     setConsultation(c);
     setDirty(true);
+  };
+
+  const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
+    update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
   };
 
   // ── Lot helpers ───────────────────────────────────────────────────────────
@@ -636,99 +657,159 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
           {/* Entreprises consultées */}
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconBuilding size={15} /> Entreprises consultées
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Sélectionnez les entreprises et affectez-leur les lots</p>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Sélectionnez les entreprises, affectez-leur les lots et leur corps d'état (nomenclature FFB)</p>
               </div>
-              <button onClick={() => {
-                const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
-                update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
-              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
-                <IconPlus size={13} /> Ajouter
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportEntreprisesConsulteesToExcel(consultation.entreprises, corpsEtat, lots, projectName)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all"
+                >
+                  <IconDownload size={13} /> Excel
+                </button>
+                <button
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, corpsEtat, lots, settings, projectName)}
+                  disabled={!settings}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition-all"
+                >
+                  <IconDownload size={13} /> PDF
+                </button>
+                <button onClick={() => {
+                  const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
+                  update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
+                }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
+                  <IconPlus size={13} /> Ajouter
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
+              <table className="w-full text-sm min-w-[1000px]">
                 <thead className="bg-[var(--tblr-surface-2)]">
                   <tr>
                     <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Corps d'état</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Email</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Lots assignés</th>
+                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">DCE transmis le</th>
+                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Relance</th>
+                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Offre reçue le</th>
                     <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Envoyer DCE</th>
+                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Ne répond pas</th>
                     <th className="w-10"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--tblr-border)]">
-                  {consultation.entreprises.map((e, idx) => (
-                    <tr key={e.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
-                      <td className="px-4 py-3">
-                        <select
-                          className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                          value={e.contact_id || ''}
-                          onChange={ev => {
-                            const contact = contacts.find(c => c.id === ev.target.value);
-                            const nom = contact ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim()) : '';
-                            const email = contact?.email_work || contact?.email || '';
-                            const newE = [...consultation.entreprises];
-                            newE[idx] = { ...e, contact_id: ev.target.value, nom, email };
-                            update({ ...consultation, entreprises: newE });
-                          }}
-                        >
-                          <option value="">— Sélectionner —</option>
-                          {contacts.map(c => (
-                            <option key={c.id} value={c.id}>{c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</option>
-                          ))}
-                        </select>
-                        {!e.contact_id && (
-                          <input className="mt-1 w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                            placeholder="Ou saisir un nom" value={e.nom}
-                            onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, nom: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                          placeholder="email@entreprise.fr" value={e.email || ''}
-                          onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, email: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {lots.map(lot => (
-                            <label key={lot.id} className={cn(
-                              'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors',
-                              e.lots_ids.includes(lot.id)
-                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-zinc-200'
-                            )}>
-                              <input type="checkbox" className="hidden"
-                                checked={e.lots_ids.includes(lot.id)}
-                                onChange={ev => {
-                                  const es = [...consultation.entreprises];
-                                  const ids = ev.target.checked ? [...e.lots_ids, lot.id] : e.lots_ids.filter(i => i !== lot.id);
-                                  es[idx] = { ...e, lots_ids: ids };
-                                  update({ ...consultation, entreprises: es });
-                                }}
-                              />
-                              {e.lots_ids.includes(lot.id) && <IconCheck size={9} />}
-                              Lot {lot.lot_number}
-                            </label>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input type="checkbox" checked={!!e.envoyer_dce}
-                          onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, envoyer_dce: ev.target.checked }; update({ ...consultation, entreprises: es }); }}
-                          className="w-4 h-4 rounded accent-blue-600" />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => update({ ...consultation, entreprises: consultation.entreprises.filter(en => en.id !== e.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
-                      </td>
-                    </tr>
+                  {groupByCorpsEtat(consultation.entreprises, corpsEtat).map(groupe => (
+                    <React.Fragment key={groupe.libelle}>
+                      <tr className="bg-zinc-100 dark:bg-zinc-800">
+                        <td colSpan={10} className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                          {groupe.libelle}
+                        </td>
+                      </tr>
+                      {groupe.entreprises.map(e => (
+                        <tr key={e.id} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', e.ne_repond_pas && 'opacity-60')}>
+                          <td className="px-4 py-3">
+                            <select
+                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                              value={e.contact_id || ''}
+                              onChange={ev => {
+                                const contact = contacts.find(c => c.id === ev.target.value);
+                                const nom = contact ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim()) : '';
+                                const email = contact?.email_work || contact?.email || '';
+                                updateEntreprise(e.id, { contact_id: ev.target.value, nom, email });
+                              }}
+                            >
+                              <option value="">— Sélectionner —</option>
+                              {contacts.map(c => (
+                                <option key={c.id} value={c.id}>{c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</option>
+                              ))}
+                            </select>
+                            {!e.contact_id && (
+                              <input className="mt-1 w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                                placeholder="Ou saisir un nom" value={e.nom}
+                                onChange={ev => updateEntreprise(e.id, { nom: ev.target.value })} />
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <select
+                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                              value={e.corps_etat_code || ''}
+                              onChange={ev => updateEntreprise(e.id, { corps_etat_code: ev.target.value || undefined })}
+                            >
+                              <option value="">— Non classé —</option>
+                              {corpsEtat.map(ce => (
+                                <option key={ce.code} value={ce.code}>{ce.libelle}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                              placeholder="email@entreprise.fr" value={e.email || ''}
+                              onChange={ev => updateEntreprise(e.id, { email: ev.target.value })} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {lots.map(lot => (
+                                <label key={lot.id} className={cn(
+                                  'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors',
+                                  e.lots_ids.includes(lot.id)
+                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                    : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-zinc-200'
+                                )}>
+                                  <input type="checkbox" className="hidden"
+                                    checked={e.lots_ids.includes(lot.id)}
+                                    onChange={ev => {
+                                      const ids = ev.target.checked ? [...e.lots_ids, lot.id] : e.lots_ids.filter(i => i !== lot.id);
+                                      updateEntreprise(e.id, { lots_ids: ids });
+                                    }}
+                                  />
+                                  {e.lots_ids.includes(lot.id) && <IconCheck size={9} />}
+                                  Lot {lot.lot_number}
+                                </label>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input type="date"
+                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                              value={e.dce_transmis_le || ''}
+                              onChange={ev => updateEntreprise(e.id, { dce_transmis_le: ev.target.value || undefined })} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <input type="date"
+                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                              value={e.relance_le || ''}
+                              onChange={ev => updateEntreprise(e.id, { relance_le: ev.target.value || undefined })} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <input type="date"
+                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
+                              value={e.offre_recue_le || ''}
+                              onChange={ev => updateEntreprise(e.id, { offre_recue_le: ev.target.value || undefined })} />
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input type="checkbox" checked={!!e.envoyer_dce}
+                              onChange={ev => updateEntreprise(e.id, { envoyer_dce: ev.target.checked })}
+                              className="w-4 h-4 rounded accent-blue-600" />
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input type="checkbox" checked={!!e.ne_repond_pas}
+                              onChange={ev => updateEntreprise(e.id, { ne_repond_pas: ev.target.checked })}
+                              className="w-4 h-4 rounded accent-red-600" />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button onClick={() => update({ ...consultation, entreprises: consultation.entreprises.filter(en => en.id !== e.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
                   {consultation.entreprises.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
+                    <tr><td colSpan={10} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
                   )}
                 </tbody>
               </table>
