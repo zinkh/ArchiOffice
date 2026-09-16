@@ -68,8 +68,51 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
     },
   ],
   center: [lon, lat],
-  zoom: 17,
+  zoom: 19,
 });
+
+// Emprise approximative d'une parcelle pavillonnaire — sert de secours quand
+// aucune parcelle n'englobe le marqueur (adresse en bordure de parcelle,
+// parcelle non encore chargée...).
+const FALLBACK_HALF_EXTENT_DEG = 0.0009;
+
+const geometryBounds = (geometry: GeoJSON.Geometry): [[number, number], [number, number]] | null => {
+  let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+  const visit = (coords: any): void => {
+    if (typeof coords[0] === 'number') {
+      const [x, y] = coords as [number, number];
+      if (x < west) west = x;
+      if (x > east) east = x;
+      if (y < south) south = y;
+      if (y > north) north = y;
+    } else {
+      coords.forEach(visit);
+    }
+  };
+  if (!('coordinates' in geometry)) return null;
+  visit(geometry.coordinates);
+  if (!isFinite(west) || !isFinite(south) || !isFinite(east) || !isFinite(north)) return null;
+  return [[west, south], [east, north]];
+};
+
+// Ray casting simple, sur le contour extérieur de chaque polygone — suffisant
+// pour repérer la parcelle sous le marqueur, sans dépendance à une lib SIG.
+const pointInGeometry = (point: [number, number], geometry: GeoJSON.Geometry): boolean => {
+  const inRing = (ring: number[][]): boolean => {
+    let inside = false;
+    const [x, y] = point;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      const intersects = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+  if (geometry.type === 'Polygon') return inRing(geometry.coordinates[0]);
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates.some((poly) => inRing(poly[0]));
+  return false;
+};
 
 export const MapLibreCadastre = ({
   lat,
@@ -84,14 +127,17 @@ export const MapLibreCadastre = ({
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
   const [contextLost, setContextLost] = useState(false);
-  const [zoom, setZoom] = useState(17);
+  const [zoom, setZoom] = useState(19);
   const hoveredId = useRef<number | string | null>(null);
   const selectedId = useRef<number | string | null>(null);
   const fetchAbort = useRef<AbortController | null>(null);
   const onParcelSelectRef = useRef(onParcelSelect);
   onParcelSelectRef.current = onParcelSelect;
+  // N'ajuste le cadrage à la parcelle qu'une fois, au premier chargement —
+  // sans ça, chaque déplacement de la carte (moveend) re-fitterait dessus.
+  const fittedParcel = useRef(false);
 
-  const fetchParcelles = useCallback((instance: maplibregl.Map) => {
+  const fetchParcelles = useCallback((instance: maplibregl.Map, center?: [number, number]) => {
     if (instance.getZoom() < CADASTRE_MIN_ZOOM) return;
     const source = instance.getSource('parcelles') as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
@@ -106,7 +152,20 @@ export const MapLibreCadastre = ({
     fetch(`/api/cadastre/parcel?bbox=${bbox}`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.features) source.setData(data);
+        if (!data?.features) return;
+        source.setData(data);
+        if (center && !fittedParcel.current) {
+          fittedParcel.current = true;
+          const containing = data.features.find((f: GeoJSON.Feature) => f.geometry && pointInGeometry(center, f.geometry));
+          const bounds = containing ? geometryBounds(containing.geometry) : null;
+          instance.fitBounds(
+            bounds ?? [
+              [center[0] - FALLBACK_HALF_EXTENT_DEG, center[1] - FALLBACK_HALF_EXTENT_DEG],
+              [center[0] + FALLBACK_HALF_EXTENT_DEG, center[1] + FALLBACK_HALF_EXTENT_DEG],
+            ],
+            { padding: 40, maxZoom: 20, duration: 0 },
+          );
+        }
       })
       .catch((err) => {
         if (err.name !== 'AbortError') console.warn('[MapLibreCadastre] parcel fetch failed', err);
@@ -119,6 +178,7 @@ export const MapLibreCadastre = ({
     map.current?.remove();
     map.current = null;
     marker.current = null;
+    fittedParcel.current = false;
 
     const instance = new maplibregl.Map({
       container: mapContainer.current,
@@ -132,8 +192,7 @@ export const MapLibreCadastre = ({
         .setLngLat([lon, lat])
         .addTo(instance);
       setZoom(Math.round(instance.getZoom()));
-      setTimeout(() => instance.resize(), 100);
-      fetchParcelles(instance);
+      fetchParcelles(instance, [lon, lat]);
     });
 
     instance.on('zoomend', () => setZoom(Math.round(instance.getZoom())));
@@ -192,6 +251,12 @@ export const MapLibreCadastre = ({
 
     instance.addControl(new maplibregl.NavigationControl(), 'top-left');
     instance.addControl(new maplibregl.ScaleControl(), 'bottom-right');
+    // Marge explicite plutôt que de compter sur le CSS par défaut de
+    // maplibre-gl (10px) : dans cette appli, il finit collé aux bords de la
+    // carte, probablement écrasé par une règle plus tardive dans la cascade.
+    instance.getContainer().querySelectorAll<HTMLElement>('.maplibregl-ctrl-top-left, .maplibregl-ctrl-bottom-right').forEach((el) => {
+      el.style.margin = '12px';
+    });
     map.current = instance;
   }, [lat, lon]);
 
@@ -209,14 +274,36 @@ export const MapLibreCadastre = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Un changement d'adresse ne fait que recentrer la carte existante,
-  // jamais la recréer.
+  // Le conteneur peut encore être en cours de mise en page au moment de la
+  // création de la carte (onglet qui vient de s'activer, layout flex pas
+  // encore stabilisé) : un resize() appelé pendant que sa taille mesurée est
+  // encore fausse fige un cadrage incorrect (constaté : carte figée sur une
+  // vue du pays entier). Un ResizeObserver redimensionne la carte à chaque
+  // changement RÉEL de taille du conteneur, plutôt qu'après un délai fixe
+  // deviné.
   useEffect(() => {
+    if (!mapContainer.current) return;
+    const observer = new ResizeObserver(() => map.current?.resize());
+    observer.observe(mapContainer.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // Un changement d'adresse ne fait que recentrer la carte existante,
+  // jamais la recréer — mais pas au montage : la carte est déjà centrée sur
+  // ce point initial par MAP_STYLE, un setCenter/resize immédiat ici ne fait
+  // que dupliquer (et risquer de perturber) le cadrage initial.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
     if (!map.current) return;
+    fittedParcel.current = false;
     map.current.setCenter([lon, lat]);
     marker.current?.setLngLat([lon, lat]);
-    map.current.resize();
-  }, [lat, lon]);
+    fetchParcelles(map.current, [lon, lat]);
+  }, [lat, lon, fetchParcelles]);
 
   const handleReload = () => {
     setContextLost(false);
