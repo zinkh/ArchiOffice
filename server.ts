@@ -81,6 +81,7 @@ import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
+import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
@@ -1000,6 +1001,7 @@ export async function createApp() {
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
+  registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });

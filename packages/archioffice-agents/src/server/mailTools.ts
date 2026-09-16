@@ -147,6 +147,24 @@ export function buildMailTools(canSend: boolean): FunctionDeclarationLike[] {
         required: ['id'],
       },
     },
+    {
+      name: 'create_draft',
+      description:
+        "Crée un brouillon dans une messagerie Gmail ou Outlook connectée (visible dans le dossier Brouillons, PAS envoyé). " +
+        "Contrairement à send_email, aucune confirmation en deux temps n'est nécessaire : rien ne part vers l'extérieur tant qu'un humain n'a pas explicitement envoyé ce brouillon depuis sa messagerie. " +
+        "Fonctionne uniquement pour un compte Gmail/Outlook — une boîte IMAP seule n'a pas cette capacité.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Destinataire(s), séparés par des virgules' },
+          cc: { type: 'string', description: 'Optionnel' },
+          subject: { type: 'string' },
+          body: { type: 'string', description: 'Corps du message, texte brut' },
+          compte: { type: 'string', description: COMPTE_PARAM_DESCRIPTION },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    },
   ];
 
   if (canSend) {
@@ -322,7 +340,36 @@ export async function executeMailTool(
     }
   }
 
+  if (name === 'create_draft') {
+    if (account.provider === 'infomaniak') {
+      return { response: { error: "Ce compte (IMAP) ne permet pas de créer un brouillon — connectez une boîte Gmail ou Outlook pour cette action." } };
+    }
+    const to = String(args.to || '').trim();
+    const subject = String(args.subject || '').trim();
+    const bodyText = String(args.body || '');
+    const cc = args.cc ? String(args.cc).trim() : '';
+    if (!to || !subject || !bodyText) return { response: { error: 'to, subject et body sont requis.' } };
+    if (/[\r\n]/.test(to) || /[\r\n]/.test(subject) || /[\r\n]/.test(cc)) {
+      return { response: { error: "Caractères invalides (retour à la ligne) dans le destinataire, la copie ou l'objet." } };
+    }
+    try {
+      const res = await fetch(baseUrl + '/api/mail/drafts', {
+        method: 'POST',
+        headers: internalHeaders(auth, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ to, cc: cc || undefined, subject, text: bodyText, account_id: account.id }),
+      });
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok) return { response: { error: json?.error || `Échec de la création du brouillon (HTTP ${res.status}).` } };
+      return {
+        response: { success: true, compte: account.email, to, subject },
+        summary: `Brouillon créé dans ${account.email} à destination de ${to} — « ${subject} »`,
+      };
+    } catch (e: any) {
+      return { response: { error: e?.message || "Échec de la création du brouillon." } };
+    }
+  }
+
   return { response: { error: `Fonction messagerie inconnue : ${name}` } };
 }
 
-export const MAIL_TOOL_NAMES = ['search_emails', 'list_emails', 'read_email', 'send_email'];
+export const MAIL_TOOL_NAMES = ['search_emails', 'list_emails', 'read_email', 'send_email', 'create_draft'];
