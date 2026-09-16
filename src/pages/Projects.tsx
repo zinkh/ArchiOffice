@@ -7,7 +7,8 @@ import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../ty
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { db } from '../db';
-import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -1568,15 +1569,25 @@ export default function Projects() {
                 {(selectedProject.address || (isEditing && editForm?.address)) && (
                   <div className="mt-6">
                     <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2 block">{t('projects_location_label')}</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
-                      <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
-                        <InfoPanelBoundary label="Cadastre"><GeoportailMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} /></InfoPanelBoundary>
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
-                      </div>
-                      <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
-                        <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} /></InfoPanelBoundary>
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_google_maps_label')}</div>
-                      </div>
+                    <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-[400px]">
+                      <InfoPanelBoundary label="Cadastre">
+                        <GeoportailMap
+                          address={isEditing ? editForm?.address || '' : selectedProject.address || ''}
+                          onParcelSelect={isEditing ? (parcel: CadastreParcel) => {
+                            const reference = [
+                              parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                              parcel.section,
+                              parcel.numero,
+                            ].filter(Boolean).join(' ');
+                            setEditForm(prev => prev ? ({
+                              ...prev,
+                              ref_cadastrale: reference || prev.ref_cadastrale,
+                              surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                            }) : null);
+                          } : undefined}
+                        />
+                      </InfoPanelBoundary>
+                      <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
                     </div>
                   </div>
                 )}
