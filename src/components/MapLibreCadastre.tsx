@@ -195,16 +195,11 @@ export const MapLibreCadastre = ({
     map.current = instance;
   }, [lat, lon]);
 
-  useEffect(() => {
-    if (map.current) {
-      map.current.setCenter([lon, lat]);
-      marker.current?.setLngLat([lon, lat]);
-      map.current.resize();
-      return;
-    }
-    initMap();
-  }, [lat, lon, initMap]);
-
+  // Un seul effet crée la carte, au montage — la doubler avec un second
+  // useEffect qui rappelait initMap() détruisait et recréait le contexte
+  // WebGL dans la même passe de rendu, ce que certains navigateurs/GPU
+  // traduisent en perte de contexte immédiate ("Contexte WebGL perdu" dès
+  // l'affichage, avant toute interaction).
   useEffect(() => {
     initMap();
     return () => {
@@ -213,6 +208,15 @@ export const MapLibreCadastre = ({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Un changement d'adresse ne fait que recentrer la carte existante,
+  // jamais la recréer.
+  useEffect(() => {
+    if (!map.current) return;
+    map.current.setCenter([lon, lat]);
+    marker.current?.setLngLat([lon, lat]);
+    map.current.resize();
+  }, [lat, lon]);
 
   const handleReload = () => {
     setContextLost(false);
