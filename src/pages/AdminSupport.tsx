@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -56,6 +57,7 @@ function Bubble({ msg }: { msg: Message }) {
 }
 
 export default function AdminSupport() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const tenantFilter = searchParams.get('tenant_id');
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -102,7 +104,7 @@ export default function AdminSupport() {
       await loadDetail(activeId);
       await loadTickets();
     } catch (e: any) {
-      alert(e.message || "Erreur lors de l'envoi");
+      alert(e.message || t('admin_support_send_failed'));
     } finally {
       setSending(false);
     }

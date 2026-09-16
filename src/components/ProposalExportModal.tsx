@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconX, IconDownload, IconSettings, IconLayout, IconPalette, IconLetterCase, IconLayoutSidebar,
 } from '@tabler/icons-react';
@@ -773,6 +774,7 @@ function TemplateEditorPanel({
 // ─── Main modal ──────────────────────────────────────────────────────────────
 
 export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal; onClose: () => void }) {
+  const { t } = useTranslation();
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
   const [isGenerating, setIsGenerating] = useState(false);
@@ -820,7 +822,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
       await exportProposalPdf(previewRef.current, data);
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      alert('Erreur lors de la génération du PDF. Veuillez réessayer.');
+      alert(t('proposal_export_modal_pdf_error'));
     } finally {
       setIsGenerating(false);
     }

@@ -338,7 +338,7 @@ export default function Billing() {
             {status?.plan !== 'trial' && status?.plan !== 'expired' && !status?.pending_plan && (
               <button
                 onClick={() => handleScheduleCancel('trial',
-                  "Résilier votre abonnement ArchiOffice ?\n\nVous conserverez l'accès à votre plan actuel jusqu'à la fin de la période déjà payée, puis votre cabinet repassera automatiquement en formule d'essai (limites réduites)."
+                  t('billing_confirm_cancel_trial')
                 )}
                 disabled={cancelling}
                 className="text-xs text-zinc-400 hover:text-red-500 underline mt-1 disabled:opacity-50"
@@ -434,7 +434,7 @@ export default function Billing() {
               if (isCurrent || checkingOut !== null || cancelling) return;
               if (isDowngrade) {
                 handleScheduleCancel(planId,
-                  `Passer au plan ${plan.name} ?\n\nVous conserverez l'accès à votre plan actuel jusqu'à la fin de la période déjà payée, puis vous passerez automatiquement au plan ${plan.name}.`
+                  t('billing_confirm_downgrade', { planName: plan.name })
                 );
               } else {
                 handleCheckout(planId);

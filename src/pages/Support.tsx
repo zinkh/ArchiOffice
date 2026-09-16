@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -168,6 +169,7 @@ function HelpHome({ onNavigate, onNewTicket, onViewTickets }: { onNavigate: (key
 }
 
 export default function Support() {
+  const { t } = useTranslation();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [view, setView] = useState<'help' | 'faq' | 'article' | 'list' | 'new'>('help');
@@ -222,7 +224,7 @@ export default function Support() {
         fd.append('file', newAttachment);
         const token = await getAccessToken();
         const res = await fetch('/api/support/tickets', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Erreur lors de la création du ticket');
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || t('support_ticket_create_failed'));
         ticket = await res.json();
       } else {
         ticket = await apiFetch<Ticket>('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: newSubject, message: newMessage }) });
@@ -230,7 +232,7 @@ export default function Support() {
       setNewSubject(''); setNewMessage(''); setNewAttachment(null);
       setActiveId(ticket.id);
     } catch (e: any) {
-      alert(e.message || 'Erreur lors de la création du ticket');
+      alert(e.message || t('support_ticket_create_failed'));
     } finally {
       setCreating(false);
     }
@@ -246,21 +248,21 @@ export default function Support() {
         fd.append('file', replyAttachment);
         const token = await getAccessToken();
         const res = await fetch(`/api/support/tickets/${activeId}/messages`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Erreur lors de l'envoi");
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || t('support_message_send_failed'));
       } else {
         await apiFetch(`/api/support/tickets/${activeId}/messages`, { method: 'POST', body: JSON.stringify({ body: reply }) });
       }
       setReply(''); setReplyAttachment(null);
       await loadDetail(activeId);
     } catch (e: any) {
-      alert(e.message || "Erreur lors de l'envoi");
+      alert(e.message || t('support_message_send_failed'));
     } finally {
       setSending(false);
     }
   }
 
   async function handleClose() {
-    if (!activeId || !window.confirm('Fermer ce ticket ?')) return;
+    if (!activeId || !window.confirm(t('support_confirm_close_ticket'))) return;
     await apiFetch(`/api/support/tickets/${activeId}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'closed' }) });
     await loadDetail(activeId);
   }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import {
@@ -58,6 +59,7 @@ export function PlanBadge({ plan }: { plan: string }) {
 }
 
 export function PlanSelect({ tenantId, current, onChange }: { tenantId: string; current: string; onChange: (plan: string) => void }) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
   async function handleChange(e: ChangeEvent<HTMLSelectElement>) {
@@ -71,7 +73,7 @@ export function PlanSelect({ tenantId, current, onChange }: { tenantId: string; 
       });
       onChange(plan);
     } catch {
-      alert('Erreur lors du changement de plan');
+      alert(t('admin_dashboard_plan_change_failed'));
     } finally {
       setLoading(false);
     }
@@ -617,6 +619,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
 }
 
 function PlatformAdminsPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const [admins, setAdmins] = useState<PlatformAdminRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
@@ -652,12 +655,12 @@ function PlatformAdminsPanel({ onClose }: { onClose: () => void }) {
   }
 
   async function handleRemove(userId: string) {
-    if (!confirm('Retirer cet accès super-admin ?')) return;
+    if (!confirm(t('admin_dashboard_confirm_remove_superadmin'))) return;
     try {
       await apiFetch(`/api/admin/platform-admins/${userId}`, { method: 'DELETE' });
       await load();
     } catch (e: any) {
-      alert(e.message ?? 'Erreur');
+      alert(e.message ?? t('admin_dashboard_generic_error'));
     }
   }
 

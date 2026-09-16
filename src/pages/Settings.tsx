@@ -915,25 +915,20 @@ export default function Settings() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err?.message || "Échec de l'export des données du cabinet.");
+      alert(err?.message || t('settings_tenant_export_failed'));
     } finally {
       setIsExportingTenant(false);
     }
   };
 
   const handleRequestTenantDeletion = async () => {
-    if (!window.confirm(
-      "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront " +
-      "définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. " +
-      "Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ? La loi française impose la " +
-      "conservation des documents comptables pendant 10 ans, indépendamment de cette suppression."
-    )) return;
+    if (!window.confirm(t('settings_confirm_tenant_deletion_request'))) return;
     setIsRequestingDeletion(true);
     try {
       const res = await apiFetch<{ deletion_requested_at: string }>('/api/settings/tenant-deletion', { method: 'POST' });
       setTenantDeletion(prev => ({ deletion_requested_at: res.deletion_requested_at, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de la demande de fermeture.");
+      alert(err?.message || t('settings_tenant_deletion_request_failed'));
     } finally {
       setIsRequestingDeletion(false);
     }
@@ -945,7 +940,7 @@ export default function Settings() {
       await apiFetch('/api/settings/tenant-deletion', { method: 'DELETE' });
       setTenantDeletion(prev => ({ deletion_requested_at: null, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de l'annulation.");
+      alert(err?.message || t('settings_tenant_deletion_cancel_failed'));
     } finally {
       setIsCancelingDeletion(false);
     }
@@ -1345,7 +1340,7 @@ export default function Settings() {
   // écritures, révoquer coupe aussi la lecture des fichiers déjà déposés.
   const handleStorageDisable = async () => {
     if (!externalStorage?.id) return;
-    if (!window.confirm("Déconnecter cet espace ?\n\nLes nouveaux documents et plans repartiront dans ArchiOffice. Ceux déjà déposés chez vous resteront consultables.")) return;
+    if (!window.confirm(t('settings_confirm_storage_disable'))) return;
     try {
       await apiFetch(`/api/external-storage/${externalStorage.id}/disable`, { method: 'POST' });
       await refreshExternalStorage();
@@ -1357,7 +1352,7 @@ export default function Settings() {
 
   const handleStorageRevoke = async () => {
     if (!externalStorage?.id) return;
-    if (!window.confirm("Révoquer les accès ?\n\nArchiOffice oubliera votre mot de passe d'application. Les documents et plans déjà déposés ne seront PLUS consultables depuis ArchiOffice — ils restent dans votre espace de stockage, mais l'application ne saura plus aller les chercher.")) return;
+    if (!window.confirm(t('settings_confirm_storage_revoke'))) return;
     try {
       await apiFetch(`/api/external-storage/${externalStorage.id}`, { method: 'DELETE' });
       await refreshExternalStorage();

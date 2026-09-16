@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconX, IconCheck, IconClock, IconAlertTriangle,
   IconChevronRight, IconFilter, IconTrash, IconPencil,
@@ -196,6 +197,7 @@ interface MarcheTravaux {
 }
 
 export default function OrdresDeService() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentUser } = useUser();
   const [osList, setOsList] = useState<OrdreDeService[]>([]);
@@ -296,7 +298,7 @@ export default function OrdresDeService() {
       }
       await refresh();
       setIsFormOpen(false);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
     finally { setSaving(false); }
   };
 
@@ -315,7 +317,7 @@ export default function OrdresDeService() {
         body: JSON.stringify({ status: newStatus }),
       });
       await refresh();
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleArConfirm = async () => {
@@ -328,7 +330,7 @@ export default function OrdresDeService() {
       });
       await refresh();
       setArModal(null);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleDelete = async () => {

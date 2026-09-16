@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconClipboardCheck,
   IconAlertTriangle,
@@ -59,6 +60,7 @@ const FILTERS: { id: Filter; label: string }[] = [
  * la liste filtrée à l'écran.
  */
 export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings }: ReserveTrackerProps) {
+  const { t } = useTranslation();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -131,7 +133,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
   };
 
   const deleteReserve = async (res: ReserveLike) => {
-    if (!confirm(`Supprimer la réserve N° ${res.number ?? ''} ?`)) return;
+    if (!confirm(t('reserve_tracker_confirm_delete', { number: res.number ?? '' }))) return;
     try {
       const response = await fetch(`${apiBase}/${res.id}`, { method: 'DELETE' });
       if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
@@ -139,15 +141,15 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
   };
 
   const handleExport = async () => {
-    if (!project || !settings) { alert("Les réglages du cabinet ne sont pas encore chargés."); return; }
-    if (visible.length === 0) { alert('Aucune réserve à exporter avec ce filtre.'); return; }
+    if (!project || !settings) { alert(t('reserve_tracker_settings_not_loaded')); return; }
+    if (visible.length === 0) { alert(t('reserve_tracker_no_reserves_to_export')); return; }
     setExporting('Préparation…');
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       await exportReservesToPDF(visible, plans, project, settings, { title, onProgress: setExporting });
     } catch (err) {
       console.error('[ReserveTracker] export', err);
-      alert("L'export PDF a échoué.");
+      alert(t('reserve_tracker_export_failed'));
     } finally {
       setExporting(null);
     }

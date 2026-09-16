@@ -219,6 +219,9 @@ export default function ProjectDetail() {
 
   // AR modal state
   const [arOsTarget, setArOsTarget] = useState<OrdreDeService | null>(null);
+  const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
+  const [deleteProjectConfirmInput, setDeleteProjectConfirmInput] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [arForm, setArForm] = useState({ date_ar: new Date().toISOString().slice(0, 10), date_execution: '', notes_ar: '' });
   const [arSaving, setArSaving] = useState(false);
 
@@ -517,11 +520,11 @@ export default function ProjectDetail() {
         setViewedPhase(null); // resync the overview's note column to the new actual phase
       } else {
         const err = await res.json().catch(() => null);
-        alert(`Erreur lors du changement de phase : ${err?.error || res.statusText}`);
+        alert(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }));
       }
     } catch (err) {
       console.error('Failed to update project phase:', err);
-      alert('Erreur lors du changement de phase.');
+      alert(t('projectdetail_phase_change_failed'));
     }
   };
 
@@ -772,7 +775,7 @@ export default function ProjectDetail() {
       setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
       setIsAddingMarche(false);
     } else {
-      alert("Échec de la création du marché.");
+      alert(t('projectdetail_marche_create_failed'));
     }
   };
 
@@ -815,7 +818,7 @@ export default function ProjectDetail() {
         body: JSON.stringify(project)
       });
       if (res.ok) {
-        alert('Project saved successfully');
+        alert(t('projectdetail_project_saved_successfully'));
       }
     } catch (err) {
       console.error(err);
@@ -825,7 +828,8 @@ export default function ProjectDetail() {
   };
 
   const handleDelete = async () => {
-    if (!project || !confirm('Are you sure you want to delete this project?')) return;
+    if (!project) return;
+    setIsDeletingProject(true);
     try {
       const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -833,6 +837,8 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -908,7 +914,7 @@ export default function ProjectDetail() {
         setIsAddingOs(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || "Échec de la création de l'OS.");
+        alert(err?.error || t('projectdetail_os_create_failed'));
       }
     } catch (err) {
       console.error(err);
@@ -946,7 +952,7 @@ export default function ProjectDetail() {
         setIsAddingOsMoe(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || "Échec de la création de l'avenant.");
+        alert(err?.error || t('projectdetail_avenant_create_failed'));
       }
     } catch (err) {
       console.error(err);
@@ -1135,7 +1141,7 @@ export default function ProjectDetail() {
   };
 
   const handleDeleteAvenant = async (avenantId: string) => {
-    if (!confirm("Supprimer cet avenant ?")) return;
+    if (!confirm(t('projectdetail_confirm_delete_avenant'))) return;
     try {
       const res = await fetch(`/api/avenants_moe/${avenantId}`, { method: 'DELETE' });
       if (res.ok) setAvenantsMoe(prev => prev.filter(a => a.id !== avenantId));
@@ -1347,7 +1353,7 @@ export default function ProjectDetail() {
   };
 
   const handleDeleteOs = async (osId: string) => {
-    if (!confirm('Supprimer cet ordre de service ?')) return;
+    if (!confirm(t('projectdetail_confirm_delete_os'))) return;
     try {
       const res = await fetch(`/api/ordres_de_service/${osId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -1471,7 +1477,7 @@ export default function ProjectDetail() {
           setUpdatingPlanId(null);
         } else {
           const err = await res.json().catch(() => null);
-          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
+          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
         }
       } else {
         // Create a new plan
@@ -1486,12 +1492,12 @@ export default function ProjectDetail() {
           setPlans(prev => [...prev, data]);
         } else {
           const err = await res.json().catch(() => null);
-          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
+          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
         }
       }
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de l'upload du plan.");
+      alert(t('projectdetail_plan_upload_failed'));
     } finally {
       setPlanUploading(false);
       if (planInputRef.current) planInputRef.current.value = '';
@@ -1562,7 +1568,7 @@ export default function ProjectDetail() {
         <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
           {currentUser?.system_role === 'admin' && (
             <button
-              onClick={handleDelete}
+              onClick={() => { setDeleteProjectConfirmInput(''); setShowDeleteProjectConfirm(true); }}
               className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
               title={t('delete')}
             >
@@ -2433,7 +2439,7 @@ export default function ProjectDetail() {
                   };
 
                   const deleteNote = async (noteId: string) => {
-                    if (!confirm('Supprimer cette note d\'honoraires ?')) return;
+                    if (!confirm(t('projectdetail_confirm_delete_note_honoraires'))) return;
                     await fetch(`/api/notes_honoraires/${noteId}`, { method: 'DELETE' });
                     setNotesHonoraires(notesHonoraires.filter((n: any) => n.id !== noteId));
                   };
@@ -2450,7 +2456,7 @@ export default function ProjectDetail() {
                   const createFactureFromNote = async (note: any) => {
                     if (note.invoice_id) return;
                     const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
-                    if (!res.ok) { alert('Échec de la création de la facture brouillon.'); return; }
+                    if (!res.ok) { alert(t('projectdetail_draft_invoice_create_failed')); return; }
                     const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
                     setNotesHonoraires(data || []);
                   };
@@ -3169,7 +3175,7 @@ export default function ProjectDetail() {
                               </div>
                               <button 
                                 onClick={() => {
-                                  if(confirm('Supprimer ce jalon ?')) {
+                                  if(confirm(t('projectdetail_confirm_delete_milestone'))) {
                                     fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
                                       .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
                                   }
@@ -3624,7 +3630,7 @@ export default function ProjectDetail() {
                               </select>
                               <button
                                 onClick={async () => {
-                                  if (!confirm('Supprimer ce permis ?')) return;
+                                  if (!confirm(t('projectdetail_confirm_delete_permit'))) return;
                                   const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
                                   if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
                                 }}
@@ -3959,7 +3965,7 @@ export default function ProjectDetail() {
                               </select>
                               <button
                                 onClick={async () => {
-                                  if (!confirm('Supprimer cette RFI ?')) return;
+                                  if (!confirm(t('projectdetail_confirm_delete_rfi'))) return;
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
@@ -4310,7 +4316,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
+                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
                                 }
                               } else {
                                 const res = await fetch('/api/visas', { method: 'POST', body: form });
@@ -4319,7 +4325,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => [...prev, data]);
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
+                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
                                 }
                               }
                               setIsVisaModalOpen(false);
@@ -4328,7 +4334,7 @@ export default function ProjectDetail() {
                               setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                             } catch (err) {
                               console.error(err);
-                              alert("Erreur lors de l'enregistrement du visa.");
+                              alert(t('projectdetail_visa_save_failed'));
                             } finally {
                               setVisaSaving(false);
                             }
@@ -4474,7 +4480,7 @@ export default function ProjectDetail() {
                                 <button
                                   title="Supprimer"
                                   onClick={async () => {
-                                    if (!confirm('Supprimer ce visa ?')) return;
+                                    if (!confirm(t('projectdetail_confirm_delete_visa'))) return;
                                     try {
                                       const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
                                       if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
@@ -4848,7 +4854,7 @@ export default function ProjectDetail() {
                                   <button
                                     title="Supprimer"
                                     onClick={async () => {
-                                      if (!confirm('Supprimer ce PV de réception ?')) return;
+                                      if (!confirm(t('projectdetail_confirm_delete_pv_reception'))) return;
                                       try {
                                         const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
                                         if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
@@ -4937,7 +4943,7 @@ export default function ProjectDetail() {
                                               <td className="px-4 py-2 text-right">
                                                 <button
                                                   onClick={async () => {
-                                                    if (!confirm('Supprimer cette réserve ?')) return;
+                                                    if (!confirm(t('projectdetail_confirm_delete_reserve'))) return;
                                                     await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
                                                     setReserves(prev => prev.filter(rv => rv.id !== r.id));
                                                   }}
@@ -5040,11 +5046,11 @@ export default function ProjectDetail() {
                               await fetchDoeDocuments();
                             } else {
                               const err = await res.json().catch(() => null);
-                              alert(`Erreur lors de l'upload du document DOE : ${err?.error || res.statusText}`);
+                              alert(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }));
                             }
                           } catch (err) {
                             console.error(err);
-                            alert("Erreur lors de l'upload du document DOE.");
+                            alert(t('projectdetail_doe_upload_failed'));
                           } finally {
                             setDoeUploading(false);
                             if (doeInputRef.current) doeInputRef.current.value = '';
@@ -5180,7 +5186,7 @@ export default function ProjectDetail() {
                                           </button>
                                           <button
                                             onClick={async () => {
-                                              if (!confirm('Supprimer ce document DOE ?')) return;
+                                              if (!confirm(t('projectdetail_confirm_delete_doe_document'))) return;
                                               try {
                                                 const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
                                                 if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
@@ -5283,7 +5289,7 @@ export default function ProjectDetail() {
                                     </button>
                                     <button 
                                       onClick={async () => {
-                                        if (!confirm('Supprimer ce plan ?')) return;
+                                        if (!confirm(t('projectdetail_confirm_delete_plan'))) return;
                                         try {
                                           const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
                                           if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
@@ -5356,6 +5362,52 @@ export default function ProjectDetail() {
                 <button onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar}
                   className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-all">
                   {arSaving ? 'Enregistrement…' : 'Confirmer AR'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
+      <AnimatePresence>
+        {showDeleteProjectConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md rounded-lg shadow-2xl p-6"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <h3 className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('projects_delete_confirm_title')}</h3>
+              <p className="text-sm text-[var(--tblr-muted)] mb-2">
+                {t('projects_delete_confirm_body', { name: project?.name })}
+              </p>
+              <p className="text-sm text-[var(--tblr-muted)] mb-3">
+                {t('projects_delete_confirm_instruction', { word: t('projects_delete_confirm_word') })}
+              </p>
+              <input
+                autoFocus
+                className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-[var(--tblr-text)]"
+                value={deleteProjectConfirmInput}
+                onChange={e => setDeleteProjectConfirmInput(e.target.value)}
+                placeholder={t('projects_delete_confirm_word')}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && deleteProjectConfirmInput.trim().toLowerCase() === t('projects_delete_confirm_word').toLowerCase() && !isDeletingProject) {
+                    handleDelete();
+                  }
+                }}
+              />
+              <div className="flex gap-2 mt-5 justify-end">
+                <button onClick={() => setShowDeleteProjectConfirm(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                  {t('btn_cancel')}
+                </button>
+                <button
+                  disabled={deleteProjectConfirmInput.trim().toLowerCase() !== t('projects_delete_confirm_word').toLowerCase() || isDeletingProject}
+                  onClick={handleDelete}
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
                 </button>
               </div>
             </motion.div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconSend, IconPaperclip, IconPlus, IconX, IconSearch, IconUsersGroup,
   IconArrowLeft, IconFile, IconDownload, IconMessageCircle, IconLogout, IconCheck,
@@ -174,6 +175,7 @@ function NewConversationModal({ teamMembers, onClose, onCreated }: {
 }
 
 export default function Messages() {
+  const { t } = useTranslation();
   const { currentUser } = useUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -317,7 +319,7 @@ export default function Messages() {
 
   const leaveConversation = async () => {
     if (!selectedId || !currentUser) return;
-    if (!window.confirm('Quitter ce groupe ?')) return;
+    if (!window.confirm(t('messages_confirm_leave_group'))) return;
     try {
       await apiFetch(`/api/conversations/${selectedId}/participants/${currentUser.id}`, { method: 'DELETE' });
       setConversations(prev => prev.filter(c => c.id !== selectedId));

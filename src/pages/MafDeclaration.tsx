@@ -697,6 +697,7 @@ function SuiviView({ tauxContrat, onChangeStatut }: {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function MafDeclaration() {
+  const { t } = useTranslation();
   const { tenantPlan } = useUser();
   const { settings } = useSettings();
 
@@ -763,7 +764,7 @@ export default function MafDeclaration() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Supprimer cette entrée ?')) return;
+    if (!confirm(t('maf_declaration_confirm_delete'))) return;
     await apiFetch(`/api/maf/v1/entries/${id}`, { method: 'DELETE' });
     await loadData();
   };

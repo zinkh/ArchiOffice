@@ -495,7 +495,7 @@ export default function Reunions() {
   };
 
   const deleteMeeting = async (id: string) => {
-    if (!confirm('Supprimer cette réunion ?')) return;
+    if (!confirm(t('reunions_confirm_delete'))) return;
     await apiFetch(`/api/meetings/${id}`, { method: 'DELETE' });
     setMeetings(prev => prev.filter(m => m.id !== id));
     if (selectedMeeting?.id === id) setSelectedMeeting(null);

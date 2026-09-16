@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconX, IconDownload,
   IconCalculator, IconChevronDown, IconChevronRight, IconAlertTriangle,
@@ -127,6 +128,7 @@ const INDICES_COURANTS: { code: string; label: string }[] = [
 
 // ── Composant principal ─────────────────────────────────────────────────────
 export default function Situations({ projectId: propProjectId }: { projectId?: string }) {
+  const { t } = useTranslation();
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const projectId = propProjectId || routeProjectId || '';
 
@@ -370,7 +372,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
 
   // ── Supprimer une situation ───────────────────────────────────────────────
   const handleDeleteSit = async (id: string) => {
-    if (!confirm('Supprimer cette situation ?')) return;
+    if (!confirm(t('situations_confirm_delete_situation'))) return;
     await apiFetch(`/api/situations/${id}`, { method: 'DELETE' });
     if (selectedSit?.id === id) setSelectedSit(null);
     await loadSituations();
@@ -405,7 +407,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
   };
 
   const handleDeleteMarche = async (id: string) => {
-    if (!confirm('Supprimer ce marché ?')) return;
+    if (!confirm(t('situations_confirm_delete_marche'))) return;
     await apiFetch(`/api/marches-entreprises/${id}`, { method: 'DELETE' });
     await loadMarches();
   };
