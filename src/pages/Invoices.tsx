@@ -73,6 +73,16 @@ function contactLegalLines(c: Contact): string[] {
   return lines;
 }
 
+// Le Maître d'Ouvrage d'une facture est invoice.client_id, sinon celui de
+// son projet (voir resolveInvoiceClientId côté serveur) — la liste ne joint
+// jamais le contact (voir invoice.client plus haut), donc résolu ici sur les
+// contacts déjà chargés pour l'autocomplete plutôt que d'ajouter un fan-out.
+function invoiceClientName(invoice: Invoice, projects: Project[], contacts: Contact[]): string {
+  const contact = invoice.client_id ? contacts.find(c => c.id === invoice.client_id) : undefined;
+  if (contact) return contact.company_name || `${contact.first_name} ${contact.last_name}`.trim();
+  return projects.find(p => p.id === invoice.project_id)?.client || '---';
+}
+
 function getEffectivePhases(invoice: Invoice): InvoicePhase[] {
   if (invoice.phases && invoice.phases.length > 0) return invoice.phases;
   if (invoice.mission_id) {
@@ -707,7 +717,7 @@ export default function Invoices() {
                   <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
-              { label: t('invoices_col_client'), render: inv => projects.find(p => p.id === inv.project_id)?.client || '---' },
+              { label: t('invoices_col_client'), render: inv => invoiceClientName(inv, projects, contacts) },
               { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (

@@ -822,9 +822,18 @@ export default function ProjectDetail() {
       });
       if (res.ok) {
         alert(t('projectdetail_project_saved_successfully'));
+      } else {
+        // Un échec passait jusqu'ici totalement inaperçu : ni alerte ni
+        // console.error, seule l'absence du message de succès habituel — un
+        // changement (le client du projet, par exemple) restait alors non
+        // enregistré sans que rien ne le signale, et la prochaine ouverture
+        // de la fiche le perdait silencieusement.
+        const err = await res.json().catch(() => null);
+        alert(err?.error || 'Échec de l\'enregistrement du projet.');
       }
     } catch (err) {
       console.error(err);
+      alert((err as any)?.message || 'Échec de l\'enregistrement du projet.');
     } finally {
       setIsSaving(false);
     }
@@ -2928,13 +2937,13 @@ export default function ProjectDetail() {
                             placeholder="Project Name"
                           />
                           <div className="flex flex-wrap items-center gap-4">
-                            <ContactAutocomplete 
+                            <ContactAutocomplete
                               contacts={contacts.filter(isClientContact)}
-                              value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
+                              value={project.client_id || contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
                               onChange={id => {
                                 const contact = contacts.find(c => c.id === id);
                                 if (contact) {
-                                  setProject({...project, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                                  setProject({...project, client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                                 }
                               }}
                               onAddNew={() => setIsContactModalOpen(true)}
@@ -5450,6 +5459,7 @@ export default function ProjectDetail() {
           setContacts(prev => [...prev, newContact]);
           setProject(prev => prev ? ({
             ...prev,
+            client_id: newContact.id,
             client: newContact.company_name || `${newContact.first_name} ${newContact.last_name}`
           }) : prev);
           fetchContacts();
