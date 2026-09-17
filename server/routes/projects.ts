@@ -138,7 +138,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       await checkQuota(tenantId, 'projects');
       const {
-        id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        id: bodyId, name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
@@ -151,6 +151,9 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      if (client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
@@ -182,7 +185,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const project_code = affairePrefix ? `${affairePrefix}${sepPrefix ? '-' : ''}${yearPart}` : yearPart;
       const id = bodyId || crypto.randomUUID();
       const { error: pe } = await supabaseAdmin.from('projects').insert({
-        id, tenant_id: tenantId, name, client, status: status || 'Planning', budget: budget || 0,
+        id, tenant_id: tenantId, name, client, client_id: client_id || null, status: status || 'Planning', budget: budget || 0,
         category: category || null, start_date: start_date || new Date().toISOString().split('T')[0],
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
@@ -226,7 +229,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, is_chantier, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
@@ -242,18 +245,22 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       // exemple) ne doit pas être bloquée faute de renvoyer le nom et le
       // client déjà en base : ils ne sont exigés qu'à la création. Absents du
       // corps de la requête, on retombe sur les valeurs déjà enregistrées.
-      const { data: existingProject } = await supabaseAdmin.from('projects').select('name, client')
+      const { data: existingProject } = await supabaseAdmin.from('projects').select('name, client, client_id')
         .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       const finalName = name ?? (existingProject as any)?.name;
       const finalClient = client ?? (existingProject as any)?.client;
+      const finalClientId = client_id !== undefined ? client_id : (existingProject as any)?.client_id;
       if (!finalName || !finalClient) return res.status(400).json({ error: "Name and client are required" });
+      if (finalClientId && !(await assertTenantEntity(supabaseAdmin, 'contacts', finalClientId, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
       const { error: ue } = await supabaseAdmin.from('projects').update({
-        name: finalName, client: finalClient, status, budget, category, start_date, end_date, description, image_url, address,
+        name: finalName, client: finalClient, client_id: finalClientId || null, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
