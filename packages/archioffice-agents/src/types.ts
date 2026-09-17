@@ -254,6 +254,13 @@ export interface AgentCapabilities {
    *  Conversations, routes.ts n'active le tool que quand
    *  LlmProvider.supportsWebSearch est vrai — voir mistral.ts. */
   webSearch: boolean;
+  /** Bibliothèque de connaissances propre à cet agent (documents.resource_type
+   *  = 'agents', voir migrate_agent_knowledge.sql) : réglementation, DTU,
+   *  notices déposées par l'architecte via ResourceAttachments sur la fiche
+   *  agent. Contrairement aux documents joints à un message, ces documents
+   *  sont auto-injectés à chaque tour, comme firm_knowledge — pas de tool à
+   *  appeler, pas de condition de context_scopes (voir buildAgentContext). */
+  knowledge: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -267,6 +274,7 @@ export function capabilitiesFromAgent(agent: {
   delegate_enabled?: boolean | null;
   notify_users_enabled?: boolean | null;
   web_search_enabled?: boolean | null;
+  knowledge_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -285,6 +293,7 @@ export function capabilitiesFromAgent(agent: {
     delegate: !!agent.delegate_enabled,
     notifyUsers: !!agent.notify_users_enabled,
     webSearch: !!agent.web_search_enabled,
+    knowledge: !!agent.knowledge_enabled,
   };
 }
 
@@ -310,6 +319,7 @@ export interface Agent {
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
+  knowledge_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -388,6 +398,7 @@ export interface AgentRow {
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
+  knowledge_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
@@ -438,4 +449,11 @@ export interface AgentContext {
     projectCostHistory: { designation: string; unite: string; avgPrixUnitaireHt: number; occurrences: number }[];
     cctpExcerpts: { title: string; excerpt: string }[];
   };
+  /**
+   * Bibliothèque de connaissances propre à cet agent (réglementation, DTU,
+   * notices déposées via ResourceAttachments sur documents.resource_type =
+   * 'agents') — voir capabilities.knowledge et migrate_agent_knowledge.sql.
+   * Auto-injecté à chaque tour comme firmKnowledge, jamais via un tool.
+   */
+  knowledgeDocuments: { title: string; excerpt: string }[];
 }

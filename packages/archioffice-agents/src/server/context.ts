@@ -104,6 +104,17 @@ const MAX_COST_HISTORY_ROWS = 30;
 const MAX_CCTP_EXCERPTS = 5;
 const MAX_CCTP_EXCERPT_CHARS = 2000;
 
+// La bibliothèque de connaissances d'un agent (réglementation, DTU, notices)
+// est, comme firm_knowledge, auto-injectée à chaque tour et facturée au
+// jeton — mêmes plafonds d'ordre de grandeur que les extraits de CCTP
+// ci-dessus, volontairement serrés : ce n'est pas un canal de recherche dans
+// un gros document, mais l'injection directe de quelques pièces courtes
+// choisies par l'architecte (voir CLAUDE.md, "Bibliothèque de connaissances
+// des agents").
+const MAX_KNOWLEDGE_DOCS = 10;
+const MAX_KNOWLEDGE_DOC_CHARS = 6000;
+const KNOWLEDGE_EXTRACTION_TIMEOUT_MS = 10_000;
+
 function daysBetween(start: string, end: string): number | null {
   const s = new Date(start).getTime();
   const e = new Date(end).getTime();
@@ -190,6 +201,36 @@ function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string;
   return excerpts;
 }
 
+// Extraction texte-seul (pas de vision) pour un document de la bibliothèque
+// de connaissances d'un agent : une réglementation ou un DTU est un texte,
+// jamais une photo à lire pixel par pixel comme une pièce jointe de message
+// (voir la note sur ctx.documentImages plus bas) — pas de branche vision ici,
+// volontairement, pour rester le sous-ensemble strictement nécessaire plutôt
+// que de dupliquer toute la marche à suivre de la boucle contentFetches
+// ci-dessous (redirection PDF scanné vers rasterizePdf comprise).
+async function extractKnowledgeDocText(supabaseAdmin: any, tenantId: string, doc: { name: string; file_url: string }): Promise<string | null> {
+  const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
+  if (!fetched) return null;
+  const { buffer, contentType } = fetched;
+  const lowerName = String(doc.name || '').toLowerCase();
+
+  let text: string | null = null;
+  if (lowerName.endsWith('.pdf')) {
+    text = (await pdfParse(buffer)).text;
+  } else if (lowerName.endsWith('.docx')) {
+    text = (await mammoth.extractRawText({ buffer })).value;
+  } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
+    text = buffer.toString('utf8');
+  }
+
+  if (isOcrCandidate(lowerName, text)) {
+    const ocr = await ocrDocument(lowerName, buffer).catch(() => null);
+    if (ocr?.text?.trim()) text = ocr.text;
+  }
+
+  return text && text.trim() ? text : null;
+}
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
@@ -203,7 +244,10 @@ export async function buildAgentContext(
   // défaut : un appelant qui ne le passe pas (les tests existants, avant
   // cette capacité) garde le comportement OCR d'origine plutôt que de
   // planter sur un paramètre manquant.
-  supportsVision: boolean = false
+  supportsVision: boolean = false,
+  // capabilitiesFromAgent(agent).knowledge — indépendant de context_scopes,
+  // comme docsRead/docsWrite (voir AgentCapabilities.knowledge dans types.ts).
+  knowledgeEnabled: boolean = false
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -224,6 +268,7 @@ export async function buildAgentContext(
     colleagues: [],
     teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
+    knowledgeDocuments: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -503,6 +548,36 @@ export async function buildAgentContext(
     });
 
     await Promise.all(contentFetches);
+  }
+
+  // Bibliothèque de connaissances de l'agent — auto-injectée à chaque tour,
+  // comme firm_knowledge, jamais conditionnée par attachedDocumentIds : ces
+  // documents (documents.resource_type = 'agents', resource_id = l'agent)
+  // ont été déposés une fois pour toutes par l'architecte via
+  // ResourceAttachments sur la fiche agent, pas joints à CE message.
+  if (knowledgeEnabled) {
+    const { data: knowledgeDocs } = await supabaseAdmin
+      .from('documents')
+      .select('id, name, file_url')
+      .eq('tenant_id', tenantId)
+      .eq('resource_type', 'agents')
+      .eq('resource_id', currentAgentId)
+      .order('uploaded_at', { ascending: false })
+      .limit(MAX_KNOWLEDGE_DOCS);
+
+    const knowledgeFetches = ((knowledgeDocs as any[]) || []).map((doc: any) =>
+      withTimeout(
+        extractKnowledgeDocText(supabaseAdmin, tenantId, doc).then(text => {
+          if (text) ctx.knowledgeDocuments.push({ title: doc.name, excerpt: text.slice(0, MAX_KNOWLEDGE_DOC_CHARS) });
+        }),
+        KNOWLEDGE_EXTRACTION_TIMEOUT_MS
+      ).catch((e: any) => {
+        // Même logique que l'extraction des pièces jointes : un document
+        // illisible ou trop lent est ignoré, jamais bloquant pour le tour.
+        console.log(`[agent context] knowledge document "${doc.name}" extraction failed: ${e?.message}`);
+      })
+    );
+    await Promise.all(knowledgeFetches);
   }
 
   return ctx;

@@ -985,6 +985,48 @@ Deux mécanismes tournent sans qu'on leur pose de question :
   utilisateur à transmettre à l'API interne, et fabriquer un jeton de service
   contournerait les contrôles que les actions d'agent traversent justement.
 
+### Bibliothèque de connaissances des agents
+
+`knowledge_enabled` (`supabase/migrate_agent_knowledge.sql`), une colonne de
+plus sur `agents` réglable depuis `/agents/:id/edit`, off par défaut et
+jamais héritée d'un template — même traitement que `web_search_enabled`.
+Ferme le trou signalé par l'architecte : un agent ne pouvait s'appuyer que
+sur `firm_knowledge` (l'historique interne du cabinet) ou sur des documents
+joints AU MESSAGE COURANT, jamais sur un document déposé une fois pour
+toutes pour lui — une réglementation, un DTU, une notice technique.
+
+**Aucune nouvelle table.** `'agents'` rejoint `ATTACHABLE_RESOURCE_TYPES`
+(`server/routes/documents.ts`) : un document de bibliothèque est une ligne
+`documents` ordinaire, avec `resource_type = 'agents'` et `resource_id`
+l'agent visé. Le dépôt, la liste et la suppression passent par
+`<ResourceAttachments resourceType="agents" resourceId={agent.id} />`
+(`src/components/ResourceAttachments.tsx`), affiché sur `/agents/:id/edit`
+dès que `knowledge_enabled` est coché — le même composant générique que la
+fiche permis, sans code dédié.
+
+**Auto-injecté à chaque tour, jamais via un tool.** `buildAgentContext()`
+(`packages/archioffice-agents/src/server/context.ts`) lit, quand
+`capabilitiesFromAgent(agent).knowledge` est vrai, les documents
+`resource_type = 'agents'` de CET agent (`resource_id = currentAgentId`),
+en extrait le texte (`extractKnowledgeDocText()` — pdf-parse, mammoth, OCR
+en repli sur un PDF scanné ; jamais de vision, une réglementation étant du
+texte et non une photo) et les pose dans `ctx.knowledgeDocuments`. Même
+principe que `firm_knowledge` : pas de recherche, pas de `tool` que le
+modèle appellerait — le contenu est simplement dans le prompt
+(`BIBLIOTHÈQUE DE CONNAISSANCES DE CET AGENT`, `systemPrompts.ts`), sous
+`docContentsSection`/`firmKnowledgeSection` et donc lu même quand
+`system_prompt_override` remplace tout le prompt généré (même raison que
+ces deux sections).
+
+**Plafonné pour rester un coût de jetons prévisible, pas un RAG.**
+`MAX_KNOWLEDGE_DOCS` (10 documents) et `MAX_KNOWLEDGE_DOC_CHARS` (6000
+caractères, tronqué au-delà) bornent ce qui part dans CHAQUE tour de CHAQUE
+conversation avec cet agent — volontairement pensé pour des pièces courtes
+à moyennes (notices, extraits de DTU), pas pour un corpus réglementaire de
+plusieurs centaines de pages : ce dépôt n'a pas de recherche par mots-clés
+ni d'embeddings, tout document déposé est relu en entier. `/agents/:id/edit`
+le dit explicitement dans le texte d'aide du réglage.
+
 ### Délégation entre agents
 
 Incident du 7 septembre 2026 : un agent avait créé 19 CCTP vides en réponse à

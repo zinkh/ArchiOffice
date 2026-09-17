@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconRobot, IconChevronDown, IconAlertTriangle } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
+import { ResourceAttachments } from '@/src/components/ResourceAttachments';
 import type { Agent, AgentContextScope, AgentActionScope } from '../types.js';
 import { AGENT_RESOURCES } from '../types.js';
 
@@ -49,6 +50,7 @@ export default function AgentConfig() {
   const [delegateEnabled, setDelegateEnabled] = useState(false);
   const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [knowledgeEnabled, setKnowledgeEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -74,6 +76,7 @@ export default function AgentConfig() {
         setDelegateEnabled(!!found.delegate_enabled);
         setNotifyUsersEnabled(!!found.notify_users_enabled);
         setWebSearchEnabled(!!found.web_search_enabled);
+        setKnowledgeEnabled(!!found.knowledge_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -116,6 +119,7 @@ export default function AgentConfig() {
           delegate_enabled: delegateEnabled,
           notify_users_enabled: notifyUsersEnabled,
           web_search_enabled: webSearchEnabled,
+          knowledge_enabled: knowledgeEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -369,7 +373,27 @@ export default function AgentConfig() {
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_notify_users')}</span>
           </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={knowledgeEnabled}
+              onChange={() => setKnowledgeEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_knowledge')}</span>
+          </label>
         </div>
+
+        {knowledgeEnabled && (
+          <div className="pt-1 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+            <p className="text-[11px] mb-2 mt-3" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_knowledge_hint')}</p>
+            {agent
+              ? <ResourceAttachments resourceType="agents" resourceId={agent.id} />
+              : <p className="text-[12px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_knowledge_save_first')}</p>}
+          </div>
+        )}
 
         {mailEnabled && mailSendEnabled && (
           <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>

@@ -174,6 +174,11 @@ export function registerAgentRoutes(
           // explicitement depuis /agents/:id après avoir créé l'agent.
           docs_write_enabled: false,
           web_search_enabled: false,
+          // Jamais héritée d'un template, comme web_search_enabled : la
+          // bibliothèque de connaissances est vide à la création (aucun
+          // document n'y est encore rattaché) et son activation est un choix
+          // de l'architecte, pas un défaut de métier.
+          knowledge_enabled: false,
           is_active: true, is_system_template: false,
         };
       } else {
@@ -187,6 +192,7 @@ export function registerAgentRoutes(
           action_scopes: action_scopes || [],
           web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
           geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, web_search_enabled: false,
+          knowledge_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
         };
       }
@@ -206,6 +212,7 @@ export function registerAgentRoutes(
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
         mail_send_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
+        knowledge_enabled,
         system_prompt_override, is_active,
       } = req.body;
       const { data, error } = await supabaseAdmin.from('agents').update({
@@ -223,6 +230,7 @@ export function registerAgentRoutes(
         // de sens (voir capabilitiesFromAgent).
         docs_write_enabled: !!docs_read_enabled && !!docs_write_enabled,
         web_search_enabled: !!web_search_enabled,
+        knowledge_enabled: !!knowledge_enabled,
         system_prompt_override, is_active,
       }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
@@ -557,7 +565,7 @@ export function registerAgentRoutes(
       // chaque appel de timedChat() plus bas.
       const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
 
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge);
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, webSearchActive);
 
