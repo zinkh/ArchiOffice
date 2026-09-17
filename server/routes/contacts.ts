@@ -45,6 +45,33 @@ function pickContactColumns(body: Record<string, any>): Record<string, any> {
   return out;
 }
 
+// PostgREST/Supabase plafonne silencieusement toute réponse à 1000 lignes
+// (db-max-rows) quand la requête n'a ni .range() ni .limit() explicite — un
+// `.select('*')` nu ne renvoie alors PAS une erreur mais une liste tronquée.
+// Sans ORDER BY, rien ne garantit que les lignes gardées soient les plus
+// anciennes ou les plus récentes : pour un cabinet passé au-delà de 1000
+// contacts, un contact fraîchement créé peut simplement ne jamais apparaître
+// dans la liste, sans qu'aucune erreur ni aucun filtre ne l'explique (bug
+// constaté : AAZS, 1621 contacts, le contact BELLERY créé le jour même absent
+// des 1000 lignes renvoyées). Repaginé en interne pour toujours renvoyer
+// la liste complète, comme avant que le cabinet ne dépasse ce seuil.
+const CONTACTS_PAGE_SIZE = 1000;
+
+async function fetchAllContacts(supabaseAdmin: any, tenantId: string): Promise<{ data: any[]; error: any }> {
+  const rows: any[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId)
+      .range(offset, offset + CONTACTS_PAGE_SIZE - 1);
+    if (error) return { data: rows, error };
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < CONTACTS_PAGE_SIZE) break;
+    offset += CONTACTS_PAGE_SIZE;
+  }
+  return { data: rows, error: null };
+}
+
 export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   // Un contact "pro" reste partagé par tout le cabinet ; un contact
   // `is_personal` n'appartient qu'à son créateur (`owner_user_id`, jamais
@@ -60,7 +87,7 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       // le réglage ne doit jamais masquer des contacts déjà visibles avant son
       // introduction.
       const showPersonal = (profileRow as any)?.show_personal_contacts ?? true;
-      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('*');
+      const { data, error } = await fetchAllContacts(supabaseAdmin, tenantId);
       if (error) throw error;
       const visible = (data || []).filter((c: any) => {
         if (!c.is_personal) return true;
