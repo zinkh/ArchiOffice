@@ -82,6 +82,7 @@ import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
+import { ResourceAttachments } from '../components/ResourceAttachments';
 
 import { useTranslation } from 'react-i18next';
 
@@ -261,6 +262,7 @@ export default function ProjectDetail() {
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
+  const [expandedPermitId, setExpandedPermitId] = useState<string | null>(null);
   const [isAddingRfi, setIsAddingRfi] = useState(false);
   const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
@@ -3620,39 +3622,51 @@ export default function ProjectDetail() {
                     ) : (
                       <div className="space-y-2">
                         {permits.map(p => (
-                          <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
-                              <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
-                              <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <select
-                                className="text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
-                                value={p.status}
-                                onChange={async (e) => {
-                                  const status = e.target.value;
-                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
-                                  if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
-                                }}
-                              >
-                                <option value="en_instruction">En instruction</option>
-                                <option value="accorde">Accordé</option>
-                                <option value="refuse">Refusé</option>
-                                <option value="recours">Recours</option>
-                              </select>
+                          <div key={p.id} className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg overflow-hidden">
+                            <div className="flex items-center justify-between gap-2 px-3 py-2 group">
                               <button
-                                onClick={async () => {
-                                  if (!confirm(t('projectdetail_confirm_delete_permit'))) return;
-                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
-                                  if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
-                                }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
-                                title="Supprimer"
+                                type="button"
+                                onClick={() => setExpandedPermitId(expandedPermitId === p.id ? null : p.id)}
+                                className="flex items-center gap-3 min-w-0 text-left"
                               >
-                                <IconTrash size={14} />
+                                {expandedPermitId === p.id ? <IconChevronDown size={14} className="text-[var(--tblr-muted)] shrink-0" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)] shrink-0" />}
+                                <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
+                                <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
+                                <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
                               </button>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <select
+                                  className="text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
+                                  value={p.status}
+                                  onChange={async (e) => {
+                                    const status = e.target.value;
+                                    const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
+                                    if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
+                                  }}
+                                >
+                                  <option value="en_instruction">En instruction</option>
+                                  <option value="accorde">Accordé</option>
+                                  <option value="refuse">Refusé</option>
+                                  <option value="recours">Recours</option>
+                                </select>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(t('projectdetail_confirm_delete_permit'))) return;
+                                    const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
+                                    if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
+                                  }}
+                                  className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                  title="Supprimer"
+                                >
+                                  <IconTrash size={14} />
+                                </button>
+                              </div>
                             </div>
+                            {expandedPermitId === p.id && (
+                              <div className="px-3 pb-3 pt-1 border-t border-[var(--tblr-border)]">
+                                <ResourceAttachments resourceType="permits" resourceId={p.id} category="CERFA" />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

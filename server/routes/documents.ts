@@ -18,6 +18,19 @@ import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
 import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
+// Ressources auxquelles une pièce jointe peut se rattacher au-delà d'un
+// projet (resource_type/resource_id, voir migrate_documents_attachments.sql).
+// Liste explicite plutôt qu'un import d'AGENT_RESOURCES : plusieurs clés de
+// ce jeu-là (ex. "references", "articles_type") ont un basePath qui ne
+// correspond PAS au nom réel de leur table, et assertTenantEntity() prend le
+// nom de table tel quel — mieux vaut une liste vérifiée à la main que de
+// risquer un `.from()` sur une table inexistante ou, pire, sur la mauvaise.
+export const ATTACHABLE_RESOURCE_TYPES: string[] = [
+  'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
+  'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
+  'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones',
+];
+
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -41,11 +54,40 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     return (data as any) || null;
   }
 
+  // Le sous-dossier d'une pièce jointe rattachée à autre chose qu'un projet
+  // (permis, réunion, réserve...) : la plupart de ces ressources portent
+  // elles-mêmes un project_id, donc le fichier va nicher dans le dossier de
+  // l'affaire — sinon (contacts, devis, appels d'offres, qui n'ont pas
+  // encore d'affaire) il tombe dans un sous-dossier nommé d'après la
+  // ressource, à la racine « Général », comme un document sans affaire.
+  const RESOURCE_FOLDER_LABELS: Record<string, string> = {
+    contacts: 'Contacts', proposals: 'Devis', tenders: "Appels d'offres",
+    permits: 'Permis', meetings: 'Réunions', receptions: 'Réceptions', reserves: 'Réserves',
+    contrats_moe: 'Contrats MOE', ordres_de_service: 'Ordres de service', visas: 'VISA',
+    notes_honoraires: "Notes d'honoraires", marches_entreprises: 'Marchés entreprises',
+    tasks: 'Tâches', milestones: 'Jalons',
+  };
+
+  async function folderPathForResource(resourceType: string, resourceId: string | null, tenantId: string): Promise<string[]> {
+    if (resourceType === 'projects') return buildDocumentFolderPath(await loadFolderProject(resourceId, tenantId), null);
+    if (!resourceId) return buildDocumentFolderPath(null, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
+    const { data } = await supabaseAdmin.from(resourceType).select('project_id').eq('id', resourceId).eq('tenant_id', tenantId).maybeSingle();
+    const linkedProjectId = (data as any)?.project_id || null;
+    const project = linkedProjectId ? await loadFolderProject(linkedProjectId, tenantId) : null;
+    return buildDocumentFolderPath(project, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
+  }
+
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id } = req.query;
+      const { project_id, resource_type, resource_id } = req.query;
       const query = supabaseAdmin.from('documents').select('*').eq('tenant_id', tenantId);
+      // resource_type/resource_id (fiche permis, devis, appel d'offres...)
+      // et project_id (l'onglet Documents d'une affaire) filtrent
+      // indépendamment — aucun des deux n'implique l'autre, puisque
+      // resource_type vaut 'projects' par défaut sur toute ligne existante.
+      if (resource_type) query.eq('resource_type', resource_type as string);
+      if (resource_id) query.eq('resource_id', resource_id as string);
       if (project_id) query.eq('project_id', project_id as string);
       const { data, error } = await query;
       if (error) throw error;
@@ -72,23 +114,45 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
+
+      // Rattachement générique (voir migrate_documents_attachments.sql) : par
+      // défaut une pièce jointe reste rattachée à un projet comme avant.
+      // resource_type/resource_id (le permis, l'appel d'offres... visé) prend
+      // le relais quand le formulaire (ou un outil MCP) en fournit un autre —
+      // resource_id retombe sur project_id pour ne pas casser l'onglet
+      // Documents existant, qui n'envoie jamais ces deux champs.
+      const resourceTypeRaw = req.body.resource_type;
+      if (resourceTypeRaw && !ATTACHABLE_RESOURCE_TYPES.includes(resourceTypeRaw)) {
+        return res.status(400).json({ error: `resource_type "${resourceTypeRaw}" non pris en charge.` });
+      }
+      const resourceType = resourceTypeRaw || 'projects';
+      const resourceIdVal = req.body.resource_id || (resourceType === 'projects' ? projectIdVal : null);
+      if (resourceType !== 'projects') {
+        if (!resourceIdVal) return res.status(400).json({ error: 'resource_id est requis avec resource_type.' });
+        if (!(await assertTenantEntity(supabaseAdmin, resourceType, resourceIdVal, tenantId))) {
+          return res.status(400).json({ error: `Fiche "${resourceType}" introuvable pour ce cabinet.` });
+        }
+      }
+
       const phaseVal = phase || null;
       const id = crypto.randomUUID();
       const phaseSegment = phaseVal ? `${phaseVal}/` : '';
       const stored = await storeBusinessFile({
         tenantId,
         bucket: 'documents',
-        folderPath: buildDocumentFolderPath(await loadFolderProject(projectIdVal, tenantId), phaseVal),
+        folderPath: resourceType === 'projects'
+          ? buildDocumentFolderPath(await loadFolderProject(projectIdVal, tenantId), phaseVal)
+          : await folderPathForResource(resourceType, resourceIdVal, tenantId),
         fileName: file.originalname,
-        supabasePath: `${tenantId}/${projectIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`,
+        supabasePath: `${tenantId}/${projectIdVal || resourceIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`,
       }, file.buffer, file.mimetype);
       const file_url = stored.fileUrl;
       const uploaded_at = new Date().toISOString();
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, resource_type: resourceType, resource_id: resourceIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, mime_type: file.mimetype, size_bytes: stored.sizeBytes, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, size_bytes: stored.sizeBytes });
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
-      res.status(201).json({ id });
+      res.status(201).json({ id, file_url, size_bytes: stored.sizeBytes, uploaded_at });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
   });
 
