@@ -1,0 +1,22 @@
+-- ============================================================
+-- ArchiOffice — Migration : bibliothèque de connaissances des agents
+-- ============================================================
+-- Même principe qu'une colonne de plus par capacité (web_fetch_enabled,
+-- mail_enabled, geo_enabled, docs_read_enabled, delegate_enabled,
+-- notify_users_enabled, web_search_enabled) plutôt qu'une entrée dans
+-- action_scopes : réglable agent par agent depuis /agents/:id/edit, off par
+-- défaut, jamais héritée d'un template (voir routes.ts, POST /api/agents).
+--
+-- knowledge_enabled active l'injection, à chaque tour de conversation, du
+-- contenu des documents que l'architecte a déposés pour CET agent —
+-- réglementation, DTU, notices — via ResourceAttachments sur sa fiche
+-- (documents.resource_type = 'agents', resource_id = l'agent ; 'agents'
+-- rejoint donc ATTACHABLE_RESOURCE_TYPES dans server/routes/documents.ts,
+-- aucune nouvelle table n'était nécessaire). Contrairement à un document
+-- joint à un message (attached_document_ids), ces documents ne sont pas
+-- choisis à chaque question : une fois déposés, ils sont relus intégralement
+-- à chaque tour, comme firm_knowledge (voir buildAgentContext, context.ts)
+-- — d'où un plafond de nombre et de taille par document (MAX_KNOWLEDGE_DOCS/
+-- MAX_KNOWLEDGE_DOC_CHARS) pour rester un coût de jetons prévisible plutôt
+-- qu'un moteur de recherche dans un gros corpus.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS knowledge_enabled BOOLEAN NOT NULL DEFAULT FALSE;

@@ -344,6 +344,7 @@ const MCP_CAPS: AgentCapabilities = {
   delegate: false,
   notifyUsers: false,
   webSearch: false,
+  knowledge: false,
 };
 
 function genericTools(): FunctionDeclarationLike[] {

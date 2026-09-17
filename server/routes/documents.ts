@@ -25,10 +25,15 @@ import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/s
 // correspond PAS au nom réel de leur table, et assertTenantEntity() prend le
 // nom de table tel quel — mieux vaut une liste vérifiée à la main que de
 // risquer un `.from()` sur une table inexistante ou, pire, sur la mauvaise.
+// 'agents' porte la bibliothèque de connaissances d'un agent IA (voir
+// migrate_agent_knowledge.sql, capabilities.knowledge dans
+// packages/archioffice-agents) : réglementation, DTU, notices — auto-injectés
+// dans le prompt de CET agent à chaque tour (buildAgentContext), jamais
+// affichés comme un document de projet.
 export const ATTACHABLE_RESOURCE_TYPES: string[] = [
   'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
   'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
-  'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones',
+  'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones', 'agents',
 ];
 
 export interface RouteDeps {
@@ -65,7 +70,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     permits: 'Permis', meetings: 'Réunions', receptions: 'Réceptions', reserves: 'Réserves',
     contrats_moe: 'Contrats MOE', ordres_de_service: 'Ordres de service', visas: 'VISA',
     notes_honoraires: "Notes d'honoraires", marches_entreprises: 'Marchés entreprises',
-    tasks: 'Tâches', milestones: 'Jalons',
+    tasks: 'Tâches', milestones: 'Jalons', agents: 'Bibliothèque de connaissances',
   };
 
   async function folderPathForResource(resourceType: string, resourceId: string | null, tenantId: string): Promise<string[]> {
