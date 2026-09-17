@@ -1569,6 +1569,63 @@ document sans être individuellement repérable dans l'image.
 lue dans `settings` par `server/agencyIdentity.ts` : logo et coordonnées en
 en-tête, adresse et SIRET en pied de page, pagination « P1|2 » en bas à droite.
 
+### Pièces jointes polymorphes et MCP
+
+`documents` ne se rattachait jusqu'ici qu'à un projet (`project_id`) : une
+fiche sans projet — un permis (PC/DP/AT), un appel d'offres, un devis — n'avait
+aucun moyen de porter un fichier, alors que le cas déclencheur (un CERFA rempli
+et ses notices sur une fiche `permits`) en avait justement besoin.
+`supabase/migrate_documents_attachments.sql` ajoute `resource_type` (défaut
+`'projects'`) et `resource_id`, backfillé depuis `project_id` : toute ligne
+existante garde son sens, et l'onglet Documents d'une affaire continue de
+filtrer par `project_id` sans y toucher. `mime_type`/`size_bytes` rejoignent
+aussi `documents` elle-même (`document_versions` n'avait que `size_bytes`) :
+les lire à la demande aurait voulu rouvrir la dernière version à chaque appel.
+
+**`ATTACHABLE_RESOURCE_TYPES`** (`server/routes/documents.ts`) est une liste
+explicite plutôt qu'un import d'`AGENT_RESOURCES` : certaines clés de ce
+jeu-là (`references`, `articles_type`...) ont un `basePath` qui ne
+correspond PAS au nom réel de leur table, et `assertTenantEntity()` prend le
+nom de table tel quel — une liste vérifiée à la main évite un `.from()` sur
+la mauvaise table. `POST /api/documents` valide `resource_id` avec
+`assertTenantEntity` dès que `resource_type !== 'projects'`, exactement
+comme le fait déjà `project_id`. Le dossier logique sur l'espace de stockage
+du cabinet (`folderPathForResource`) niche sous le projet de la ressource
+quand elle en porte un (un permis a toujours un `project_id`), et retombe
+sur un sous-dossier nommé d'après la ressource sinon (devis, appels
+d'offres, qui n'ont pas encore d'affaire).
+
+**Le MCP ArchiOffice** (`packages/archioffice-agents/src/server/mcp/tools.ts`)
+gagne quatre outils écrits à la main — `upload_document`, `list_documents`,
+`get_document`, `delete_document` — aucun ne rentrant dans le moule
+générique `create_record`/`update_record` (un upload porte un fichier
+binaire encodé en base64, pas un objet JSON). Ils réutilisent tels quels
+`POST/GET/DELETE /api/documents` : `upload_document` reconstruit un
+`FormData`/`Blob` en mémoire (Node 22, pas de dépendance ajoutée) plutôt que
+d'ouvrir une route JSON parallèle, et `get_document` repasse par
+`GET /api/storage/signed-url` (le même mécanisme que l'ouverture d'un
+document côté navigateur) avant de retélécharger et encoder les octets —
+aucune nouvelle route de lecture de fichier n'a donc été nécessaire.
+Limite commune 25 Mo (`MAX_MCP_FILE_BYTES`), plus basse que la limite serveur
+(50 Mo, `server/documentUpload.ts`) : un fichier voyage en base64 dans
+l'appel JSON-RPC lui-même, environ un tiers plus volumineux que l'original.
+`delete_document` suit la même confirmation en deux temps que
+`delete_record`/`consulter_agent` (`needs_confirmation` puis `confirm: true`)
+— exception délibérée à la règle « jamais de suppression depuis une liaison
+externe » : retirer UNE pièce jointe n'a pas les conséquences de supprimer
+la fiche elle-même.
+
+`DOCUMENT_RESOURCE_TYPES` (mcp/tools.ts) est une copie à la main de
+`ATTACHABLE_RESOURCE_TYPES` : ce paquet n'importe rien du serveur hôte (même
+raison que la copie de `parseStorageRef` dans `context.ts`), donc pas de
+source commune possible — les deux listes doivent être maintenues ensemble.
+
+**Côté écran**, `src/components/ResourceAttachments.tsx` est le pendant
+générique : liste/dépose/supprime les pièces jointes d'une fiche donnée
+(`resourceType`/`resourceId`), câblé pour l'instant sur la fiche permis
+(`ProjectDetail.tsx`, ligne dépliable). Les autres ressources attachables
+pourront le réutiliser tel quel quand leur propre écran de détail existera.
+
 ### Notifications système (PWA et poste de travail)
 
 Le flux d'activité ne prévient personne quand l'application est fermée, et le

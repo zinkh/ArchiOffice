@@ -214,4 +214,62 @@ describe('Documents', () => {
     await request(app).delete('/api/documents/doc-b2').set(authHeader(token));
     expect(fakeSupabaseAdmin.getTable('documents').find(d => d.id === 'doc-b2')).toBeDefined();
   });
+
+  describe('resource_type/resource_id (pièces jointes hors projet)', () => {
+    it('attaches a document to a permit, storing resource_type/resource_id, mime_type and size_bytes', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('permits', [{ id: 'permit1', tenant_id: tenantId, project_id: 'p1' }]);
+
+      const res = await request(app).post('/api/documents').set(authHeader(token))
+        .field('resource_type', 'permits').field('resource_id', 'permit1')
+        .field('name', 'CERFA 13409').field('category', 'CERFA')
+        .attach('file', Buffer.from('%PDF-fake'), 'cerfa.pdf');
+      expect(res.status).toBe(201);
+
+      const doc = fakeSupabaseAdmin.getTable('documents').find(d => d.id === res.body.id);
+      expect(doc?.resource_type).toBe('permits');
+      expect(doc?.resource_id).toBe('permit1');
+      expect(doc?.mime_type).toBe('application/pdf');
+      expect(doc?.size_bytes).toBeGreaterThan(0);
+    });
+
+    it('rejects an unsupported resource_type', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+
+      const res = await request(app).post('/api/documents').set(authHeader(token))
+        .field('resource_type', 'articles_type').field('resource_id', 'whatever')
+        .field('name', 'X')
+        .attach('file', Buffer.from('%PDF-fake'), 'x.pdf');
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a resource_id belonging to another tenant', async () => {
+      const tenantB = makeTenant();
+      fakeSupabaseAdmin.seed('permits', [{ id: 'permit-b', tenant_id: tenantB, project_id: 'pb' }]);
+      const tenantA = makeTenant();
+      const { token } = makeUser(tenantA);
+
+      const res = await request(app).post('/api/documents').set(authHeader(token))
+        .field('resource_type', 'permits').field('resource_id', 'permit-b')
+        .field('name', 'X')
+        .attach('file', Buffer.from('%PDF-fake'), 'x.pdf');
+      expect(res.status).toBe(400);
+    });
+
+    it('filters the list by resource_type/resource_id, independently of project_id', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('documents', [
+        { id: 'doc-permit', tenant_id: tenantId, name: 'CERFA', resource_type: 'permits', resource_id: 'permit1', project_id: null },
+        { id: 'doc-other-permit', tenant_id: tenantId, name: 'Notice', resource_type: 'permits', resource_id: 'permit2', project_id: null },
+        { id: 'doc-project', tenant_id: tenantId, name: 'DPGF', resource_type: 'projects', resource_id: 'p1', project_id: 'p1' },
+      ]);
+
+      const res = await request(app).get('/api/documents').query({ resource_type: 'permits', resource_id: 'permit1' }).set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.map((d: any) => d.id)).toEqual(['doc-permit']);
+    });
+  });
 });
