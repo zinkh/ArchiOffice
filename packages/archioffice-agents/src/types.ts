@@ -92,15 +92,22 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'] },
     defaults: { status: 'Draft' },
     fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
-  { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'specifications', label: 'Anciennes fiches « cahier des charges » (obsolète)', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'project_id', 'description', 'content'],
     // project_id est obligatoire depuis l'incident du 7 septembre 2026 : un
     // agent avait créé 19 CCTP sans projet (project_id NULL), invisibles
     // nulle part dans l'application (la seule vue qui les affiche filtre par
     // projet), en réponse à des demandes qui visaient en réalité la
     // Bibliothèque d'ouvrages (voir la ressource 'articles_type' ci-dessous).
+    //
+    // Cette ressource n'est PLUS le CCTP depuis que /specifications est
+    // devenue la bibliothèque d'ouvrages (CLAUDE.md, « Le CCTP n'est pas un
+    // document séparé ») : la table `specifications` est un reliquat que
+    // plus aucune vue de l'application n'affiche comme un CCTP. Un agent qui
+    // y écrit malgré tout reproduit l'incident du 7 septembre — une fiche
+    // créée pour rien, invisible pour l'utilisateur qui l'a demandée.
     required: ['title', 'project_id'],
-    fields: 'title*, project_id*, description, content' },
+    fields: "title*, project_id*, description, content. RÉSERVÉ à d'anciennes fiches ; N'ÉCRIS JAMAIS ici pour un CCTP ou un DPGF — utilise l'outil write_dpgf_article (capacité docsWrite) si disponible, sinon dis à l'utilisateur qu'aucun outil d'écriture n'est activé pour cet agent." },
   { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
     // À ne pas confondre avec 'specifications' (CCTP) : ceci est le catalogue
     // d'articles réutilisables du cabinet — un article a un prix unitaire et
@@ -222,6 +229,13 @@ export interface AgentCapabilities {
   geo: boolean;
   /** Lecture du CCTP et du DPGF d'un projet. */
   docsRead: boolean;
+  /** write_dpgf_article — créer ou modifier un article du CCTP/DPGF d'un
+   *  projet (texte technique et/ou ligne chiffrée). Palier distinct de la
+   *  lecture, jamais implicite : mêmes principes que mailSend/mailRead.
+   *  Sans elle, un agent n'a AUCUN moyen d'écrire un CCTP ou un DPGF — la
+   *  ressource 'specifications' d'AGENT_RESOURCES ne doit jamais servir de
+   *  repli (voir sa description). */
+  docsWrite: boolean;
   /** consulter_agent — interroger un collègue (autre agent actif du cabinet)
    *  et recevoir sa réponse dans le même tour. Un seul niveau : un agent
    *  consulté ne peut pas lui-même en consulter un autre (voir routes.ts,
@@ -249,6 +263,7 @@ export function capabilitiesFromAgent(agent: {
   mail_send_enabled?: boolean | null;
   geo_enabled?: boolean | null;
   docs_read_enabled?: boolean | null;
+  docs_write_enabled?: boolean | null;
   delegate_enabled?: boolean | null;
   notify_users_enabled?: boolean | null;
   web_search_enabled?: boolean | null;
@@ -262,6 +277,11 @@ export function capabilitiesFromAgent(agent: {
     mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
     geo: !!agent.geo_enabled,
     docsRead: !!agent.docs_read_enabled,
+    // Même invariant que mailSend : écrire sans lire n'a pas de sens (un
+    // agent ne peut pas ajouter un article cohérent à un document qu'il ne
+    // consulte pas) et le serveur le refuserait de toute façon (PUT
+    // /api/agents/:id applique le même ET).
+    docsWrite: !!agent.docs_read_enabled && !!agent.docs_write_enabled,
     delegate: !!agent.delegate_enabled,
     notifyUsers: !!agent.notify_users_enabled,
     webSearch: !!agent.web_search_enabled,
@@ -286,6 +306,7 @@ export interface Agent {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  docs_write_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
@@ -363,6 +384,7 @@ export interface AgentRow {
   mail_send_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  docs_write_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;

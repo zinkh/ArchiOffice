@@ -1134,6 +1134,8 @@ export default {
       "agent_config_mail_send_warning": "Un email part à l'extérieur du cabinet et ne se rattrape pas. L'agent doit toujours présenter son brouillon et obtenir un accord explicite avant d'envoyer, mais la responsabilité du message reste celle du cabinet.",
       "agent_config_geo": "Interroger les données publiques d'urbanisme (adresse, cadastre, PLU, risques, monuments historiques)",
       "agent_config_docs_read": "Lire le CCTP, le DPGF et le BPU des projets",
+      "agent_config_docs_write": "Créer ou modifier des articles du CCTP/DPGF (texte technique, quantités, prix unitaires)",
+      "agent_config_docs_write_warning": "L'agent peut créer des lots, chapitres et articles et modifier des prix directement dans le DPGF du projet. Relis toujours ce qu'il a écrit avant de considérer le document comme définitif.",
       "agent_config_web_search": "Effectuer une recherche web en temps réel pour une information récente (nécessite un fournisseur IA qui la prend en charge)",
       "agent_config_delegate": "Consulter un collègue (autre agent du cabinet) et recevoir sa réponse immédiatement",
       "agent_config_notify_users": "Publier dans Notifications & Flux d'activité pour prévenir quelqu'un du cabinet",

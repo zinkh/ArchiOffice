@@ -169,6 +169,10 @@ export function registerAgentRoutes(
           mail_send_enabled: false,
           geo_enabled: !!t.geo_enabled,
           docs_read_enabled: !!t.docs_read_enabled,
+          // Jamais hérité, comme mail_send_enabled : c'est une capacité
+          // d'écriture, jamais implicite, au cabinet de l'activer
+          // explicitement depuis /agents/:id après avoir créé l'agent.
+          docs_write_enabled: false,
           web_search_enabled: false,
           is_active: true, is_system_template: false,
         };
@@ -182,7 +186,7 @@ export function registerAgentRoutes(
           context_scopes: context_scopes || [],
           action_scopes: action_scopes || [],
           web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
-          geo_enabled: false, docs_read_enabled: false, web_search_enabled: false,
+          geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, web_search_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
         };
       }
@@ -201,7 +205,7 @@ export function registerAgentRoutes(
       const {
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
-        mail_send_enabled, geo_enabled, docs_read_enabled, web_search_enabled,
+        mail_send_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
         system_prompt_override, is_active,
       } = req.body;
       const { data, error } = await supabaseAdmin.from('agents').update({
@@ -215,6 +219,9 @@ export function registerAgentRoutes(
         mail_send_enabled: !!mail_enabled && !!mail_send_enabled,
         geo_enabled: !!geo_enabled,
         docs_read_enabled: !!docs_read_enabled,
+        // Même invariant : écrire un CCTP/DPGF sans pouvoir le lire n'a pas
+        // de sens (voir capabilitiesFromAgent).
+        docs_write_enabled: !!docs_read_enabled && !!docs_write_enabled,
         web_search_enabled: !!web_search_enabled,
         system_prompt_override, is_active,
       }).eq('id', id).eq('tenant_id', tenantId).select().single();

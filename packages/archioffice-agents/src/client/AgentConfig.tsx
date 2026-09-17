@@ -45,6 +45,7 @@ export default function AgentConfig() {
   const [mailSendEnabled, setMailSendEnabled] = useState(false);
   const [geoEnabled, setGeoEnabled] = useState(false);
   const [docsReadEnabled, setDocsReadEnabled] = useState(false);
+  const [docsWriteEnabled, setDocsWriteEnabled] = useState(false);
   const [delegateEnabled, setDelegateEnabled] = useState(false);
   const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -69,6 +70,7 @@ export default function AgentConfig() {
         setMailSendEnabled(!!found.mail_send_enabled);
         setGeoEnabled(!!found.geo_enabled);
         setDocsReadEnabled(!!found.docs_read_enabled);
+        setDocsWriteEnabled(!!found.docs_write_enabled);
         setDelegateEnabled(!!found.delegate_enabled);
         setNotifyUsersEnabled(!!found.notify_users_enabled);
         setWebSearchEnabled(!!found.web_search_enabled);
@@ -110,6 +112,7 @@ export default function AgentConfig() {
           mail_send_enabled: mailEnabled && mailSendEnabled,
           geo_enabled: geoEnabled,
           docs_read_enabled: docsReadEnabled,
+          docs_write_enabled: docsReadEnabled && docsWriteEnabled,
           delegate_enabled: delegateEnabled,
           notify_users_enabled: notifyUsersEnabled,
           web_search_enabled: webSearchEnabled,
@@ -320,6 +323,20 @@ export default function AgentConfig() {
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_read')}</span>
           </label>
 
+          {/* L'écriture est un second palier, comme l'envoi de mail : sans
+              lecture, elle n'a pas de sens et le serveur la refuserait. */}
+          <label className={`flex items-center gap-3 pl-7 ${docsReadEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              disabled={!docsReadEnabled}
+              checked={docsReadEnabled && docsWriteEnabled}
+              onChange={() => setDocsWriteEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: '#c92a2a' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_write')}</span>
+          </label>
+
           <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -358,6 +375,13 @@ export default function AgentConfig() {
           <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
             <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
             <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_mail_send_warning')}</p>
+          </div>
+        )}
+
+        {docsReadEnabled && docsWriteEnabled && (
+          <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
+            <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
+            <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_docs_write_warning')}</p>
           </div>
         )}
       </section>
