@@ -2,7 +2,7 @@ import { AGENT_RESOURCES, type AgentResourceDef, type AgentCapabilities } from '
 import { fetchUrlSafely } from './webFetch.js';
 import { buildMailTools, executeMailTool, MAIL_TOOL_NAMES } from './mailTools.js';
 import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
-import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES } from './projectDocTools.js';
+import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES, buildWriteProjectDocTools, executeWriteProjectDocTool, PROJECT_DOC_WRITE_TOOL_NAMES } from './projectDocTools.js';
 import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
 import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
@@ -132,6 +132,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
   if (caps.geo) tools.push(...buildGeoTools());
   if (caps.docsRead) tools.push(...buildProjectDocTools());
+  if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
   if (caps.delegate) tools.push(...buildDelegateTools());
   if (caps.notifyUsers) tools.push(...buildNotifyTools());
 
@@ -364,6 +365,12 @@ export async function executeAgentAction(
     if (!caps.docsRead) return { response: { error: "La lecture du CCTP et du DPGF n'est pas activée pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return executeProjectDocTool(baseUrl, auth, name, args);
+  }
+
+  if (name && PROJECT_DOC_WRITE_TOOL_NAMES.includes(name)) {
+    if (!caps.docsWrite) return { response: { error: "L'écriture du CCTP et du DPGF n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeWriteProjectDocTool(baseUrl, auth, name, args);
   }
 
   if (name && DELEGATE_TOOL_NAMES.includes(name)) {

@@ -103,7 +103,10 @@ async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string
 // Toutes les ressources du cabinet (contacts, devis, appels d'offres,
 // réunions, jalons, réserves, contrats MOE, bibliothèque d'ouvrages...),
 // jamais la suppression, jamais l'envoi de mail réel (create_draft suffit),
-// jamais fetch_url/consulter un collègue/publier au flux d'activité.
+// jamais fetch_url/consulter un collègue/publier au flux d'activité,
+// jamais l'écriture du CCTP/DPGF (write_dpgf_article) — même prudence que
+// pour la suppression : un outil MCP externe reste en lecture/écriture de
+// fiches simples, jamais sur un document arborescent aux totaux dérivés.
 const MCP_CAPS: AgentCapabilities = {
   actionScopes: AGENT_RESOURCES.map(r => r.key),
   webFetch: false,
@@ -111,6 +114,7 @@ const MCP_CAPS: AgentCapabilities = {
   mailSend: false,
   geo: true,
   docsRead: true,
+  docsWrite: false,
   delegate: false,
   notifyUsers: false,
   webSearch: false,

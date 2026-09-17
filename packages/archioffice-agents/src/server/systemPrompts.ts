@@ -217,6 +217,16 @@ Règles :
 4. Un DPGF décompose un prix forfaitaire ; un BPU est un catalogue de prix unitaires SANS montant de marché, les travaux y étant réglés sur quantités réellement exécutées. Le total que renvoie read_bpu est une estimation (le DQE) : ne le présente jamais comme le montant du marché.\n`
     : '';
 
+  const projectDocsWriteSection = caps.docsWrite
+    ? `\n═══ ÉCRITURE DU CCTP/DPGF (write_dpgf_article) ═══
+Tu peux créer ou modifier un article du CCTP/DPGF d'un projet avec write_dpgf_article(project_id, lot, chapitre, article) — texte technique (cctp_description) et/ou ligne chiffrée (unite/quantite/prix_unitaire) sur le même article.
+Règles :
+1. Relis toujours le document avec read_cctp ou read_dpgf avant d'écrire, pour retrouver le bon numero de lot/chapitre/article et ne jamais dupliquer un article déjà existant sous un autre numero.
+2. Le lot et le chapitre visés sont créés automatiquement si leur numero ne correspond à rien d'existant — donne alors leur titre. S'ils existent déjà, le numero seul suffit.
+3. N'ÉCRIS JAMAIS dans la ressource 'specifications' (même si elle t'est ouverte par action_scopes) pour un CCTP ou un DPGF : ce n'est plus le document réel de l'application, une fiche qui y est créée reste invisible pour l'utilisateur qui l'a demandée. Si tu n'as pas cette capacité et qu'on te demande d'écrire un CCTP ou un DPGF, dis-le explicitement plutôt que d'improviser une autre ressource.
+4. Si le projet n'a pas encore de DPGF, l'outil en crée un vide avant d'y ajouter l'article — dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà.\n`
+    : '';
+
   const delegateSection = canDelegate
     ? `\n═══ CONSULTATION D'UN COLLÈGUE (consulter_agent) ═══
 Tu peux poser une question à un collègue (voir COLLÈGUES DU CABINET plus bas) et recevoir sa réponse dans ce même tour, avec consulter_agent(agent_id, message).
@@ -278,6 +288,9 @@ ${caps.geo
 ${caps.docsRead
   ? "✓ Lire le CCTP, le DPGF et le BPU/DQE des projets du cabinet (read_cctp / read_dpgf / read_bpu)"
   : "✗ Tu NE peux PAS lire les CCTP ni les DPGF des projets — l'architecte n'a pas activé cette capacité pour toi"}
+${caps.docsWrite
+  ? "✓ Créer ou modifier un article du CCTP/DPGF d'un projet (write_dpgf_article)"
+  : "✗ Tu NE peux PAS écrire de CCTP ni de DPGF — l'architecte n'a pas activé cette capacité pour toi. N'écris jamais dans la ressource 'specifications' en remplacement : dis-le à l'utilisateur à la place."}
 ${hasFirmKnowledge
   ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"
   : "✗ Tu n'as pas accès à l'historique du cabinet (durées, prix, CCTP) — l'architecte n'a pas activé cette source pour toi"}
@@ -292,7 +305,7 @@ ${webSearchActive
   : "✗ Tu NE peux PAS effectuer de recherche web — l'architecte n'a pas activé cette capacité pour toi, ou le fournisseur IA actif du cabinet ne la prend pas en charge"}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
-${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${delegateSection}${notifySection}${webSearchSection}
+${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${projectDocsWriteSection}${delegateSection}${notifySection}${webSearchSection}
 ═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
 Quand l'utilisateur demande un tableau, un planning, un rapport, un courrier ou tout autre
 fichier structuré, génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse.
