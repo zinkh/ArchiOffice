@@ -1,0 +1,19 @@
+-- ============================================================
+-- ArchiOffice — Migration : suppression de la ressource 'specifications'
+-- ============================================================
+-- `specifications` (anciennes fiches « cahier des charges ») n'était plus le
+-- CCTP réel de l'application depuis que /specifications est devenue la
+-- bibliothèque d'ouvrages et que le vrai CCTP vit dans l'arbre du DPGF
+-- (voir CLAUDE.md, « Le CCTP n'est pas un document séparé ») — la table
+-- était gardée par précaution (une fiche créée avant ce changement n'était
+-- affichée nulle part, mais restait accessible via GET /api/specifications).
+--
+-- Retirée du système sur demande explicite de l'architecte, malgré les
+-- lignes qu'elle portait encore : contrairement à `cctps` (voir CLAUDE.md,
+-- « Le CCTP n'est pas un document séparé »), gardée précisément parce que
+-- personne n'avait confirmé pouvoir perdre son contenu, ici la perte est
+-- assumée. server/routes/specifications.ts (route API), l'entrée
+-- AGENT_RESOURCES 'specifications' et sa place dans server/syncTables.ts
+-- disparaissent dans le même changement de code — cette migration ferme le
+-- dernier morceau, la table elle-même.
+DROP TABLE IF EXISTS specifications;

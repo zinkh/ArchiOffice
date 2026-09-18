@@ -367,14 +367,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_tenant_project  ON tasks(tenant_id, project
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_assignee ON tasks(tenant_id, assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_status   ON tasks(tenant_id, status);
 
-CREATE TABLE IF NOT EXISTS specifications (
-  id TEXT PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id TEXT, title TEXT NOT NULL, content TEXT,
-  last_updated TEXT, is_template INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_specifications_tenant_project ON specifications(tenant_id, project_id);
-
 CREATE TABLE IF NOT EXISTS ordres_de_service (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -650,7 +642,6 @@ ALTER TABLE project_cotraitants  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_stakeholders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_lots         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks                ENABLE ROW LEVEL SECURITY;
-ALTER TABLE specifications       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordres_de_service    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_reports         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_report_notes    ENABLE ROW LEVEL SECURITY;
@@ -740,8 +731,6 @@ CREATE POLICY "tenant_isolation" ON project_stakeholders
 CREATE POLICY "tenant_isolation" ON project_lots
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON tasks
-  USING (tenant_id = my_tenant_id());
-CREATE POLICY "tenant_isolation" ON specifications
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON ordres_de_service
   USING (tenant_id = my_tenant_id());

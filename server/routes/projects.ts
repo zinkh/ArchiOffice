@@ -93,10 +93,9 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       // alimente le classement « ouverts récemment ». Meilleur effort : une
       // instance non migrée ne doit pas perdre l'accès à ses projets pour ça.
       recordProjectOpened(supabaseAdmin, tenantId, req.user.id, id).catch(() => {});
-      const [milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
+      const [milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
-        supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('ordres_de_service').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('avenants_moe').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('marches_entreprises').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
@@ -106,7 +105,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
       ]);
       const reserves = await attachReservePhotos(supabaseAdmin, tenantId, 'opr', reservesRows);
-      res.json({ project, milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
+      res.json({ project, milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch project details" });
@@ -305,7 +304,6 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
-        supabaseAdmin.from('specifications').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId),
       ]);
       const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);

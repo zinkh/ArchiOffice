@@ -92,28 +92,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'] },
     defaults: { status: 'Draft' },
     fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
-  { key: 'specifications', label: 'Anciennes fiches « cahier des charges » (obsolète)', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
-    knownFields: ['title', 'project_id', 'description', 'content'],
-    // project_id est obligatoire depuis l'incident du 7 septembre 2026 : un
-    // agent avait créé 19 CCTP sans projet (project_id NULL), invisibles
-    // nulle part dans l'application (la seule vue qui les affiche filtre par
-    // projet), en réponse à des demandes qui visaient en réalité la
-    // Bibliothèque d'ouvrages (voir la ressource 'articles_type' ci-dessous).
-    //
-    // Cette ressource n'est PLUS le CCTP depuis que /specifications est
-    // devenue la bibliothèque d'ouvrages (CLAUDE.md, « Le CCTP n'est pas un
-    // document séparé ») : la table `specifications` est un reliquat que
-    // plus aucune vue de l'application n'affiche comme un CCTP. Un agent qui
-    // y écrit malgré tout reproduit l'incident du 7 septembre — une fiche
-    // créée pour rien, invisible pour l'utilisateur qui l'a demandée.
-    required: ['title', 'project_id'],
-    fields: "title*, project_id*, description, content. RÉSERVÉ à d'anciennes fiches ; N'ÉCRIS JAMAIS ici pour un CCTP ou un DPGF — utilise l'outil write_dpgf_article (capacité docsWrite) si disponible, sinon dis à l'utilisateur qu'aucun outil d'écriture n'est activé pour cet agent." },
   { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
-    // À ne pas confondre avec 'specifications' (CCTP) : ceci est le catalogue
-    // d'articles réutilisables du cabinet — un article a un prix unitaire et
-    // se range par corps de métier, un CCTP est un document de projet. Un
-    // agent qui « intègre les articles d'un document à la bibliothèque »
-    // crée un enregistrement par article ici, jamais un CCTP par chapitre.
+    // La ressource 'specifications' (anciennes fiches CCTP, table et route
+    // /api/specifications) a été retirée du système — voir CLAUDE.md, « Le
+    // CCTP n'est pas un document séparé » : elle n'était plus le CCTP réel
+    // depuis longtemps (write_dpgf_article, capacité docsWrite, est le seul
+    // moyen d'écrire un CCTP/DPGF) et avait causé l'incident du 7 septembre
+    // 2026 (19 fiches créées pour rien en réponse à des demandes qui
+    // visaient en réalité CETTE ressource, articles_type — un agent qui
+    // « intègre les articles d'un document à la bibliothèque » crée un
+    // enregistrement par article ici, jamais un CCTP par chapitre).
     knownFields: ['designation', 'unite', 'prix_unitaire', 'categorie', 'lot_type', 'description', 'notes', 'origine', 'code'],
     required: ['designation'],
     enums: { origine: ['reference', 'saisie', 'bpu', 'offre', 'import'] },
@@ -202,15 +190,19 @@ export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
   'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits'],
   'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
-  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications', 'articles_type'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
-  'responsable-hqe':     ['specifications', 'tasks'],
-  'ingenieur-thermique': ['specifications'],
-  'ingenieur-structure': ['specifications'],
-  'ingenieur-fluides':   ['specifications'],
-  'acousticien':         ['specifications'],
-  'paysagiste':          ['specifications', 'tasks'],
+  'responsable-hqe':     ['tasks'],
+  // Ces quatre métiers n'avaient que 'specifications' (l'ancienne ressource
+  // CCTP, retirée du système — voir CLAUDE.md) en défaut : sans elle, aucun
+  // périmètre d'écriture par défaut ne leur correspond encore, à régler au
+  // cas par cas depuis /agents/:id/edit plutôt que d'improviser un remplaçant.
+  'ingenieur-thermique': [],
+  'ingenieur-structure': [],
+  'ingenieur-fluides':   [],
+  'acousticien':         [],
+  'paysagiste':          ['tasks'],
   'urbaniste':           ['contacts', 'meetings', 'tasks', 'projects'],
 };
 
@@ -232,9 +224,9 @@ export interface AgentCapabilities {
   /** write_dpgf_article — créer ou modifier un article du CCTP/DPGF d'un
    *  projet (texte technique et/ou ligne chiffrée). Palier distinct de la
    *  lecture, jamais implicite : mêmes principes que mailSend/mailRead.
-   *  Sans elle, un agent n'a AUCUN moyen d'écrire un CCTP ou un DPGF — la
-   *  ressource 'specifications' d'AGENT_RESOURCES ne doit jamais servir de
-   *  repli (voir sa description). */
+   *  Sans elle, un agent n'a AUCUN moyen d'écrire un CCTP ou un DPGF —
+   *  AGENT_RESOURCES n'a plus de ressource 'specifications' vers laquelle
+   *  se replier depuis son retrait du système (voir CLAUDE.md). */
   docsWrite: boolean;
   /** consulter_agent — interroger un collègue (autre agent actif du cabinet)
    *  et recevoir sa réponse dans le même tour. Un seul niveau : un agent

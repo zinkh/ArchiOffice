@@ -12,7 +12,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Tenders (*appels d'offres*) + RSS watch | ✅ | Includes RSS source polling and match → tender conversion. |
 | Proposals (*devis*) with AI-assisted drafting | ✅ | Suggestion endpoint behind the provider-neutral LLM layer, gated by per-tenant AI credits. |
 | Contracts (*contrats MOE*) | ✅ | Co-traitants/sous-traitants, status workflow. |
-| CCTP (technical specifications) | 🟡 | Two parallel data models exist server-side (`/api/specifications` and the newer `/api/projects/:id/cctp` + `/api/cctps/:id`). Functionally usable, but treat this as still consolidating — don't build external integrations against both. |
+| CCTP (technical specifications) | ✅ | Lives in the same lot/chapitre/article tree as the DPGF (`cctpDescription`/`cctpOnly` fields, `/api/projects/:id/dpgf`) — no separate CCTP resource. The former `/api/specifications` table/route was removed. |
 | DPGF (cost breakdown), XML import | ✅ | Import of existing DPGF XML files works. |
 | Situations / progress billing (*états d'acompte*) | ✅ | Includes PDF export of the *état d'acompte*. |
 | Invoicing (Factur-X / EN 16931) | ✅ | |

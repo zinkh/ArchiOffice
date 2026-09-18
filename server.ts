@@ -37,7 +37,6 @@ import { registerLeaveRoutes } from "./server/routes/leave";
 import { registerTenderRoutes } from "./server/routes/tenders";
 import { registerTenderRssRoutes } from "./server/routes/tenderRss";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
-import { registerSpecificationRoutes } from "./server/routes/specifications";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
 import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
@@ -959,7 +958,6 @@ export async function createApp() {
   registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
-  registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
   registerAdminSupportRoutes(app, { supabaseAdmin, uploadToStorage });

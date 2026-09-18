@@ -130,7 +130,6 @@ The schema lives in `supabase/schema.sql`. Key tables:
 | `proposals` | Client proposals (devis) |
 | `tenders` | Market opportunities (appels d'offres) |
 | `invoices` | Factures (Factur-X EN 16931 compliant) |
-| `specifications` | Anciens documents « cahier des charges » — plus exposés dans l'UI depuis que `/specifications` est devenue la bibliothèque d'ouvrages ; l'API subsiste, les lignes sont conservées |
 | `articles_type` | Bibliothèque d'ouvrages du cabinet (article, prix courant, classement, provenance) |
 | `article_prix_observations` | Prix constatés par article, sans écraser le prix courant |
 | `ref_sfb_elements`, `ref_corps_etat`, `ref_dtu`, `ref_dtu_corps_etat`, `ref_naf` | Nomenclatures publiques, **globales** et non multi-tenant |
@@ -729,7 +728,7 @@ acceptait un identifiant de clé étrangère depuis le corps de la requête
 `marche_id`, `assignee_id`/`user_id`) vérifie désormais son appartenance au
 cabinet avant l'écriture — `invoices.ts`, `proposals.ts`, `tenders.ts`,
 `timeTracking.ts`, `meetings.ts`, `observations.ts`, `visas.ts`,
-`specifications.ts`, `tasks.ts`, `reserves.ts`, `rfis.ts`, `situations.ts`,
+`tasks.ts`, `reserves.ts`, `rfis.ts`, `situations.ts`,
 `projects.ts`, `receptions.ts`, `plans.ts`, `priceLibrary.ts`,
 `projectMembers.ts`, `ordresDeService.ts`, `permits.ts`, `maf.ts`,
 `marchesEntreprises.ts`, `meetingAttendees.ts`, `milestones.ts`,
@@ -1286,12 +1285,13 @@ deux morts ou cassés :
    cette route morte et rapportait donc systématiquement qu'aucun CCTP
    n'existait, quel que soit le projet demandé — un bug utilisateur réel,
    pas seulement du code mort.
-3. **L'ancienne table `specifications`**, qui servait de CCTP avant que
-   `/specifications` ne devienne la bibliothèque d'ouvrages (voir plus bas) ;
-   `packages/archioffice-agents/src/server/context.ts`'s `firmKnowledge`
-   (scope `firm_knowledge`) y puisait encore ses `cctpExcerpts` — du contenu
-   qui ne reçoit plus d'écriture depuis ce changement, donc de plus en plus
-   périmé au fil du temps.
+3. **L'ancienne table `specifications`** (depuis retirée du système, voir
+   plus bas), qui servait de CCTP avant que `/specifications` ne devienne la
+   bibliothèque d'ouvrages (voir plus bas) ; `packages/archioffice-agents/
+   src/server/context.ts`'s `firmKnowledge` (scope `firm_knowledge`) y
+   puisait encore ses `cctpExcerpts` — du contenu qui ne recevait plus
+   d'écriture depuis ce changement, donc de plus en plus périmé au fil du
+   temps.
 
 **Correction : `read_cctp` lit maintenant la même route que `read_dpgf`**
 (`/api/projects/:projectId/dpgf`) et `summarizeCctp()` en extrait le texte
@@ -1312,8 +1312,15 @@ instance de production en porte une ligne, écrite par l'ancien hook mort —
 la retirer sans savoir si un cabinet compte dessus serait une perte de
 données pour gagner une ligne dans `schema.sql`. Elle reste donc dans
 `server/syncTables.ts` et `supabase/migrate_add_sync_infra.sql`, vide de
-toute route qui l'écrit ou la lit désormais — même traitement que la table
-`specifications` plus bas, conservée pour la même raison.
+toute route qui l'écrit ou la lit désormais.
+
+**La table `specifications`, elle, a fini par être retirée du système
+entier** — route (`server/routes/specifications.ts`), entrée
+`AGENT_RESOURCES`, place dans `server/syncTables.ts` et table elle-même
+(`supabase/migrate_drop_specifications.sql`) — sur demande explicite de
+l'architecte, malgré les quelques lignes qu'elle portait encore : à la
+différence de `cctps` ci-dessus, la perte a été assumée plutôt que
+préservée par précaution.
 
 ### Pagination et fan-out sur les listes
 

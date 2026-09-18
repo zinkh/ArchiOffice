@@ -231,7 +231,7 @@ Tu peux créer ou modifier un article du CCTP/DPGF d'un projet avec write_dpgf_a
 Règles :
 1. Relis toujours le document avec read_cctp ou read_dpgf avant d'écrire, pour retrouver le bon numero de lot/chapitre/article et ne jamais dupliquer un article déjà existant sous un autre numero.
 2. Le lot et le chapitre visés sont créés automatiquement si leur numero ne correspond à rien d'existant — donne alors leur titre. S'ils existent déjà, le numero seul suffit.
-3. N'ÉCRIS JAMAIS dans la ressource 'specifications' (même si elle t'est ouverte par action_scopes) pour un CCTP ou un DPGF : ce n'est plus le document réel de l'application, une fiche qui y est créée reste invisible pour l'utilisateur qui l'a demandée. Si tu n'as pas cette capacité et qu'on te demande d'écrire un CCTP ou un DPGF, dis-le explicitement plutôt que d'improviser une autre ressource.
+3. N'invente jamais une autre ressource pour écrire un CCTP ou un DPGF. Si tu n'as pas cette capacité et qu'on te le demande, dis-le explicitement plutôt que d'improviser.
 4. Si le projet n'a pas encore de DPGF, l'outil en crée un vide avant d'y ajouter l'article — dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà.\n`
     : '';
 
@@ -298,7 +298,7 @@ ${caps.docsRead
   : "✗ Tu NE peux PAS lire les CCTP ni les DPGF des projets — l'architecte n'a pas activé cette capacité pour toi"}
 ${caps.docsWrite
   ? "✓ Créer ou modifier un article du CCTP/DPGF d'un projet (write_dpgf_article)"
-  : "✗ Tu NE peux PAS écrire de CCTP ni de DPGF — l'architecte n'a pas activé cette capacité pour toi. N'écris jamais dans la ressource 'specifications' en remplacement : dis-le à l'utilisateur à la place."}
+  : "✗ Tu NE peux PAS écrire de CCTP ni de DPGF — l'architecte n'a pas activé cette capacité pour toi. Dis-le à l'utilisateur plutôt que d'improviser avec une autre ressource."}
 ${hasFirmKnowledge
   ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"
   : "✗ Tu n'as pas accès à l'historique du cabinet (durées, prix, CCTP) — l'architecte n'a pas activé cette source pour toi"}

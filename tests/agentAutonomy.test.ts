@@ -58,11 +58,20 @@ describe('périmètre des outils selon les capacités', () => {
     expect(String(docs.response.error)).toMatch(/CCTP/i);
   });
 
-  it('donne un périmètre d\'écriture par défaut à chaque métier du catalogue', () => {
+  it('donne un périmètre d\'écriture par défaut à la plupart des métiers du catalogue', () => {
     expect(AGENT_DEFAULT_ACTION_SCOPES['secretaire']).toContain('meetings');
     expect(AGENT_DEFAULT_ACTION_SCOPES['comptable']).toContain('invoices');
-    for (const scopes of Object.values(AGENT_DEFAULT_ACTION_SCOPES)) {
-      expect(scopes.length).toBeGreaterThan(0);
+    // Quatre métiers d'ingénierie n'avaient que la ressource 'specifications'
+    // (l'ancienne ressource CCTP, retirée du système — voir CLAUDE.md) comme
+    // défaut : leur périmètre est désormais vide plutôt qu'un remplacement
+    // improvisé, à régler au cas par cas depuis /agents/:id/edit.
+    const emptyByDesign = ['ingenieur-thermique', 'ingenieur-structure', 'ingenieur-fluides', 'acousticien'];
+    for (const [metier, scopes] of Object.entries(AGENT_DEFAULT_ACTION_SCOPES)) {
+      if (emptyByDesign.includes(metier)) {
+        expect(scopes.length).toBe(0);
+      } else {
+        expect(scopes.length).toBeGreaterThan(0);
+      }
     }
   });
 });
@@ -489,21 +498,17 @@ describe('préparation des écritures', () => {
   });
 });
 
-// ── Bibliothèque d'ouvrages (articles_type) vs CCTP (specifications) ────────
+// ── Bibliothèque d'ouvrages (articles_type) ─────────────────────────────────
 // Le 7 septembre 2026, un agent a créé 19 CCTP sans projet en réponse à des
 // demandes qui visaient en réalité la Bibliothèque d'ouvrages : les agents
-// n'avaient aucun outil d'écriture sur articles_type, seul le CCTP
-// ressemblait de loin à une « bibliothèque ». Ces tests protègent les deux
-// correctifs : un CCTP exige désormais un projet, et articles_type est une
-// ressource à part entière, jamais confondue avec le CCTP.
+// n'avaient aucun outil d'écriture sur articles_type, seule la ressource
+// 'specifications' (l'ancien CCTP) ressemblait de loin à une « bibliothèque ».
+// Cette ressource a depuis été retirée du système entier (route, table et
+// entrée AGENT_RESOURCES — voir CLAUDE.md) ; ces tests protègent ce qui
+// reste : articles_type comme ressource à part entière, jamais confondue
+// avec le CCTP réel (qui vit désormais dans l'arbre du DPGF).
 describe("Bibliothèque d'ouvrages (articles_type)", () => {
-  const specifications = AGENT_RESOURCES.find(r => r.key === 'specifications')!;
   const articlesType = AGENT_RESOURCES.find(r => r.key === 'articles_type')!;
-
-  it('exige désormais un projet pour créer un CCTP', () => {
-    const prepared = prepareRecord(specifications, { title: 'Lot 00 - Généralités' });
-    expect(prepared.missingRequired).toEqual(['project_id']);
-  });
 
   it("pose 'saisie' comme provenance par défaut d'un article de bibliothèque", () => {
     const prepared = prepareRecord(articlesType, { designation: 'Chape fluide anhydrite' });
@@ -523,7 +528,10 @@ describe("Bibliothèque d'ouvrages (articles_type)", () => {
     // recréer la même ambiguïté avec la bibliothèque.
     expect(articlesType.label).toBe("Bibliothèque d'ouvrages");
     expect(articlesType.label).not.toContain('CCTP');
-    expect(specifications.label).not.toBe("Bibliothèque d'ouvrages");
+  });
+
+  it("n'expose plus aucune ressource 'specifications' — retirée du système", () => {
+    expect(AGENT_RESOURCES.find(r => r.key === 'specifications')).toBeUndefined();
   });
 
   it("expose create/update/delete/search sur articles_type à un agent qui y est autorisé", () => {

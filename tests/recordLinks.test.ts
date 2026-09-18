@@ -60,7 +60,7 @@ describe('buildRecordPath — ressources sous onglet de la fiche projet', () => 
 });
 
 describe('buildRecordPath — cas limites', () => {
-  it("'specifications' (ressource obsolète) et une clé inconnue rendent toujours null", () => {
+  it("'specifications' (ressource retirée du système) et une clé inconnue rendent toujours null", () => {
     expect(buildRecordPath('specifications', { id: 's1', project_id: 'p1' })).toBeNull();
     expect(buildRecordPath('ressource-inconnue', { id: 'x1' })).toBeNull();
   });

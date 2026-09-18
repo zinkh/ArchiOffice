@@ -84,10 +84,6 @@ export function buildRecordPath(resourceKey: string, record: Record<string, unkn
     case 'notes_honoraires':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=HONOS` : null;
 
-    // 'specifications' est une ressource obsolète (voir sa description dans
-    // AGENT_RESOURCES) : aucune vue de l'application ne l'affiche plus,
-    // donc aucun lien possible.
-    case 'specifications':
     default:
       return null;
   }
