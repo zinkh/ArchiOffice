@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { addMonths, subMonths, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isWithinInterval } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -71,6 +72,18 @@ export default function Gantt() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la barre de tâche.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || tasks.length === 0) return;
+    const task = tasks.find(t => t.id === openId);
+    if (task) setModal({ ...task });
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, searchParams]);
 
   // Patch minimal : le PUT n'écrit plus que les champs envoyés, inutile donc
   // de renvoyer la ligne entière (ce qui écrasait `dependencies` au passage).

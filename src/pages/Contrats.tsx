@@ -6,7 +6,7 @@ import {
   IconAlertTriangle, IconFileImport,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
 import { useTranslation } from 'react-i18next';
@@ -1119,6 +1119,18 @@ export default function Contrats() {
   const openNew = () => { setEditingContrat(null); setIsModalOpen(true); };
   const openEdit = (c: ContratMOE) => { setEditingContrat(c); setIsModalOpen(true); };
   const closeModal = () => { setIsModalOpen(false); setEditingContrat(null); };
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || contrats.length === 0) return;
+    const contrat = contrats.find(c => c.id === openId);
+    if (contrat) openEdit(contrat);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contrats, searchParams]);
 
   const handleSave = async (data: Partial<ContratMOE>) => {
     if (editingContrat?.id) {

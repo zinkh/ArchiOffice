@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlus,
@@ -443,6 +444,42 @@ export default function Reunions() {
     setShowNewMeeting(false);
     setMobileView('meetings');
   };
+
+  // Lien direct depuis un agent (?parent=project:<id>|proposal:<id>|tender:<id>
+  // et ?open=<meetingId>, voir recordLinks.ts côté serveur) : cette page
+  // n'affiche jamais « toutes les réunions », il faut d'abord sélectionner le
+  // même parent qu'un clic dans la colonne de gauche avant que la réunion
+  // elle-même ne puisse être ouverte — d'où les deux effets séparés,
+  // enchaînés par le chargement de `meetings` que `loadMeetings` déclenche.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const parent = searchParams.get('parent');
+    if (!parent) return;
+    const [kind, parentId] = parent.split(':');
+    if (kind === 'project' && projects.length > 0) {
+      const project = projects.find(p => p.id === parentId);
+      if (project) selectProject(project);
+    } else if (kind === 'proposal' && proposals.length > 0) {
+      const proposal = proposals.find(p => p.id === parentId);
+      if (proposal) selectProposal(proposal);
+    } else if (kind === 'tender' && tenders.length > 0) {
+      const tender = tenders.find(t => t.id === parentId);
+      if (tender) selectTender(tender);
+    } else {
+      return; // la liste concernée n'est pas encore chargée — on réessaiera au prochain rendu
+    }
+    setSearchParams(prev => { prev.delete('parent'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, proposals, tenders, searchParams]);
+
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || meetings.length === 0) return;
+    const meeting = meetings.find(m => m.id === openId);
+    if (meeting) loadMeetingDetail(meeting);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetings, searchParams]);
 
   const loadMeetingDetail = async (meeting: Meeting) => {
     setLoadingDetail(true);
