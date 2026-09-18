@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
 import CreatableSelect from 'react-select/creatable';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
   IconArrowLeft, 
   IconDeviceFloppy, 
@@ -298,6 +298,37 @@ export default function ProjectDetail() {
   });
   const [pvForm, setPvForm] = useState(defaultPvForm());
 
+  // Extrait de l'onClick « Modifier » d'un PV de réception (onglet AOR) pour
+  // être réutilisable depuis le lien direct d'un agent (?open=receptions:<id>
+  // sur cette page, voir recordLinks.ts et l'effet de lien direct plus bas).
+  const openReceptionForm = (rec: Reception) => {
+    setEditingReceptionId(rec.id);
+    const existingReserves = reserves.filter(r => r.reception_id === rec.id);
+    setPvForm({
+      reference_pv: rec.reference_pv || '',
+      type: rec.type,
+      date: rec.date,
+      lieu: rec.lieu || '',
+      date_limite_levee: rec.date_limite_levee || '',
+      has_reserves: rec.has_reserves,
+      reserves_count: rec.reserves_count || 0,
+      signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
+      observations: rec.observations || '',
+      pv_valide: rec.pv_valide || false,
+      reserves_list: existingReserves.map(r => ({
+        id: r.id,
+        title: r.title,
+        batiment: r.batiment || '',
+        local: r.local || '',
+        lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
+        entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
+        due_date: r.due_date || '',
+        status: r.status,
+      })),
+    });
+    setShowPvForm(true);
+  };
+
   // DOE documents state
   const [doeDocuments, setDoeDocuments] = useState<any[]>([]);
   const doeInputRef = useRef<HTMLInputElement>(null);
@@ -313,6 +344,44 @@ export default function ProjectDetail() {
       setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
+
+  // Lien direct depuis un agent (?tab=<ONGLET>&open=<resourceKey>:<id>, voir
+  // recordLinks.ts côté serveur) : sept ressources n'ont pas de page propre
+  // et vivent comme onglets de cette fiche. `openResourceKey`/`openRecordId`
+  // sont calculés au rendu (pas dans un effet) pour rester disponibles dès
+  // le premier rendu du prop `initialOpenReserveId` de ReserveTracker plus
+  // bas, qui gère lui-même 'reserves'.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openParam = searchParams.get('open') || '';
+  const [openResourceKey, openRecordId] = openParam.split(':');
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (!tab || !project) return;
+    setActiveTab(tab);
+    setSearchParams(prev => { prev.delete('tab'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, searchParams]);
+
+  useEffect(() => {
+    if (!openParam) return;
+    if (openResourceKey === 'visas') {
+      if (visas.length === 0) return; // pas encore chargées — on réessaiera au prochain rendu
+      const visa = visas.find(v => v.id === openRecordId);
+      if (visa) { setEditingVisa(visa); setIsVisaModalOpen(true); }
+    } else if (openResourceKey === 'receptions') {
+      if (receptions.length === 0) return;
+      const rec = receptions.find(r => r.id === openRecordId);
+      if (rec) openReceptionForm(rec);
+    }
+    // 'reserves' est consommé directement par ReserveTracker via son prop
+    // initialOpenReserveId (calculé ci-dessus) ; milestones/permits/
+    // marches_entreprises/notes_honoraires n'ont que l'onglet déjà posé par
+    // l'effet précédent (voir recordLinks.ts) — rien de plus à faire ici
+    // dans les deux cas, seulement nettoyer le paramètre.
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visas, receptions, searchParams]);
 
   useEffect(() => {
     // Unconditional (not tab-gated): the "Phase actuelle" buttons (INFOS tab)
@@ -4561,6 +4630,7 @@ export default function ProjectDetail() {
                   lotsList={project?.lots_list}
                   project={project}
                   settings={settings}
+                  initialOpenReserveId={openResourceKey === 'reserves' ? openRecordId : undefined}
                 />
 
                 <ReserveTracker
@@ -4855,33 +4925,7 @@ export default function ProjectDetail() {
                                   {/* Edit */}
                                   <button
                                     title="Modifier"
-                                    onClick={() => {
-                                      setEditingReceptionId(rec.id);
-                                      const existingReserves = reserves.filter(r => r.reception_id === rec.id);
-                                      setPvForm({
-                                        reference_pv: rec.reference_pv || '',
-                                        type: rec.type,
-                                        date: rec.date,
-                                        lieu: rec.lieu || '',
-                                        date_limite_levee: rec.date_limite_levee || '',
-                                        has_reserves: rec.has_reserves,
-                                        reserves_count: rec.reserves_count || 0,
-                                        signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
-                                        observations: rec.observations || '',
-                                        pv_valide: rec.pv_valide || false,
-                                        reserves_list: existingReserves.map(r => ({
-                                          id: r.id,
-                                          title: r.title,
-                                          batiment: r.batiment || '',
-                                          local: r.local || '',
-                                          lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
-                                          entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
-                                          due_date: r.due_date || '',
-                                          status: r.status,
-                                        })),
-                                      });
-                                      setShowPvForm(true);
-                                    }}
+                                    onClick={() => openReceptionForm(rec)}
                                     className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
                                   >
                                     <IconFileText size={15} />

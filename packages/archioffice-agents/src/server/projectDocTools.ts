@@ -418,7 +418,6 @@ export function buildWriteProjectDocTools(): FunctionDeclarationLike[] {
         "Crée ou met à jour un article du CCTP/DPGF d'un projet — sa description technique (cctp_description), et/ou sa ligne chiffrée (unite/quantite/prix_unitaire). " +
         "Le lot et le chapitre sont créés automatiquement s'ils n'existent pas encore (donne alors leur titre). S'ils existent déjà, seul leur numero suffit pour les retrouver — inutile de redonner leur titre. " +
         "S'il n'existe encore aucun DPGF pour ce projet, l'outil en crée un vide puis y ajoute l'article : dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà. " +
-        "N'écris JAMAIS dans la ressource 'specifications' pour un CCTP — c'est un reliquat obsolète que l'application n'affiche plus comme tel. " +
         "Toujours relire le document avec read_cctp ou read_dpgf avant d'écrire, pour ne pas dupliquer un article déjà existant sous un autre numero.",
       parametersJsonSchema: {
         type: 'object',

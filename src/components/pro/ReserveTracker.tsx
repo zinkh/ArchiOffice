@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconClipboardCheck,
@@ -39,6 +39,10 @@ interface ReserveTrackerProps {
   /** Pour l'export PDF : l'affaire et la charte du cabinet. */
   project?: ReservesExportProject | null;
   settings?: AgencySettings | null;
+  /** Ouvre directement cette réserve à l'arrivée sur l'onglet — lien direct
+   *  depuis un agent (?open=reserves:<id> sur /projects/:id, voir
+   *  recordLinks.ts côté serveur et ProjectDetail.tsx). */
+  initialOpenReserveId?: string | null;
 }
 
 type Filter = 'ouvertes' | 'retard' | 'levees' | 'toutes';
@@ -59,12 +63,18 @@ const FILTERS: { id: Filter; label: string }[] = [
  * avec la photo prise sur place. L'export PDF (lib/reservesExport.ts) sort
  * la liste filtrée à l'écran.
  */
-export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings }: ReserveTrackerProps) {
+export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
   const { t } = useTranslation();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [openReserveId, setOpenReserveId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialOpenReserveId || reserves.length === 0) return;
+    if (reserves.some(r => r.id === initialOpenReserveId)) setOpenReserveId(initialOpenReserveId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenReserveId, reserves]);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');

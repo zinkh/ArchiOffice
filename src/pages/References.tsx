@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
@@ -981,6 +981,18 @@ export default function References() {
     fetchCategories();
     fetchTeam();
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre le panneau de détail, comme un clic sur la carte.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || items.length === 0) return;
+    const item = items.find(i => i.id === openId);
+    if (item) setSelectedItem(item);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, searchParams]);
 
   const fetchContacts = async () => {
     const localData = await db.contacts.toArray();

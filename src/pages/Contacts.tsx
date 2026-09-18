@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
@@ -65,6 +66,20 @@ export default function Contacts() {
     fetchProjects();
     fetchTenders();
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne, dès que la
+  // liste est chargée, puis retire le paramètre pour ne pas la rouvrir si le
+  // contact est modifié et la liste rafraîchie.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || contacts.length === 0) return;
+    const contact = contacts.find(c => c.id === openId);
+    if (contact) handleEdit(contact);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts, searchParams]);
 
   const fetchContacts = () => {
     fetchJson('/api/contacts')

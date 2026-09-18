@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
@@ -197,6 +197,18 @@ export default function Proposals() {
     };
     loadData();
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || proposals.length === 0) return;
+    const proposal = proposals.find(p => p.id === openId);
+    if (proposal) handleEditClick(proposal);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals, searchParams]);
 
   const fetchMilestones = async () => {
     try {

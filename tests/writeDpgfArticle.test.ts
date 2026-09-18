@@ -1,7 +1,7 @@
 // write_dpgf_article (packages/archioffice-agents/src/server/projectDocTools.ts)
 // est le seul moyen pour un agent d'écrire un CCTP/DPGF depuis que la
-// ressource 'specifications' d'AGENT_RESOURCES a été signalée obsolète pour
-// cet usage (CLAUDE.md, « Le CCTP n'est pas un document séparé » — voir aussi
+// ressource 'specifications' d'AGENT_RESOURCES a été retirée du système
+// (CLAUDE.md, « Le CCTP n'est pas un document séparé » — voir aussi
 // l'incident du 7 septembre 2026 sur cette même ressource). Comme le reste
 // des outils d'agent, il dépend d'un aller-retour HTTP en boucle locale
 // (voir tools.ts) : ces tests stubbent global.fetch plutôt que de faire

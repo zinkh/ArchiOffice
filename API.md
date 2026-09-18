@@ -104,9 +104,8 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET /api/situations/:projectId/avec-marche`.
 - `GET/POST/PUT/DELETE /api/marches-entreprises(/:id)`.
 
-### Specifications / CCTP
-- `GET/POST/PUT/DELETE /api/specifications(/:id)`.
-- `GET/POST /api/projects/:projectId/cctp`, `PUT/DELETE /api/cctps/:id` — newer, parallel CCTP model (see roadmap note above).
+### CCTP
+CCTP is not a separate resource — it's the `cctpDescription`/`cctpOnly` fields carried by the same lot/chapitre/article tree as the DPGF. See `GET/POST /api/projects/:projectId/dpgf` above. The former `/api/specifications` route (an older, no-longer-displayed CCTP model) and its table were removed.
 
 ### Site supervision
 - `GET/POST/PUT/DELETE /api/ordres_de_service(/:id)`, `PATCH /api/ordres_de_service/:id/status`, `GET /api/ordres_de_service/next-number`.

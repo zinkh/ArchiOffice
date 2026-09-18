@@ -7,6 +7,7 @@ import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './
 import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
+import { buildRecordUrl } from './recordLinks.js';
 
 export type { FunctionDeclarationLike };
 
@@ -543,11 +544,21 @@ export async function executeAgentAction(
       dateWarning = checkSuspiciousDate(resourceKey, savedRecord || body || {});
     }
 
+    // Le lien de la fiche créée/modifiée, à redonner à l'utilisateur pour
+    // qu'il y accède sans repasser par la recherche — voir recordLinks.ts.
+    // savedRecord (relu en base) porte le project_id le plus fiable ; body/
+    // json servent de repli pour delete_record (jamais de lien après coup)
+    // ou une ressource sans `list` (ex. marches_entreprises, absent d'ici).
+    const recordUrl = name !== 'delete_record'
+      ? buildRecordUrl(resourceKey, savedRecord || { ...body, id: json?.id })
+      : null;
+
     return {
       response: {
         success: true,
         ...json,
         ...(savedRecord ? { saved_record: savedRecord } : {}),
+        ...(recordUrl ? { record_url: recordUrl } : {}),
         // Ce que la couche outil a corrigé d'elle-même. Le modèle doit le
         // répercuter à l'utilisateur : un champ écarté est une information
         // qu'il croyait avoir enregistrée.

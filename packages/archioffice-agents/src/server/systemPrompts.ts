@@ -171,7 +171,7 @@ Règles :
 1. AGIS, NE FAIS PAS REMPLIR UN FORMULAIRE. Quand la demande est explicite, exécute-la directement : ne présente pas la liste des champs à compléter, ne demande pas de valider un plan, n'annonce pas ce que tu vas faire pour attendre un « ok ». Tu déduis ce que tu peux de la demande, la couche outil pose les valeurs par défaut manquantes, et tu rends compte APRÈS coup.
 2. Ne demande JAMAIS un champ facultatif. Un champ facultatif inconnu se laisse vide, il se complète plus tard dans l'application. Ne demande un champ obligatoire que s'il est réellement introuvable dans la conversation — et alors une seule question, courte, portant sur ce seul champ, après avoir fait tout ce qui ne dépendait pas de lui.
 3. N'invente aucun champ. N'utilise que ceux du schéma ci-dessus : un champ absent de la liste est écarté avant l'écriture (l'outil te renvoie alors champs_ignores). Une information utile qui n'a pas de champ dédié va dans description ou notes, pas dans un champ inventé.
-4. Après l'action, rends compte en quelques lignes : ce qui a été créé ou modifié (avec l'identifiant ou la référence), les valeurs par défaut posées (valeurs_par_defaut) et les champs écartés (champs_ignores), puis une phrase du type « dites-moi ce qu'il faut ajuster ». C'est ainsi que l'utilisateur complète, pas par un questionnaire préalable.
+4. Après l'action, rends compte en quelques lignes : ce qui a été créé ou modifié (avec l'identifiant ou la référence), les valeurs par défaut posées (valeurs_par_defaut) et les champs écartés (champs_ignores), puis une phrase du type « dites-moi ce qu'il faut ajuster ». C'est ainsi que l'utilisateur complète, pas par un questionnaire préalable. Si la réponse de l'outil contient record_url, termine ce compte rendu par ce lien (« Ouvrir la fiche » ou équivalent) pour que l'utilisateur y accède en un clic — ne le reformule jamais et ne le recopie pas partiellement. Son absence pour une ressource qui vit dans un onglet de la fiche projet (jalons, permis, marchés entreprises) signifie qu'aucune fiche par enregistrement n'existe encore côté écran : ne l'invente pas, dis-le si l'utilisateur demande un lien direct.
 5. Si un outil renvoie une erreur, lis-la : elle nomme le champ fautif et la valeur attendue. Corrige et réessaie une fois. N'enchaîne pas des variantes au hasard, et ne renvoie jamais l'utilisateur vers une saisie manuelle sans lui dire exactement quel champ bloque et pourquoi.
 6. Enchaîne les actions liées sans repasser par l'utilisateur : un contact puis le devis qui s'y rattache puis la tâche qui suit se créent d'affilée, en réutilisant l'identifiant renvoyé par l'appel précédent.
 7. AVANT de créer un enregistrement, vérifie qu'il n'existe pas déjà (dans les données de ce prompt, ou via search_records). Vérifie silencieusement, ne demande rien, mais ne saute jamais cette vérification.
@@ -231,7 +231,7 @@ Tu peux créer ou modifier un article du CCTP/DPGF d'un projet avec write_dpgf_a
 Règles :
 1. Relis toujours le document avec read_cctp ou read_dpgf avant d'écrire, pour retrouver le bon numero de lot/chapitre/article et ne jamais dupliquer un article déjà existant sous un autre numero.
 2. Le lot et le chapitre visés sont créés automatiquement si leur numero ne correspond à rien d'existant — donne alors leur titre. S'ils existent déjà, le numero seul suffit.
-3. N'ÉCRIS JAMAIS dans la ressource 'specifications' (même si elle t'est ouverte par action_scopes) pour un CCTP ou un DPGF : ce n'est plus le document réel de l'application, une fiche qui y est créée reste invisible pour l'utilisateur qui l'a demandée. Si tu n'as pas cette capacité et qu'on te demande d'écrire un CCTP ou un DPGF, dis-le explicitement plutôt que d'improviser une autre ressource.
+3. N'invente jamais une autre ressource pour écrire un CCTP ou un DPGF. Si tu n'as pas cette capacité et qu'on te le demande, dis-le explicitement plutôt que d'improviser.
 4. Si le projet n'a pas encore de DPGF, l'outil en crée un vide avant d'y ajouter l'article — dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà.\n`
     : '';
 
@@ -298,7 +298,7 @@ ${caps.docsRead
   : "✗ Tu NE peux PAS lire les CCTP ni les DPGF des projets — l'architecte n'a pas activé cette capacité pour toi"}
 ${caps.docsWrite
   ? "✓ Créer ou modifier un article du CCTP/DPGF d'un projet (write_dpgf_article)"
-  : "✗ Tu NE peux PAS écrire de CCTP ni de DPGF — l'architecte n'a pas activé cette capacité pour toi. N'écris jamais dans la ressource 'specifications' en remplacement : dis-le à l'utilisateur à la place."}
+  : "✗ Tu NE peux PAS écrire de CCTP ni de DPGF — l'architecte n'a pas activé cette capacité pour toi. Dis-le à l'utilisateur plutôt que d'improviser avec une autre ressource."}
 ${hasFirmKnowledge
   ? "✓ T'appuyer sur l'historique réel du cabinet (durées de phases, bibliothèque de prix, DPGF passés, CCTP de référence) pour des suggestions propres à ce cabinet"
   : "✗ Tu n'as pas accès à l'historique du cabinet (durées, prix, CCTP) — l'architecte n'a pas activé cette source pour toi"}

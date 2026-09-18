@@ -1,7 +1,10 @@
 // Phase 7 batch 10: end-to-end Supertest coverage for the domains extracted
-// into server/routes/{specifications,contacts}.ts — confirms the
-// extraction didn't change behavior and that tenantScopedFrom() still
-// enforces tenant isolation through the real app.
+// into server/routes/contacts.ts — confirms the extraction didn't change
+// behavior and that tenantScopedFrom() still enforces tenant isolation
+// through the real app. The former sibling coverage for
+// server/routes/specifications.ts was removed along with that route and its
+// table (see CLAUDE.md, « Le CCTP n'est pas un document séparé ») — the
+// resource was retired from the system entirely, not just deprecated.
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
@@ -11,55 +14,6 @@ let app: Express;
 
 beforeAll(async () => {
   app = await getTestApp();
-});
-
-describe('Specifications (CCTP)', () => {
-  it('creates, lists, updates, and deletes a specification', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
-
-    const created = await request(app).post('/api/specifications').set(authHeader(token)).send({ project_id: 'p1', title: 'CCTP Lot Gros Œuvre', content: '[]' });
-    expect(created.status).toBe(201);
-    const id = created.body.id;
-    expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === id)?.tenant_id).toBe(tenantId);
-
-    const listed = await request(app).get('/api/specifications').set(authHeader(token));
-    expect(listed.body.some((s: any) => s.id === id)).toBe(true);
-
-    const updated = await request(app).put(`/api/specifications/${id}`).set(authHeader(token)).send({ title: 'CCTP Lot Gros Œuvre (révisé)', content: '[]', is_template: true });
-    expect(updated.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === id)?.title).toBe('CCTP Lot Gros Œuvre (révisé)');
-
-    const deleted = await request(app).delete(`/api/specifications/${id}`).set(authHeader(token));
-    expect(deleted.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === id)).toBeUndefined();
-  });
-
-  it('refuse un CCTP sans projet', async () => {
-    // Un CCTP sans project_id n'apparaît nulle part dans l'application (la
-    // seule vue qui les affiche filtre par projet) — voir server/routes/specifications.ts.
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
-    const res = await request(app).post('/api/specifications').set(authHeader(token)).send({ title: 'CCTP orphelin', content: '[]' });
-    expect(res.status).toBe(400);
-    expect(fakeSupabaseAdmin.getTable('specifications').some(s => s.title === 'CCTP orphelin')).toBe(false);
-  });
-
-  it('never lets a caller update or delete another tenant\'s specification', async () => {
-    const tenantB = makeTenant();
-    const specId = 'spec-b';
-    fakeSupabaseAdmin.seed('specifications', [{ id: specId, tenant_id: tenantB, title: 'SECRET-CCTP-B', content: '[]' }]);
-
-    const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
-
-    await request(app).put(`/api/specifications/${specId}`).set(authHeader(token)).send({ title: 'Hacked', content: '[]' });
-    expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === specId)?.title).toBe('SECRET-CCTP-B');
-
-    await request(app).delete(`/api/specifications/${specId}`).set(authHeader(token));
-    expect(fakeSupabaseAdmin.getTable('specifications').find(s => s.id === specId)).toBeDefined();
-  });
 });
 
 describe('Contacts', () => {

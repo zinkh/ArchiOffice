@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
@@ -270,6 +271,18 @@ export default function Invoices() {
     fetch('/api/superpdp/status').then(r => r.json()).then(s => setSuperpdpConnected(!!s.connected)).catch(() => {});
     fetch('/api/chorus-pro/status').then(r => r.json()).then(s => setChorusProConnected(!!s.connected)).catch(() => {});
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || invoices.length === 0) return;
+    const invoice = invoices.find(i => i.id === openId);
+    if (invoice) handleOpenGenerator(invoice);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, searchParams]);
 
   const handleZohoSync = async () => {
     setIsSyncingZoho(true);
