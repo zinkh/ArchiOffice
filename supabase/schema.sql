@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS tenders (
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
   mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
   withdrawal_deadline TEXT, archived INTEGER DEFAULT 0,
-  ville_execution TEXT
+  ville_execution TEXT, description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tender_specialties (
@@ -231,6 +231,69 @@ CREATE TABLE IF NOT EXISTS tender_specialties (
   tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE,
   specialty_name TEXT NOT NULL, contact_id TEXT
 );
+
+-- Dossier de candidature d'un appel d'offres — voir migrate_tender_dossier.sql
+CREATE TABLE IF NOT EXISTS tender_competitors (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL, info TEXT,
+  risk_level TEXT NOT NULL DEFAULT 'moyen' CHECK (risk_level IN ('faible', 'moyen', 'eleve')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_competitors_tender ON tender_competitors(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_evaluation_criteria (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL, weight_pct NUMERIC NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tender_eval_criteria_tender ON tender_evaluation_criteria(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_pieces (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  section TEXT NOT NULL DEFAULT 'candidature' CHECK (section IN ('candidature', 'offre_technique', 'offre_financiere')),
+  label TEXT NOT NULL, obligatoire BOOLEAN NOT NULL DEFAULT TRUE, quantity_required INTEGER,
+  status TEXT NOT NULL DEFAULT 'a_fournir' CHECK (status IN ('a_fournir', 'fournie', 'detectee_ia')),
+  source_hint TEXT, document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_pieces_tender ON tender_pieces(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_references (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  custom_reference_id UUID REFERENCES custom_references(id) ON DELETE CASCADE,
+  required BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (project_id IS NOT NULL OR custom_reference_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_tender_references_tender ON tender_references(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_methodology_notes (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'a_rediger' CHECK (status IN ('a_rediger', 'redige')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_methodology_tender ON tender_methodology_notes(tenant_id, tender_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS tender_activity_notes (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  author_name TEXT NOT NULL, content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_activity_notes_tender ON tender_activity_notes(tenant_id, tender_id, created_at);
 
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
@@ -633,6 +696,12 @@ ALTER TABLE team_members         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_team         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenders              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tender_specialties   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_competitors        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_evaluation_criteria ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_pieces             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_references         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_methodology_notes  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_activity_notes     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposal_specialties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones           ENABLE ROW LEVEL SECURITY;
@@ -713,6 +782,18 @@ CREATE POLICY "tenant_isolation" ON team_members
 CREATE POLICY "tenant_isolation" ON tenders
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON tender_specialties
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_competitors
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_evaluation_criteria
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_pieces
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_references
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_methodology_notes
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_activity_notes
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON proposals
   USING (tenant_id = my_tenant_id());

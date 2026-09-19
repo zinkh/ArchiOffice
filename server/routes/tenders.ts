@@ -36,16 +36,17 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*), tender_evaluation_criteria(*)').eq('id', id).single();
       if (error || !data) return res.status(404).json({ error: "Tender not found" });
-      res.json({ ...data, specialties_list: (data as any).tender_specialties || [] });
+      const criteria = ((data as any).tender_evaluation_criteria || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
+      res.json({ ...data, specialties_list: (data as any).tender_specialties || [], evaluation_criteria_list: criteria });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch tender" }); }
   });
 
   app.post("/api/tenders", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, ville_execution } = req.body;
+      const { title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution } = req.body;
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
         return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
       }
@@ -53,15 +54,16 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
         return res.status(400).json({ error: "Contact de spécialité introuvable pour ce cabinet." });
       }
       const id = crypto.randomUUID();
-      const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({ id, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null });
+      const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({ id, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', description: description || null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null });
       if (te) throw te;
       if (specialties_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
       if (milestones_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
-      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*)').eq('id', id).single();
+      if (evaluation_criteria_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_evaluation_criteria').insert(evaluation_criteria_list.map((c: any, i: number) => ({ id: crypto.randomUUID(), tender_id: id, label: c.label, weight_pct: c.weight_pct || 0, sort_order: i })));
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*), tender_evaluation_criteria(*)').eq('id', id).single();
       // Log activity
       const userNameTndr = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
-      res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
+      res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [], evaluation_criteria_list: (data as any)?.tender_evaluation_criteria || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
   });
 
@@ -72,6 +74,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       const { data: tender } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('title').eq('id', id).maybeSingle();
       await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').delete().eq('tender_id', id);
       await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').delete().eq('tender_id', id);
+      await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_evaluation_criteria').delete().eq('tender_id', id);
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').delete().eq('id', id);
       if (error) throw error;
       const title = (tender as any)?.title || '';
@@ -86,21 +89,26 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
     try {
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { title, client, submission_deadline, status, value, notes, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, ville_execution } = req.body;
+      const { title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution } = req.body;
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
         return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
       }
       if (!(await assertSpecialtyContacts(supabaseAdmin, tenantId, specialties_list))) {
         return res.status(400).json({ error: "Contact de spécialité introuvable pour ce cabinet." });
       }
-      const { error: ue } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null }).eq('id', id);
+      const { error: ue } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', description: description ?? null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null }).eq('id', id);
       if (ue) throw ue;
       await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').delete().eq('tender_id', id);
       if (specialties_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
       await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').delete().eq('tender_id', id);
       if (milestones_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').insert(milestones_list.map((m: any) => ({ id: crypto.randomUUID(), tender_id: id, title: m.title, due_date: m.due_date, completed: !!m.completed })));
-      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*)').eq('id', id).single();
-      res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [] });
+      if (evaluation_criteria_list !== undefined) {
+        await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_evaluation_criteria').delete().eq('tender_id', id);
+        if (evaluation_criteria_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_evaluation_criteria').insert(evaluation_criteria_list.map((c: any, i: number) => ({ id: crypto.randomUUID(), tender_id: id, label: c.label, weight_pct: c.weight_pct || 0, sort_order: i })));
+      }
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('*, tender_specialties(*), tender_evaluation_criteria(*)').eq('id', id).single();
+      const criteria = ((data as any)?.tender_evaluation_criteria || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
+      res.json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [], evaluation_criteria_list: criteria });
     } catch (e: any) { captureWithContext(e, { route: 'PUT /api/tenders/:id', tenantId, userId: req.user?.id }); res.status(500).json({ error: "Failed to update tender: " + e.message }); }
   });
 }
