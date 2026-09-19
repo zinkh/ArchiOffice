@@ -230,12 +230,12 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
       if (me || !match) return res.status(404).json({ error: "Tender RSS match not found" });
 
       const tenderId = crypto.randomUUID();
-      const notes = [match.link, match.description].filter(Boolean).join('\n\n');
       const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({
         id: tenderId, title: match.title, client: match.pouvoir_adjudicateur || '',
         submission_deadline: match.date_limite_reponse || '', status: 'Draft', value: 0,
+        description: match.description || null, type: match.type_marche || null,
         construction_cost: match.montant_travaux || null, ville_execution: match.ville_execution || null,
-        notes, archived: false
+        notes: match.link || '', archived: false
       });
       if (te) throw te;
 

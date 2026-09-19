@@ -132,6 +132,74 @@ describe('POST /api/tenders/:id/analyze-dce', () => {
   });
 });
 
+describe('POST /api/tenders/:id/estimate-enveloppe', () => {
+  it('refuses a tenant not on the Enterprise plan', async () => {
+    const tenantId = makeTenant({ plan: 'pro', ai_credit_balance_eur_cents: 10000 });
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-env-1';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client' }]);
+
+    const res = await request(app).post(`/api/tenders/${tenderId}/estimate-enveloppe`).set(authHeader(token));
+    expect(res.status).toBe(403);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it('refuses when no DCE document is attached', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-env-2';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client' }]);
+
+    const res = await request(app).post(`/api/tenders/${tenderId}/estimate-enveloppe`).set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
+  it('extracts the estimated fee envelope from the DCE and saves it on the tender', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-env-3';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client' }]);
+    fakeSupabaseAdmin.seed('documents', [{
+      id: 'doc-env-1', tenant_id: tenantId, resource_type: 'tenders', resource_id: tenderId,
+      name: 'rc.pdf', file_url: 'archioffice://documents/rc.pdf',
+    }]);
+    mockChatJson({ enveloppe_previsionnelle: 45000, source_hint: 'RC p.3' });
+
+    const res = await request(app).post(`/api/tenders/${tenderId}/estimate-enveloppe`).set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.enveloppe_previsionnelle).toBe(45000);
+
+    const tender = fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === tenderId);
+    expect(tender?.enveloppe_previsionnelle).toBe(45000);
+  });
+
+  it('does not write anything when the DCE mentions no fee envelope', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-env-4';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client', enveloppe_previsionnelle: null }]);
+    fakeSupabaseAdmin.seed('documents', [{ id: 'doc-env-2', tenant_id: tenantId, resource_type: 'tenders', resource_id: tenderId, name: 'rc.pdf', file_url: 'x' }]);
+    mockChatJson({ enveloppe_previsionnelle: null, source_hint: null });
+
+    const res = await request(app).post(`/api/tenders/${tenderId}/estimate-enveloppe`).set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.enveloppe_previsionnelle).toBeNull();
+    expect(fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === tenderId)?.enveloppe_previsionnelle).toBeNull();
+  });
+
+  it('returns 402 without calling the model when the AI credit balance is exhausted', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 0 });
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-env-5';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client' }]);
+    fakeSupabaseAdmin.seed('documents', [{ id: 'doc-env-3', tenant_id: tenantId, resource_type: 'tenders', resource_id: tenderId, name: 'rc.pdf', file_url: 'x' }]);
+
+    const res = await request(app).post(`/api/tenders/${tenderId}/estimate-enveloppe`).set(authHeader(token));
+    expect(res.status).toBe(402);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/tenders/:id/methodology/:noteId/draft-ai', () => {
   it('drafts the section content and marks it as redige', async () => {
     const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });

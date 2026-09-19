@@ -9,7 +9,7 @@ import {
 import { fetchJson, apiFetch } from '../lib/api';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
-  TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project,
+  TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
 } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
@@ -75,6 +75,12 @@ export default function TenderDetail() {
   const [activityNotes, setActivityNotes] = useState<TenderActivityNote[]>([]);
   const [newActivityNote, setNewActivityNote] = useState('');
   const [aperçuLoaded, setAperçuLoaded] = useState(false);
+  const [enveloppeDraft, setEnveloppeDraft] = useState('');
+  const [isEstimatingEnveloppe, setIsEstimatingEnveloppe] = useState(false);
+  const [enveloppeError, setEnveloppeError] = useState<string | null>(null);
+  const [similarTenders, setSimilarTenders] = useState<SimilarTender[]>([]);
+  const [resultForm, setResultForm] = useState({ entreprise_retenue: '', honoraires_retenus_montant: '' });
+  const [isSavingResult, setIsSavingResult] = useState(false);
 
   // ── Documents : pièces demandées ──
   const [pieces, setPieces] = useState<TenderPieceRequise[]>([]);
@@ -119,6 +125,11 @@ export default function TenderDetail() {
         setCriteriaForm(tenderData.evaluation_criteria_list || []);
         setMandataireId(tenderData.mandataire_id || '');
         setSpecialtiesForm(tenderData.specialties_list || []);
+        setEnveloppeDraft(tenderData.enveloppe_previsionnelle != null ? String(tenderData.enveloppe_previsionnelle) : '');
+        setResultForm({
+          entreprise_retenue: tenderData.entreprise_retenue || '',
+          honoraires_retenus_montant: tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '',
+        });
       } catch (err) {
         console.error('Failed to load tender details:', err);
       } finally {
@@ -134,6 +145,7 @@ export default function TenderDetail() {
       setAperçuLoaded(true);
       fetchJson<TenderCompetitor[]>(`/api/tender-competitors?tender_id=${tender.id}`).then(setCompetitors).catch(console.error);
       fetchJson<TenderActivityNote[]>(`/api/tender-activity-notes?tender_id=${tender.id}`).then(setActivityNotes).catch(console.error);
+      fetchJson<SimilarTender[]>(`/api/tenders/${tender.id}/candidatures-similaires`).then(setSimilarTenders).catch(console.error);
     }
     if (activeTab === 'documents' && !piecesLoaded) {
       setPiecesLoaded(true);
@@ -173,6 +185,50 @@ export default function TenderDetail() {
     try { await saveTenderPatch({ evaluation_criteria_list: criteriaForm }); }
     finally { setIsSavingApercu(false); }
   };
+
+  const saveEnveloppe = async () => {
+    if (!tender) return;
+    const value = enveloppeDraft.trim() === '' ? null : Number(enveloppeDraft);
+    if (value === tender.enveloppe_previsionnelle) return;
+    setIsSavingApercu(true);
+    try { await saveTenderPatch({ enveloppe_previsionnelle: value }); }
+    finally { setIsSavingApercu(false); }
+  };
+
+  const estimateEnveloppeWithAi = async () => {
+    if (!tender) return;
+    setIsEstimatingEnveloppe(true);
+    setEnveloppeError(null);
+    try {
+      const res = await apiFetch<{ enveloppe_previsionnelle: number | null }>(`/api/tenders/${tender.id}/estimate-enveloppe`, { method: 'POST' });
+      if (res.enveloppe_previsionnelle != null) {
+        setEnveloppeDraft(String(res.enveloppe_previsionnelle));
+        setTender(prev => prev ? { ...prev, enveloppe_previsionnelle: res.enveloppe_previsionnelle } : prev);
+      } else {
+        setEnveloppeError(t('tender_detail_enveloppe_not_found'));
+      }
+    } catch (err: any) {
+      setEnveloppeError(err?.message || t('tender_detail_enveloppe_estimate_error'));
+    } finally {
+      setIsEstimatingEnveloppe(false);
+    }
+  };
+
+  const saveResult = async () => {
+    if (!tender) return;
+    setIsSavingResult(true);
+    try {
+      await saveTenderPatch({
+        entreprise_retenue: resultForm.entreprise_retenue.trim() || null,
+        honoraires_retenus_montant: resultForm.honoraires_retenus_montant.trim() === '' ? null : Number(resultForm.honoraires_retenus_montant),
+      });
+    } finally {
+      setIsSavingResult(false);
+    }
+  };
+  const resultPercent = tender?.enveloppe_previsionnelle && resultForm.honoraires_retenus_montant.trim() !== ''
+    ? (Number(resultForm.honoraires_retenus_montant) / tender.enveloppe_previsionnelle) * 100
+    : null;
 
   const addCriterion = () => setCriteriaForm(prev => [...prev, { label: '', weight_pct: 0 }]);
   const updateCriterion = (idx: number, field: 'label' | 'weight_pct', value: string) => {
@@ -486,6 +542,38 @@ export default function TenderDetail() {
                   <IconPlus size={12} /> {t('tender_detail_add_criterion')}
                 </button>
               </div>
+
+              {/* Enveloppe prévisionnelle des honoraires */}
+              <div className="space-y-1.5 pb-2 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+                <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_label')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={0}
+                    placeholder={t('tender_detail_enveloppe_placeholder')}
+                    className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none"
+                    style={inputStyle()}
+                    value={enveloppeDraft}
+                    onChange={e => setEnveloppeDraft(e.target.value)}
+                    onBlur={saveEnveloppe}
+                  />
+                  {isEnterprise && (
+                    <button
+                      onClick={estimateEnveloppeWithAi}
+                      disabled={isEstimatingEnveloppe}
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1.5 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                      style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+                    >
+                      <IconSparkles size={12} className={isEstimatingEnveloppe ? 'animate-pulse' : ''} />
+                      {isEstimatingEnveloppe ? t('tender_detail_analyzing_dce') : t('tender_detail_enveloppe_search_dce')}
+                    </button>
+                  )}
+                </div>
+                {!isEnterprise && <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_ai_enterprise_hint')}</p>}
+                {enveloppeError && (
+                  <p className="text-xs flex items-center gap-1" style={{ color: 'var(--tblr-danger)' }}><IconAlertTriangle size={12} /> {enveloppeError}</p>
+                )}
+              </div>
+
               <div className="space-y-2">
                 {criteriaForm.map((c, idx) => (
                   <div key={idx} className="flex items-center gap-2">
@@ -560,6 +648,25 @@ export default function TenderDetail() {
                 />
                 <button onClick={addCompetitor} className="p-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}><IconPlus size={16} /></button>
               </div>
+
+              {/* Candidatures similaires — autres affaires du cabinet, même type de procédure ou même spécialité, dont l'entreprise retenue est connue */}
+              {similarTenders.length > 0 && (
+                <div className="space-y-2 pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                  <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_similar_tenders_title')}</p>
+                  {similarTenders.map(st => (
+                    <div key={st.id} className="flex items-center justify-between gap-2 p-2 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{st.title}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{st.client}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-bold" style={{ color: 'var(--tblr-primary)' }}>{st.entreprise_retenue}</p>
+                        {st.honoraires_retenus_montant != null && <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(st.honoraires_retenus_montant)}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Correspondance */}
@@ -567,6 +674,44 @@ export default function TenderDetail() {
               <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--tblr-text)' }}>{t('correspondence_title')}</h3>
               <CorrespondenceTab localType="tender" localId={tender.id} contactEmail={mandataireContact?.email} />
             </div>
+          </div>
+
+          {/* Résultat de la consultation */}
+          <div className="rounded-lg p-5 space-y-3 h-fit" style={surfaceCardStyle()}>
+            <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_result_title')}</h3>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_entreprise_label')}</label>
+              <input
+                placeholder={t('tender_detail_result_entreprise_placeholder')}
+                className="w-full px-3 py-1.5 rounded-lg text-sm outline-none"
+                style={inputStyle()}
+                value={resultForm.entreprise_retenue}
+                onChange={e => setResultForm(prev => ({ ...prev, entreprise_retenue: e.target.value }))}
+                onBlur={saveResult}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_honoraires_label')}</label>
+              <input
+                type="number" min={0}
+                placeholder={t('tender_detail_result_honoraires_placeholder')}
+                className="w-full px-3 py-1.5 rounded-lg text-sm outline-none"
+                style={inputStyle()}
+                value={resultForm.honoraires_retenus_montant}
+                onChange={e => setResultForm(prev => ({ ...prev, honoraires_retenus_montant: e.target.value }))}
+                onBlur={saveResult}
+              />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_label')}</span>
+              <span className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>
+                {resultPercent !== null ? `${resultPercent.toFixed(1)} %` : '—'}
+              </span>
+            </div>
+            {resultPercent === null && !tender.enveloppe_previsionnelle && (
+              <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_hint')}</p>
+            )}
+            {isSavingResult && <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('saving')}</p>}
           </div>
 
           {/* Notes de suivi */}

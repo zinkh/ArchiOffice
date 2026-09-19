@@ -609,6 +609,28 @@ export interface Tender {
   evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+  // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
+  // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
+  // consultation, une fois connu : entreprise/cabinet retenu et montant des
+  // honoraires réellement obtenus. Le pourcentage honoraires/enveloppe se
+  // calcule à l'affichage, jamais stocké.
+  enveloppe_previsionnelle?: number | null;
+  entreprise_retenue?: string | null;
+  honoraires_retenus_montant?: number | null;
+}
+
+// Une autre affaire du cabinet dont le résultat (entreprise retenue) est
+// connu, retrouvée par type de procédure ou spécialités communes — voir
+// GET /api/tenders/:id/candidatures-similaires (server/routes/tenders.ts).
+export interface SimilarTender {
+  id: string;
+  title: string;
+  client: string;
+  type?: string | null;
+  entreprise_retenue: string;
+  honoraires_retenus_montant?: number | null;
+  enveloppe_previsionnelle?: number | null;
+  submission_deadline?: string | null;
 }
 
 // Dossier de candidature — voir supabase/migrate_tender_dossier.sql
@@ -726,6 +748,10 @@ export interface TenderRssMatch {
   pouvoir_adjudicateur?: string | null;
   montant_travaux?: number | null;
   date_limite_reponse?: string | null;
+  // Type de procédure (Concours/MAPA), détecté heuristiquement dans le texte
+  // de l'annonce (server/tenderFieldExtractor.ts) — repris comme
+  // tenders.type à la conversion.
+  type_marche?: string | null;
 }
 
 export interface Specification {
