@@ -10,7 +10,7 @@ import { fetchJson, apiFetch } from '../lib/api';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
   TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
-  TenderRssMatch, TenderGroupementMembre,
+  TenderRssMatch, TenderGroupementMembre, Milestone,
 } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
@@ -19,12 +19,13 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { MatchDetailContent } from '../components/tenderRss/MatchDetailContent';
+import { HonorairesSection, type HonorairesDoc } from '../components/HonorairesSection';
 import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT } from '../lib/contactCategories';
 import { toRefItem, customToRefItem, type RefItem, type CustomRef } from '../lib/referenceItems';
 import { useUser } from '../UserContext';
 import { formatCurrency, cn } from '../lib/utils';
 
-type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie';
+type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires';
 
 const SECTION_LABELS: Record<TenderPieceRequise['section'], string> = {
   candidature: 'Candidature',
@@ -100,6 +101,15 @@ export default function TenderDetail() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_COTRAITANT);
 
+  // ── Honoraires (MAPA uniquement) — calcul et répartition identiques à
+  // une proposition (src/components/HonorairesSection.tsx) : brouillon local
+  // édité librement, persisté d'un coup via le bouton "Enregistrer", comme
+  // les autres onglets (Évaluation, Partenaires). ──
+  const [honorairesForm, setHonorairesForm] = useState<HonorairesDoc>({});
+  const [isSavingHonoraires, setIsSavingHonoraires] = useState(false);
+  const [tenderMilestones, setTenderMilestones] = useState<Milestone[]>([]);
+  const [honorairesLoaded, setHonorairesLoaded] = useState(false);
+
   // ── Références ──
   const [references, setReferences] = useState<TenderReference[]>([]);
   const [referencesLoaded, setReferencesLoaded] = useState(false);
@@ -132,6 +142,18 @@ export default function TenderDetail() {
         setEnveloppeDraft(tenderData.enveloppe_previsionnelle != null ? String(tenderData.enveloppe_previsionnelle) : '');
         setGroupementForm(tenderData.groupement_retenu_list || []);
         setHonorairesRetenusDraft(tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '');
+        setHonorairesForm({
+          id: tenderData.id,
+          amount: tenderData.value,
+          construction_cost: tenderData.construction_cost,
+          complexity_rate: tenderData.complexity_rate,
+          base_fee_percent: tenderData.base_fee_percent,
+          miqcp_assessment: tenderData.miqcp_assessment,
+          fee_distribution: tenderData.fee_distribution,
+          specialties_list: tenderData.specialties_list,
+          decimal_precision: tenderData.decimal_precision,
+          vat_rate: tenderData.vat_rate,
+        });
       } catch (err) {
         console.error('Failed to load tender details:', err);
       } finally {
@@ -162,7 +184,11 @@ export default function TenderDetail() {
       setMethodologyLoaded(true);
       fetchJson<TenderMethodologyNote[]>(`/api/tender-methodology-notes?tender_id=${tender.id}`).then(setMethodologyNotes).catch(console.error);
     }
-  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded]);
+    if (activeTab === 'honoraires' && !honorairesLoaded) {
+      setHonorairesLoaded(true);
+      fetchJson<Milestone[]>(`/api/milestones?tender_id=${tender.id}`).then(setTenderMilestones).catch(console.error);
+    }
+  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded, honorairesLoaded]);
 
   const saveTenderPatch = async (patch: Partial<Tender>) => {
     if (!tender) return;
@@ -321,6 +347,25 @@ export default function TenderDetail() {
     finally { setIsSavingPartners(false); }
   };
 
+  // ── Honoraires handlers (MAPA) ──
+  const saveHonoraires = async () => {
+    setIsSavingHonoraires(true);
+    try {
+      await saveTenderPatch({
+        value: honorairesForm.amount,
+        construction_cost: honorairesForm.construction_cost,
+        complexity_rate: honorairesForm.complexity_rate,
+        base_fee_percent: honorairesForm.base_fee_percent,
+        miqcp_assessment: honorairesForm.miqcp_assessment,
+        fee_distribution: honorairesForm.fee_distribution,
+        decimal_precision: honorairesForm.decimal_precision,
+        vat_rate: honorairesForm.vat_rate,
+      });
+    } finally {
+      setIsSavingHonoraires(false);
+    }
+  };
+
   // ── Références handlers ──
   const openRefPicker = async () => {
     setIsRefPickerOpen(true);
@@ -441,6 +486,10 @@ export default function TenderDetail() {
     { id: 'apercu', label: t('tender_detail_tab_apercu') },
     { id: 'documents', label: t('tender_detail_tab_documents'), count: piecesLoaded ? pieces.length : undefined },
     { id: 'partenaires', label: t('tender_detail_tab_partenaires'), count: (tender.specialties_list || []).length || undefined },
+    // Le calcul des honoraires (Assistant MIQCP + répartition entre
+    // cotraitants) ne concerne que les MAPA — un concours ou une procédure
+    // "Other" n'ont pas ce même cadre honoraires/complexité.
+    ...(tender.type === 'MAPA' ? [{ id: 'honoraires' as TabId, label: t('tender_detail_tab_honoraires') }] : []),
     { id: 'organigramme', label: t('tender_detail_tab_organigramme') },
     { id: 'references', label: t('tender_detail_tab_references'), count: referencesLoaded ? references.length : undefined },
     { id: 'methodologie', label: t('tender_detail_tab_methodologie') },
@@ -918,6 +967,26 @@ export default function TenderDetail() {
             </div>
           </div>
           <button onClick={savePartners} disabled={isSavingPartners} className="text-xs font-bold uppercase px-4 py-2 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{t('save')}</button>
+        </div>
+      )}
+
+      {/* Honoraires (MAPA uniquement) — calcul identique à une proposition */}
+      {activeTab === 'honoraires' && tender.type === 'MAPA' && (
+        <div className="rounded-lg p-5" style={surfaceCardStyle()}>
+          <HonorairesSection
+            doc={honorairesForm}
+            onChange={patch => setHonorairesForm(prev => ({ ...prev, ...patch }))}
+            contacts={contacts}
+            onContactCreated={contact => setContacts(prev => [...prev, contact])}
+            milestones={tenderMilestones}
+            onMilestonesChange={setTenderMilestones}
+            milestoneEntityField="tender_id"
+            filenameLabel={tender.title}
+            showCotraitantsTable={false}
+          />
+          <div className="pt-4">
+            <button onClick={saveHonoraires} disabled={isSavingHonoraires} className="text-xs font-bold uppercase px-4 py-2 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{isSavingHonoraires ? t('saving') : t('save')}</button>
+          </div>
         </div>
       )}
 

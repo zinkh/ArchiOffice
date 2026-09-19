@@ -633,6 +633,13 @@ export interface Tender {
   enveloppe_previsionnelle?: number | null;
   groupement_retenu_list?: TenderGroupementMembre[];
   honoraires_retenus_montant?: number | null;
+  // Onglet Honoraires (MAPA uniquement, src/pages/TenderDetail.tsx) : calcul
+  // des honoraires et répartition entre cotraitants, exactement comme dans
+  // une proposition (src/components/HonorairesSection.tsx). `value` porte
+  // déjà le montant des honoraires (voir tenders_valuation_label).
+  fee_distribution?: string; // JSON string, même format que Proposal.fee_distribution
+  vat_rate?: number;
+  decimal_precision?: number;
 }
 
 // Une autre affaire du cabinet dont le résultat (groupement retenu) est

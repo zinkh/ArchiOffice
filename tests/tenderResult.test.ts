@@ -102,6 +102,43 @@ describe('tender result fields (enveloppe, groupement retenu, honoraires)', () =
   });
 });
 
+describe('tender honoraires fields (fee_distribution, vat_rate, decimal_precision)', () => {
+  it('persists the fee distribution and its calculation settings on update', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-hon-1';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire MAPA', client: 'Client', type: 'MAPA', submission_deadline: '', status: 'Draft' }]);
+
+    const feeDistribution = JSON.stringify({ missions: [{ id: 'esquisse', name: 'Esquisse', category: 'Mission base', amount: 1000, percentages: { architect: 100 } }] });
+    const res = await request(app).put(`/api/tenders/${tenderId}`).set(authHeader(token)).send({
+      title: 'Affaire MAPA', client: 'Client', type: 'MAPA', submission_deadline: '', status: 'Draft',
+      value: 10000, construction_cost: 500000, complexity_rate: 1.1, base_fee_percent: 10,
+      fee_distribution: feeDistribution, vat_rate: 20, decimal_precision: 2,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.fee_distribution).toBe(feeDistribution);
+    expect(res.body.vat_rate).toBe(20);
+    expect(res.body.decimal_precision).toBe(2);
+
+    const stored = fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === tenderId);
+    expect(stored?.fee_distribution).toBe(feeDistribution);
+    expect(stored?.construction_cost).toBe(500000);
+    expect(stored?.complexity_rate).toBe(1.1);
+  });
+
+  it('defaults vat_rate and decimal_precision on creation when not provided', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+
+    const res = await request(app).post('/api/tenders').set(authHeader(token)).send({
+      title: 'Nouvelle affaire MAPA', client: 'Client', type: 'MAPA', submission_deadline: '', status: 'Draft',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.vat_rate).toBe(20);
+    expect(res.body.decimal_precision).toBe(2);
+  });
+});
+
 describe('GET /api/tenders/:id/candidatures-similaires', () => {
   it('returns other tenders with a known groupement retenu, matched by same type', async () => {
     const tenantId = makeTenant();
