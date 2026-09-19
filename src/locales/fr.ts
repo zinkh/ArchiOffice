@@ -703,6 +703,8 @@ export default {
       "tender_rss_confirm_delete_source": "Supprimer la source \"{{name}}\" et toutes ses annonces détectées ?",
       "tender_rss_matches_title": "Annonces détectées",
       "tender_rss_no_matches": "Aucune annonce détectée pour le moment.",
+      "tender_rss_search_placeholder": "Rechercher une annonce (titre, source, ville, pouvoir adjudicateur...)",
+      "tender_rss_no_search_results": "Aucune annonce ne correspond à cette recherche.",
       "tender_rss_new": "Nouveau",
       "tender_rss_open_source": "Ouvrir l'annonce source",
       "tender_rss_mark_read": "Marquer comme lu",

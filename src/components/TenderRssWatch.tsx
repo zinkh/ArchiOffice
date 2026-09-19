@@ -1,7 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import {
   IconPlus, IconRss, IconTrash, IconEdit, IconX, IconRefresh, IconExternalLink,
-  IconCheck, IconEye, IconEyeOff, IconAlertTriangle, IconInbox
+  IconCheck, IconEye, IconEyeOff, IconAlertTriangle, IconInbox, IconSearch
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
@@ -107,12 +107,30 @@ export function TenderRssWatch() {
   const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null);
   const [isTestingConnector, setIsTestingConnector] = useState(false);
   const [pageSize, setPageSize] = useState(50);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Only new/read items belong in the inbox — ignored, watched and
   // converted items each have their own destination (hidden, or the
   // "Annonces sélectionnées" tab).
   const inboxMatches = matches.filter(m => m.status === 'new' || m.status === 'read');
-  const matchesPagination = usePagination(inboxMatches, pageSize);
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const searchedMatches = normalizedSearch
+    ? inboxMatches.filter(m => {
+        const haystack = [
+          m.title,
+          m.source_name,
+          m.ville_execution,
+          m.pouvoir_adjudicateur,
+          m.description,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+    : inboxMatches;
+  const matchesPagination = usePagination(searchedMatches, pageSize);
 
   const fetchSources = () => fetchJson<TenderRssSource[]>('/api/tender-rss-sources').then(setSources);
   const fetchMatches = () => fetchJson<TenderRssMatch[]>('/api/tender-rss-matches').then(setMatches);
@@ -492,6 +510,19 @@ export function TenderRssWatch() {
           <div className="flex flex-wrap items-center justify-between gap-3 p-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             <h3 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_matches_title')}</h3>
             {inboxMatches.length > 0 && (
+              <div className="relative w-full sm:w-64">
+                <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
+                <input
+                  type="text"
+                  placeholder={t('tender_rss_search_placeholder')}
+                  className="w-full pl-9 pr-3 py-1.5 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+            )}
+            {inboxMatches.length > 0 && (
               <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                 {t('tender_rss_page_size_label')}
                 <select
@@ -530,6 +561,8 @@ export function TenderRssWatch() {
 
           {inboxMatches.length === 0 ? (
             <div className="py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_no_matches')}</div>
+          ) : searchedMatches.length === 0 ? (
+            <div className="py-10 text-center text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_no_search_results')}</div>
           ) : (
             <div>
               <div className="flex items-center gap-3 px-4 py-2" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
