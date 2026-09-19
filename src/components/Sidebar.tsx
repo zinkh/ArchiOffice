@@ -68,7 +68,7 @@ export const NAV_ITEMS = [
   { name: 'support',        path: '/support',        icon: IconMessageCircle },
 ];
 
-const NAV_SECTIONS = [
+export const NAV_SECTIONS = [
   {
     key: 'gestion',
     label: 'Gestion',
@@ -149,7 +149,16 @@ function loadCollapsed(): Record<string, boolean> {
   }
 }
 
-export function Sidebar() {
+/**
+ * Corps du menu — les catégories repliables (Gestion, Affaires, Outils…),
+ * le lien Super Admin et le bandeau d'essai. Partagé par la barre latérale
+ * desktop (`Sidebar`, toujours montée mais masquée en CSS sous `md`) et le
+ * tiroir mobile du `Header` : les deux doivent afficher le même
+ * regroupement par catégories, pas une liste à plat d'un côté et des
+ * sections de l'autre. `onNavigate` referme le tiroir mobile après un clic ;
+ * `undefined` en desktop, où il n'y a rien à refermer.
+ */
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const location = useLocation();
   const { tenantPlan, isTrialExpired, trialEndsAt, currentUser } = useUser();
@@ -209,37 +218,7 @@ export function Sidebar() {
     : null;
 
   return (
-    <aside
-      className="hidden md:flex flex-col shrink-0 border-r overflow-y-auto"
-      style={{
-        width: 'var(--tblr-sidebar-w)',
-        background: 'var(--tblr-surface)',
-        borderColor: 'var(--tblr-border)',
-      }}
-    >
-      {/* Logo area */}
-      <div
-        className="flex flex-col px-4 py-3 border-b shrink-0"
-        style={{ borderColor: 'var(--tblr-border)', minHeight: 'var(--tblr-navbar-h)' }}
-      >
-        <Link
-          to="/"
-          className="flex items-center gap-2 font-bold text-base tracking-tight"
-          style={{ color: 'var(--tblr-text)' }}
-        >
-          <BrandLogo logoUrl={settings?.logoUrl} size={28} />
-          <span>ArchiOffice</span>
-        </Link>
-        {!settings?.logoUrl && settings?.agencyName && (
-          <p
-            className="mt-0.5 text-[11px] truncate pl-[36px]"
-            style={{ color: 'var(--tblr-muted)' }}
-          >
-            {settings.agencyName}
-          </p>
-        )}
-      </div>
-
+    <>
       {/* Navigation */}
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
         {NAV_SECTIONS.map(section => {
@@ -279,6 +258,7 @@ export function Sidebar() {
                       <Link
                         key={item.path}
                         to={item.path}
+                        onClick={onNavigate}
                         className={cn(
                           'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
                           isActive
@@ -310,6 +290,7 @@ export function Sidebar() {
                       <Link
                         key="/superpdp"
                         to="/superpdp"
+                        onClick={onNavigate}
                         className={cn(
                           'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
                           isActive
@@ -329,6 +310,7 @@ export function Sidebar() {
                       <Link
                         key="/chorus-pro"
                         to="/chorus-pro"
+                        onClick={onNavigate}
                         className={cn(
                           'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
                           isActive
@@ -348,6 +330,7 @@ export function Sidebar() {
                       <Link
                         key="/maf-declaration"
                         to="/maf-declaration"
+                        onClick={onNavigate}
                         className={cn(
                           'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
                           isActive
@@ -372,6 +355,7 @@ export function Sidebar() {
         <div className="px-2 pb-1 border-t pt-2" style={{ borderColor: 'var(--tblr-border)' }}>
           <Link
             to="/admin"
+            onClick={onNavigate}
             className={cn(
               'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
               location.pathname === '/admin'
@@ -390,6 +374,7 @@ export function Sidebar() {
         <div className="p-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
           <Link
             to="/billing"
+            onClick={onNavigate}
             className={cn(
               'flex items-center gap-2 px-3 py-2 rounded text-[12px] font-medium transition-colors border',
               isTrialExpired
@@ -404,6 +389,52 @@ export function Sidebar() {
           </Link>
         </div>
       )}
+    </>
+  );
+}
+
+/**
+ * Barre latérale desktop — le chrome (logo, largeur fixe, bordure) autour du
+ * contenu partagé `SidebarNav`. Toujours montée (masquée en CSS sous `md`
+ * via `hidden md:flex`), donc son état interne (sections repliées, statut
+ * des connecteurs) survit à un simple redimensionnement de fenêtre.
+ */
+export function Sidebar() {
+  const { settings } = useSettings();
+
+  return (
+    <aside
+      className="hidden md:flex flex-col shrink-0 border-r overflow-y-auto"
+      style={{
+        width: 'var(--tblr-sidebar-w)',
+        background: 'var(--tblr-surface)',
+        borderColor: 'var(--tblr-border)',
+      }}
+    >
+      {/* Logo area */}
+      <div
+        className="flex flex-col px-4 py-3 border-b shrink-0"
+        style={{ borderColor: 'var(--tblr-border)', minHeight: 'var(--tblr-navbar-h)' }}
+      >
+        <Link
+          to="/"
+          className="flex items-center gap-2 font-bold text-base tracking-tight"
+          style={{ color: 'var(--tblr-text)' }}
+        >
+          <BrandLogo logoUrl={settings?.logoUrl} size={28} />
+          <span>ArchiOffice</span>
+        </Link>
+        {!settings?.logoUrl && settings?.agencyName && (
+          <p
+            className="mt-0.5 text-[11px] truncate pl-[36px]"
+            style={{ color: 'var(--tblr-muted)' }}
+          >
+            {settings.agencyName}
+          </p>
+        )}
+      </div>
+
+      <SidebarNav />
     </aside>
   );
 }

@@ -13,7 +13,6 @@ import {
   IconMessageCircle,
   IconUser,
   IconBuilding,
-  IconShieldLock,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -25,7 +24,8 @@ import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
-import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
+import { MobileShortcutBar } from './components/MobileShortcutBar';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
@@ -461,10 +461,12 @@ function Header() {
             {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
           </button>
 
-          {/* Messages */}
+          {/* Messages — desktop only : sur mobile ce raccourci vit dans le
+              menu de raccourcis en bas d'écran (Messagerie), et l'icône
+              ci-dessous fusionne son compteur avec celui des notifications. */}
           <button
             onClick={() => navigate('/messages')}
-            className="p-1.5 rounded transition-colors relative"
+            className="hidden md:inline-flex p-1.5 rounded transition-colors relative"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
             onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -481,10 +483,11 @@ function Header() {
             )}
           </button>
 
-          {/* Notifications */}
+          {/* Notifications — desktop only, voir l'icône fusionnée ci-dessous
+              pour le mobile. */}
           <button
             onClick={() => navigate('/notifications')}
-            className="p-1.5 rounded transition-colors relative"
+            className="hidden md:inline-flex p-1.5 rounded transition-colors relative"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
             onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -497,6 +500,28 @@ function Header() {
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {/* Notifications & Messages fusionnées — mobile uniquement. Les
+              deux icônes séparées ci-dessus prennent trop de place sur un
+              écran étroit alors que /notifications porte déjà un filtre
+              « Messages » : une seule icône, un seul badge qui additionne
+              les deux compteurs, vers la page qui couvre les deux. */}
+          <button
+            onClick={() => navigate('/notifications')}
+            className="md:hidden p-1.5 rounded transition-colors relative"
+            style={{ color: 'var(--tblr-muted)' }}
+            title="Notifications et messages"
+          >
+            <IconBell size={18} />
+            {(unreadCount + unreadMessages) > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                style={{ background: 'var(--tblr-danger)' }}
+              >
+                {(unreadCount + unreadMessages) > 99 ? '99+' : unreadCount + unreadMessages}
               </span>
             )}
           </button>
@@ -630,51 +655,13 @@ function Header() {
                 <BrandLogo logoUrl={settings?.logoUrl} size={28} />
                 <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
               </div>
-              {/* Nav items */}
-              <nav className="flex flex-col p-2 gap-0.5 flex-1">
-                {NAV_ITEMS.map((item) => {
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                        isActive
-                          ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                          : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                      )}
-                    >
-                      <item.icon size={18} />
-                      <span>{t(item.name)}</span>
-                    </Link>
-                  );
-                })}
-                {currentUser?.isSuperAdmin && (
-                  <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
-                    {[{ path: '/admin', label: 'Super Admin', icon: IconShieldLock }, { path: '/admin/support', label: 'Support (back-office)', icon: IconMessageCircle }].map(item => {
-                      const isActive = location.pathname === item.path;
-                      return (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                            isActive
-                              ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                              : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                          )}
-                        >
-                          <item.icon size={18} />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </nav>
+              {/* Nav items — mêmes catégories repliables (Gestion, Affaires,
+                  Outils…) que la barre latérale desktop, plutôt qu'une liste
+                  à plat : `SidebarNav` porte à la fois le regroupement et
+                  l'état des connecteurs (Super PDP, Chorus Pro, MAF), déjà
+                  fetché côté desktop mais tout aussi valable ici puisque la
+                  barre desktop reste montée (masquée en CSS) même sur mobile. */}
+              <SidebarNav onNavigate={() => setIsMobileMenuOpen(false)} />
             </motion.div>
           </>
         )}
@@ -773,7 +760,7 @@ function ProtectedLayout() {
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
 
-        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto'}>
+        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}>
           <Outlet />
         </main>
 
@@ -792,6 +779,10 @@ function ProtectedLayout() {
           </footer>
         )}
       </div>
+
+      {/* Menu de raccourcis mobile — masqué sur les routes plein écran
+          (fiche projet, chat d'agent) qui gèrent déjà tout leur espace. */}
+      {!isFullBleedRoute && <MobileShortcutBar />}
     </div>
     </AgentChatProvider>
   );
