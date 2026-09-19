@@ -4,13 +4,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   IconArrowLeft, IconBuildingSkyscraper, IconUsers, IconCalendar, IconCurrencyEuro,
   IconPlus, IconTrash, IconMapPin, IconFileText, IconSparkles, IconLock, IconCheck,
-  IconAlertTriangle, IconX, IconSearch, IconWand,
+  IconAlertTriangle, IconX, IconSearch, IconWand, IconMail,
 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
   TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
-  TenderRssMatch, TenderGroupementMembre, Milestone,
+  TenderRssMatch, TenderGroupementMembre, Milestone, TenderPartnerSolicitation,
 } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
@@ -97,9 +97,17 @@ export default function TenderDetail() {
   // ── Partenaires ──
   const [mandataireId, setMandataireId] = useState('');
   const [specialtiesForm, setSpecialtiesForm] = useState<{ id?: string; specialty_name: string; contact_id?: string }[]>([]);
+  const [exclusiviteForm, setExclusiviteForm] = useState<'totale' | 'partielle' | null>(null);
   const [isSavingPartners, setIsSavingPartners] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_COTRAITANT);
+
+  // ── Sollicitations des bureaux d'études (onglet Partenaires) ──
+  const [solicitations, setSolicitations] = useState<TenderPartnerSolicitation[]>([]);
+  const [solicitationsLoaded, setSolicitationsLoaded] = useState(false);
+  const [newSolicitation, setNewSolicitation] = useState({ specialty_name: '', contact_id: '' });
+  const [solicitationBusyId, setSolicitationBusyId] = useState<string | null>(null);
+  const [solicitationError, setSolicitationError] = useState<string | null>(null);
 
   // ── Honoraires (MAPA uniquement) — calcul et répartition identiques à
   // une proposition (src/components/HonorairesSection.tsx) : brouillon local
@@ -139,6 +147,7 @@ export default function TenderDetail() {
         setCriteriaForm(tenderData.evaluation_criteria_list || []);
         setMandataireId(tenderData.mandataire_id || '');
         setSpecialtiesForm(tenderData.specialties_list || []);
+        setExclusiviteForm(tenderData.exclusivite || null);
         setEnveloppeDraft(tenderData.enveloppe_previsionnelle != null ? String(tenderData.enveloppe_previsionnelle) : '');
         setGroupementForm(tenderData.groupement_retenu_list || []);
         setHonorairesRetenusDraft(tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '');
@@ -188,7 +197,11 @@ export default function TenderDetail() {
       setHonorairesLoaded(true);
       fetchJson<Milestone[]>(`/api/milestones?tender_id=${tender.id}`).then(setTenderMilestones).catch(console.error);
     }
-  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded, honorairesLoaded]);
+    if (activeTab === 'partenaires' && !solicitationsLoaded) {
+      setSolicitationsLoaded(true);
+      fetchJson<TenderPartnerSolicitation[]>(`/api/tender-partner-solicitations?tender_id=${tender.id}`).then(setSolicitations).catch(console.error);
+    }
+  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded, honorairesLoaded, solicitationsLoaded]);
 
   const saveTenderPatch = async (patch: Partial<Tender>) => {
     if (!tender) return;
@@ -343,8 +356,60 @@ export default function TenderDetail() {
   };
   const savePartners = async () => {
     setIsSavingPartners(true);
-    try { await saveTenderPatch({ mandataire_id: mandataireId || undefined, specialties_list: specialtiesForm as any }); }
+    try { await saveTenderPatch({ mandataire_id: mandataireId || undefined, specialties_list: specialtiesForm as any, exclusivite: exclusiviteForm }); }
     finally { setIsSavingPartners(false); }
+  };
+  const toggleExclusivite = (value: 'totale' | 'partielle') => {
+    setExclusiviteForm(prev => prev === value ? null : value);
+  };
+
+  // ── Sollicitations des bureaux d'études ──
+  const addSolicitation = async () => {
+    if (!tender || !newSolicitation.specialty_name.trim() || !newSolicitation.contact_id) return;
+    setSolicitationError(null);
+    try {
+      const created = await apiFetch<TenderPartnerSolicitation>('/api/tender-partner-solicitations', {
+        method: 'POST', body: JSON.stringify({ tender_id: tender.id, specialty_name: newSolicitation.specialty_name.trim(), contact_id: newSolicitation.contact_id }),
+      });
+      setSolicitations(prev => [...prev, created]);
+      setNewSolicitation({ specialty_name: '', contact_id: '' });
+    } catch (err: any) {
+      setSolicitationError(err?.message || t('tender_detail_solicitation_add_error'));
+    }
+  };
+  const removeSolicitation = async (solId: string) => {
+    await apiFetch(`/api/tender-partner-solicitations/${solId}`, { method: 'DELETE' });
+    setSolicitations(prev => prev.filter(s => s.id !== solId));
+  };
+  const setSolicitationStatus = async (sol: TenderPartnerSolicitation, status: TenderPartnerSolicitation['status']) => {
+    setSolicitations(prev => prev.map(s => s.id === sol.id ? { ...s, status } : s));
+    await apiFetch(`/api/tender-partner-solicitations/${sol.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+  };
+  const solicitationContact = (sol: TenderPartnerSolicitation) => contacts.find(c => c.id === sol.contact_id);
+  const solicitationEmailBody = (sol: TenderPartnerSolicitation, isRelance: boolean) => {
+    if (!tender) return { subject: '', text: '' };
+    const subject = `${isRelance ? 'Relance — ' : ''}Consultation ${sol.specialty_name} — ${tender.title}`;
+    const text = isRelance
+      ? `Bonjour,\n\nNous revenons vers vous suite à notre sollicitation concernant la mission "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client}).\n\nMerci de nous indiquer si vous êtes disponible pour nous rejoindre sur ce groupement.\n\nCordialement,`
+      : `Bonjour,\n\nNous sollicitons votre structure pour une mission de "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client})${tender.submission_deadline ? `, dont la date limite de remise est fixée au ${new Date(tender.submission_deadline).toLocaleDateString('fr-FR')}` : ''}.\n\nMerci de nous indiquer votre disponibilité pour nous rejoindre sur ce groupement.\n\nCordialement,`;
+    return { subject, text };
+  };
+  const sendSolicitation = async (sol: TenderPartnerSolicitation, isRelance: boolean) => {
+    const contact = solicitationContact(sol);
+    const to = contact?.email || contact?.email_work;
+    if (!to) { setSolicitationError(t('tender_detail_solicitation_no_email')); return; }
+    setSolicitationBusyId(sol.id);
+    setSolicitationError(null);
+    try {
+      const { subject, text } = solicitationEmailBody(sol, isRelance);
+      await apiFetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to, subject, text }) });
+      const updated = await apiFetch<TenderPartnerSolicitation>(`/api/tender-partner-solicitations/${sol.id}/${isRelance ? 'mark-relance' : 'mark-sent'}`, { method: 'POST' });
+      setSolicitations(prev => prev.map(s => s.id === sol.id ? updated : s));
+    } catch (err: any) {
+      setSolicitationError(err?.message || t('tender_detail_solicitation_send_error'));
+    } finally {
+      setSolicitationBusyId(null);
+    }
   };
 
   // ── Honoraires handlers (MAPA) ──
@@ -596,6 +661,21 @@ export default function TenderDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Visite obligatoire */}
+            {tender.mandatory_visit && (
+              <div className="rounded-lg p-5 flex items-center gap-3" style={surfaceCardStyle()}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--tblr-warning-lt)' }}>
+                  <IconCalendar size={18} style={{ color: 'var(--tblr-warning)' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_mandatory_visit_title')}</p>
+                  <p className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>
+                    {tender.visit_date ? new Date(tender.visit_date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : t('tender_detail_mandatory_visit_no_date')}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Évaluation */}
             <div className="rounded-lg p-5 space-y-3" style={surfaceCardStyle()}>
@@ -926,6 +1006,7 @@ export default function TenderDetail() {
 
       {/* Partenaires */}
       {activeTab === 'partenaires' && (
+        <div className="space-y-6">
         <div className="rounded-lg p-5 space-y-4" style={surfaceCardStyle()}>
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_representative_label')}</label>
@@ -935,6 +1016,19 @@ export default function TenderDetail() {
               onChange={setMandataireId}
               onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_CLIENT); setIsContactModalOpen(true); }}
             />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_exclusivite_label')}</label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                <input type="checkbox" checked={exclusiviteForm === 'totale'} onChange={() => toggleExclusivite('totale')} />
+                {t('tender_detail_exclusivite_totale')}
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                <input type="checkbox" checked={exclusiviteForm === 'partielle'} onChange={() => toggleExclusivite('partielle')} />
+                {t('tender_detail_exclusivite_partielle')}
+              </label>
+            </div>
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -967,6 +1061,86 @@ export default function TenderDetail() {
             </div>
           </div>
           <button onClick={savePartners} disabled={isSavingPartners} className="text-xs font-bold uppercase px-4 py-2 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{t('save')}</button>
+        </div>
+
+        {/* Suivi des sollicitations des bureaux d'études */}
+        <div className="rounded-lg p-5 space-y-4" style={surfaceCardStyle()}>
+          <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_solicitations_title')}</h3>
+          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_solicitations_hint')}</p>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              placeholder={t('tenders_specialty_placeholder')}
+              className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-sm outline-none"
+              style={inputStyle()}
+              value={newSolicitation.specialty_name}
+              onChange={e => setNewSolicitation(prev => ({ ...prev, specialty_name: e.target.value }))}
+            />
+            <ContactAutocomplete
+              className="flex-1 min-w-[12rem]"
+              contacts={contacts}
+              value={newSolicitation.contact_id}
+              onChange={val => setNewSolicitation(prev => ({ ...prev, contact_id: val }))}
+              onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
+            />
+            <button onClick={addSolicitation} className="flex items-center gap-1 text-xs font-bold uppercase px-3 py-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              <IconPlus size={14} /> {t('tender_detail_solicitations_add')}
+            </button>
+          </div>
+          {solicitationError && (
+            <p className="text-xs flex items-center gap-1" style={{ color: 'var(--tblr-danger)' }}><IconAlertTriangle size={12} /> {solicitationError}</p>
+          )}
+
+          <div className="space-y-2">
+            {solicitations.map(sol => {
+              const contact = solicitationContact(sol);
+              const contactName = contact ? `${contact.first_name} ${contact.last_name}${contact.company_name ? ` (${contact.company_name})` : ''}` : '—';
+              const isBusy = solicitationBusyId === sol.id;
+              return (
+                <div key={sol.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg flex-wrap" style={{ border: '1px solid var(--tblr-border)' }}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{sol.specialty_name}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{contactName}</p>
+                    {sol.sent_at && (
+                      <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                        {t('tender_detail_solicitation_sent_on', { date: new Date(sol.sent_at).toLocaleDateString('fr-FR') })}
+                        {sol.relance_count > 0 && ` · ${t('tender_detail_solicitation_relance_count', { count: sol.relance_count })}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <select
+                      value={sol.status}
+                      onChange={e => setSolicitationStatus(sol, e.target.value as TenderPartnerSolicitation['status'])}
+                      className="text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none"
+                      style={
+                        sol.status === 'accepte' ? { background: 'var(--tblr-success-lt)', color: 'var(--tblr-success)', border: 'none' }
+                        : sol.status === 'decline' ? { background: 'var(--tblr-danger-lt)', color: 'var(--tblr-danger)', border: 'none' }
+                        : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: 'none' }
+                      }
+                    >
+                      <option value="a_solliciter">{t('tender_detail_solicitation_status_a_solliciter')}</option>
+                      <option value="sollicite">{t('tender_detail_solicitation_status_sollicite')}</option>
+                      <option value="relance">{t('tender_detail_solicitation_status_relance')}</option>
+                      <option value="accepte">{t('tender_detail_solicitation_status_accepte')}</option>
+                      <option value="decline">{t('tender_detail_solicitation_status_decline')}</option>
+                    </select>
+                    <button
+                      onClick={() => sendSolicitation(sol, sol.status !== 'a_solliciter')}
+                      disabled={isBusy}
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
+                      style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+                    >
+                      <IconMail size={12} /> {isBusy ? t('tender_detail_solicitation_sending') : (sol.status === 'a_solliciter' ? t('tender_detail_solicitation_send') : t('tender_detail_solicitation_relance'))}
+                    </button>
+                    <button onClick={() => removeSolicitation(sol.id)} style={{ color: 'var(--tblr-muted)' }}><IconTrash size={14} /></button>
+                  </div>
+                </div>
+              );
+            })}
+            {solicitations.length === 0 && <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_solicitations_empty')}</p>}
+          </div>
+        </div>
         </div>
       )}
 

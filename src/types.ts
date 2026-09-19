@@ -640,6 +640,29 @@ export interface Tender {
   fee_distribution?: string; // JSON string, même format que Proposal.fee_distribution
   vat_rate?: number;
   decimal_precision?: number;
+  // Exclusivité demandée aux cotraitants — 'totale' (interdit de répondre
+  // dans une autre équipe, tous lots confondus), 'partielle' (interdit
+  // seulement sur le même lot/la même spécialité), ou absente (aucune
+  // exigence). Onglet Partenaires.
+  exclusivite?: 'totale' | 'partielle' | null;
+}
+
+// Une sollicitation d'un bureau d'études pour une spécialité donnée — onglet
+// Partenaires d'un appel d'offres. Indépendante de TenderSpecialty : pour
+// une même spécialité on consulte souvent plusieurs entreprises avant d'en
+// retenir une. Voir GET/POST /api/tender-partner-solicitations
+// (server/routes/tenderPartnerSolicitations.ts).
+export interface TenderPartnerSolicitation {
+  id: string;
+  tender_id: string;
+  specialty_name: string;
+  contact_id: string;
+  status: 'a_solliciter' | 'sollicite' | 'relance' | 'accepte' | 'decline';
+  sent_at?: string | null;
+  last_relance_at?: string | null;
+  relance_count: number;
+  response_notes?: string | null;
+  created_at?: string;
 }
 
 // Une autre affaire du cabinet dont le résultat (groupement retenu) est

@@ -102,6 +102,35 @@ describe('tender result fields (enveloppe, groupement retenu, honoraires)', () =
   });
 });
 
+describe('tender exclusivite field', () => {
+  it('persists the exclusivity mode chosen for co-contractors', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-excl-1';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client', submission_deadline: '', status: 'Draft' }]);
+
+    const res = await request(app).put(`/api/tenders/${tenderId}`).set(authHeader(token)).send({
+      title: 'Affaire', client: 'Client', submission_deadline: '', status: 'Draft', exclusivite: 'totale',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.exclusivite).toBe('totale');
+    expect(fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === tenderId)?.exclusivite).toBe('totale');
+  });
+
+  it('clears exclusivite back to null', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const tenderId = 'tender-excl-2';
+    fakeSupabaseAdmin.seed('tenders', [{ id: tenderId, tenant_id: tenantId, title: 'Affaire', client: 'Client', submission_deadline: '', status: 'Draft', exclusivite: 'partielle' }]);
+
+    const res = await request(app).put(`/api/tenders/${tenderId}`).set(authHeader(token)).send({
+      title: 'Affaire', client: 'Client', submission_deadline: '', status: 'Draft', exclusivite: null,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.exclusivite).toBeNull();
+  });
+});
+
 describe('tender honoraires fields (fee_distribution, vat_rate, decimal_precision)', () => {
   it('persists the fee distribution and its calculation settings on update', async () => {
     const tenantId = makeTenant();
