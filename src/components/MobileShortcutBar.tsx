@@ -11,6 +11,7 @@ import {
 import { cn } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
+import { useAgentChat } from '@zinkh/archioffice-agents/client';
 
 // Raccourcis du quotidien sur le terrain : l'agenda (Réunions) et les
 // comptes rendus de chantier (Réunion de chantier, /reunions) sont deux
@@ -26,16 +27,20 @@ const SHORTCUTS = [
 ] as const;
 
 /**
- * Barre de raccourcis mobile, fixée en bas de l'écran, sur le modèle d'une
- * appli mobile grand public : les pages les plus consultées au quotidien
- * (accueil, projets, messagerie, agenda, comptes rendus de chantier) en
- * accès direct, plus Agents en bouton flottant à droite — toujours au même
- * endroit, quelle que soit la page. N'apparaît pas sur les routes plein
- * écran (fiche projet, chat d'agent) qui gèrent déjà tout leur espace vertical.
+ * Menu de raccourcis mobile — une pastille flottante détachée des bords de
+ * l'écran (pas une barre encastrée) : accueil, projets, messagerie, agenda,
+ * comptes rendus de chantier, plus Agents. Le tabler « Agents » rouvre le
+ * même panneau de chat que le bouton flottant global de
+ * `AgentChatProvider` (`useAgentChat`), jamais une seconde entrée
+ * concurrente — ce bouton global se masque sur mobile (voir AgentChat.tsx)
+ * précisément parce que cette pastille le remplace. N'apparaît pas sur les
+ * routes plein écran (fiche projet, chat d'agent) qui gèrent déjà tout leur
+ * espace vertical.
  */
 export function MobileShortcutBar() {
   const location = useLocation();
   const { currentUser } = useUser();
+  const { openChat } = useAgentChat();
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
@@ -50,32 +55,29 @@ export function MobileShortcutBar() {
     return () => clearInterval(interval);
   }, [currentUser?.email]);
 
+  const itemClass = (isActive: boolean) => cn(
+    'relative flex items-center justify-center w-10 h-10 rounded-full transition-colors shrink-0',
+    isActive ? 'bg-white text-zinc-900' : 'text-white/85 hover:text-white'
+  );
+
   return (
     <nav
-      className="md:hidden fixed bottom-0 inset-x-0 z-30 flex items-stretch"
-      style={{
-        background: 'var(--tblr-surface)',
-        borderTop: '1px solid var(--tblr-border)',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        boxShadow: '0 -2px 12px rgba(0,0,0,.08)',
-      }}
+      className="md:hidden fixed inset-x-0 z-30 flex justify-center pointer-events-none"
+      style={{ bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}
     >
-      <div className="flex-1 flex">
+      <div
+        className="flex items-center gap-1 px-1.5 py-1.5 rounded-full pointer-events-auto"
+        style={{ background: '#15171c', boxShadow: '0 8px 24px rgba(0,0,0,.28)' }}
+      >
         {SHORTCUTS.map(item => {
           const isActive = item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
           const Icon = item.icon;
           return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className="relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors"
-              style={{ color: isActive ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
-            >
-              <Icon size={20} />
-              <span className="leading-none">{item.label}</span>
+            <Link key={item.path} to={item.path} aria-label={item.label} className={itemClass(isActive)}>
+              <Icon size={19} />
               {item.path === '/messages' && unreadMessages > 0 && (
                 <span
-                  className="absolute top-1 right-[24%] min-w-[14px] h-[14px] px-1 rounded-full text-[8px] font-bold text-white flex items-center justify-center leading-none"
+                  className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[3px] rounded-full text-[8px] font-bold text-white flex items-center justify-center leading-none"
                   style={{ background: 'var(--tblr-danger)' }}
                 >
                   {unreadMessages > 9 ? '9+' : unreadMessages}
@@ -84,20 +86,9 @@ export function MobileShortcutBar() {
             </Link>
           );
         })}
-      </div>
-
-      {/* Agents — toujours à droite, en bouton flottant au-dessus de la barre */}
-      <div className="relative w-16 shrink-0">
-        <Link
-          to="/agents"
-          aria-label="Agents"
-          className={cn(
-            'absolute -top-5 left-1/2 -translate-x-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95',
-          )}
-          style={{ background: 'var(--tblr-primary)' }}
-        >
-          <IconRobot size={22} />
-        </Link>
+        <button type="button" onClick={() => openChat()} aria-label="Agents" className={itemClass(false)}>
+          <IconRobot size={19} />
+        </button>
       </div>
     </nav>
   );
