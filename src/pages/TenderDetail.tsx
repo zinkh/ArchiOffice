@@ -96,6 +96,9 @@ export default function TenderDetail() {
   const [isRefPickerOpen, setIsRefPickerOpen] = useState(false);
   const [refPickerItems, setRefPickerItems] = useState<RefItem[]>([]);
   const [refPickerQuery, setRefPickerQuery] = useState('');
+  const [refPickerPeriod, setRefPickerPeriod] = useState<'all' | '3' | '5' | '10'>('all');
+  const [refPickerCategory, setRefPickerCategory] = useState('all');
+  const [refPickerSort, setRefPickerSort] = useState<'none' | 'budget_desc' | 'budget_asc'>('none');
 
   // ── Note méthodologique ──
   const [methodologyNotes, setMethodologyNotes] = useState<TenderMethodologyNote[]>([]);
@@ -277,9 +280,22 @@ export default function TenderDetail() {
     await apiFetch(`/api/tender-references/${ref.id}`, { method: 'PUT', body: JSON.stringify({ required }) });
   };
   const selectedRefIds = new Set(references.map(r => (r.project_id || r.custom_reference_id) + ':' + (r.project_id ? 'project' : 'manual')));
+  const refPickerCategories = Array.from(new Set(refPickerItems.map(item => item.category).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const refPickerPeriodCutoffYear = refPickerPeriod === 'all' ? null : new Date().getFullYear() - Number(refPickerPeriod);
   const filteredRefPickerItems = refPickerItems
     .filter(item => !selectedRefIds.has(`${item.id}:${item.source}`))
-    .filter(item => !refPickerQuery.trim() || item.name.toLowerCase().includes(refPickerQuery.trim().toLowerCase()));
+    .filter(item => !refPickerQuery.trim() || item.name.toLowerCase().includes(refPickerQuery.trim().toLowerCase()))
+    .filter(item => refPickerCategory === 'all' || item.category === refPickerCategory)
+    .filter(item => {
+      if (refPickerPeriodCutoffYear === null) return true;
+      if (!item.end_date) return false;
+      return new Date(item.end_date).getFullYear() >= refPickerPeriodCutoffYear;
+    })
+    .sort((a, b) => {
+      if (refPickerSort === 'none') return 0;
+      const diff = (a.budget ?? 0) - (b.budget ?? 0);
+      return refPickerSort === 'budget_asc' ? diff : -diff;
+    });
 
   // ── Note méthodologique handlers ──
   const addMethodologyNote = async () => {
@@ -808,12 +824,12 @@ export default function TenderDetail() {
       {/* Sélecteur de références */}
       {isRefPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
+          <div className="rounded-lg shadow-xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
             <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
               <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_add_reference')}</h3>
               <button onClick={() => setIsRefPickerOpen(false)} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
             </div>
-            <div className="p-4">
+            <div className="p-4 space-y-3" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
               <div className="relative">
                 <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
                 <input
@@ -824,8 +840,43 @@ export default function TenderDetail() {
                   onChange={e => setRefPickerQuery(e.target.value)}
                 />
               </div>
+              <div className="flex flex-wrap gap-2">
+                {(['all', '3', '5', '10'] as const).map(period => (
+                  <button
+                    key={period}
+                    onClick={() => setRefPickerPeriod(period)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-full"
+                    style={refPickerPeriod === period
+                      ? { background: 'var(--tblr-primary)', color: '#fff' }
+                      : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    {t(period === 'all' ? 'tender_detail_reference_filter_period_all' : `tender_detail_reference_filter_period_${period}`)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={inputStyle()}
+                  value={refPickerCategory}
+                  onChange={e => setRefPickerCategory(e.target.value)}
+                >
+                  <option value="all">{t('tender_detail_reference_filter_category_all')}</option>
+                  {refPickerCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+                <select
+                  className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={inputStyle()}
+                  value={refPickerSort}
+                  onChange={e => setRefPickerSort(e.target.value as typeof refPickerSort)}
+                >
+                  <option value="none">{t('tender_detail_reference_filter_sort_none')}</option>
+                  <option value="budget_desc">{t('tender_detail_reference_filter_sort_budget_desc')}</option>
+                  <option value="budget_asc">{t('tender_detail_reference_filter_sort_budget_asc')}</option>
+                </select>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
               {filteredRefPickerItems.map(item => (
                 <button
                   key={`${item.source}:${item.id}`}
@@ -835,7 +886,13 @@ export default function TenderDetail() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{item.name}</p>
-                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{item.client}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{item.client}{item.category ? ` · ${item.category}` : ''}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
+                      {item.end_date
+                        ? t('tender_detail_reference_delivery_date', { date: new Date(item.end_date).toLocaleDateString('fr-FR') })
+                        : t('tender_detail_reference_delivery_date_unknown')}
+                      {item.budget ? ` · ${formatCurrency(item.budget)}` : ''}
+                    </p>
                   </div>
                   <IconPlus size={16} style={{ color: 'var(--tblr-primary)' }} />
                 </button>
