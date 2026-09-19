@@ -575,6 +575,14 @@ export interface TenderSpecialty {
   contact_name?: string;
 }
 
+export interface TenderEvaluationCriterion {
+  id?: string;
+  tender_id?: string;
+  label: string;
+  weight_pct: number;
+  sort_order?: number;
+}
+
 export interface Tender {
   id: string;
   title: string;
@@ -583,6 +591,7 @@ export interface Tender {
   status: 'Draft' | 'Submitted' | 'Won' | 'Lost';
   value: number;
   notes: string;
+  description?: string;
   mandataire_id?: string;
   mandataire_name?: string;
   type?: string;
@@ -597,8 +606,69 @@ export interface Tender {
   withdrawal_deadline?: string;
   specialties_list?: TenderSpecialty[];
   milestones_list?: Milestone[];
+  evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+}
+
+// Dossier de candidature — voir supabase/migrate_tender_dossier.sql
+export interface TenderCompetitor {
+  id: string;
+  tender_id: string;
+  name: string;
+  info?: string;
+  risk_level: 'faible' | 'moyen' | 'eleve';
+  created_at?: string;
+}
+
+export type TenderPieceSection = 'candidature' | 'offre_technique' | 'offre_financiere';
+export type TenderPieceStatus = 'a_fournir' | 'fournie' | 'detectee_ia';
+
+export interface TenderPieceRequise {
+  id: string;
+  tender_id: string;
+  section: TenderPieceSection;
+  label: string;
+  obligatoire: boolean;
+  quantity_required?: number;
+  status: TenderPieceStatus;
+  source_hint?: string;
+  document_id?: string;
+  created_at?: string;
+}
+
+export interface TenderReference {
+  id: string;
+  tender_id: string;
+  project_id?: string;
+  custom_reference_id?: string;
+  required: boolean;
+  created_at?: string;
+  // Champs de lecture, joints côté serveur pour l'affichage (nom, client...)
+  name?: string;
+  client?: string;
+  category?: string;
+  end_date?: string;
+  source?: 'project' | 'manual';
+}
+
+export interface TenderMethodologyNote {
+  id: string;
+  tender_id: string;
+  title: string;
+  content: string;
+  status: 'a_rediger' | 'redige';
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TenderActivityNote {
+  id: string;
+  tender_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
 }
 
 export type TenderSourceType = 'rss' | 'boamp' | 'ted';

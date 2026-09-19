@@ -36,6 +36,12 @@ import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
 import { registerTenderRoutes } from "./server/routes/tenders";
 import { registerTenderRssRoutes } from "./server/routes/tenderRss";
+import { registerTenderCompetitorRoutes } from "./server/routes/tenderCompetitors";
+import { registerTenderPieceRoutes } from "./server/routes/tenderPieces";
+import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences";
+import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
+import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
+import { registerTenderAiRoutes } from "./server/routes/tenderAi";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
@@ -497,7 +503,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -529,7 +535,7 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
@@ -957,6 +963,12 @@ export async function createApp() {
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });
   registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTenderCompetitorRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderPieceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderReferenceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });

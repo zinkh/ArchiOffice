@@ -208,7 +208,7 @@ function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string;
 // volontairement, pour rester le sous-ensemble strictement nécessaire plutôt
 // que de dupliquer toute la marche à suivre de la boucle contentFetches
 // ci-dessous (redirection PDF scanné vers rasterizePdf comprise).
-async function extractKnowledgeDocText(supabaseAdmin: any, tenantId: string, doc: { name: string; file_url: string }): Promise<string | null> {
+export async function extractKnowledgeDocText(supabaseAdmin: any, tenantId: string, doc: { name: string; file_url: string }): Promise<string | null> {
   const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
   if (!fetched) return null;
   const { buffer, contentType } = fetched;
