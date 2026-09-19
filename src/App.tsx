@@ -13,7 +13,6 @@ import {
   IconMessageCircle,
   IconUser,
   IconBuilding,
-  IconShieldLock,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -25,7 +24,7 @@ import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
-import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
@@ -630,51 +629,13 @@ function Header() {
                 <BrandLogo logoUrl={settings?.logoUrl} size={28} />
                 <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
               </div>
-              {/* Nav items */}
-              <nav className="flex flex-col p-2 gap-0.5 flex-1">
-                {NAV_ITEMS.map((item) => {
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                        isActive
-                          ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                          : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                      )}
-                    >
-                      <item.icon size={18} />
-                      <span>{t(item.name)}</span>
-                    </Link>
-                  );
-                })}
-                {currentUser?.isSuperAdmin && (
-                  <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
-                    {[{ path: '/admin', label: 'Super Admin', icon: IconShieldLock }, { path: '/admin/support', label: 'Support (back-office)', icon: IconMessageCircle }].map(item => {
-                      const isActive = location.pathname === item.path;
-                      return (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                            isActive
-                              ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                              : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                          )}
-                        >
-                          <item.icon size={18} />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </nav>
+              {/* Nav items — mêmes catégories repliables (Gestion, Affaires,
+                  Outils…) que la barre latérale desktop, plutôt qu'une liste
+                  à plat : `SidebarNav` porte à la fois le regroupement et
+                  l'état des connecteurs (Super PDP, Chorus Pro, MAF), déjà
+                  fetché côté desktop mais tout aussi valable ici puisque la
+                  barre desktop reste montée (masquée en CSS) même sur mobile. */}
+              <SidebarNav onNavigate={() => setIsMobileMenuOpen(false)} />
             </motion.div>
           </>
         )}
