@@ -583,6 +583,21 @@ export interface TenderEvaluationCriterion {
   sort_order?: number;
 }
 
+// Un membre du groupement retenu à l'issue de la consultation (architecte
+// mandataire, bureau d'études, économiste...) — voir
+// supabase/migrate_tender_groupement_retenu.sql. contact_id, quand renseigné,
+// est ce qui permettra plus tard de retrouver les opérations sur lesquelles
+// un bureau d'études donné a déjà été retenu ; name est un repli en texte
+// libre pour un membre qui n'est pas (encore) une fiche Contact du cabinet.
+export interface TenderGroupementMembre {
+  id?: string;
+  tender_id?: string;
+  role: string;
+  contact_id?: string | null;
+  name?: string | null;
+  sort_order?: number;
+}
+
 export interface Tender {
   id: string;
   title: string;
@@ -609,6 +624,59 @@ export interface Tender {
   evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+  // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
+  // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
+  // consultation, une fois connu : groupement retenu (plusieurs entreprises
+  // possibles — architecte, bureau d'études, économiste) et montant des
+  // honoraires réellement obtenus. Le pourcentage honoraires/enveloppe se
+  // calcule à l'affichage, jamais stocké.
+  enveloppe_previsionnelle?: number | null;
+  groupement_retenu_list?: TenderGroupementMembre[];
+  honoraires_retenus_montant?: number | null;
+  // Onglet Honoraires (MAPA uniquement, src/pages/TenderDetail.tsx) : calcul
+  // des honoraires et répartition entre cotraitants, exactement comme dans
+  // une proposition (src/components/HonorairesSection.tsx). `value` porte
+  // déjà le montant des honoraires (voir tenders_valuation_label).
+  fee_distribution?: string; // JSON string, même format que Proposal.fee_distribution
+  vat_rate?: number;
+  decimal_precision?: number;
+  // Exclusivité demandée aux cotraitants — 'totale' (interdit de répondre
+  // dans une autre équipe, tous lots confondus), 'partielle' (interdit
+  // seulement sur le même lot/la même spécialité), ou absente (aucune
+  // exigence). Onglet Partenaires.
+  exclusivite?: 'totale' | 'partielle' | null;
+}
+
+// Une sollicitation d'un bureau d'études pour une spécialité donnée — onglet
+// Partenaires d'un appel d'offres. Indépendante de TenderSpecialty : pour
+// une même spécialité on consulte souvent plusieurs entreprises avant d'en
+// retenir une. Voir GET/POST /api/tender-partner-solicitations
+// (server/routes/tenderPartnerSolicitations.ts).
+export interface TenderPartnerSolicitation {
+  id: string;
+  tender_id: string;
+  specialty_name: string;
+  contact_id: string;
+  status: 'a_solliciter' | 'sollicite' | 'relance' | 'accepte' | 'decline';
+  sent_at?: string | null;
+  last_relance_at?: string | null;
+  relance_count: number;
+  response_notes?: string | null;
+  created_at?: string;
+}
+
+// Une autre affaire du cabinet dont le résultat (groupement retenu) est
+// connu, retrouvée par type de procédure ou spécialités communes — voir
+// GET /api/tenders/:id/candidatures-similaires (server/routes/tenders.ts).
+export interface SimilarTender {
+  id: string;
+  title: string;
+  client: string;
+  type?: string | null;
+  groupement_retenu_list: TenderGroupementMembre[];
+  honoraires_retenus_montant?: number | null;
+  enveloppe_previsionnelle?: number | null;
+  submission_deadline?: string | null;
 }
 
 // Dossier de candidature — voir supabase/migrate_tender_dossier.sql
@@ -726,6 +794,10 @@ export interface TenderRssMatch {
   pouvoir_adjudicateur?: string | null;
   montant_travaux?: number | null;
   date_limite_reponse?: string | null;
+  // Type de procédure (Concours/MAPA), détecté heuristiquement dans le texte
+  // de l'annonce (server/tenderFieldExtractor.ts) — repris comme
+  // tenders.type à la conversion.
+  type_marche?: string | null;
 }
 
 export interface Specification {

@@ -4,12 +4,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   IconArrowLeft, IconBuildingSkyscraper, IconUsers, IconCalendar, IconCurrencyEuro,
   IconPlus, IconTrash, IconMapPin, IconFileText, IconSparkles, IconLock, IconCheck,
-  IconAlertTriangle, IconX, IconSearch, IconWand,
+  IconAlertTriangle, IconX, IconSearch, IconWand, IconMail,
 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
-  TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project,
+  TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
+  TenderRssMatch, TenderGroupementMembre, Milestone, TenderPartnerSolicitation,
 } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
@@ -17,12 +18,14 @@ import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { MatchDetailContent } from '../components/tenderRss/MatchDetailContent';
+import { HonorairesSection, type HonorairesDoc } from '../components/HonorairesSection';
 import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT } from '../lib/contactCategories';
 import { toRefItem, customToRefItem, type RefItem, type CustomRef } from '../lib/referenceItems';
 import { useUser } from '../UserContext';
 import { formatCurrency, cn } from '../lib/utils';
 
-type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie';
+type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires';
 
 const SECTION_LABELS: Record<TenderPieceRequise['section'], string> = {
   candidature: 'Candidature',
@@ -75,6 +78,14 @@ export default function TenderDetail() {
   const [activityNotes, setActivityNotes] = useState<TenderActivityNote[]>([]);
   const [newActivityNote, setNewActivityNote] = useState('');
   const [aperçuLoaded, setAperçuLoaded] = useState(false);
+  const [enveloppeDraft, setEnveloppeDraft] = useState('');
+  const [isEstimatingEnveloppe, setIsEstimatingEnveloppe] = useState(false);
+  const [enveloppeError, setEnveloppeError] = useState<string | null>(null);
+  const [similarTenders, setSimilarTenders] = useState<SimilarTender[]>([]);
+  const [groupementForm, setGroupementForm] = useState<TenderGroupementMembre[]>([]);
+  const [honorairesRetenusDraft, setHonorairesRetenusDraft] = useState('');
+  const [isSavingResult, setIsSavingResult] = useState(false);
+  const [sourceMatch, setSourceMatch] = useState<TenderRssMatch | null>(null);
 
   // ── Documents : pièces demandées ──
   const [pieces, setPieces] = useState<TenderPieceRequise[]>([]);
@@ -86,9 +97,26 @@ export default function TenderDetail() {
   // ── Partenaires ──
   const [mandataireId, setMandataireId] = useState('');
   const [specialtiesForm, setSpecialtiesForm] = useState<{ id?: string; specialty_name: string; contact_id?: string }[]>([]);
+  const [exclusiviteForm, setExclusiviteForm] = useState<'totale' | 'partielle' | null>(null);
   const [isSavingPartners, setIsSavingPartners] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_COTRAITANT);
+
+  // ── Sollicitations des bureaux d'études (onglet Partenaires) ──
+  const [solicitations, setSolicitations] = useState<TenderPartnerSolicitation[]>([]);
+  const [solicitationsLoaded, setSolicitationsLoaded] = useState(false);
+  const [newSolicitation, setNewSolicitation] = useState({ specialty_name: '', contact_id: '' });
+  const [solicitationBusyId, setSolicitationBusyId] = useState<string | null>(null);
+  const [solicitationError, setSolicitationError] = useState<string | null>(null);
+
+  // ── Honoraires (MAPA uniquement) — calcul et répartition identiques à
+  // une proposition (src/components/HonorairesSection.tsx) : brouillon local
+  // édité librement, persisté d'un coup via le bouton "Enregistrer", comme
+  // les autres onglets (Évaluation, Partenaires). ──
+  const [honorairesForm, setHonorairesForm] = useState<HonorairesDoc>({});
+  const [isSavingHonoraires, setIsSavingHonoraires] = useState(false);
+  const [tenderMilestones, setTenderMilestones] = useState<Milestone[]>([]);
+  const [honorairesLoaded, setHonorairesLoaded] = useState(false);
 
   // ── Références ──
   const [references, setReferences] = useState<TenderReference[]>([]);
@@ -96,6 +124,9 @@ export default function TenderDetail() {
   const [isRefPickerOpen, setIsRefPickerOpen] = useState(false);
   const [refPickerItems, setRefPickerItems] = useState<RefItem[]>([]);
   const [refPickerQuery, setRefPickerQuery] = useState('');
+  const [refPickerPeriod, setRefPickerPeriod] = useState<'all' | '3' | '5' | '10'>('all');
+  const [refPickerCategory, setRefPickerCategory] = useState('all');
+  const [refPickerSort, setRefPickerSort] = useState<'none' | 'budget_desc' | 'budget_asc'>('none');
 
   // ── Note méthodologique ──
   const [methodologyNotes, setMethodologyNotes] = useState<TenderMethodologyNote[]>([]);
@@ -116,6 +147,22 @@ export default function TenderDetail() {
         setCriteriaForm(tenderData.evaluation_criteria_list || []);
         setMandataireId(tenderData.mandataire_id || '');
         setSpecialtiesForm(tenderData.specialties_list || []);
+        setExclusiviteForm(tenderData.exclusivite || null);
+        setEnveloppeDraft(tenderData.enveloppe_previsionnelle != null ? String(tenderData.enveloppe_previsionnelle) : '');
+        setGroupementForm(tenderData.groupement_retenu_list || []);
+        setHonorairesRetenusDraft(tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '');
+        setHonorairesForm({
+          id: tenderData.id,
+          amount: tenderData.value,
+          construction_cost: tenderData.construction_cost,
+          complexity_rate: tenderData.complexity_rate,
+          base_fee_percent: tenderData.base_fee_percent,
+          miqcp_assessment: tenderData.miqcp_assessment,
+          fee_distribution: tenderData.fee_distribution,
+          specialties_list: tenderData.specialties_list,
+          decimal_precision: tenderData.decimal_precision,
+          vat_rate: tenderData.vat_rate,
+        });
       } catch (err) {
         console.error('Failed to load tender details:', err);
       } finally {
@@ -131,6 +178,8 @@ export default function TenderDetail() {
       setAperçuLoaded(true);
       fetchJson<TenderCompetitor[]>(`/api/tender-competitors?tender_id=${tender.id}`).then(setCompetitors).catch(console.error);
       fetchJson<TenderActivityNote[]>(`/api/tender-activity-notes?tender_id=${tender.id}`).then(setActivityNotes).catch(console.error);
+      fetchJson<SimilarTender[]>(`/api/tenders/${tender.id}/candidatures-similaires`).then(setSimilarTenders).catch(console.error);
+      fetchJson<TenderRssMatch[]>(`/api/tender-rss-matches?tender_id=${tender.id}`).then(matches => setSourceMatch(matches[0] || null)).catch(console.error);
     }
     if (activeTab === 'documents' && !piecesLoaded) {
       setPiecesLoaded(true);
@@ -144,7 +193,15 @@ export default function TenderDetail() {
       setMethodologyLoaded(true);
       fetchJson<TenderMethodologyNote[]>(`/api/tender-methodology-notes?tender_id=${tender.id}`).then(setMethodologyNotes).catch(console.error);
     }
-  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded]);
+    if (activeTab === 'honoraires' && !honorairesLoaded) {
+      setHonorairesLoaded(true);
+      fetchJson<Milestone[]>(`/api/milestones?tender_id=${tender.id}`).then(setTenderMilestones).catch(console.error);
+    }
+    if (activeTab === 'partenaires' && !solicitationsLoaded) {
+      setSolicitationsLoaded(true);
+      fetchJson<TenderPartnerSolicitation[]>(`/api/tender-partner-solicitations?tender_id=${tender.id}`).then(setSolicitations).catch(console.error);
+    }
+  }, [activeTab, tender, aperçuLoaded, piecesLoaded, referencesLoaded, methodologyLoaded, honorairesLoaded, solicitationsLoaded]);
 
   const saveTenderPatch = async (patch: Partial<Tender>) => {
     if (!tender) return;
@@ -170,6 +227,61 @@ export default function TenderDetail() {
     try { await saveTenderPatch({ evaluation_criteria_list: criteriaForm }); }
     finally { setIsSavingApercu(false); }
   };
+
+  const saveEnveloppe = async () => {
+    if (!tender) return;
+    const value = enveloppeDraft.trim() === '' ? null : Number(enveloppeDraft);
+    if (value === tender.enveloppe_previsionnelle) return;
+    setIsSavingApercu(true);
+    try { await saveTenderPatch({ enveloppe_previsionnelle: value }); }
+    finally { setIsSavingApercu(false); }
+  };
+
+  const estimateEnveloppeWithAi = async () => {
+    if (!tender) return;
+    setIsEstimatingEnveloppe(true);
+    setEnveloppeError(null);
+    try {
+      const res = await apiFetch<{ enveloppe_previsionnelle: number | null }>(`/api/tenders/${tender.id}/estimate-enveloppe`, { method: 'POST' });
+      if (res.enveloppe_previsionnelle != null) {
+        setEnveloppeDraft(String(res.enveloppe_previsionnelle));
+        setTender(prev => prev ? { ...prev, enveloppe_previsionnelle: res.enveloppe_previsionnelle } : prev);
+      } else {
+        setEnveloppeError(t('tender_detail_enveloppe_not_found'));
+      }
+    } catch (err: any) {
+      setEnveloppeError(err?.message || t('tender_detail_enveloppe_estimate_error'));
+    } finally {
+      setIsEstimatingEnveloppe(false);
+    }
+  };
+
+  const addGroupementRow = () => setGroupementForm(prev => [...prev, { role: '', contact_id: '' }]);
+  const removeGroupementRow = (idx: number) => setGroupementForm(prev => prev.filter((_, i) => i !== idx));
+  const updateGroupementRow = (idx: number, field: 'role' | 'contact_id', value: string) => {
+    setGroupementForm(prev => prev.map((m, i) => i === idx ? { ...m, [field]: value } : m));
+  };
+  const contactNameById = (contactId?: string | null) => {
+    const c = contactId ? contacts.find(c => c.id === contactId) : undefined;
+    return c ? `${c.first_name} ${c.last_name}${c.company_name ? ` (${c.company_name})` : ''}`.trim() : null;
+  };
+  const groupementMemberLabel = (m: TenderGroupementMembre) => contactNameById(m.contact_id) || m.name || '';
+
+  const saveResult = async () => {
+    if (!tender) return;
+    setIsSavingResult(true);
+    try {
+      await saveTenderPatch({
+        groupement_retenu_list: groupementForm.filter(m => m.role.trim() || m.contact_id),
+        honoraires_retenus_montant: honorairesRetenusDraft.trim() === '' ? null : Number(honorairesRetenusDraft),
+      });
+    } finally {
+      setIsSavingResult(false);
+    }
+  };
+  const resultPercent = tender?.enveloppe_previsionnelle && honorairesRetenusDraft.trim() !== ''
+    ? (Number(honorairesRetenusDraft) / tender.enveloppe_previsionnelle) * 100
+    : null;
 
   const addCriterion = () => setCriteriaForm(prev => [...prev, { label: '', weight_pct: 0 }]);
   const updateCriterion = (idx: number, field: 'label' | 'weight_pct', value: string) => {
@@ -244,8 +356,79 @@ export default function TenderDetail() {
   };
   const savePartners = async () => {
     setIsSavingPartners(true);
-    try { await saveTenderPatch({ mandataire_id: mandataireId || undefined, specialties_list: specialtiesForm as any }); }
+    try { await saveTenderPatch({ mandataire_id: mandataireId || undefined, specialties_list: specialtiesForm as any, exclusivite: exclusiviteForm }); }
     finally { setIsSavingPartners(false); }
+  };
+  const toggleExclusivite = (value: 'totale' | 'partielle') => {
+    setExclusiviteForm(prev => prev === value ? null : value);
+  };
+
+  // ── Sollicitations des bureaux d'études ──
+  const addSolicitation = async () => {
+    if (!tender || !newSolicitation.specialty_name.trim() || !newSolicitation.contact_id) return;
+    setSolicitationError(null);
+    try {
+      const created = await apiFetch<TenderPartnerSolicitation>('/api/tender-partner-solicitations', {
+        method: 'POST', body: JSON.stringify({ tender_id: tender.id, specialty_name: newSolicitation.specialty_name.trim(), contact_id: newSolicitation.contact_id }),
+      });
+      setSolicitations(prev => [...prev, created]);
+      setNewSolicitation({ specialty_name: '', contact_id: '' });
+    } catch (err: any) {
+      setSolicitationError(err?.message || t('tender_detail_solicitation_add_error'));
+    }
+  };
+  const removeSolicitation = async (solId: string) => {
+    await apiFetch(`/api/tender-partner-solicitations/${solId}`, { method: 'DELETE' });
+    setSolicitations(prev => prev.filter(s => s.id !== solId));
+  };
+  const setSolicitationStatus = async (sol: TenderPartnerSolicitation, status: TenderPartnerSolicitation['status']) => {
+    setSolicitations(prev => prev.map(s => s.id === sol.id ? { ...s, status } : s));
+    await apiFetch(`/api/tender-partner-solicitations/${sol.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+  };
+  const solicitationContact = (sol: TenderPartnerSolicitation) => contacts.find(c => c.id === sol.contact_id);
+  const solicitationEmailBody = (sol: TenderPartnerSolicitation, isRelance: boolean) => {
+    if (!tender) return { subject: '', text: '' };
+    const subject = `${isRelance ? 'Relance — ' : ''}Consultation ${sol.specialty_name} — ${tender.title}`;
+    const text = isRelance
+      ? `Bonjour,\n\nNous revenons vers vous suite à notre sollicitation concernant la mission "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client}).\n\nMerci de nous indiquer si vous êtes disponible pour nous rejoindre sur ce groupement.\n\nCordialement,`
+      : `Bonjour,\n\nNous sollicitons votre structure pour une mission de "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client})${tender.submission_deadline ? `, dont la date limite de remise est fixée au ${new Date(tender.submission_deadline).toLocaleDateString('fr-FR')}` : ''}.\n\nMerci de nous indiquer votre disponibilité pour nous rejoindre sur ce groupement.\n\nCordialement,`;
+    return { subject, text };
+  };
+  const sendSolicitation = async (sol: TenderPartnerSolicitation, isRelance: boolean) => {
+    const contact = solicitationContact(sol);
+    const to = contact?.email || contact?.email_work;
+    if (!to) { setSolicitationError(t('tender_detail_solicitation_no_email')); return; }
+    setSolicitationBusyId(sol.id);
+    setSolicitationError(null);
+    try {
+      const { subject, text } = solicitationEmailBody(sol, isRelance);
+      await apiFetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to, subject, text }) });
+      const updated = await apiFetch<TenderPartnerSolicitation>(`/api/tender-partner-solicitations/${sol.id}/${isRelance ? 'mark-relance' : 'mark-sent'}`, { method: 'POST' });
+      setSolicitations(prev => prev.map(s => s.id === sol.id ? updated : s));
+    } catch (err: any) {
+      setSolicitationError(err?.message || t('tender_detail_solicitation_send_error'));
+    } finally {
+      setSolicitationBusyId(null);
+    }
+  };
+
+  // ── Honoraires handlers (MAPA) ──
+  const saveHonoraires = async () => {
+    setIsSavingHonoraires(true);
+    try {
+      await saveTenderPatch({
+        value: honorairesForm.amount,
+        construction_cost: honorairesForm.construction_cost,
+        complexity_rate: honorairesForm.complexity_rate,
+        base_fee_percent: honorairesForm.base_fee_percent,
+        miqcp_assessment: honorairesForm.miqcp_assessment,
+        fee_distribution: honorairesForm.fee_distribution,
+        decimal_precision: honorairesForm.decimal_precision,
+        vat_rate: honorairesForm.vat_rate,
+      });
+    } finally {
+      setIsSavingHonoraires(false);
+    }
   };
 
   // ── Références handlers ──
@@ -277,9 +460,22 @@ export default function TenderDetail() {
     await apiFetch(`/api/tender-references/${ref.id}`, { method: 'PUT', body: JSON.stringify({ required }) });
   };
   const selectedRefIds = new Set(references.map(r => (r.project_id || r.custom_reference_id) + ':' + (r.project_id ? 'project' : 'manual')));
+  const refPickerCategories = Array.from(new Set(refPickerItems.map(item => item.category).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const refPickerPeriodCutoffYear = refPickerPeriod === 'all' ? null : new Date().getFullYear() - Number(refPickerPeriod);
   const filteredRefPickerItems = refPickerItems
     .filter(item => !selectedRefIds.has(`${item.id}:${item.source}`))
-    .filter(item => !refPickerQuery.trim() || item.name.toLowerCase().includes(refPickerQuery.trim().toLowerCase()));
+    .filter(item => !refPickerQuery.trim() || item.name.toLowerCase().includes(refPickerQuery.trim().toLowerCase()))
+    .filter(item => refPickerCategory === 'all' || item.category === refPickerCategory)
+    .filter(item => {
+      if (refPickerPeriodCutoffYear === null) return true;
+      if (!item.end_date) return false;
+      return new Date(item.end_date).getFullYear() >= refPickerPeriodCutoffYear;
+    })
+    .sort((a, b) => {
+      if (refPickerSort === 'none') return 0;
+      const diff = (a.budget ?? 0) - (b.budget ?? 0);
+      return refPickerSort === 'budget_asc' ? diff : -diff;
+    });
 
   // ── Note méthodologique handlers ──
   const addMethodologyNote = async () => {
@@ -355,6 +551,10 @@ export default function TenderDetail() {
     { id: 'apercu', label: t('tender_detail_tab_apercu') },
     { id: 'documents', label: t('tender_detail_tab_documents'), count: piecesLoaded ? pieces.length : undefined },
     { id: 'partenaires', label: t('tender_detail_tab_partenaires'), count: (tender.specialties_list || []).length || undefined },
+    // Le calcul des honoraires (Assistant MIQCP + répartition entre
+    // cotraitants) ne concerne que les MAPA — un concours ou une procédure
+    // "Other" n'ont pas ce même cadre honoraires/complexité.
+    ...(tender.type === 'MAPA' ? [{ id: 'honoraires' as TabId, label: t('tender_detail_tab_honoraires') }] : []),
     { id: 'organigramme', label: t('tender_detail_tab_organigramme') },
     { id: 'references', label: t('tender_detail_tab_references'), count: referencesLoaded ? references.length : undefined },
     { id: 'methodologie', label: t('tender_detail_tab_methodologie') },
@@ -462,6 +662,21 @@ export default function TenderDetail() {
               </div>
             </div>
 
+            {/* Visite obligatoire */}
+            {tender.mandatory_visit && (
+              <div className="rounded-lg p-5 flex items-center gap-3" style={surfaceCardStyle()}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--tblr-warning-lt)' }}>
+                  <IconCalendar size={18} style={{ color: 'var(--tblr-warning)' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_mandatory_visit_title')}</p>
+                  <p className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>
+                    {tender.visit_date ? new Date(tender.visit_date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : t('tender_detail_mandatory_visit_no_date')}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Évaluation */}
             <div className="rounded-lg p-5 space-y-3" style={surfaceCardStyle()}>
               <div className="flex items-center justify-between">
@@ -470,6 +685,38 @@ export default function TenderDetail() {
                   <IconPlus size={12} /> {t('tender_detail_add_criterion')}
                 </button>
               </div>
+
+              {/* Enveloppe prévisionnelle des honoraires */}
+              <div className="space-y-1.5 pb-2 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+                <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_label')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={0}
+                    placeholder={t('tender_detail_enveloppe_placeholder')}
+                    className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none"
+                    style={inputStyle()}
+                    value={enveloppeDraft}
+                    onChange={e => setEnveloppeDraft(e.target.value)}
+                    onBlur={saveEnveloppe}
+                  />
+                  {isEnterprise && (
+                    <button
+                      onClick={estimateEnveloppeWithAi}
+                      disabled={isEstimatingEnveloppe}
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1.5 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                      style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+                    >
+                      <IconSparkles size={12} className={isEstimatingEnveloppe ? 'animate-pulse' : ''} />
+                      {isEstimatingEnveloppe ? t('tender_detail_analyzing_dce') : t('tender_detail_enveloppe_search_dce')}
+                    </button>
+                  )}
+                </div>
+                {!isEnterprise && <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_ai_enterprise_hint')}</p>}
+                {enveloppeError && (
+                  <p className="text-xs flex items-center gap-1" style={{ color: 'var(--tblr-danger)' }}><IconAlertTriangle size={12} /> {enveloppeError}</p>
+                )}
+              </div>
+
               <div className="space-y-2">
                 {criteriaForm.map((c, idx) => (
                   <div key={idx} className="flex items-center gap-2">
@@ -544,6 +791,29 @@ export default function TenderDetail() {
                 />
                 <button onClick={addCompetitor} className="p-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}><IconPlus size={16} /></button>
               </div>
+
+              {/* Candidatures similaires — autres affaires du cabinet, même type de procédure ou même spécialité, dont le groupement retenu est connu */}
+              {similarTenders.length > 0 && (
+                <div className="space-y-2 pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                  <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_similar_tenders_title')}</p>
+                  {similarTenders.map(st => (
+                    <div key={st.id} className="flex items-center justify-between gap-2 p-2 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{st.title}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{st.client}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {st.groupement_retenu_list.map((m, i) => (
+                          <p key={i} className="text-xs font-bold truncate" style={{ color: 'var(--tblr-primary)' }}>
+                            {groupementMemberLabel(m)}{m.role ? ` — ${m.role}` : ''}
+                          </p>
+                        ))}
+                        {st.honoraires_retenus_montant != null && <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(st.honoraires_retenus_montant)}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Correspondance */}
@@ -551,6 +821,70 @@ export default function TenderDetail() {
               <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--tblr-text)' }}>{t('correspondence_title')}</h3>
               <CorrespondenceTab localType="tender" localId={tender.id} contactEmail={mandataireContact?.email} />
             </div>
+          </div>
+
+          {/* Annonce d'origine — même panneau de détail que "Annonces surveillées" (src/components/tenderRss/MatchDetailContent.tsx), pour un appel d'offres créé depuis la veille RSS/BOAMP/TED. */}
+          {sourceMatch && (
+            <div className="rounded-lg p-5 space-y-3 h-fit" style={surfaceCardStyle()}>
+              <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_source_match_title')}</h3>
+              <MatchDetailContent match={sourceMatch} t={t} />
+            </div>
+          )}
+
+          {/* Résultat de la consultation */}
+          <div className="rounded-lg p-5 space-y-3 h-fit" style={surfaceCardStyle()}>
+            <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_result_title')}</h3>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_groupement_label')}</label>
+                <button onClick={addGroupementRow} className="text-[10px] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
+                  <IconPlus size={12} /> {t('tender_detail_result_groupement_add')}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {groupementForm.map((m, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      placeholder={t('tender_detail_result_groupement_role_placeholder')}
+                      className="w-28 shrink-0 px-3 py-1.5 rounded-lg text-sm outline-none"
+                      style={inputStyle()}
+                      value={m.role}
+                      onChange={e => updateGroupementRow(idx, 'role', e.target.value)}
+                    />
+                    <ContactAutocomplete
+                      className="flex-1"
+                      contacts={contacts}
+                      value={m.contact_id || ''}
+                      onChange={val => updateGroupementRow(idx, 'contact_id', val)}
+                      onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
+                    />
+                    <button onClick={() => removeGroupementRow(idx)} style={{ color: 'var(--tblr-muted)' }}><IconTrash size={16} /></button>
+                  </div>
+                ))}
+                {groupementForm.length === 0 && <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_groupement_empty')}</p>}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_honoraires_label')}</label>
+              <input
+                type="number" min={0}
+                placeholder={t('tender_detail_result_honoraires_placeholder')}
+                className="w-full px-3 py-1.5 rounded-lg text-sm outline-none"
+                style={inputStyle()}
+                value={honorairesRetenusDraft}
+                onChange={e => setHonorairesRetenusDraft(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_label')}</span>
+              <span className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>
+                {resultPercent !== null ? `${resultPercent.toFixed(1)} %` : '—'}
+              </span>
+            </div>
+            {resultPercent === null && !tender.enveloppe_previsionnelle && (
+              <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_hint')}</p>
+            )}
+            <button onClick={saveResult} disabled={isSavingResult} className="w-full text-xs font-bold uppercase px-3 py-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{isSavingResult ? t('saving') : t('save')}</button>
           </div>
 
           {/* Notes de suivi */}
@@ -672,6 +1006,7 @@ export default function TenderDetail() {
 
       {/* Partenaires */}
       {activeTab === 'partenaires' && (
+        <div className="space-y-6">
         <div className="rounded-lg p-5 space-y-4" style={surfaceCardStyle()}>
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_representative_label')}</label>
@@ -681,6 +1016,19 @@ export default function TenderDetail() {
               onChange={setMandataireId}
               onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_CLIENT); setIsContactModalOpen(true); }}
             />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_exclusivite_label')}</label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                <input type="checkbox" checked={exclusiviteForm === 'totale'} onChange={() => toggleExclusivite('totale')} />
+                {t('tender_detail_exclusivite_totale')}
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-text)' }}>
+                <input type="checkbox" checked={exclusiviteForm === 'partielle'} onChange={() => toggleExclusivite('partielle')} />
+                {t('tender_detail_exclusivite_partielle')}
+              </label>
+            </div>
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -713,6 +1061,106 @@ export default function TenderDetail() {
             </div>
           </div>
           <button onClick={savePartners} disabled={isSavingPartners} className="text-xs font-bold uppercase px-4 py-2 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{t('save')}</button>
+        </div>
+
+        {/* Suivi des sollicitations des bureaux d'études */}
+        <div className="rounded-lg p-5 space-y-4" style={surfaceCardStyle()}>
+          <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_solicitations_title')}</h3>
+          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_solicitations_hint')}</p>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              placeholder={t('tenders_specialty_placeholder')}
+              className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-sm outline-none"
+              style={inputStyle()}
+              value={newSolicitation.specialty_name}
+              onChange={e => setNewSolicitation(prev => ({ ...prev, specialty_name: e.target.value }))}
+            />
+            <ContactAutocomplete
+              className="flex-1 min-w-[12rem]"
+              contacts={contacts}
+              value={newSolicitation.contact_id}
+              onChange={val => setNewSolicitation(prev => ({ ...prev, contact_id: val }))}
+              onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
+            />
+            <button onClick={addSolicitation} className="flex items-center gap-1 text-xs font-bold uppercase px-3 py-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              <IconPlus size={14} /> {t('tender_detail_solicitations_add')}
+            </button>
+          </div>
+          {solicitationError && (
+            <p className="text-xs flex items-center gap-1" style={{ color: 'var(--tblr-danger)' }}><IconAlertTriangle size={12} /> {solicitationError}</p>
+          )}
+
+          <div className="space-y-2">
+            {solicitations.map(sol => {
+              const contact = solicitationContact(sol);
+              const contactName = contact ? `${contact.first_name} ${contact.last_name}${contact.company_name ? ` (${contact.company_name})` : ''}` : '—';
+              const isBusy = solicitationBusyId === sol.id;
+              return (
+                <div key={sol.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg flex-wrap" style={{ border: '1px solid var(--tblr-border)' }}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{sol.specialty_name}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{contactName}</p>
+                    {sol.sent_at && (
+                      <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                        {t('tender_detail_solicitation_sent_on', { date: new Date(sol.sent_at).toLocaleDateString('fr-FR') })}
+                        {sol.relance_count > 0 && ` · ${t('tender_detail_solicitation_relance_count', { count: sol.relance_count })}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <select
+                      value={sol.status}
+                      onChange={e => setSolicitationStatus(sol, e.target.value as TenderPartnerSolicitation['status'])}
+                      className="text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none"
+                      style={
+                        sol.status === 'accepte' ? { background: 'var(--tblr-success-lt)', color: 'var(--tblr-success)', border: 'none' }
+                        : sol.status === 'decline' ? { background: 'var(--tblr-danger-lt)', color: 'var(--tblr-danger)', border: 'none' }
+                        : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: 'none' }
+                      }
+                    >
+                      <option value="a_solliciter">{t('tender_detail_solicitation_status_a_solliciter')}</option>
+                      <option value="sollicite">{t('tender_detail_solicitation_status_sollicite')}</option>
+                      <option value="relance">{t('tender_detail_solicitation_status_relance')}</option>
+                      <option value="accepte">{t('tender_detail_solicitation_status_accepte')}</option>
+                      <option value="decline">{t('tender_detail_solicitation_status_decline')}</option>
+                    </select>
+                    <button
+                      onClick={() => sendSolicitation(sol, sol.status !== 'a_solliciter')}
+                      disabled={isBusy}
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
+                      style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+                    >
+                      <IconMail size={12} /> {isBusy ? t('tender_detail_solicitation_sending') : (sol.status === 'a_solliciter' ? t('tender_detail_solicitation_send') : t('tender_detail_solicitation_relance'))}
+                    </button>
+                    <button onClick={() => removeSolicitation(sol.id)} style={{ color: 'var(--tblr-muted)' }}><IconTrash size={14} /></button>
+                  </div>
+                </div>
+              );
+            })}
+            {solicitations.length === 0 && <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_solicitations_empty')}</p>}
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Honoraires (MAPA uniquement) — calcul identique à une proposition */}
+      {activeTab === 'honoraires' && tender.type === 'MAPA' && (
+        <div className="rounded-lg p-5" style={surfaceCardStyle()}>
+          <HonorairesSection
+            doc={honorairesForm}
+            onChange={patch => setHonorairesForm(prev => ({ ...prev, ...patch }))}
+            contacts={contacts}
+            onContactCreated={contact => setContacts(prev => [...prev, contact])}
+            milestones={tenderMilestones}
+            onMilestonesChange={setTenderMilestones}
+            milestoneEntityField="tender_id"
+            filenameLabel={tender.title}
+            showCotraitantsTable={false}
+          />
+          <div className="pt-4">
+            <button onClick={saveHonoraires} disabled={isSavingHonoraires} className="text-xs font-bold uppercase px-4 py-2 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{isSavingHonoraires ? t('saving') : t('save')}</button>
+          </div>
         </div>
       )}
 
@@ -808,12 +1256,12 @@ export default function TenderDetail() {
       {/* Sélecteur de références */}
       {isRefPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
+          <div className="rounded-lg shadow-xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
             <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
               <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_add_reference')}</h3>
               <button onClick={() => setIsRefPickerOpen(false)} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
             </div>
-            <div className="p-4">
+            <div className="p-4 space-y-3" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
               <div className="relative">
                 <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--tblr-muted)' }} />
                 <input
@@ -824,8 +1272,43 @@ export default function TenderDetail() {
                   onChange={e => setRefPickerQuery(e.target.value)}
                 />
               </div>
+              <div className="flex flex-wrap gap-2">
+                {(['all', '3', '5', '10'] as const).map(period => (
+                  <button
+                    key={period}
+                    onClick={() => setRefPickerPeriod(period)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-full"
+                    style={refPickerPeriod === period
+                      ? { background: 'var(--tblr-primary)', color: '#fff' }
+                      : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    {t(period === 'all' ? 'tender_detail_reference_filter_period_all' : `tender_detail_reference_filter_period_${period}`)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={inputStyle()}
+                  value={refPickerCategory}
+                  onChange={e => setRefPickerCategory(e.target.value)}
+                >
+                  <option value="all">{t('tender_detail_reference_filter_category_all')}</option>
+                  {refPickerCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+                <select
+                  className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={inputStyle()}
+                  value={refPickerSort}
+                  onChange={e => setRefPickerSort(e.target.value as typeof refPickerSort)}
+                >
+                  <option value="none">{t('tender_detail_reference_filter_sort_none')}</option>
+                  <option value="budget_desc">{t('tender_detail_reference_filter_sort_budget_desc')}</option>
+                  <option value="budget_asc">{t('tender_detail_reference_filter_sort_budget_asc')}</option>
+                </select>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
               {filteredRefPickerItems.map(item => (
                 <button
                   key={`${item.source}:${item.id}`}
@@ -835,7 +1318,13 @@ export default function TenderDetail() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{item.name}</p>
-                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{item.client}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{item.client}{item.category ? ` · ${item.category}` : ''}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
+                      {item.end_date
+                        ? t('tender_detail_reference_delivery_date', { date: new Date(item.end_date).toLocaleDateString('fr-FR') })
+                        : t('tender_detail_reference_delivery_date_unknown')}
+                      {item.budget ? ` · ${formatCurrency(item.budget)}` : ''}
+                    </p>
                   </div>
                   <IconPlus size={16} style={{ color: 'var(--tblr-primary)' }} />
                 </button>

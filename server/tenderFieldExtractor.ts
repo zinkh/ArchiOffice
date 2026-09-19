@@ -16,6 +16,7 @@ export interface ExtractedTenderFields {
   pouvoir_adjudicateur?: string;
   montant_travaux?: number;
   date_limite_reponse?: string; // ISO yyyy-mm-dd
+  type_marche?: string; // 'Concours' | 'MAPA', voir extractProcedureType()
 }
 
 // Label synonyms per field, tried in order (first match wins). Longer /
@@ -130,11 +131,26 @@ function parseFrenchDate(raw: string): string | null {
   return null;
 }
 
+// Contrairement aux autres champs, le type de procédure n'est pas annoncé
+// sous un label stable d'une source à l'autre ("Type de marché", "Procédure",
+// "Nature du marché"...) : plutôt qu'une liste de labels de plus, une
+// détection par mot-clé sur le texte entier — 'Concours' l'emporte sur
+// 'MAPA' quand les deux apparaissent (un concours peut être mené sous une
+// procédure adaptée, mais c'est le concours qui structure la mission).
+function extractProcedureType(text: string): string | undefined {
+  if (/\bconcours\b/i.test(text)) return 'Concours';
+  if (/proc[ée]dure adapt[ée]e|\bmapa\b/i.test(text)) return 'MAPA';
+  return undefined;
+}
+
 export function extractTenderFields(description: string | null | undefined): ExtractedTenderFields {
   if (!description) return {};
   const text = stripHtml(description);
 
   const result: ExtractedTenderFields = {};
+
+  const procedureType = extractProcedureType(text);
+  if (procedureType) result.type_marche = procedureType;
 
   const ville = extractLabeledValue(text, 'ville_execution');
   if (ville) result.ville_execution = ville;

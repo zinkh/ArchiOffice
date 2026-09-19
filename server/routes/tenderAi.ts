@@ -129,6 +129,81 @@ N'invente rien : ne liste que les pièces réellement mentionnées dans le texte
     }
   });
 
+  // "Chercher dans le DCE" pour l'enveloppe prévisionnelle des honoraires
+  // (onglet Aperçu > Évaluation) — même lecture des documents DCE que
+  // "Analyser le DCE" ci-dessus, mais pour une seule valeur plutôt qu'une
+  // liste de pièces. Best-effort : si le DCE n'annonce aucun budget
+  // prévisionnel, l'IA renvoie null plutôt que d'inventer un montant, et le
+  // champ reste à saisir manuellement.
+  app.post("/api/tenders/:id/estimate-enveloppe", aiGenerationLimiter, async (req: any, res: any) => {
+    const tenantId = await getTenantId(req.user.id);
+    try {
+      const { id: tenderId } = req.params;
+      const { plan } = await getTenantPlan(tenantId);
+      if (!requireEnterprisePlan(plan, res)) return;
+
+      const { data: tender } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('id, title, client, type').eq('id', tenderId).maybeSingle();
+      if (!tender) return res.status(404).json({ error: "Appel d'offres introuvable." });
+
+      const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'tenders').eq('resource_id', tenderId);
+      if (!docs?.length) return res.status(400).json({ error: "Aucun document DCE attaché — déposez d'abord le règlement de consultation ou le CCTP." });
+
+      const { extractKnowledgeDocText } = await import('@zinkh/archioffice-agents/server');
+      let combinedText = '';
+      for (const doc of docs) {
+        if (combinedText.length >= MAX_DCE_CHARS) break;
+        const text = await extractKnowledgeDocText(supabaseAdmin, tenantId, doc as any).catch(() => null);
+        if (text) combinedText += `\n\n--- ${(doc as any).name} ---\n${text.slice(0, MAX_DCE_CHARS - combinedText.length)}`;
+      }
+      if (!combinedText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents DCE (scan illisible ou format non supporté)." });
+
+      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+
+      const prompt = `Tu es un assistant pour un cabinet d'architecture français qui répond à un appel d'offres.
+Voici des extraits du dossier de consultation des entreprises (DCE) de l'affaire "${tender.title}" (client : ${tender.client}) :
+${combinedText}
+
+Cherche l'enveloppe prévisionnelle des honoraires de maîtrise d'œuvre annoncée par le maître d'ouvrage (montant en euros HT, pas le montant des travaux). Réponds UNIQUEMENT avec un JSON valide (sans markdown), de la forme :
+{"enveloppe_previsionnelle": nombre ou null, "source_hint": "où c'est écrit, ex. \\"RC p.3\\", ou null"}
+Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec enveloppe_previsionnelle: null plutôt que d'estimer une valeur.`;
+
+      const estimatedInputTokens = Math.ceil(prompt.length / 4);
+      const reservedCents = await estimateReserveCents(provider.id, provider.model, estimatedInputTokens);
+      if (!(await reserveAiCredit(tenantId, reservedCents))) {
+        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+      }
+
+      let result;
+      try {
+        result = await provider.chat({ messages: [{ role: 'user', content: prompt }] });
+      } catch (e) {
+        await refundAiCredit(tenantId, reservedCents).catch(() => {});
+        throw e;
+      }
+      await settleAiCredit({
+        tenantId, userId: req.user.id, agentId: null, conversationId: null, endpointType: 'tender_ai',
+        provider: provider.id, model: provider.model, reservedCents,
+        inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
+      });
+
+      const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return res.status(500).json({ error: "Réponse IA invalide." });
+      const parsed = JSON.parse(jsonMatch[0]);
+      const enveloppe = typeof parsed?.enveloppe_previsionnelle === 'number' && parsed.enveloppe_previsionnelle > 0 ? parsed.enveloppe_previsionnelle : null;
+
+      if (enveloppe !== null) {
+        await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ enveloppe_previsionnelle: enveloppe }).eq('id', tenderId);
+      }
+      res.json({ enveloppe_previsionnelle: enveloppe, source_hint: parsed?.source_hint || null });
+    } catch (e: any) {
+      if (e?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
+      console.error("Tender enveloppe estimation error:", e.message);
+      Sentry.captureException(e, { tags: { feature: 'tender-estimate-enveloppe' } });
+      res.status(500).json({ error: "Échec de la recherche dans le DCE : " + e.message });
+    }
+  });
+
   app.post("/api/tenders/:id/methodology/:noteId/draft-ai", aiGenerationLimiter, async (req: any, res: any) => {
     const tenantId = await getTenantId(req.user.id);
     try {

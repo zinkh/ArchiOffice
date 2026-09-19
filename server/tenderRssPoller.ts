@@ -101,6 +101,7 @@ async function fetchRssRows(source: TenderRssSourceRow, includeKeywords: string[
         pouvoir_adjudicateur: extracted.pouvoir_adjudicateur || null,
         montant_travaux: extracted.montant_travaux ?? null,
         date_limite_reponse: extracted.date_limite_reponse || null,
+        type_marche: extracted.type_marche || null,
       };
     });
 }
@@ -118,8 +119,14 @@ async function pollSource(supabaseAdmin: SupabaseClient, source: TenderRssSource
 
     // Un même avis relayé par plusieurs sources (BOAMP, TED, flux RSS) n'est
     // inséré qu'une fois par cabinet — voir server/tenderDedup.ts.
+    // Le type de procédure (Concours/MAPA) n'est extrait qu'au fil RSS
+    // générique (fetchRssRows) ; BOAMP et TED consignent leur propre libellé
+    // de procédure dans la ligne "Procédure : ..." de la description
+    // construite par leur mapper — la même détection heuristique s'y
+    // applique donc aussi bien, sans dupliquer la logique par connecteur.
     const keyed = fetched.map(row => ({
       ...row,
+      type_marche: (row as any).type_marche ?? extractTenderFields(row.description).type_marche ?? null,
       dedup_key: dedupTitleKey(row.title),
       dedup_buyer: dedupBuyerKey(row.pouvoir_adjudicateur),
     }));
