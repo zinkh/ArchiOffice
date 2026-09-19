@@ -10,6 +10,7 @@ import { fetchJson, apiFetch } from '../lib/api';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
   TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
+  TenderRssMatch, TenderGroupementMembre,
 } from '../types';
 import { useTranslation } from 'react-i18next';
 import { OrgChart, OrgNode } from '../components/OrgChart';
@@ -17,6 +18,7 @@ import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
+import { MatchDetailContent } from '../components/tenderRss/MatchDetailContent';
 import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT } from '../lib/contactCategories';
 import { toRefItem, customToRefItem, type RefItem, type CustomRef } from '../lib/referenceItems';
 import { useUser } from '../UserContext';
@@ -79,8 +81,10 @@ export default function TenderDetail() {
   const [isEstimatingEnveloppe, setIsEstimatingEnveloppe] = useState(false);
   const [enveloppeError, setEnveloppeError] = useState<string | null>(null);
   const [similarTenders, setSimilarTenders] = useState<SimilarTender[]>([]);
-  const [resultForm, setResultForm] = useState({ entreprise_retenue: '', honoraires_retenus_montant: '' });
+  const [groupementForm, setGroupementForm] = useState<TenderGroupementMembre[]>([]);
+  const [honorairesRetenusDraft, setHonorairesRetenusDraft] = useState('');
   const [isSavingResult, setIsSavingResult] = useState(false);
+  const [sourceMatch, setSourceMatch] = useState<TenderRssMatch | null>(null);
 
   // ── Documents : pièces demandées ──
   const [pieces, setPieces] = useState<TenderPieceRequise[]>([]);
@@ -126,10 +130,8 @@ export default function TenderDetail() {
         setMandataireId(tenderData.mandataire_id || '');
         setSpecialtiesForm(tenderData.specialties_list || []);
         setEnveloppeDraft(tenderData.enveloppe_previsionnelle != null ? String(tenderData.enveloppe_previsionnelle) : '');
-        setResultForm({
-          entreprise_retenue: tenderData.entreprise_retenue || '',
-          honoraires_retenus_montant: tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '',
-        });
+        setGroupementForm(tenderData.groupement_retenu_list || []);
+        setHonorairesRetenusDraft(tenderData.honoraires_retenus_montant != null ? String(tenderData.honoraires_retenus_montant) : '');
       } catch (err) {
         console.error('Failed to load tender details:', err);
       } finally {
@@ -146,6 +148,7 @@ export default function TenderDetail() {
       fetchJson<TenderCompetitor[]>(`/api/tender-competitors?tender_id=${tender.id}`).then(setCompetitors).catch(console.error);
       fetchJson<TenderActivityNote[]>(`/api/tender-activity-notes?tender_id=${tender.id}`).then(setActivityNotes).catch(console.error);
       fetchJson<SimilarTender[]>(`/api/tenders/${tender.id}/candidatures-similaires`).then(setSimilarTenders).catch(console.error);
+      fetchJson<TenderRssMatch[]>(`/api/tender-rss-matches?tender_id=${tender.id}`).then(matches => setSourceMatch(matches[0] || null)).catch(console.error);
     }
     if (activeTab === 'documents' && !piecesLoaded) {
       setPiecesLoaded(true);
@@ -214,20 +217,31 @@ export default function TenderDetail() {
     }
   };
 
+  const addGroupementRow = () => setGroupementForm(prev => [...prev, { role: '', contact_id: '' }]);
+  const removeGroupementRow = (idx: number) => setGroupementForm(prev => prev.filter((_, i) => i !== idx));
+  const updateGroupementRow = (idx: number, field: 'role' | 'contact_id', value: string) => {
+    setGroupementForm(prev => prev.map((m, i) => i === idx ? { ...m, [field]: value } : m));
+  };
+  const contactNameById = (contactId?: string | null) => {
+    const c = contactId ? contacts.find(c => c.id === contactId) : undefined;
+    return c ? `${c.first_name} ${c.last_name}${c.company_name ? ` (${c.company_name})` : ''}`.trim() : null;
+  };
+  const groupementMemberLabel = (m: TenderGroupementMembre) => contactNameById(m.contact_id) || m.name || '';
+
   const saveResult = async () => {
     if (!tender) return;
     setIsSavingResult(true);
     try {
       await saveTenderPatch({
-        entreprise_retenue: resultForm.entreprise_retenue.trim() || null,
-        honoraires_retenus_montant: resultForm.honoraires_retenus_montant.trim() === '' ? null : Number(resultForm.honoraires_retenus_montant),
+        groupement_retenu_list: groupementForm.filter(m => m.role.trim() || m.contact_id),
+        honoraires_retenus_montant: honorairesRetenusDraft.trim() === '' ? null : Number(honorairesRetenusDraft),
       });
     } finally {
       setIsSavingResult(false);
     }
   };
-  const resultPercent = tender?.enveloppe_previsionnelle && resultForm.honoraires_retenus_montant.trim() !== ''
-    ? (Number(resultForm.honoraires_retenus_montant) / tender.enveloppe_previsionnelle) * 100
+  const resultPercent = tender?.enveloppe_previsionnelle && honorairesRetenusDraft.trim() !== ''
+    ? (Number(honorairesRetenusDraft) / tender.enveloppe_previsionnelle) * 100
     : null;
 
   const addCriterion = () => setCriteriaForm(prev => [...prev, { label: '', weight_pct: 0 }]);
@@ -649,7 +663,7 @@ export default function TenderDetail() {
                 <button onClick={addCompetitor} className="p-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}><IconPlus size={16} /></button>
               </div>
 
-              {/* Candidatures similaires — autres affaires du cabinet, même type de procédure ou même spécialité, dont l'entreprise retenue est connue */}
+              {/* Candidatures similaires — autres affaires du cabinet, même type de procédure ou même spécialité, dont le groupement retenu est connu */}
               {similarTenders.length > 0 && (
                 <div className="space-y-2 pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                   <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_similar_tenders_title')}</p>
@@ -660,7 +674,11 @@ export default function TenderDetail() {
                         <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{st.client}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs font-bold" style={{ color: 'var(--tblr-primary)' }}>{st.entreprise_retenue}</p>
+                        {st.groupement_retenu_list.map((m, i) => (
+                          <p key={i} className="text-xs font-bold truncate" style={{ color: 'var(--tblr-primary)' }}>
+                            {groupementMemberLabel(m)}{m.role ? ` — ${m.role}` : ''}
+                          </p>
+                        ))}
                         {st.honoraires_retenus_montant != null && <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(st.honoraires_retenus_montant)}</p>}
                       </div>
                     </div>
@@ -676,19 +694,46 @@ export default function TenderDetail() {
             </div>
           </div>
 
+          {/* Annonce d'origine — même panneau de détail que "Annonces surveillées" (src/components/tenderRss/MatchDetailContent.tsx), pour un appel d'offres créé depuis la veille RSS/BOAMP/TED. */}
+          {sourceMatch && (
+            <div className="rounded-lg p-5 space-y-3 h-fit" style={surfaceCardStyle()}>
+              <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_source_match_title')}</h3>
+              <MatchDetailContent match={sourceMatch} t={t} />
+            </div>
+          )}
+
           {/* Résultat de la consultation */}
           <div className="rounded-lg p-5 space-y-3 h-fit" style={surfaceCardStyle()}>
             <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_result_title')}</h3>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_entreprise_label')}</label>
-              <input
-                placeholder={t('tender_detail_result_entreprise_placeholder')}
-                className="w-full px-3 py-1.5 rounded-lg text-sm outline-none"
-                style={inputStyle()}
-                value={resultForm.entreprise_retenue}
-                onChange={e => setResultForm(prev => ({ ...prev, entreprise_retenue: e.target.value }))}
-                onBlur={saveResult}
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_groupement_label')}</label>
+                <button onClick={addGroupementRow} className="text-[10px] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
+                  <IconPlus size={12} /> {t('tender_detail_result_groupement_add')}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {groupementForm.map((m, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      placeholder={t('tender_detail_result_groupement_role_placeholder')}
+                      className="w-28 shrink-0 px-3 py-1.5 rounded-lg text-sm outline-none"
+                      style={inputStyle()}
+                      value={m.role}
+                      onChange={e => updateGroupementRow(idx, 'role', e.target.value)}
+                    />
+                    <ContactAutocomplete
+                      className="flex-1"
+                      contacts={contacts}
+                      value={m.contact_id || ''}
+                      onChange={val => updateGroupementRow(idx, 'contact_id', val)}
+                      onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_COTRAITANT); setIsContactModalOpen(true); }}
+                    />
+                    <button onClick={() => removeGroupementRow(idx)} style={{ color: 'var(--tblr-muted)' }}><IconTrash size={16} /></button>
+                  </div>
+                ))}
+                {groupementForm.length === 0 && <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_groupement_empty')}</p>}
+              </div>
             </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_honoraires_label')}</label>
@@ -697,9 +742,8 @@ export default function TenderDetail() {
                 placeholder={t('tender_detail_result_honoraires_placeholder')}
                 className="w-full px-3 py-1.5 rounded-lg text-sm outline-none"
                 style={inputStyle()}
-                value={resultForm.honoraires_retenus_montant}
-                onChange={e => setResultForm(prev => ({ ...prev, honoraires_retenus_montant: e.target.value }))}
-                onBlur={saveResult}
+                value={honorairesRetenusDraft}
+                onChange={e => setHonorairesRetenusDraft(e.target.value)}
               />
             </div>
             <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -711,7 +755,7 @@ export default function TenderDetail() {
             {resultPercent === null && !tender.enveloppe_previsionnelle && (
               <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_hint')}</p>
             )}
-            {isSavingResult && <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('saving')}</p>}
+            <button onClick={saveResult} disabled={isSavingResult} className="w-full text-xs font-bold uppercase px-3 py-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{isSavingResult ? t('saving') : t('save')}</button>
           </div>
 
           {/* Notes de suivi */}

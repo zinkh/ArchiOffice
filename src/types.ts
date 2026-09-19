@@ -583,6 +583,21 @@ export interface TenderEvaluationCriterion {
   sort_order?: number;
 }
 
+// Un membre du groupement retenu à l'issue de la consultation (architecte
+// mandataire, bureau d'études, économiste...) — voir
+// supabase/migrate_tender_groupement_retenu.sql. contact_id, quand renseigné,
+// est ce qui permettra plus tard de retrouver les opérations sur lesquelles
+// un bureau d'études donné a déjà été retenu ; name est un repli en texte
+// libre pour un membre qui n'est pas (encore) une fiche Contact du cabinet.
+export interface TenderGroupementMembre {
+  id?: string;
+  tender_id?: string;
+  role: string;
+  contact_id?: string | null;
+  name?: string | null;
+  sort_order?: number;
+}
+
 export interface Tender {
   id: string;
   title: string;
@@ -611,15 +626,16 @@ export interface Tender {
   ville_execution?: string;
   // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
   // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
-  // consultation, une fois connu : entreprise/cabinet retenu et montant des
+  // consultation, une fois connu : groupement retenu (plusieurs entreprises
+  // possibles — architecte, bureau d'études, économiste) et montant des
   // honoraires réellement obtenus. Le pourcentage honoraires/enveloppe se
   // calcule à l'affichage, jamais stocké.
   enveloppe_previsionnelle?: number | null;
-  entreprise_retenue?: string | null;
+  groupement_retenu_list?: TenderGroupementMembre[];
   honoraires_retenus_montant?: number | null;
 }
 
-// Une autre affaire du cabinet dont le résultat (entreprise retenue) est
+// Une autre affaire du cabinet dont le résultat (groupement retenu) est
 // connu, retrouvée par type de procédure ou spécialités communes — voir
 // GET /api/tenders/:id/candidatures-similaires (server/routes/tenders.ts).
 export interface SimilarTender {
@@ -627,7 +643,7 @@ export interface SimilarTender {
   title: string;
   client: string;
   type?: string | null;
-  entreprise_retenue: string;
+  groupement_retenu_list: TenderGroupementMembre[];
   honoraires_retenus_montant?: number | null;
   enveloppe_previsionnelle?: number | null;
   submission_deadline?: string | null;
