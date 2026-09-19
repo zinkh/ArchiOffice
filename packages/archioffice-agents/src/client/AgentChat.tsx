@@ -610,10 +610,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     <AgentChatContext.Provider value={{ openChat, closeChat, refreshCopilotSuggestions: loadCopilotSuggestions }}>
       {children}
 
-      {/* Floating trigger */}
+      {/* Floating trigger — desktop only : sur mobile, l'icône Agents de la
+          pastille de raccourcis (MobileShortcutBar, src/App.tsx) rouvre ce
+          même panneau via useAgentChat() plutôt que de dupliquer ce bouton. */}
       <button
         onClick={() => setIsOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
+        className="hidden md:flex fixed bottom-6 right-6 z-40 items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
         style={{ background: 'var(--tblr-primary)', color: 'white' }}
         title={copilotSuggestions.length > 0 ? t('agent_chat_suggestions_badge', { count: copilotSuggestions.length }) : t('agents')}
       >
@@ -637,13 +639,19 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 40 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-20 right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
+            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
             style={expanded ? {
+              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',
               height: 'min(88vh, calc(100vh - 40px))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             } : {
+              // Sur mobile, ce panneau s'ouvre depuis la pastille de
+              // raccourcis flottante en bas d'écran (MobileShortcutBar) et
+              // non plus depuis un bouton juste en dessous : il lui faut
+              // une marge basse plus généreuse pour ne pas la recouvrir.
+              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(420px, calc(100vw - 24px))',
               height: 'min(640px, calc(100vh - 100px))',
               background: 'var(--tblr-surface)',
