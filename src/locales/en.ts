@@ -627,6 +627,8 @@ export default {
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",
+      "tenders_search_placeholder": "Search a tender (title, client, city, representative...)",
+      "tenders_no_search_results": "No tender matches this search.",
       "tenders_all_statuses": "All Statuses",
       "tenders_all_types": "All Types",
       "tenders_sort_by_deadline": "Sort by Deadline",
@@ -699,6 +701,8 @@ export default {
       "tender_rss_confirm_delete_source": "Delete the source \"{{name}}\" and all its detected items?",
       "tender_rss_matches_title": "Detected items",
       "tender_rss_no_matches": "No items detected yet.",
+      "tender_rss_search_placeholder": "Search a listing (title, source, city, contracting authority...)",
+      "tender_rss_no_search_results": "No listing matches this search.",
       "tender_rss_new": "New",
       "tender_rss_open_source": "Open source item",
       "tender_rss_mark_read": "Mark as read",

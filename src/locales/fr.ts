@@ -629,6 +629,8 @@ export default {
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",
+      "tenders_search_placeholder": "Rechercher un appel d'offres (titre, client, ville, mandataire...)",
+      "tenders_no_search_results": "Aucun appel d'offres ne correspond à cette recherche.",
       "tenders_all_statuses": "Tous les statuts",
       "tenders_all_types": "Tous les types",
       "tenders_sort_by_deadline": "Trier par échéance",
@@ -701,6 +703,8 @@ export default {
       "tender_rss_confirm_delete_source": "Supprimer la source \"{{name}}\" et toutes ses annonces détectées ?",
       "tender_rss_matches_title": "Annonces détectées",
       "tender_rss_no_matches": "Aucune annonce détectée pour le moment.",
+      "tender_rss_search_placeholder": "Rechercher une annonce (titre, source, ville, pouvoir adjudicateur...)",
+      "tender_rss_no_search_results": "Aucune annonce ne correspond à cette recherche.",
       "tender_rss_new": "Nouveau",
       "tender_rss_open_source": "Ouvrir l'annonce source",
       "tender_rss_mark_read": "Marquer comme lu",
