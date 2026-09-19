@@ -629,6 +629,8 @@ export default {
 
       // Tenders
       "tenders_subtitle": "Suivez et gérez les offres pour de nouveaux contrats architecturaux.",
+      "tenders_search_placeholder": "Rechercher un appel d'offres (titre, client, ville, mandataire...)",
+      "tenders_no_search_results": "Aucun appel d'offres ne correspond à cette recherche.",
       "tenders_all_statuses": "Tous les statuts",
       "tenders_all_types": "Tous les types",
       "tenders_sort_by_deadline": "Trier par échéance",

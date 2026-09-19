@@ -627,6 +627,8 @@ export default {
 
       // Tenders
       "tenders_subtitle": "Track and manage bids for new architectural contracts.",
+      "tenders_search_placeholder": "Search a tender (title, client, city, representative...)",
+      "tenders_no_search_results": "No tender matches this search.",
       "tenders_all_statuses": "All Statuses",
       "tenders_all_types": "All Types",
       "tenders_sort_by_deadline": "Sort by Deadline",

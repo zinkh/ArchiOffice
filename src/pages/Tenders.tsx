@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark } from '@tabler/icons-react';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark, IconSearch } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -51,6 +51,7 @@ export default function Tenders() {
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterType, setFilterType] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
   const [activeTab, setActiveTab] = useState<'list' | 'selected' | 'watch'>('list');
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
@@ -215,10 +216,25 @@ export default function Tenders() {
     }
   };
 
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+
   const filteredTenders = tenders.filter(t => {
     const statusMatch = filterStatus === 'All' || t.status === filterStatus;
     const typeMatch = filterType === 'All' || t.type === filterType;
-    return statusMatch && typeMatch;
+    if (!statusMatch || !typeMatch) return false;
+    if (!normalizedSearch) return true;
+    const haystack = [
+      t.title,
+      t.client,
+      t.ville_execution,
+      t.mandataire_name,
+      t.type,
+      ...(t.specialties_list || []).map(s => s.specialty_name),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(normalizedSearch);
   });
 
   const sortedTenders = [...filteredTenders].sort((a, b) => {
@@ -346,6 +362,17 @@ export default function Tenders() {
         className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-lg shadow-sm"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
+        <div className="relative w-full md:w-72">
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
+            placeholder={t('tenders_search_placeholder')}
+            className="w-full pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
           <div className="flex items-center gap-2">
             <IconFilter size={18} style={{ color: 'var(--tblr-muted)' }} />
@@ -405,7 +432,7 @@ export default function Tenders() {
           <MobileAccordionTable
             data={activePagination.pageItems}
             keyField="id"
-            emptyText={t('tenders_no_active')}
+            emptyText={normalizedSearch ? t('tenders_no_search_results') : t('tenders_no_active')}
             columns={[
               { label: t('description'), primary: true, render: t => (
                 <div>
@@ -563,7 +590,7 @@ export default function Tenders() {
                   <td colSpan={8} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconFileText size={32} className="opacity-20" />
-                      <p>{t('tenders_no_active')}</p>
+                      <p>{normalizedSearch ? t('tenders_no_search_results') : t('tenders_no_active')}</p>
                     </div>
                   </td>
                 </tr>
