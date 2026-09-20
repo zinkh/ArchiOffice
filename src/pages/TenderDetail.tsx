@@ -7,6 +7,7 @@ import {
   IconAlertTriangle, IconX, IconSearch, IconWand, IconMail,
 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
+import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
   TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
@@ -386,13 +387,32 @@ export default function TenderDetail() {
     await apiFetch(`/api/tender-partner-solicitations/${sol.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
   };
   const solicitationContact = (sol: TenderPartnerSolicitation) => contacts.find(c => c.id === sol.contact_id);
-  const solicitationEmailBody = (sol: TenderPartnerSolicitation, isRelance: boolean) => {
+  const solicitationEmailBody = async (sol: TenderPartnerSolicitation, isRelance: boolean) => {
     if (!tender) return { subject: '', text: '' };
-    const subject = `${isRelance ? 'Relance — ' : ''}Consultation ${sol.specialty_name} — ${tender.title}`;
-    const text = isRelance
+    const dateLimiteClause = tender.submission_deadline
+      ? `, dont la date limite de remise est fixée au ${new Date(tender.submission_deadline).toLocaleDateString('fr-FR')}`
+      : '';
+    // Fallback text if the tenant's "tender_solicitation"/"tender_relance"
+    // email template can't be fetched — exactly what this used to send
+    // before templates existed.
+    const fallbackSubject = `${isRelance ? 'Relance — ' : ''}Consultation ${sol.specialty_name} — ${tender.title}`;
+    const fallbackText = isRelance
       ? `Bonjour,\n\nNous revenons vers vous suite à notre sollicitation concernant la mission "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client}).\n\nMerci de nous indiquer si vous êtes disponible pour nous rejoindre sur ce groupement.\n\nCordialement,`
-      : `Bonjour,\n\nNous sollicitons votre structure pour une mission de "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client})${tender.submission_deadline ? `, dont la date limite de remise est fixée au ${new Date(tender.submission_deadline).toLocaleDateString('fr-FR')}` : ''}.\n\nMerci de nous indiquer votre disponibilité pour nous rejoindre sur ce groupement.\n\nCordialement,`;
-    return { subject, text };
+      : `Bonjour,\n\nNous sollicitons votre structure pour une mission de "${sol.specialty_name}" dans le cadre de notre réponse à l'appel d'offres "${tender.title}" (${tender.client})${dateLimiteClause}.\n\nMerci de nous indiquer votre disponibilité pour nous rejoindre sur ce groupement.\n\nCordialement,`;
+    try {
+      const tpl = await fetchEmailTemplate(isRelance ? 'tender_relance' : 'tender_solicitation');
+      if (!tpl) return { subject: fallbackSubject, text: fallbackText };
+      const placeholderValues: Record<string, string> = {
+        specialite: sol.specialty_name,
+        titre_ao: tender.title,
+        client_ao: tender.client,
+        date_limite_clause: isRelance ? '' : dateLimiteClause,
+      };
+      return { subject: fillTemplate(tpl.subject, placeholderValues), text: fillTemplate(tpl.body, placeholderValues) };
+    } catch (err) {
+      console.error('fetchEmailTemplate(tender) failed:', err);
+      return { subject: fallbackSubject, text: fallbackText };
+    }
   };
   const sendSolicitation = async (sol: TenderPartnerSolicitation, isRelance: boolean) => {
     const contact = solicitationContact(sol);
@@ -401,7 +421,7 @@ export default function TenderDetail() {
     setSolicitationBusyId(sol.id);
     setSolicitationError(null);
     try {
-      const { subject, text } = solicitationEmailBody(sol, isRelance);
+      const { subject, text } = await solicitationEmailBody(sol, isRelance);
       await apiFetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to, subject, text }) });
       const updated = await apiFetch<TenderPartnerSolicitation>(`/api/tender-partner-solicitations/${sol.id}/${isRelance ? 'mark-relance' : 'mark-sent'}`, { method: 'POST' });
       setSolicitations(prev => prev.map(s => s.id === sol.id ? updated : s));

@@ -23,6 +23,7 @@ import { registerObservationRoutes } from "./server/routes/observations";
 import { registerMeetingRoutes } from "./server/routes/meetings";
 import { registerMeetingAttendeeRoutes } from "./server/routes/meetingAttendees";
 import { registerDocumentTemplateRoutes } from "./server/routes/documentTemplates";
+import { registerEmailTemplateRoutes } from "./server/routes/emailTemplates";
 import { registerContratsMoeRoutes } from "./server/routes/contratsMoe";
 import { registerNotesHonorairesRoutes } from "./server/routes/notesHonoraires";
 import { registerProfileRoutes } from "./server/routes/profile";
@@ -951,6 +952,7 @@ export async function createApp() {
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerEmailTemplateRoutes(app, { supabaseAdmin, getTenantId });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber, getUserName, logActivity });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });

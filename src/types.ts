@@ -90,6 +90,16 @@ export interface DocumentTemplate {
   created_at: string;
 }
 
+export type EmailTemplateKind = 'invoice' | 'tender_solicitation' | 'tender_relance';
+
+export interface EmailTemplate {
+  id: string;
+  kind: EmailTemplateKind;
+  subject: string;
+  body: string;
+  updated_at?: string;
+}
+
 export interface TimeEntry {
   id: string;
   user_id: string;

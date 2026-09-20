@@ -18,6 +18,7 @@ import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
+import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
@@ -2597,6 +2598,9 @@ export default function Settings() {
               senderOption: settings.senderOption, defaultEmailTemplate: settings.defaultEmailTemplate,
             }))}
           </div>
+
+          {/* ── Modèles de mails ── */}
+          <EmailTemplatesSettings />
         </>
       )}
 

@@ -963,6 +963,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_document_templates_one_default_per_categor
 ALTER TABLE document_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON document_templates USING (tenant_id = my_tenant_id());
 
+-- Modèles de mails transmis par l'application, personnalisables avec des
+-- placeholders (see migrate_email_templates.sql). Un modèle par genre de mail
+-- (`kind` : 'invoice', 'tender_solicitation', 'tender_relance'), pas de notion
+-- de catégories multiples ni de modèle par défaut comme document_templates —
+-- ici chaque genre EST le modèle. Éditable directement, sans dupliquer.
+CREATE TABLE IF NOT EXISTS email_templates (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  kind TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_email_templates_tenant_kind ON email_templates(tenant_id, kind);
+ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON email_templates USING (tenant_id = my_tenant_id());
+
 -- Time tracking + leave management (see migrate_add_time_and_leave.sql)
 CREATE TABLE IF NOT EXISTS time_entries (
   id TEXT PRIMARY KEY,
