@@ -1026,6 +1026,52 @@ plusieurs centaines de pages : ce dépôt n'a pas de recherche par mots-clés
 ni d'embeddings, tout document déposé est relu en entier. `/agents/:id/edit`
 le dit explicitement dans le texte d'aide du réglage.
 
+### Lecture des pièces jointes de messagerie par les agents
+
+`read_email` (`mail_enabled`) rapportait déjà les pièces jointes d'un
+message (nom, taille) mais aucun outil ne pouvait en ouvrir le contenu : un
+agent qui avait identifié le bon email (« envoie des documents Blénod-lès-
+Pont-à-Mousson ») restait incapable d'exploiter le plan, le diagnostic ou
+l'esquisse qui y était joint, faute de tout accès à ces octets — il ne
+pouvait que le dire à l'utilisateur, comme cité dans l'incident qui a motivé
+cette capacité.
+
+**`mail_attachments_enabled`** (`supabase/migrate_agent_mail_attachments.sql`),
+une colonne de plus sur `agents` réglable depuis `/agents/:id/edit`, est un
+palier distinct de `mail_enabled` — même principe que `mail_send_enabled`/
+`docs_write_enabled` : `capabilitiesFromAgent()` exige les deux
+(`mail_enabled` ET `mail_attachments_enabled`), off par défaut et jamais
+hérité d'un template. Ouvrir une pièce jointe télécharge des octets
+externes et peut déclencher un OCR — plus coûteux qu'une simple lecture de
+corps de message — et mérite d'être activé sciemment plutôt qu'allumé
+d'office avec la lecture de la boîte.
+
+**`read_email_attachment(id, attachment_id, compte?)`**
+(`packages/archioffice-agents/src/server/mailAttachmentTools.ts`) prend le
+relais de `read_email`, qui rapporte désormais `attachments[].id` et
+`.mimeType` en plus du nom et de la taille (`mailTools.ts`) — sans eux, un
+agent qui avait lu un message n'avait aucun moyen de désigner laquelle de
+ses pièces jointes ouvrir. Le téléchargement passe par les mêmes routes
+internes que l'ouverture d'une pièce jointe côté écran
+(`GET /api/gmail/messages/:id/attachments/:attachmentId`,
+`.../outlook/...`, `.../mail/imap/messages/:folder/:uid/attachments/:id`) :
+aucune nouvelle route serveur n'a été ajoutée, seul un nouvel appelant
+interne s'en sert.
+
+**Texte seul, jamais de vision native.** `ctx.documentImages` (vision, voir
+plus haut) n'est peuplé qu'AVANT le premier appel au modèle, à partir des
+documents joints AU MESSAGE — un résultat d'outil obtenu EN COURS de tour
+n'a aujourd'hui aucun moyen d'y ajouter une image. Une pièce jointe scannée
+ou photographiée retombe donc sur l'OCR texte (`ocrDocument`, `ocr.ts`),
+exactement comme un fournisseur sans vision dans `context.ts` : dégradé,
+mais honnête, plutôt qu'un tool qui prétendrait lire une image qu'il ne
+transmet pas réellement au modèle. Une pièce jointe trop volumineuse
+(20 Mo) est refusée avant tout téléchargement plutôt que de faire échouer
+l'extraction après coup, et le contenu extrait est plafonné à 6000
+caractères — même ordre de grandeur que la bibliothèque de connaissances
+d'un agent (`MAX_KNOWLEDGE_DOC_CHARS`) : une pièce jointe injectée au fil de
+la conversation, pas un corpus à parcourir.
+
 ### Délégation entre agents
 
 Incident du 7 septembre 2026 : un agent avait créé 19 CCTP vides en réponse à

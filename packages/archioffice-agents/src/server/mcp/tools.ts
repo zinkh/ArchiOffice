@@ -338,6 +338,10 @@ const MCP_CAPS: AgentCapabilities = {
   webFetch: false,
   mailRead: true,
   mailSend: false,
+  // Jamais exposé ici : un outil MCP externe a déjà upload_document/
+  // get_document pour les pièces jointes de FICHES (voir plus haut) — pas
+  // besoin d'un second chemin pour celles d'un email.
+  mailAttachments: false,
   geo: true,
   docsRead: true,
   docsWrite: false,

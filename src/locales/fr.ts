@@ -1263,6 +1263,7 @@ export default {
       "agent_config_mail_read": "Lire la messagerie connectée de l'utilisateur (Gmail, Outlook ou IMAP)",
       "agent_config_mail_send": "Envoyer des emails au nom de l'utilisateur (confirmation obligatoire avant chaque envoi)",
       "agent_config_mail_send_warning": "Un email part à l'extérieur du cabinet et ne se rattrape pas. L'agent doit toujours présenter son brouillon et obtenir un accord explicite avant d'envoyer, mais la responsabilité du message reste celle du cabinet.",
+      "agent_config_mail_attachments": "Ouvrir et exploiter le contenu des pièces jointes (plans, diagnostics, devis...)",
       "agent_config_geo": "Interroger les données publiques d'urbanisme (adresse, cadastre, PLU, risques, monuments historiques)",
       "agent_config_docs_read": "Lire le CCTP, le DPGF et le BPU des projets",
       "agent_config_docs_write": "Créer ou modifier des articles du CCTP/DPGF (texte technique, quantités, prix unitaires)",
