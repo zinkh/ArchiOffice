@@ -44,6 +44,7 @@ export default function AgentConfig() {
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [mailEnabled, setMailEnabled] = useState(false);
   const [mailSendEnabled, setMailSendEnabled] = useState(false);
+  const [mailAttachmentsEnabled, setMailAttachmentsEnabled] = useState(false);
   const [geoEnabled, setGeoEnabled] = useState(false);
   const [docsReadEnabled, setDocsReadEnabled] = useState(false);
   const [docsWriteEnabled, setDocsWriteEnabled] = useState(false);
@@ -70,6 +71,7 @@ export default function AgentConfig() {
         setWebFetchEnabled(!!found.web_fetch_enabled);
         setMailEnabled(!!found.mail_enabled);
         setMailSendEnabled(!!found.mail_send_enabled);
+        setMailAttachmentsEnabled(!!found.mail_attachments_enabled);
         setGeoEnabled(!!found.geo_enabled);
         setDocsReadEnabled(!!found.docs_read_enabled);
         setDocsWriteEnabled(!!found.docs_write_enabled);
@@ -113,6 +115,7 @@ export default function AgentConfig() {
           web_fetch_enabled: webFetchEnabled,
           mail_enabled: mailEnabled,
           mail_send_enabled: mailEnabled && mailSendEnabled,
+          mail_attachments_enabled: mailEnabled && mailAttachmentsEnabled,
           geo_enabled: geoEnabled,
           docs_read_enabled: docsReadEnabled,
           docs_write_enabled: docsReadEnabled && docsWriteEnabled,
@@ -303,6 +306,21 @@ export default function AgentConfig() {
               style={{ accentColor: '#c92a2a' }}
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_send')}</span>
+          </label>
+
+          {/* Autre second palier sous la lecture : ouvrir une pièce jointe
+              télécharge des octets externes et peut passer par l'OCR, plus
+              coûteux qu'une simple lecture de corps de message. */}
+          <label className={`flex items-center gap-3 pl-7 ${mailEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              disabled={!mailEnabled}
+              checked={mailEnabled && mailAttachmentsEnabled}
+              onChange={() => setMailAttachmentsEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_attachments')}</span>
           </label>
 
           <label className="flex items-center gap-3 cursor-pointer">

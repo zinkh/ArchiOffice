@@ -167,6 +167,9 @@ export function registerAgentRoutes(
           web_fetch_enabled: false,
           mail_enabled: !!t.mail_enabled,
           mail_send_enabled: false,
+          // Jamais hérité non plus, comme mail_send_enabled : ouvrir une
+          // pièce jointe est un second palier, jamais implicite.
+          mail_attachments_enabled: false,
           geo_enabled: !!t.geo_enabled,
           docs_read_enabled: !!t.docs_read_enabled,
           // Jamais hérité, comme mail_send_enabled : c'est une capacité
@@ -190,7 +193,7 @@ export function registerAgentRoutes(
           tone, directives,
           context_scopes: context_scopes || [],
           action_scopes: action_scopes || [],
-          web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
+          web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false, mail_attachments_enabled: false,
           geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, web_search_enabled: false,
           knowledge_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
@@ -211,7 +214,7 @@ export function registerAgentRoutes(
       const {
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
-        mail_send_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
+        mail_send_enabled, mail_attachments_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
         knowledge_enabled,
         system_prompt_override, is_active,
       } = req.body;
@@ -224,6 +227,9 @@ export function registerAgentRoutes(
         // que capabilitiesFromAgent, appliqué ici pour qu'il soit vrai en
         // base et pas seulement au moment de construire les outils.
         mail_send_enabled: !!mail_enabled && !!mail_send_enabled,
+        // Même invariant : ouvrir une pièce jointe suppose de pouvoir lire
+        // la messagerie dont elle vient.
+        mail_attachments_enabled: !!mail_enabled && !!mail_attachments_enabled,
         geo_enabled: !!geo_enabled,
         docs_read_enabled: !!docs_read_enabled,
         // Même invariant : écrire un CCTP/DPGF sans pouvoir le lire n'a pas

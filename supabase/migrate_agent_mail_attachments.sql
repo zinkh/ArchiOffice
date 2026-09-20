@@ -1,0 +1,20 @@
+-- ============================================================
+-- ArchiOffice — Migration : lecture des pièces jointes de messagerie
+-- par les agents (read_email_attachment)
+-- ============================================================
+-- read_email (mail_enabled) rapportait déjà les pièces jointes d'un message
+-- (nom, taille), mais aucun outil ne pouvait en ouvrir le contenu : un agent
+-- qui avait trouvé le bon email restait incapable d'exploiter le plan, le
+-- diagnostic ou l'esquisse qui y était joint.
+--
+-- mail_attachments_enabled est un palier distinct de mail_enabled, dans le
+-- même esprit que mail_send_enabled/docs_write_enabled : ouvrir une pièce
+-- jointe télécharge des octets externes et peut déclencher un OCR (plus
+-- coûteux qu'une simple lecture de corps de message), donc à activer
+-- sciemment plutôt qu'allumé d'office avec la lecture de la boîte.
+-- capabilitiesFromAgent() (packages/archioffice-agents/src/types.ts) exige
+-- déjà les deux (mail_enabled ET mail_attachments_enabled).
+--
+-- Off par défaut et jamais héritée d'un template, comme les autres capacités
+-- hors CRUD (web_fetch_enabled, knowledge_enabled...).
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS mail_attachments_enabled BOOLEAN NOT NULL DEFAULT FALSE;

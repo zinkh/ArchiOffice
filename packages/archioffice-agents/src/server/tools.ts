@@ -1,6 +1,7 @@
 import { AGENT_RESOURCES, type AgentResourceDef, type AgentCapabilities } from '../types.js';
 import { fetchUrlSafely } from './webFetch.js';
 import { buildMailTools, executeMailTool, MAIL_TOOL_NAMES } from './mailTools.js';
+import { buildMailAttachmentTools, executeMailAttachmentTool, MAIL_ATTACHMENT_TOOL_NAMES } from './mailAttachmentTools.js';
 import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
 import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES, buildWriteProjectDocTools, executeWriteProjectDocTool, PROJECT_DOC_WRITE_TOOL_NAMES } from './projectDocTools.js';
 import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
@@ -131,6 +132,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   }
 
   if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
+  if (caps.mailAttachments) tools.push(...buildMailAttachmentTools());
   if (caps.geo) tools.push(...buildGeoTools());
   if (caps.docsRead) tools.push(...buildProjectDocTools());
   if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
@@ -354,6 +356,12 @@ export async function executeAgentAction(
     if (!caps.mailRead) return { response: { error: "L'accès à la messagerie n'est pas activé pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
     return executeMailTool(baseUrl, auth, name, args, caps.mailSend);
+  }
+
+  if (name && MAIL_ATTACHMENT_TOOL_NAMES.includes(name)) {
+    if (!caps.mailAttachments) return { response: { error: "L'ouverture des pièces jointes de messagerie n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
+    return executeMailAttachmentTool(baseUrl, auth, name, args);
   }
 
   if (name && GEO_TOOL_NAMES.includes(name)) {

@@ -16,7 +16,7 @@ function baseAgent(overrides: Partial<AgentRow> = {}): AgentRow {
     id: 'agent-sophie', tenant_id: 'tenant-1', slug: 'sophie', name: 'Sophie',
     role_title: 'Secrétaire Administrative', avatar_initials: 'SA', avatar_color: '#000',
     context_scopes: [], action_scopes: [],
-    web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
+    web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false, mail_attachments_enabled: false,
     geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, delegate_enabled: false, notify_users_enabled: false,
     web_search_enabled: false,
     knowledge_enabled: false,

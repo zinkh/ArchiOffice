@@ -217,6 +217,12 @@ export interface AgentCapabilities {
   mailRead: boolean;
   /** Envoi de mail. Palier distinct de la lecture, jamais implicite. */
   mailSend: boolean;
+  /** read_email_attachment — ouvrir et extraire le contenu d'une pièce
+   *  jointe d'un email déjà lu. Palier distinct de la lecture, comme
+   *  mailSend/docsWrite : ouvrir une pièce jointe télécharge des octets
+   *  externes et peut déclencher un OCR, plus coûteux qu'une lecture de
+   *  corps de message, et mérite d'être activé sciemment. */
+  mailAttachments: boolean;
   /** Modules cartographiques : adresse, cadastre, PLU, risques, monuments. */
   geo: boolean;
   /** Lecture du CCTP et du DPGF d'un projet. */
@@ -260,6 +266,7 @@ export function capabilitiesFromAgent(agent: {
   web_fetch_enabled?: boolean | null;
   mail_enabled?: boolean | null;
   mail_send_enabled?: boolean | null;
+  mail_attachments_enabled?: boolean | null;
   geo_enabled?: boolean | null;
   docs_read_enabled?: boolean | null;
   docs_write_enabled?: boolean | null;
@@ -275,6 +282,9 @@ export function capabilitiesFromAgent(agent: {
     // L'envoi suppose la lecture : un agent qui ne voit pas la boîte n'a
     // aucun contexte pour écrire à quelqu'un en son nom.
     mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
+    // Même invariant que mailSend : ouvrir une pièce jointe sans pouvoir lire
+    // la messagerie n'a pas de sens (elle vient toujours d'un message déjà lu).
+    mailAttachments: !!agent.mail_enabled && !!agent.mail_attachments_enabled,
     geo: !!agent.geo_enabled,
     docsRead: !!agent.docs_read_enabled,
     // Même invariant que mailSend : écrire sans lire n'a pas de sens (un
@@ -305,6 +315,7 @@ export interface Agent {
   web_fetch_enabled: boolean;
   mail_enabled: boolean;
   mail_send_enabled: boolean;
+  mail_attachments_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
   docs_write_enabled: boolean;
@@ -384,6 +395,7 @@ export interface AgentRow {
   web_fetch_enabled: boolean;
   mail_enabled: boolean;
   mail_send_enabled: boolean;
+  mail_attachments_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
   docs_write_enabled: boolean;
