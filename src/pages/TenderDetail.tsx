@@ -8,6 +8,8 @@ import {
 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
 import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
+import { type EmailAttachment } from '../lib/emailAttachments';
+import EmailAttachmentsField from '../components/EmailAttachmentsField';
 import type {
   Tender, Contact, TenderCompetitor, TenderPieceRequise, TenderReference,
   TenderMethodologyNote, TenderActivityNote, TenderEvaluationCriterion, Project, SimilarTender,
@@ -109,6 +111,7 @@ export default function TenderDetail() {
   const [newSolicitation, setNewSolicitation] = useState({ specialty_name: '', contact_id: '' });
   const [solicitationBusyId, setSolicitationBusyId] = useState<string | null>(null);
   const [solicitationError, setSolicitationError] = useState<string | null>(null);
+  const [solicitationAttachments, setSolicitationAttachments] = useState<EmailAttachment[]>([]);
 
   // ── Honoraires (MAPA uniquement) — calcul et répartition identiques à
   // une proposition (src/components/HonorairesSection.tsx) : brouillon local
@@ -448,7 +451,7 @@ export default function TenderDetail() {
     setSolicitationError(null);
     try {
       const { subject, text } = await solicitationEmailBody(sol, isRelance);
-      await apiFetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to, subject, text }) });
+      await apiFetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to, subject, text, attachments: solicitationAttachments }) });
       const updated = await apiFetch<TenderPartnerSolicitation>(`/api/tender-partner-solicitations/${sol.id}/${isRelance ? 'mark-relance' : 'mark-sent'}`, { method: 'POST' });
       setSolicitations(prev => prev.map(s => s.id === sol.id ? updated : s));
     } catch (err: any) {
@@ -1113,6 +1116,15 @@ export default function TenderDetail() {
         <div className="rounded-lg p-5 space-y-4" style={surfaceCardStyle()}>
           <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_solicitations_title')}</h3>
           <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_solicitations_hint')}</p>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('email_attachments_label')}</label>
+            <EmailAttachmentsField
+              attachments={solicitationAttachments}
+              onChange={setSolicitationAttachments}
+              documentsQuery={{ resource_type: 'tenders', resource_id: tender.id }}
+            />
+          </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <input

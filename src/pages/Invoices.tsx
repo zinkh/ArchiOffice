@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
+import { type EmailAttachment } from '../lib/emailAttachments';
+import EmailAttachmentsField from '../components/EmailAttachmentsField';
 import type { Invoice, InvoicePhase, Project, Contact } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
@@ -235,6 +237,7 @@ export default function Invoices() {
   const [editError, setEditError] = useState<string | null>(null);
   const [sendingInvoice, setSendingInvoice] = useState<Invoice | null>(null);
   const [sendForm, setSendForm] = useState({ to: '', subject: '', message: '' });
+  const [sendAttachments, setSendAttachments] = useState<EmailAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
@@ -444,6 +447,7 @@ export default function Invoices() {
     const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
     setSendingInvoice(invoice);
     setSendForm({ to: clientEmail, subject: fallbackSubject, message: fallbackMessage });
+    setSendAttachments([]);
     setSendResult(null);
 
     fetchEmailTemplate('invoice').then(tpl => {
@@ -461,7 +465,7 @@ export default function Invoices() {
       const html = `<p>${sendForm.message.replace(/\n/g, '<br/>')}</p>`;
       await fetchJson('/api/send-email', {
         method: 'POST',
-        body: JSON.stringify({ to: sendForm.to, subject: sendForm.subject, text: sendForm.message, html })
+        body: JSON.stringify({ to: sendForm.to, subject: sendForm.subject, text: sendForm.message, html, attachments: sendAttachments })
       });
       if (sendingInvoice.status === 'Draft') {
         const updated = await fetchJson<Invoice>(`/api/invoices/${sendingInvoice.id}`, {
@@ -1564,6 +1568,14 @@ export default function Invoices() {
                     style={inputStyle}
                     value={sendForm.message}
                     onChange={e => setSendForm({ ...sendForm, message: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('email_attachments_label')}</label>
+                  <EmailAttachmentsField
+                    attachments={sendAttachments}
+                    onChange={setSendAttachments}
+                    documentsQuery={sendingInvoice?.project_id ? { project_id: sendingInvoice.project_id } : undefined}
                   />
                 </div>
                 {sendResult && (
