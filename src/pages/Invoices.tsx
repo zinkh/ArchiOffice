@@ -5,6 +5,7 @@ import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
+import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
 import type { Invoice, InvoicePhase, Project, Contact } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
@@ -418,16 +419,37 @@ export default function Invoices() {
     const project = projects.find(p => p.id === invoice.project_id);
     const clientEmail = project?.client_email || project?.email_client || '';
     const affaireRef = invoice.affaire_invoice_number ? ` (réf. affaire ${invoice.affaire_invoice_number})` : '';
-    const subject = `${invoice.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'} N° ${invoice.invoice_number}${affaireRef} – ${invoice.project_name || project?.name || ''}`;
     const isAcompte = invoice.invoice_type === 'acompte';
     const phases = isAcompte ? getEffectivePhases(invoice) : [];
     const missionLine = phases.length > 0
       ? `${phases.map(p => `Phase : ${p.phase_name} (${p.avancement_pct}% d'avancement)`).join('\n')}\n`
       : '';
-    const message = `Bonjour,\n\nVeuillez trouver ci-joint ${isAcompte ? "la facture d'acompte" : 'la facture'} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
+    const typeFacture = isAcompte ? "Facture d'acompte" : 'Facture';
+    const typeFactureMinuscule = isAcompte ? "la facture d'acompte" : 'la facture';
+    const projetNom = invoice.project_name || project?.name || '';
+    const placeholderValues: Record<string, string> = {
+      type_facture: typeFacture,
+      type_facture_minuscule: typeFactureMinuscule,
+      numero: String(invoice.invoice_number ?? ''),
+      reference_affaire: affaireRef,
+      projet: projetNom,
+      missions: missionLine,
+      montant_ht: formatCurrency(invoice.amount, currency),
+      montant_ttc: formatCurrency(invoice.total_amount ?? invoice.amount, currency),
+      echeance: new Date(invoice.due_date).toLocaleDateString('fr-FR'),
+    };
+    // Fallback text if the tenant's "invoice" email template can't be fetched —
+    // exactly what this modal always sent before templates existed.
+    const fallbackSubject = `${typeFacture} N° ${invoice.invoice_number}${affaireRef} – ${projetNom}`;
+    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
     setSendingInvoice(invoice);
-    setSendForm({ to: clientEmail, subject, message });
+    setSendForm({ to: clientEmail, subject: fallbackSubject, message: fallbackMessage });
     setSendResult(null);
+
+    fetchEmailTemplate('invoice').then(tpl => {
+      if (!tpl) return;
+      setSendForm({ to: clientEmail, subject: fillTemplate(tpl.subject, placeholderValues), message: fillTemplate(tpl.body, placeholderValues) });
+    }).catch(err => console.error('fetchEmailTemplate(invoice) failed:', err));
   };
 
   const handleSendInvoice = async (e: React.FormEvent) => {
