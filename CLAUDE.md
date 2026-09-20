@@ -1067,10 +1067,53 @@ exactement comme un fournisseur sans vision dans `context.ts` : dégradé,
 mais honnête, plutôt qu'un tool qui prétendrait lire une image qu'il ne
 transmet pas réellement au modèle. Une pièce jointe trop volumineuse
 (20 Mo) est refusée avant tout téléchargement plutôt que de faire échouer
-l'extraction après coup, et le contenu extrait est plafonné à 6000
-caractères — même ordre de grandeur que la bibliothèque de connaissances
-d'un agent (`MAX_KNOWLEDGE_DOC_CHARS`) : une pièce jointe injectée au fil de
-la conversation, pas un corpus à parcourir.
+l'extraction après coup, et le contenu extrait est plafonné à 20 000
+caractères (`MAX_EXTRACTED_TEXT_CHARS`,
+`packages/archioffice-agents/src/server/documentTextExtraction.ts`) — assez
+pour un devis ou une notice de plusieurs pages, sans devenir un corpus à
+parcourir. L'extraction elle-même (`extractDocumentText`, PDF/DOCX/texte
+brut avec repli OCR) vit dans ce module partagé, réutilisé tel quel par
+`read_document` ci-dessous : même geste, une seule implémentation.
+
+**Exposée au MCP, avec un pont vers les fiches du cabinet.** Un cas réel l'a
+révélé : un email « 71 BLANDAN Devis signe » avec deux PDF en pièces
+jointes, retrouvé par `search_emails`, mais impossible à lire ni à rattacher
+à l'affaire depuis le connecteur MCP — `read_email_attachment` existait déjà
+côté chat interne, mais `MCP_CAPS.mailAttachments`
+(`packages/archioffice-agents/src/server/mcp/tools.ts`) était à `false`.
+Il est passé à `true` : `read_email_attachment` rejoint `MCP_TOOLS` via
+`buildAgentTools()`, sans route ni outil supplémentaire à écrire. Deux
+outils MCP écrits à la main complètent le pont :
+
+- **`import_email_attachment(id, attachment_ids | attachment_id, resource,
+  resource_id, category?, description?, compte?, force?)`** dépose une ou
+  plusieurs pièces jointes d'un email déjà lu directement sur une fiche du
+  cabinet — réutilise `getFullMessage`/`downloadAttachmentBytes`
+  (`mailAttachmentTools.ts`, désormais exportées) côté lecture et
+  `depositDocument` (factorisé hors d'`upload_document`, même `POST
+  /api/documents`) côté écriture. Le fichier ne transite jamais en base64
+  par le modèle : il va de la messagerie au stockage sans détour. Un
+  doublon (même nom, même taille déjà présents sur la fiche) est refusé et
+  signalé plutôt que déposé en double, sauf `force: true`.
+- **`read_document(resource, resource_id, document_id)`** lit le texte d'une
+  pièce déjà attachée à une fiche (import ci-dessus, ou tout document
+  existant) avec les mêmes extracteurs et la même limite que
+  `read_email_attachment` — préférable à `get_document` (qui renvoie du
+  base64 que le modèle ne peut pas lire) pour analyser un PDF ou un DOCX.
+
+### Recherche IMAP : objet ET corps, pas le corps seul
+
+`GET /api/mail/imap/search` (`server/routes/imapMailSync.ts`) posait le
+paramètre libre `q` sur le critère IMAP `body` : un mot présent uniquement
+dans l'objet d'un message (« Blandan » dans « 71 BLANDAN Devis signe »)
+n'était donc jamais trouvé par `search_emails query="Blandan"`, alors que
+`subject="Blandan"` le trouvait — un comportement qui ne correspondait à
+aucune des deux autres messageries (le `q` libre de Gmail matche déjà
+objet + corps + le reste, tout comme `$search` chez Outlook/Graph).
+`buildImapSearchCriteria()`, extraite en fonction pure et testable sans
+serveur IMAP (`tests/imapSearchCriteria.test.ts`), pose désormais `q` sur
+`text` (IMAP SEARCH TEXT, RFC 3501) — qui couvre les en-têtes, objet compris,
+ET le corps — au lieu de `body`.
 
 ### Délégation entre agents
 
@@ -1691,19 +1734,28 @@ sur un sous-dossier nommé d'après la ressource sinon (devis, appels
 d'offres, qui n'ont pas encore d'affaire).
 
 **Le MCP ArchiOffice** (`packages/archioffice-agents/src/server/mcp/tools.ts`)
-gagne quatre outils écrits à la main — `upload_document`, `list_documents`,
-`get_document`, `delete_document` — aucun ne rentrant dans le moule
-générique `create_record`/`update_record` (un upload porte un fichier
-binaire encodé en base64, pas un objet JSON). Ils réutilisent tels quels
-`POST/GET/DELETE /api/documents` : `upload_document` reconstruit un
-`FormData`/`Blob` en mémoire (Node 22, pas de dépendance ajoutée) plutôt que
-d'ouvrir une route JSON parallèle, et `get_document` repasse par
+gagne six outils écrits à la main — `upload_document`, `list_documents`,
+`get_document`, `read_document`, `import_email_attachment`,
+`delete_document` — aucun ne rentrant dans le moule générique
+`create_record`/`update_record` (un upload porte un fichier binaire encodé
+en base64, pas un objet JSON). Ils réutilisent tels quels
+`POST/GET/DELETE /api/documents` : `upload_document`/`import_email_attachment`
+partagent `depositDocument()`, qui reconstruit un `FormData`/`Blob` en
+mémoire (Node 22, pas de dépendance ajoutée) plutôt que d'ouvrir une route
+JSON parallèle, et `get_document`/`read_document` partagent
+`downloadAttachedDocumentBytes()`, qui repasse par
 `GET /api/storage/signed-url` (le même mécanisme que l'ouverture d'un
-document côté navigateur) avant de retélécharger et encoder les octets —
-aucune nouvelle route de lecture de fichier n'a donc été nécessaire.
+document côté navigateur) avant de retélécharger les octets — aucune
+nouvelle route de lecture de fichier n'a donc été nécessaire.
+`import_email_attachment` (voir « Lecture des pièces jointes de messagerie
+par les agents » plus haut) est le seul des six à combiner cette écriture
+avec une lecture côté messagerie (`mailAttachmentTools.ts`).
 Limite commune 25 Mo (`MAX_MCP_FILE_BYTES`), plus basse que la limite serveur
-(50 Mo, `server/documentUpload.ts`) : un fichier voyage en base64 dans
-l'appel JSON-RPC lui-même, environ un tiers plus volumineux que l'original.
+(50 Mo, `server/documentUpload.ts`) : chez `upload_document`/`get_document`,
+un fichier voyage en base64 dans l'appel JSON-RPC lui-même, environ un tiers
+plus volumineux que l'original — `import_email_attachment`/`read_document`
+n'ont pas ce détour (octets ou texte extrait directement) mais gardent la
+même limite, par cohérence avec le reste de cette famille d'outils.
 `delete_document` suit la même confirmation en deux temps que
 `delete_record`/`consulter_agent` (`needs_confirmation` puis `confirm: true`)
 — exception délibérée à la règle « jamais de suppression depuis une liaison
