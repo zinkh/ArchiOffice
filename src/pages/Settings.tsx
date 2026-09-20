@@ -24,6 +24,7 @@ import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
+import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -3147,6 +3148,12 @@ export default function Settings() {
       {/* Bot Telegram — même principe : actions immédiates (générer un code,
           révoquer), pas de formulaire via saveSection/renderSaveButton. */}
       <TelegramConnectionsCard />
+
+      {/* Courrier entrant — même principe : choisir l'agent de triage est
+          une action immédiate, pas un champ du grand formulaire. Ne
+          s'affiche que si l'instance a un domaine de réception configuré
+          (server/agentMailInbox.ts). */}
+      <AgentMailInboxCard />
         </>
       )}
         </div>

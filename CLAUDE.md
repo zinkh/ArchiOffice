@@ -110,6 +110,9 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `GEORISQUES_TOKEN` | Optional | French geological risk API |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional | Web Push (PWA notifications). Generate once per instance with `node scripts/generate-vapid-keys.mjs`; unset means Web Push is off and nothing else breaks |
 | `VAPID_SUBJECT` | Optional | Contact address the push service uses to reach the operator (`mailto:` or `https:`). Falls back to `APP_URL` |
+| `AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD` | Optional | Shared IMAP mailbox for inbound "forward an email to an agent" (`server/agentMailInbox.ts`) — job inactive unless all four are set |
+| `AGENT_MAIL_INBOX_ALIAS_DOMAIN` | Optional | Domain used to compose each tenant's `agents+<slug>@…` alias, shown in `/settings` |
+| `AGENT_MAIL_INBOX_FOLDER` / `AGENT_MAIL_INBOX_POLL_MINUTES` | Optional | IMAP folder polled (default `INBOX`) and poll cadence in minutes (default 3) |
 | `PORT` | Optional | Server port (default 8080 in Docker) |
 | `DISABLE_HMR` | Optional | Set `true` to disable Vite HMR |
 
@@ -1114,6 +1117,94 @@ objet + corps + le reste, tout comme `$search` chez Outlook/Graph).
 serveur IMAP (`tests/imapSearchCriteria.test.ts`), pose désormais `q` sur
 `text` (IMAP SEARCH TEXT, RFC 3501) — qui couvre les en-têtes, objet compris,
 ET le corps — au lieu de `body`.
+
+### Courrier entrant : transfert d'un email vers un agent
+
+Jusqu'ici, aucun mécanisme de réception de mail n'existait dans
+ArchiOffice : le SMTP configuré (`settings.smtp_*`) est strictement
+sortant, et les connecteurs Gmail/Outlook/IMAP ne font que du pull à la
+demande sur la boîte d'UN utilisateur humain (`email_connections`,
+`user_id NOT NULL`). `server/agentMailInbox.ts` relève désormais
+périodiquement une boîte IMAP **partagée**, propriété de la plateforme et
+non d'un utilisateur, pour qu'un email transféré à un alias dédié soit pris
+en charge par un agent — sans nouveau prestataire webhook, en réutilisant
+l'infrastructure IMAP déjà écrite (`ImapFlow`,
+`server/mailFullMessage.ts`).
+
+**Un seul alias par cabinet, un agent de triage désigné.** Pas d'alias par
+agent : `settings.mail_triage_agent_id`
+(`supabase/migrate_agent_mail_inbox.sql`) fixe, par cabinet, quel agent
+traite tout ce qui arrive à son alias — réglable depuis `/settings`
+(`AgentMailInboxCard.tsx`), avec la même vérification d'appartenance au
+tenant que le reste des références inter-ressources de cette table
+(`assertTenantEntity`, voir « Références inter-locataires non validées »).
+L'alias lui-même se déduit de `tenants.slug` (le seul identifiant
+réellement unique sur toute l'instance — `agents.slug` ne l'est que par
+cabinet) : `agents+<slug-cabinet>@<AGENT_MAIL_INBOX_ALIAS_DOMAIN>`
+(`buildMailInboxAlias()`), affiché en lecture seule dans la même carte.
+
+**Prérequis hors code, à ne jamais perdre de vue.** Cette adresse ne
+fonctionne que si l'opérateur a réellement provisionné une boîte mail
+(ex. chez Infomaniak) qui reçoit tous les sous-adressages `+` dans une
+seule boîte IMAP (ou un alias/catch-all redirigé vers elle), avec un
+enregistrement MX pointant dessus pour le domaine choisi. Ni le DNS ni la
+création de la boîte ne sont du ressort de l'application — seuls les
+identifiants IMAP de cette boîte partagée sont configurés côté serveur
+(`AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD`, comme `SMTP_*`). Le job
+reste inactif tant que ces variables manquent, comme le Web Push sans clés
+VAPID : rien d'autre ne casse (`isMailInboxConfigured()`).
+
+**Jamais d'action sans expéditeur reconnu.** L'en-tête `From` d'un
+transfert n'est pas fiable (falsifiable), donc `processMessage()` ne se
+contente pas de le lire : il cherche un `profiles.email` correspondant PUIS
+vérifie son appartenance à CE cabinet (`findMembership()`,
+`server/tenantMemberships.ts` — pas seulement `profiles.tenant_id` par
+défaut, pour couvrir un architecte qui exerce dans plusieurs cabinets, voir
+« Plusieurs cabinets pour une même personne »). Sans correspondance, le
+message est ignoré silencieusement côté utilisateur (seulement loggé côté
+serveur) — jamais d'action, même en lecture seule, pour un expéditeur non
+reconnu.
+
+**Le pont d'authentification `mail_at_`.** Traiter l'email avec les VRAIS
+droits de la personne reconnue (`create_record`, écriture DPGF... selon ses
+capacités) veut dire rejouer `POST /api/agents/:id/chat` en entier —
+facturation réserve/règle, boucle d'outils, persistance de conversation —
+pas réinventer une exécution parallèle. Mais ce point d'entrée exige un
+`Authorization` Bearer validé comme un JWT Supabase, et le poller ne parle
+à personne de vivant. `server/agentMailRelayTokens.ts` ajoute un troisième
+préfixe reconnu par le middleware `/api` de `server.ts`, à côté des jetons
+`mcp_at_` et `tg_at_` déjà dispatchés là : `mail_at_`, résolu par une
+nouvelle table `agent_mail_relay_tokens`. Contrairement aux deux autres
+(liaisons persistantes, révocables mais valables tant qu'elles ne le sont
+pas), un jeton `mail_at_` ne vit que le temps d'UN appel — émis juste avant
+de rappeler l'API interne, marqué consommé dès sa résolution (`used_at`),
+expiré au bout de 5 minutes s'il n'a pas servi.
+
+**Idempotence.** `agent_mail_inbox_processed(message_id_header, tenant_id,
+processed_at)` protège contre un double traitement si le flag `\Seen` ne
+tient pas ou si deux relevés se chevauchent — même prudence que
+`article_prix_observations.source_ref` pour la remontée de prix BPU. Un
+message est marqué `\Seen` dans tous les cas à la fin de son traitement, y
+compris un échec (agent introuvable, appel interne en erreur) : un message
+illisible ne doit pas être retraité indéfiniment à chaque relevé plutôt que
+de bloquer les suivants.
+
+**Corps et pièces jointes.** Le texte envoyé à l'agent réutilise
+`extractDocumentText` (`packages/archioffice-agents/src/server/
+documentTextExtraction.ts`, déjà écrit pour `read_email_attachment`/
+`read_document`) pour chaque pièce jointe — aucune nouvelle logique
+d'extraction — avec la même mise en garde que `read_email` : contenu
+externe non fiable, jamais des instructions. Plafonné à
+`MAX_ATTACHMENTS_PER_MESSAGE` (5) et `MAX_ATTACHMENT_BYTES` (20 Mo, même
+plafond que `read_email_attachment`) pour qu'un transfert pathologique ne
+bloque jamais tout un relevé.
+
+**Restitution.** L'échange apparaît dans la conversation de l'agent de
+triage comme un tour de chat normal (`agent_conversations`/
+`agent_messages`, via la route existante) — pas de réponse email dans
+cette première version. `notifyUsers()` (`server/push.ts`) prévient
+seulement la personne reconnue qu'un email transféré a été traité, avec un
+lien direct vers cette conversation.
 
 ### Délégation entre agents
 

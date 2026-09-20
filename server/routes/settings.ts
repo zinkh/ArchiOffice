@@ -5,6 +5,8 @@ import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import { streamTenantExport } from '../tenantExport';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { buildMailInboxAlias } from '../agentMailInbox';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -50,6 +52,7 @@ const toSnake: Record<string, string> = {
   architectName: 'architect_name', oaNumber: 'oa_number',
   notificationArchiveDays: 'notification_archive_days',
   googleContactsSyncCategories: 'google_contacts_sync_categories',
+  mailTriageAgentId: 'mail_triage_agent_id',
 };
 const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -58,10 +61,16 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
-      if (!settings) { res.json({ tenant_id: tenantId }); return; }
+      // L'alias de courrier entrant se dérive de tenants.slug, pas d'une
+      // colonne de settings — une requête de plus, mais sans elle le seul
+      // moyen pour l'architecte de le connaître serait de deviner le format
+      // (voir server/agentMailInbox.ts, AgentMailInboxCard).
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('slug').eq('id', tenantId).maybeSingle();
+      const mailInboxAlias = tenant?.slug ? buildMailInboxAlias(tenant.slug) : null;
+      if (!settings) { res.json({ tenant_id: tenantId, mailInboxAlias }); return; }
       // Return camelCase keys expected by the frontend, minus stored secrets
       // (only whether one is set, so the UI can show "configured").
-      const out: any = {};
+      const out: any = { mailInboxAlias };
       for (const [k, v] of Object.entries(settings)) {
         if (SECRET_COLS.has(k)) {
           out[`${toCamel[k] ?? k}Set`] = v != null && v !== '';
@@ -109,6 +118,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'notification_archive_days',
         'tender_boamp_enabled', 'tender_ted_enabled',
         'google_contacts_sync_categories',
+        'mail_triage_agent_id',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits']);
       const filteredData: any = Object.fromEntries(
@@ -123,6 +133,14 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       );
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
+
+      // L'agent de triage référencé doit appartenir à CE cabinet — même
+      // faille que documentée dans CLAUDE.md, « Références inter-locataires
+      // non validées » : un identifiant accepté tel quel dans le corps de la
+      // requête peut pointer vers l'agent d'un autre cabinet.
+      if ('mail_triage_agent_id' in filteredData && !(await assertTenantEntity(supabaseAdmin, 'agents', filteredData.mail_triage_agent_id, tenantId))) {
+        return res.status(400).json({ error: "Agent introuvable pour ce cabinet." });
+      }
 
       // Check if row already exists for this tenant
       const { data: existing } = await supabaseAdmin

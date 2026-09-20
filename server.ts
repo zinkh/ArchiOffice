@@ -8,6 +8,7 @@ import { captureWithContext } from "./server/sentryContext";
 import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerTelegramRoutes } from "./server/routes/telegram";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
+import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -113,6 +114,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startAgentAlerts } from "./server/agentAlerts";
+import { startAgentMailInbox } from "./server/agentMailInbox";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
@@ -787,6 +789,20 @@ export async function createApp() {
           return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
         }
       }
+      // Même principe pour le relevé de la messagerie entrante partagée
+      // (server/agentMailInbox.ts) : un email transféré reconnu rappelle
+      // /api/agents/:id/chat avec ce jeton plutôt qu'un JWT, puisqu'il n'y a
+      // personne de vivant derrière ce déclenchement. Jeton à usage unique
+      // et de quelques minutes (server/agentMailRelayTokens.ts), à la
+      // différence des liaisons persistantes mcp_at_/tg_at_ ci-dessus.
+      if (token.startsWith('mail_at_')) {
+        const resolved = await resolveMailRelayToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
       return res.status(401).json({ error: "Token invalide" });
     }
     req.user = user;
@@ -1151,6 +1167,7 @@ export async function createApp() {
   // de fond, qui ne doivent pas tourner avant que la boucle locale réponde).
   const startAgentBackgroundJobs = () => {
     startAgentAlerts(supabaseAdmin);
+    startAgentMailInbox(supabaseAdmin, `http://127.0.0.1:${PORT}`);
     import('@zinkh/archioffice-agents/server')
       .then(({ startAgentScheduler }) => startAgentScheduler(supabaseAdmin, { deductAiCredit, notifyTenantAdmins }))
       .catch(e => console.error('[agentScheduler] démarrage impossible:', e.message));
