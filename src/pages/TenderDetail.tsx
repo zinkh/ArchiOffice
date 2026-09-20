@@ -385,6 +385,21 @@ export default function TenderDetail() {
   const setSolicitationStatus = async (sol: TenderPartnerSolicitation, status: TenderPartnerSolicitation['status']) => {
     setSolicitations(prev => prev.map(s => s.id === sol.id ? { ...s, status } : s));
     await apiFetch(`/api/tender-partner-solicitations/${sol.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+    // Un cotraitant marqué "accepté" (partant) rejoint directement le
+    // groupement retenu (Résultat de la consultation) — sinon l'architecte
+    // devait ressaisir à la main un nom déjà connu de la sollicitation.
+    // Ajouté au groupement PERSISTÉ du tender, pas au brouillon local de
+    // groupementForm, pour ne jamais pousser en base une ligne que
+    // l'architecte est encore en train de saisir dans ce panneau.
+    if (status === 'accepte' && tender) {
+      const persisted = tender.groupement_retenu_list || [];
+      const alreadyIn = (members: TenderGroupementMembre[]) => members.some(m => m.contact_id === sol.contact_id);
+      if (!alreadyIn(persisted)) {
+        const newMember: TenderGroupementMembre = { role: sol.specialty_name, contact_id: sol.contact_id };
+        await saveTenderPatch({ groupement_retenu_list: [...persisted, newMember] });
+        setGroupementForm(prev => alreadyIn(prev) ? prev : [...prev, newMember]);
+      }
+    }
   };
   const solicitationContact = (sol: TenderPartnerSolicitation) => contacts.find(c => c.id === sol.contact_id);
   const solicitationEmailBody = async (sol: TenderPartnerSolicitation, isRelance: boolean) => {
