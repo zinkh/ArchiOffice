@@ -385,19 +385,30 @@ export default function TenderDetail() {
   const setSolicitationStatus = async (sol: TenderPartnerSolicitation, status: TenderPartnerSolicitation['status']) => {
     setSolicitations(prev => prev.map(s => s.id === sol.id ? { ...s, status } : s));
     await apiFetch(`/api/tender-partner-solicitations/${sol.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
-    // Un cotraitant marqué "accepté" (partant) rejoint directement le
-    // groupement retenu (Résultat de la consultation) — sinon l'architecte
-    // devait ressaisir à la main un nom déjà connu de la sollicitation.
-    // Ajouté au groupement PERSISTÉ du tender, pas au brouillon local de
-    // groupementForm, pour ne jamais pousser en base une ligne que
+    // Un cotraitant marqué "accepté" (partant) rejoint directement les
+    // spécialités requises (onglet Partenaires) avec son contact déjà
+    // renseigné — sinon l'architecte devait ressaisir à la main un
+    // rattachement déjà connu de la sollicitation. Complète la spécialité
+    // existante du même nom si elle n'a pas encore de contact, sinon en
+    // ajoute une nouvelle ligne. Persisté directement (pas via le brouillon
+    // local specialtiesForm) pour ne jamais pousser en base une ligne que
     // l'architecte est encore en train de saisir dans ce panneau.
     if (status === 'accepte' && tender) {
-      const persisted = tender.groupement_retenu_list || [];
-      const alreadyIn = (members: TenderGroupementMembre[]) => members.some(m => m.contact_id === sol.contact_id);
-      if (!alreadyIn(persisted)) {
-        const newMember: TenderGroupementMembre = { role: sol.specialty_name, contact_id: sol.contact_id };
-        await saveTenderPatch({ groupement_retenu_list: [...persisted, newMember] });
-        setGroupementForm(prev => alreadyIn(prev) ? prev : [...prev, newMember]);
+      const persisted = tender.specialties_list || [];
+      const sameName = (s: { specialty_name: string }) => s.specialty_name.trim().toLowerCase() === sol.specialty_name.trim().toLowerCase();
+      const alreadyAssigned = persisted.some(s => sameName(s) && s.contact_id === sol.contact_id);
+      if (!alreadyAssigned) {
+        const emptySlotIdx = persisted.findIndex(s => sameName(s) && !s.contact_id);
+        const newList = emptySlotIdx >= 0
+          ? persisted.map((s, i) => i === emptySlotIdx ? { ...s, contact_id: sol.contact_id } : s)
+          : [...persisted, { specialty_name: sol.specialty_name, contact_id: sol.contact_id }];
+        await saveTenderPatch({ specialties_list: newList as any });
+        setSpecialtiesForm(prev => {
+          const idx = prev.findIndex(s => sameName(s) && !s.contact_id);
+          if (idx >= 0) return prev.map((s, i) => i === idx ? { ...s, contact_id: sol.contact_id } : s);
+          if (prev.some(s => sameName(s) && s.contact_id === sol.contact_id)) return prev;
+          return [...prev, { specialty_name: sol.specialty_name, contact_id: sol.contact_id }];
+        });
       }
     }
   };
