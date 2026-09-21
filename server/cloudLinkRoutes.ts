@@ -70,7 +70,7 @@ export function createCloudLinkRouter(
   // poste réellement synchronisé — ni donc de proposer de relancer l'import.
   router.get('/cloud-link-status', (req: Request, res: Response) => {
     const state = readCloudLinkState();
-    res.json({ linked: !!state, importCompleted: state?.importCompleted ?? null });
+    res.json({ linked: !!state, importCompleted: state?.importCompleted ?? null, email: state?.email ?? null });
   });
 
   router.post('/cloud-link', express.json(), async (req: Request, res: Response) => {
@@ -192,6 +192,63 @@ export function createCloudLinkRouter(
     const job = getImportJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Import introuvable' });
     res.json(job);
+  });
+
+  // Rétablit la session cloud d'un poste déjà lié quand le jeton stocké n'est
+  // plus valide (expiré côté Supabase Auth, révoqué manuellement...) — c'est
+  // le recours que /cloud-link-retry-import promettait déjà dans son message
+  // d'erreur ("Reconnectez-vous depuis Réglages") sans qu'aucune route ne
+  // l'implémente. Seul le mot de passe est demandé, jamais l'email : ce
+  // poste est déjà lié à un cloudUserId précis (state.email, ci-dessous), et
+  // le proposer en clair inviterait à croire qu'on peut re-lier ce poste à
+  // un AUTRE compte cloud depuis cet écran — impossible sans perdre
+  // l'alignement des tenant_id/profiles déjà posés localement au premier
+  // lien (voir /cloud-link plus haut).
+  router.post('/cloud-link-reconnect', express.json(), async (req: Request, res: Response) => {
+    const account = readLocalAccount();
+    const state = readCloudLinkState();
+    if (!account || !state) {
+      return res.status(400).json({ error: "Ce poste n'est pas relié à un compte cloud" });
+    }
+
+    const token = bearerToken(req);
+    const claims = token ? verifyLocalJwt(token) : null;
+    if (!claims || claims.sub !== account.userId) {
+      return res.status(401).json({ error: 'Authentification locale requise' });
+    }
+
+    const password = req.body?.password || '';
+    if (!password) {
+      return res.status(400).json({ error: 'Mot de passe requis' });
+    }
+
+    let cloudClient: SupabaseClient;
+    try {
+      cloudClient = createCloudSupabaseClient();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({ email: state.email, password });
+    if (authErr || !authData.session) {
+      return res.status(401).json({ error: authErr?.message || 'Mot de passe incorrect' });
+    }
+    // Un même email peut en théorie changer de compte cloud (suppression et
+    // recréation) — s'assurer que c'est TOUJOURS le même cloudUserId avant
+    // d'écraser le jeton stocké, sinon ce poste continuerait de pousser/tirer
+    // sous state.tenantId des données appartenant en réalité à un autre id.
+    if (authData.session.user.id !== state.cloudUserId) {
+      return res.status(409).json({ error: "Ce compte cloud ne correspond plus à celui lié à ce poste. Contactez le support." });
+    }
+
+    try {
+      const encrypted = await encryptForStorage(authData.session.refresh_token);
+      writeEncryptedCloudSession(encrypted);
+    } catch (err: any) {
+      return res.status(500).json({ error: `Échec du chiffrement de la session cloud : ${err.message}` });
+    }
+
+    res.json({ ok: true });
   });
 
   // Relance l'import initial après un échec (voir server/initialImport.ts :

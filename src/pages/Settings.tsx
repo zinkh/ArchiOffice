@@ -15,7 +15,7 @@ import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
-import { checkCloudLinkStatus, upgradeToCloud, retryImport } from '../lib/cloudSync';
+import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
@@ -427,8 +427,17 @@ export default function Settings() {
   // cloudLinked, pour offrir une relance plutôt qu'un poste bloqué sans
   // aucune donnée ni aucun moyen de le savoir depuis l'écran Projets.
   const [cloudImportCompleted, setCloudImportCompleted] = useState<boolean | null>(null);
+  const [cloudLinkedEmail, setCloudLinkedEmail] = useState<string | null>(null);
   const [isRetryingCloudImport, setIsRetryingCloudImport] = useState(false);
   const [retryCloudImportError, setRetryCloudImportError] = useState<string | null>(null);
+  // Le message d'erreur de /cloud-link-retry-import invite déjà à se
+  // reconnecter quand le jeton stocké n'est plus valide — ce formulaire est
+  // le recours que ce message promettait sans qu'aucune route ne
+  // l'implémente jusqu'ici (voir server/cloudLinkRoutes.ts).
+  const [showCloudReconnectForm, setShowCloudReconnectForm] = useState(false);
+  const [cloudReconnectPassword, setCloudReconnectPassword] = useState('');
+  const [isReconnectingCloud, setIsReconnectingCloud] = useState(false);
+  const [cloudReconnectError, setCloudReconnectError] = useState<string | null>(null);
   const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
   const [cloudUpgradeEmail, setCloudUpgradeEmail] = useState('');
   const [cloudUpgradePassword, setCloudUpgradePassword] = useState('');
@@ -542,8 +551,8 @@ export default function Settings() {
       fetchProjectCategories();
       if (isOfflineBuild()) {
         checkCloudLinkStatus()
-          .then((s) => { setCloudLinked(s.linked); setCloudImportCompleted(s.importCompleted); })
-          .catch(() => { setCloudLinked(null); setCloudImportCompleted(null); });
+          .then((s) => { setCloudLinked(s.linked); setCloudImportCompleted(s.importCompleted); setCloudLinkedEmail(s.email); })
+          .catch(() => { setCloudLinked(null); setCloudImportCompleted(null); setCloudLinkedEmail(null); });
       }
       const bridge = desktopBridge();
       if (bridge) {
@@ -965,6 +974,25 @@ export default function Settings() {
     } catch (err: any) {
       setRetryCloudImportError(err?.message || "Échec de la relance de l'import.");
       setIsRetryingCloudImport(false);
+    }
+  };
+
+  const handleReconnectCloud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCloudReconnectError(null);
+    setIsReconnectingCloud(true);
+    try {
+      await reconnectCloud(cloudReconnectPassword);
+      setCloudReconnectPassword('');
+      setShowCloudReconnectForm(false);
+      // La session cloud est rétablie — enchaîner directement sur la relance
+      // de l'import plutôt que de laisser l'utilisateur recliquer un second
+      // bouton pour la même intention.
+      await handleRetryCloudImport();
+    } catch (err: any) {
+      setCloudReconnectError(err?.message || 'Échec de la reconnexion.');
+    } finally {
+      setIsReconnectingCloud(false);
     }
   };
 
@@ -2944,16 +2972,71 @@ export default function Settings() {
                 été récupéré.
               </p>
               {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
-              <button
-                type="button"
-                onClick={handleRetryCloudImport}
-                disabled={isRetryingCloudImport}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
-                style={{ background: 'var(--tblr-warning, #f59f00)' }}
-              >
-                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
-                Relancer l'import
-              </button>
+              {!showCloudReconnectForm ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRetryCloudImport}
+                    disabled={isRetryingCloudImport}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                  >
+                    {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                    Relancer l'import
+                  </button>
+                  {/* La session cloud (jeton de rafraîchissement) peut avoir expiré
+                      ou avoir été révoquée entre-temps — dans ce cas la relance
+                      ci-dessus échoue avec un message qui invite justement à se
+                      reconnecter ici. Toujours visible (pas seulement après un
+                      échec) : pas de raison de faire deviner ce recours. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCloudReconnectForm(true)}
+                    className="text-xs font-medium underline"
+                    style={{ color: 'var(--tblr-muted)' }}
+                  >
+                    Se reconnecter au cloud
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleReconnectCloud} className="space-y-3 max-w-sm">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>
+                      Mot de passe du compte cloud{cloudLinkedEmail ? ` (${cloudLinkedEmail})` : ''}
+                    </label>
+                    <input
+                      type="password"
+                      value={cloudReconnectPassword}
+                      onChange={(e) => setCloudReconnectPassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  {cloudReconnectError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudReconnectError}</p>}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isReconnectingCloud}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                    >
+                      {isReconnectingCloud ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                      Se reconnecter et relancer l'import
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
+                      disabled={isReconnectingCloud}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
 
