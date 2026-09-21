@@ -15,7 +15,7 @@ import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
-import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
+import { checkCloudLinkStatus, upgradeToCloud, retryImport } from '../lib/cloudSync';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
@@ -421,6 +421,14 @@ export default function Settings() {
 
   // Client Electron "compte local" — bascule vers un compte cloud existant
   const [cloudLinked, setCloudLinked] = useState<boolean | null>(null);
+  // Un import initial qui a échoué (voir server/initialImport.ts) laisse ce
+  // poste "lié" pour toujours sans jamais activer la synchro (server.ts ne
+  // la démarre que si importCompleted) — d'où ce champ distinct de
+  // cloudLinked, pour offrir une relance plutôt qu'un poste bloqué sans
+  // aucune donnée ni aucun moyen de le savoir depuis l'écran Projets.
+  const [cloudImportCompleted, setCloudImportCompleted] = useState<boolean | null>(null);
+  const [isRetryingCloudImport, setIsRetryingCloudImport] = useState(false);
+  const [retryCloudImportError, setRetryCloudImportError] = useState<string | null>(null);
   const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
   const [cloudUpgradeEmail, setCloudUpgradeEmail] = useState('');
   const [cloudUpgradePassword, setCloudUpgradePassword] = useState('');
@@ -534,8 +542,8 @@ export default function Settings() {
       fetchProjectCategories();
       if (isOfflineBuild()) {
         checkCloudLinkStatus()
-          .then((s) => setCloudLinked(s.linked))
-          .catch(() => setCloudLinked(null));
+          .then((s) => { setCloudLinked(s.linked); setCloudImportCompleted(s.importCompleted); })
+          .catch(() => { setCloudLinked(null); setCloudImportCompleted(null); });
       }
       const bridge = desktopBridge();
       if (bridge) {
@@ -945,6 +953,18 @@ export default function Settings() {
       alert(err?.message || t('settings_tenant_deletion_cancel_failed'));
     } finally {
       setIsCancelingDeletion(false);
+    }
+  };
+
+  const handleRetryCloudImport = async () => {
+    setRetryCloudImportError(null);
+    setIsRetryingCloudImport(true);
+    try {
+      const result = await retryImport();
+      navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
+    } catch (err: any) {
+      setRetryCloudImportError(err?.message || "Échec de la relance de l'import.");
+      setIsRetryingCloudImport(false);
     }
   };
 
@@ -2903,6 +2923,37 @@ export default function Settings() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── Poste lié au cloud mais dont l'import initial n'a jamais abouti ──
+              server.ts ne démarre /api/sync que si importCompleted est vrai :
+              un échec au premier lien (server/initialImport.ts) laisse donc ce
+              poste "lié" mais silencieusement jamais synchronisé — projets,
+              factures, contacts... restés vides indéfiniment, sans aucun autre
+              écran pour le relancer une fois passé l'écran d'import initial. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === false && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-warning, #f59f00)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-warning, #f59f00)' }}>
+                <IconCloud size={15} /> Import cloud incomplet
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié à votre compte cloud, mais la récupération initiale de vos données (projets,
+                factures, contacts...) ne s'est jamais terminée avec succès — c'est pourquoi certains écrans peuvent
+                rester vides. Vous pouvez relancer cet import ; il reprend ce qui manque sans dupliquer ce qui a déjà
+                été récupéré.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              <button
+                type="button"
+                onClick={handleRetryCloudImport}
+                disabled={isRetryingCloudImport}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                style={{ background: 'var(--tblr-warning, #f59f00)' }}
+              >
+                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                Relancer l'import
+              </button>
             </div>
           )}
 

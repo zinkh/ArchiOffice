@@ -24,7 +24,7 @@ async function parseJsonOrThrow(res: Response): Promise<any> {
   return data;
 }
 
-export async function checkCloudLinkStatus(): Promise<{ linked: boolean }> {
+export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importCompleted: boolean | null }> {
   const res = await fetch('/api/auth/cloud-link-status');
   return parseJsonOrThrow(res);
 }
