@@ -24,9 +24,18 @@ async function parseJsonOrThrow(res: Response): Promise<any> {
   return data;
 }
 
-export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importCompleted: boolean | null }> {
+export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importCompleted: boolean | null; email: string | null }> {
   const res = await fetch('/api/auth/cloud-link-status');
   return parseJsonOrThrow(res);
+}
+
+/**
+ * Rétablit la session cloud (jeton de rafraîchissement expiré ou révoqué)
+ * d'un poste déjà lié — voir server/cloudLinkRoutes.ts. Ne demande que le
+ * mot de passe : l'email est déjà fixé par le lien existant.
+ */
+export async function reconnectCloud(password: string): Promise<{ ok: true }> {
+  return apiFetch('/api/auth/cloud-link-reconnect', { method: 'POST', body: JSON.stringify({ password }) });
 }
 
 export async function cloudLink(email: string, password: string, localPassword: string): Promise<LocalSession & { importJobId: string }> {
