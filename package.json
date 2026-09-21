@@ -15,7 +15,7 @@
     "dev": "tsx --import ./instrument.ts server.ts",
     "start": "tsx --import ./instrument.ts server.ts",
     "build": "mkdir -p dist && vite build && cp proxy.json dist/",
-    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:vite --external:@modelcontextprotocol/sdk",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:vite",
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server release",
     "lint": "tsc --noEmit",
