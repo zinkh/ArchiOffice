@@ -61,8 +61,16 @@ export function createCloudLinkRouter(
 ): Router {
   const router = Router();
 
+  // `linked` seul ne dit pas si l'import initial a abouti : un import qui a
+  // échoué au premier lien (server/initialImport.ts) laisse un état
+  // `importCompleted: false` permanent — /api/sync/* ne démarre alors
+  // jamais (voir server.ts, `if (linkState?.importCompleted)`), et sans ce
+  // champ ici, Settings.tsx n'avait aucun moyen de distinguer ce poste
+  // (lié mais jamais synchronisé, projets restés vides indéfiniment) d'un
+  // poste réellement synchronisé — ni donc de proposer de relancer l'import.
   router.get('/cloud-link-status', (req: Request, res: Response) => {
-    res.json({ linked: !!readCloudLinkState() });
+    const state = readCloudLinkState();
+    res.json({ linked: !!state, importCompleted: state?.importCompleted ?? null });
   });
 
   router.post('/cloud-link', express.json(), async (req: Request, res: Response) => {
