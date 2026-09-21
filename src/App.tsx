@@ -50,6 +50,7 @@ const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const References = lazy(() => import('./pages/References'));
 const Documents = lazy(() => import('./pages/Documents'));
+const ShareTarget = lazy(() => import('./pages/ShareTarget'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Billing = lazy(() => import('./pages/Billing'));
 const TenderDetail = lazy(() => import('./pages/TenderDetail'));
@@ -826,6 +827,7 @@ export default function App() {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/references" element={<References />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/share-target" element={<ShareTarget />} />
               <Route path="/proposals" element={<Proposals />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/tenders" element={<Tenders />} />
