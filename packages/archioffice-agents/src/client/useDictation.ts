@@ -134,7 +134,6 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
   // automatiques du moteur afin de reconnaître les résultats cumulatifs
   // propres à Chrome Android, mais repart à zéro au prochain clic utilisateur.
   const emittedBrowserTextRef = useRef('');
-  const restartedBrowserSessionRef = useRef(false);
   // Distingue « le moteur s'est arrêté tout seul » (silence prolongé, ce que
   // Chrome fait même en mode continu) de « l'utilisateur a coupé le micro ».
   const wantListeningRef = useRef(false);
@@ -179,16 +178,13 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
         if (result.isFinal) {
           if (i >= finalizedCountRef.current) {
             const clean = text.trim();
-            const addition = restartedBrowserSessionRef.current
-              ? cumulativeDictationDelta(emittedBrowserTextRef.current, clean)
-              : clean;
+            const addition = cumulativeDictationDelta(emittedBrowserTextRef.current, clean);
             if (addition) {
               onTranscriptRef.current(addition);
               emittedBrowserTextRef.current = emittedBrowserTextRef.current
                 ? `${emittedBrowserTextRef.current} ${addition}`
                 : addition;
             }
-            restartedBrowserSessionRef.current = false;
             finalizedCountRef.current = i + 1;
           }
         } else {
@@ -229,7 +225,6 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
       if (wantListeningRef.current && recognitionRef.current === recognition) {
         try {
           finalizedCountRef.current = 0;
-          restartedBrowserSessionRef.current = true;
           recognition.start();
           return;
         } catch { /* déjà relancée */ }
@@ -242,7 +237,6 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
     recognitionRef.current = recognition;
     finalizedCountRef.current = 0;
     emittedBrowserTextRef.current = '';
-    restartedBrowserSessionRef.current = false;
     recognition.start();
     return true;
   }, [language]);
