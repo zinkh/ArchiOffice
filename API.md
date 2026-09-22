@@ -173,6 +173,8 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET /api/billing/status`, `POST /api/billing/checkout`, `POST /api/billing/webhook` (Stancer, no auth), `GET /api/billing/history`, `GET /api/billing/credits/packs`, `POST /api/billing/credits/checkout`.
 
 ### External integrations
+Connection status endpoints are available to every tenant member. Tenant-wide administration (`auth`/connect, `disconnect`, `sync`, credential `test`, and configuration through `PUT /api/settings`) is restricted to users whose tenant role is `admin`. Operational invoice submission and status lookup keep their domain-specific permissions.
+
 Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth `auth`/`callback` where the provider uses OAuth):
 - **Zoho CRM**: `GET /api/zoho/status`, `GET /api/zoho/callback-url`, `GET /api/zoho/auth`, `GET /api/zoho/callback`, `DELETE /api/zoho/disconnect`, `POST /api/zoho/sync`.
 - **Zoho Books**: `GET /api/zoho-books/status`, `GET /api/zoho-books/auth`, `GET /api/zoho-books/callback`, `DELETE /api/zoho-books/disconnect`, `POST /api/zoho-books/sync`.
