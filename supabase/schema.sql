@@ -176,8 +176,8 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL, budget NUMERIC, category TEXT,
   start_date TEXT, end_date TEXT, description TEXT, image_url TEXT,
   project_code TEXT, address TEXT, client_siret TEXT, client_vat_number TEXT,
-  client_email TEXT, is_public_client INTEGER DEFAULT 0,
-  reference TEXT, projet_detail TEXT, is_entreprise INTEGER DEFAULT 0,
+  client_email TEXT, is_public_client BOOLEAN DEFAULT false,
+  reference TEXT, projet_detail TEXT, is_entreprise BOOLEAN DEFAULT false,
   nom_societe TEXT, rcs TEXT, representant TEXT, qualite TEXT,
   adresse_client TEXT, cp_client TEXT, ville_client TEXT,
   telephone TEXT, portable TEXT, email_client TEXT,
@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS projects (
   type_projet TEXT, categorie_projet TEXT, surface_plancher TEXT,
   surface_plancher_ext TEXT, surface_erp TEXT, surface_ert TEXT,
   effectif_public TEXT, effectif_personnel TEXT, ind TEXT, date_modification TEXT,
-  is_complete_mission TEXT, is_chantier TEXT, etudes_notes TEXT, chantier_notes TEXT,
+  is_complete_mission BOOLEAN DEFAULT false, is_chantier BOOLEAN DEFAULT false, etudes_notes TEXT, chantier_notes TEXT,
   surface TEXT, construction_cost TEXT, remuneration TEXT, progression TEXT,
   project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT
 );
@@ -220,8 +220,8 @@ CREATE TABLE IF NOT EXISTS tenders (
   value NUMERIC, notes TEXT, mandataire_id TEXT, type TEXT,
   surface NUMERIC, construction_cost NUMERIC, honoraires_percent NUMERIC,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
-  mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
-  withdrawal_deadline TEXT, archived INTEGER DEFAULT 0,
+  mandatory_visit BOOLEAN DEFAULT false, visit_date TEXT,
+  withdrawal_deadline TEXT, archived BOOLEAN DEFAULT false,
   ville_execution TEXT, description TEXT
 );
 
@@ -300,7 +300,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   title TEXT NOT NULL, client_id TEXT REFERENCES contacts(id), amount NUMERIC, status TEXT NOT NULL,
   description TEXT, created_at TEXT, reference TEXT, projet_detail TEXT,
-  is_entreprise INTEGER DEFAULT 0, nom_societe TEXT, rcs TEXT,
+  is_entreprise BOOLEAN DEFAULT false, nom_societe TEXT, rcs TEXT,
   representant TEXT, qualite TEXT, adresse_client TEXT, cp_client TEXT,
   ville_client TEXT, telephone TEXT, portable TEXT, email_client TEXT,
   adresse_terrain TEXT, cp_ville_terrain TEXT, ref_cadastrale TEXT,
@@ -352,7 +352,7 @@ CREATE TABLE IF NOT EXISTS milestones (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, proposal_id TEXT, tender_id TEXT,
-  title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0,
+  title TEXT NOT NULL, due_date TEXT NOT NULL, completed BOOLEAN DEFAULT false,
   duration_days INTEGER, dependencies TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
@@ -509,7 +509,7 @@ CREATE TABLE IF NOT EXISTS receptions (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, date TEXT NOT NULL, type TEXT NOT NULL,
-  has_reserves INTEGER DEFAULT 0, reserves_count INTEGER DEFAULT 0,
+  has_reserves BOOLEAN DEFAULT false, reserves_count INTEGER DEFAULT 0,
   document_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_receptions_tenant_project ON receptions(tenant_id, project_id);
