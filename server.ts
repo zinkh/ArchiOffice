@@ -996,7 +996,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
-  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity , requireTenantAdmin });
+  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCalendarAccountRoutes(app, { supabaseAdmin, getTenantId });
   registerGmailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -1005,11 +1005,11 @@ export async function createApp() {
   registerMailAccountRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerMailFolderLinkRoutes(app, { supabaseAdmin, getTenantId });
-  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity , requireTenantAdmin });
-  registerRagicRoutes(app, { supabaseAdmin, getTenantId , requireTenantAdmin });
-  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity , requireTenantAdmin });
-  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId , requireTenantAdmin });
-  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity , requireTenantAdmin });
+  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerRagicRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerRegistrationRoutes(app, { supabaseAdmin });
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
