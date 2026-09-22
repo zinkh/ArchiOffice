@@ -60,6 +60,12 @@ export async function retryImport(): Promise<{ importJobId: string }> {
   return apiFetch('/api/auth/cloud-link-retry-import', { method: 'POST' });
 }
 
+export interface ImportJobWarning {
+  table: string;
+  rowCount: number;
+  message: string;
+}
+
 export interface ImportJobStatus {
   status: 'running' | 'done' | 'error';
   tablesDone: number;
@@ -68,6 +74,7 @@ export interface ImportJobStatus {
   rowsDone: number;
   filesDone: number;
   error: string | null;
+  warnings: ImportJobWarning[];
 }
 
 export async function getImportProgress(jobId: string): Promise<ImportJobStatus> {
