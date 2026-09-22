@@ -65,6 +65,7 @@ async function resolveOdooPartnerIdForInvoice(
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
@@ -139,7 +140,7 @@ export async function pushInvoiceToOdoo(
   return { external_id: String(newId), invoice_number: created?.name || '/', status: stateMap[created?.payment_state] || 'Draft' };
 }
 
-export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // GET /api/odoo/status
   app.get('/api/odoo/status', async (req: any, res: any) => {
     try {
@@ -156,7 +157,7 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
   // DELETE /api/odoo/disconnect
   app.delete('/api/odoo/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({
         odoo_url: null, odoo_db: null, odoo_username: null, odoo_api_key: null,
       }).eq('tenant_id', tenantId);
@@ -165,14 +166,14 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/odoo/disconnect]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
   // POST /api/odoo/sync  — bidirectional sync for contacts, projects, invoices, proposals
   app.post('/api/odoo/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       const s = settings as any;
       if (!s?.odoo_url || !s?.odoo_api_key || !s?.odoo_username || !s?.odoo_db) {
@@ -464,14 +465,14 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
       res.json({ results });
     } catch (error: any) {
       console.error('[Odoo sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync Odoo échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync Odoo échouée' });
     }
   });
 
   // POST /api/odoo/test  — test connectivity without syncing
   app.post('/api/odoo/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('odoo_url,odoo_db,odoo_username,odoo_api_key').eq('tenant_id', tenantId).single();
       const s = settings as any;
       if (!s?.odoo_url || !s?.odoo_api_key || !s?.odoo_username || !s?.odoo_db) {
