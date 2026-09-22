@@ -1385,6 +1385,8 @@ export default {
       "calendar_task": "Tâche",
       "calendar_select_day_hint": "Cliquez sur un jour pour voir le détail.",
       "calendar_view_month": "Vue mensuelle",
+      "calendar_view_three_days": "3 jours",
+      "calendar_view_work_week": "5 jours ouvrés",
       "calendar_view_agenda": "Agenda",
       "calendar_view_team": "Vue équipe",
       "calendar_overdue": "En retard",

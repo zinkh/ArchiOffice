@@ -1276,6 +1276,8 @@ export default {
       "calendar_task": "Task",
       "calendar_select_day_hint": "Click a day to see the details.",
       "calendar_view_month": "Month view",
+      "calendar_view_three_days": "3 days",
+      "calendar_view_work_week": "Work week",
       "calendar_view_agenda": "Agenda",
       "calendar_view_team": "Team view",
       "calendar_overdue": "Overdue",
