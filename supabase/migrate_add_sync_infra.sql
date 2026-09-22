@@ -117,7 +117,7 @@ BEGIN
     'project_members', 'project_stakeholders', 'project_templates',
     'projects', 'proposal_specialties', 'proposals', 'receptions',
     'reserves', 'settings', 'site_report_notes', 'site_reports',
-    'situations', 'specifications', 'tasks', 'team_members',
+    'situations', 'tasks', 'team_members',
     'tender_specialties', 'tenders', 'visas'
   ]
   LOOP

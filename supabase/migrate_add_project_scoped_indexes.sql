@@ -13,7 +13,6 @@
 
 CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
-CREATE INDEX IF NOT EXISTS idx_specifications_tenant_project ON specifications(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_ordres_de_service_tenant_project ON ordres_de_service(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_site_report_notes_tenant_report ON site_report_notes(tenant_id, report_id);
