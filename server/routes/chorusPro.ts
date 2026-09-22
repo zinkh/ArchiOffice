@@ -147,7 +147,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       }
       res.json({ connected: true, sandbox });
     } catch (e: any) {
-      console.error("[POST /api/chorus-pro/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/chorus-pro/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
