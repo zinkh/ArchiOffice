@@ -795,7 +795,7 @@ describe('Zoho Books', () => {
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-victim', tenant_id: tenantB, client_name: 'Victim', amount: 1, zoho_invoice_id: null }]);
 
     const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
+    const { token } = makeUser(tenantA, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantA, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
 
     global.fetch = vi.fn(async (url: any) => {
