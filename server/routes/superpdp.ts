@@ -126,7 +126,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       const company = await superpdpFetch(token, '/v1.beta/companies/me');
       res.json({ connected: true, company: company?.formal_name || company?.name || 'SuperPDP' });
     } catch (e: any) {
-      console.error("[POST /api/superpdp/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/superpdp/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/superpdp/send/:invoiceId — send one invoice to SuperPDP
