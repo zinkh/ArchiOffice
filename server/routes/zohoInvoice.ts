@@ -324,7 +324,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         connected: !!(settings as any)?.zoho_refresh_token,
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && (settings as any)?.zoho_org_id),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/status]", error);
       res.status(500).json({ error: 'Failed to get Zoho status' });
     }
@@ -367,7 +367,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       // One-time nonce mapping back to this tenant — see server/oauthState.ts.
       authUrl.searchParams.set('state', await createOAuthState(tenantId));
       res.json({ url: authUrl.toString() });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/auth]", error);
       res.status(error.status || 500).json({ error: 'Erreur lors de la connexion à Zoho' });
     }
@@ -437,7 +437,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[DELETE /api/zoho/disconnect]", error);
       res.status(error.status || 500).json({ error: 'Failed to disconnect Zoho' });
     }
