@@ -47,6 +47,29 @@ interface CalEvent {
 
 const PROJECT_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#d63939', '#0ca678', '#f59f00', '#4263eb'];
 
+export type CalendarGridView = 'month' | 'threeDay' | 'workWeek';
+type CalendarView = CalendarGridView | 'team' | 'agenda';
+
+export function getCalendarRange(view: CalendarGridView, date: Date): { start: Date; end: Date } {
+  if (view === 'threeDay') return { start: date, end: addDays(date, 2) };
+  if (view === 'workWeek') {
+    const start = startOfWeek(date, { weekStartsOn: 1 });
+    return { start, end: addDays(start, 4) };
+  }
+  const monthStart = startOfMonth(date);
+  const monthEnd = endOfMonth(date);
+  return {
+    start: startOfWeek(monthStart, { weekStartsOn: 1 }),
+    end: endOfWeek(monthEnd, { weekStartsOn: 1 }),
+  };
+}
+
+export function navigateCalendarDate(view: CalendarGridView, date: Date, direction: -1 | 1): Date {
+  if (view === 'threeDay') return addDays(date, direction * 3);
+  if (view === 'workWeek') return addDays(date, direction * 7);
+  return direction === 1 ? addMonths(date, 1) : subMonths(date, 1);
+}
+
 export function colorForProject(projectId?: string | null): string {
   if (!projectId) return '#6c7a91';
   let hash = 0;
@@ -71,7 +94,7 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'month' | 'team' | 'agenda'>('month');
+  const [view, setView] = useState<CalendarView>('month');
   const [filterProjectId, setFilterProjectId] = useState<string>('all');
   const [showMilestones, setShowMilestones] = useState(true);
   const [showTasks, setShowTasks] = useState(true);
@@ -241,8 +264,8 @@ export default function CalendarPage() {
       const last = Number(localStorage.getItem(throttleKey) || 0);
       if (Date.now() - last < GOOGLE_PULL_THROTTLE_MS) return;
     }
-    const gStart = startOfWeek(startOfMonth(viewDate), { weekStartsOn: 1 });
-    const gEnd = endOfWeek(endOfMonth(viewDate), { weekStartsOn: 1 });
+    const gridView: CalendarGridView = view === 'threeDay' || view === 'workWeek' ? view : 'month';
+    const { start: gStart, end: gEnd } = getCalendarRange(gridView, viewDate);
     try {
       const data = await apiFetch<{ id: string; title: string; date: string; calendarId?: string; color?: string | null }[]>(
         `/api/google-calendar/events?start=${format(gStart, 'yyyy-MM-dd')}&end=${format(gEnd, 'yyyy-MM-dd')}`
@@ -252,7 +275,7 @@ export default function CalendarPage() {
     } catch (err) {
       console.error('Failed to pull Google Calendar events:', err);
     }
-  }, [googleStatus?.connected, viewDate]);
+  }, [googleStatus?.connected, viewDate, view]);
 
   useEffect(() => { pullGoogleEvents(); }, [pullGoogleEvents]);
 
@@ -366,11 +389,13 @@ export default function CalendarPage() {
     return map;
   }, [filteredEvents]);
 
-  const monthStart = startOfMonth(viewDate);
-  const monthEnd = endOfMonth(viewDate);
-  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
-  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
-  const days = eachDayOfInterval({ start: gridStart, end: gridEnd });
+  const isCalendarGridView = view === 'month' || view === 'threeDay' || view === 'workWeek';
+  const activeGridView: CalendarGridView = isCalendarGridView ? view : 'month';
+  const visibleRange = getCalendarRange(activeGridView, viewDate);
+  const days = eachDayOfInterval({ start: visibleRange.start, end: visibleRange.end });
+  const navigationLabel = activeGridView === 'month'
+    ? format(viewDate, 'MMMM yyyy', { locale })
+    : `${format(visibleRange.start, 'd MMM', { locale })} – ${format(visibleRange.end, 'd MMM yyyy', { locale })}`;
 
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const weekEnd = addDays(weekStart, 6);
@@ -440,10 +465,10 @@ export default function CalendarPage() {
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
           <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
-        {view === 'month' && (
+        {isCalendarGridView && (
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setViewDate(subMonths(viewDate, 1))}
+              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, -1))}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
@@ -457,14 +482,14 @@ export default function CalendarPage() {
               {t('calendar_today_btn')}
             </button>
             <button
-              onClick={() => setViewDate(addMonths(viewDate, 1))}
+              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, 1))}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
               <IconChevronRight size={16} />
             </button>
             <span className="text-sm font-semibold capitalize ml-1" style={{ color: 'var(--tblr-text)' }}>
-              {format(viewDate, 'MMMM yyyy', { locale })}
+              {navigationLabel}
             </span>
             <div className="relative flex items-center ml-1">
               <IconCalendar size={14} className="absolute left-2 pointer-events-none" style={{ color: 'var(--tblr-muted)' }} />
@@ -482,14 +507,14 @@ export default function CalendarPage() {
         )}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={() => openCreateMilestone(view === 'month' ? selectedDay : undefined)}
+            onClick={() => openCreateMilestone(isCalendarGridView ? selectedDay : undefined)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
             style={{ background: 'var(--tblr-primary)' }}
           >
             <IconPlus size={14} /> {t('calendar_type_milestone')}
           </button>
           <button
-            onClick={() => openCreateTask(view === 'month' ? selectedDay : undefined)}
+            onClick={() => openCreateTask(isCalendarGridView ? selectedDay : undefined)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
             style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)' }}
           >
@@ -508,6 +533,20 @@ export default function CalendarPage() {
             {t('calendar_view_month')}
           </button>
           <button
+            onClick={() => setView('threeDay')}
+            className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={view === 'threeDay' ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' } : { color: 'var(--tblr-muted)' }}
+          >
+            {t('calendar_view_three_days')}
+          </button>
+          <button
+            onClick={() => setView('workWeek')}
+            className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={view === 'workWeek' ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' } : { color: 'var(--tblr-muted)' }}
+          >
+            {t('calendar_view_work_week')}
+          </button>
+          <button
             onClick={() => setView('agenda')}
             className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
             style={view === 'agenda' ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' } : { color: 'var(--tblr-muted)' }}
@@ -523,7 +562,7 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        {overdueCount > 0 && (view === 'month' || view === 'agenda') && (
+        {overdueCount > 0 && (isCalendarGridView || view === 'agenda') && (
           <button
             onClick={() => setView('agenda')}
             className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors"
@@ -533,7 +572,7 @@ export default function CalendarPage() {
           </button>
         )}
 
-        {(view === 'month' || view === 'agenda') && (
+        {(isCalendarGridView || view === 'agenda') && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
             <select
               value={filterProjectId}
@@ -567,7 +606,7 @@ export default function CalendarPage() {
           </div>
         )}
 
-        <div className={cn('flex items-center gap-2', view !== 'month' && view !== 'agenda' && 'ml-auto')}>
+        <div className={cn('flex items-center gap-2', !isCalendarGridView && view !== 'agenda' && 'ml-auto')}>
           {googleStatus?.connected ? (
             <>
               <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }} title={googleStatus.email || ''}>
@@ -627,7 +666,7 @@ export default function CalendarPage() {
         />
       )}
 
-      {error && view === 'month' && (
+      {error && isCalendarGridView && (
         <ErrorState compact message={error} onRetry={load} />
       )}
 
@@ -713,22 +752,22 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {view === 'month' && (
+      {isCalendarGridView && (
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
-        {/* ── Month grid ── */}
+        {/* ── Calendar grid ── */}
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-          <div className="grid grid-cols-7" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-            {weekdayLabels.map((label, i) => (
+          <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
+            {(activeGridView === 'month' ? weekdayLabels : days.map(day => format(day, 'EEE d', { locale }))).map((label, i) => (
               <div key={i} className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
                 {label}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7">
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
             {days.map((day) => {
               const key = format(day, 'yyyy-MM-dd');
               const dayEvents = eventsByDay.get(key) || [];
-              const inMonth = isSameMonth(day, viewDate);
+              const inMonth = activeGridView !== 'month' || isSameMonth(day, viewDate);
               const selected = isSameDay(day, selectedDay);
               const today = dfIsToday(day);
               return (
@@ -745,7 +784,7 @@ export default function CalendarPage() {
                   onDragEnter={() => { if (draggingEvent) setDragOverDayKey(key); }}
                   onDragLeave={() => setDragOverDayKey(prev => (prev === key ? null : prev))}
                   onDrop={() => handleDrop(day)}
-                  className="group relative min-h-[92px] p-1.5 flex flex-col items-start text-left transition-colors cursor-pointer"
+                  className={cn('group relative p-1.5 flex flex-col items-start text-left transition-colors cursor-pointer', activeGridView === 'month' ? 'min-h-[92px]' : 'min-h-[180px]')}
                   style={{
                     borderRight: '1px solid var(--tblr-border)',
                     borderBottom: '1px solid var(--tblr-border)',
@@ -770,7 +809,7 @@ export default function CalendarPage() {
                     {format(day, 'd')}
                   </span>
                   <div className="flex flex-col gap-0.5 w-full">
-                    {dayEvents.slice(0, 3).map(ev => (
+                    {dayEvents.slice(0, activeGridView === 'month' ? 3 : 8).map(ev => (
                       <span
                         key={ev.id}
                         draggable={ev.type !== 'google'}
@@ -790,8 +829,10 @@ export default function CalendarPage() {
                         {ev.title}
                       </span>
                     ))}
-                    {dayEvents.length > 3 && (
-                      <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>+{dayEvents.length - 3}</span>
+                    {dayEvents.length > (activeGridView === 'month' ? 3 : 8) && (
+                      <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                        +{dayEvents.length - (activeGridView === 'month' ? 3 : 8)}
+                      </span>
                     )}
                   </div>
                 </div>
