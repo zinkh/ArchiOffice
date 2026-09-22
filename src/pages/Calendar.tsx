@@ -2,12 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  addMonths,
-  subMonths,
-  startOfMonth,
-  endOfMonth,
   startOfWeek,
-  endOfWeek,
   eachDayOfInterval,
   isSameDay,
   isSameMonth,
@@ -23,6 +18,7 @@ import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, Milestone, Task, TeamMember } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
+import { getCalendarRange, navigateCalendarDate, type CalendarGridView } from '../lib/calendarViews';
 import TeamWeekSchedule from '../components/TeamWeekSchedule';
 import { CalendarEventModal, type CalendarEventInitial } from '../components/CalendarEventModal';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
@@ -47,28 +43,7 @@ interface CalEvent {
 
 const PROJECT_COLORS = ['#206bc4', '#2fb344', '#f76707', '#ae3ec9', '#d63939', '#0ca678', '#f59f00', '#4263eb'];
 
-export type CalendarGridView = 'month' | 'threeDay' | 'workWeek';
 type CalendarView = CalendarGridView | 'team' | 'agenda';
-
-export function getCalendarRange(view: CalendarGridView, date: Date): { start: Date; end: Date } {
-  if (view === 'threeDay') return { start: date, end: addDays(date, 2) };
-  if (view === 'workWeek') {
-    const start = startOfWeek(date, { weekStartsOn: 1 });
-    return { start, end: addDays(start, 4) };
-  }
-  const monthStart = startOfMonth(date);
-  const monthEnd = endOfMonth(date);
-  return {
-    start: startOfWeek(monthStart, { weekStartsOn: 1 }),
-    end: endOfWeek(monthEnd, { weekStartsOn: 1 }),
-  };
-}
-
-export function navigateCalendarDate(view: CalendarGridView, date: Date, direction: -1 | 1): Date {
-  if (view === 'threeDay') return addDays(date, direction * 3);
-  if (view === 'workWeek') return addDays(date, direction * 7);
-  return direction === 1 ? addMonths(date, 1) : subMonths(date, 1);
-}
 
 export function colorForProject(projectId?: string | null): string {
   if (!projectId) return '#6c7a91';
