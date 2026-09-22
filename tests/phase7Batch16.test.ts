@@ -47,7 +47,7 @@ describe('SuperPDP', () => {
 
   it('reports connected from settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
 
     const res = await request(app).get('/api/superpdp/status').set(authHeader(token));
@@ -57,7 +57,7 @@ describe('SuperPDP', () => {
 
   it('disconnects, clearing the credentials', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
 
     const res = await request(app).delete('/api/superpdp/disconnect').set(authHeader(token));
@@ -67,7 +67,7 @@ describe('SuperPDP', () => {
 
   it('tests credentials against the companies endpoint', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
     mockFetch({ '/oauth2/token': { access_token: 'tok' }, '/v1.beta/companies/me': { formal_name: 'Cabinet ArchiTest' } });
 
@@ -78,7 +78,7 @@ describe('SuperPDP', () => {
 
   it('sends an invoice, persisting the superpdp_id and status', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret', agency_name: 'Cabinet ArchiTest' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv1', tenant_id: tenantId, invoice_number: 'F-001', amount: 1000, vat_rate: 20 }]);
     mockFetch({
@@ -96,7 +96,7 @@ describe('SuperPDP', () => {
 
   it('refreshes lifecycle events for a sent invoice', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv2', tenant_id: tenantId, superpdp_id: 'spdp_2' }]);
     mockFetch({ '/oauth2/token': { access_token: 'tok' }, '/invoice_events': { data: [{ status_code: 'api:sent' }, { status_code: 'api:accepted' }] } });
@@ -109,7 +109,7 @@ describe('SuperPDP', () => {
 
   it('lists invoices from Super PDP', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
     mockFetch({ '/oauth2/token': { access_token: 'tok' }, '/v1.beta/invoices': { data: [{ id: 'spdp_9' }] } });
 
@@ -120,7 +120,7 @@ describe('SuperPDP', () => {
 
   it('rejects search-situation-facture when the linked marché has no SIRET (no embedded-join support in the fake)', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret' }]);
     fakeSupabaseAdmin.seed('situations', [{ id: 'sit1', tenant_id: tenantId, numero_situation: 1 }]);
 
@@ -130,7 +130,7 @@ describe('SuperPDP', () => {
 
   it('links a situation to an already-found Super PDP facture', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('situations', [{ id: 'sit2', tenant_id: tenantId, numero_situation: 2 }]);
 
     const res = await request(app).post('/api/superpdp/link-situation/sit2').set(authHeader(token)).send({ superpdp_id: 777, buyer_siret: '12345678900011' });
@@ -140,7 +140,7 @@ describe('SuperPDP', () => {
 
   it('attaches the état d\'acompte PDF to an already-linked facture', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, superpdp_client_id: 'cid', superpdp_client_secret: 'secret', agency_name: 'Cabinet ArchiTest' }]);
     fakeSupabaseAdmin.seed('situations', [{ id: 'sit3', tenant_id: tenantId, numero_situation: 3, date_situation: '2026-03-01', superpdp_id: 777 }]);
     fakeSupabaseAdmin.seed('detail_situations', [{ id: 'd1', tenant_id: tenantId, situation_id: 'sit3', montant_situation: 5000 }]);
@@ -153,7 +153,7 @@ describe('SuperPDP', () => {
 
   it('lists situations linked to Super PDP with their computed net amount', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('situations', [{ id: 'sit4', tenant_id: tenantId, numero_situation: 4, superpdp_id: 42 }]);
     fakeSupabaseAdmin.seed('detail_situations', [{ id: 'd2', tenant_id: tenantId, situation_id: 'sit4', montant_situation: 10000 }]);
 
@@ -169,7 +169,7 @@ describe('Chorus Pro', () => {
 
   it('reports connected only when all four credential fields are set', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c' }]);
 
     const res = await request(app).get('/api/chorus-pro/status').set(authHeader(token));
@@ -179,7 +179,7 @@ describe('Chorus Pro', () => {
 
   it('disconnects, clearing all four credential fields', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
 
     const res = await request(app).delete('/api/chorus-pro/disconnect').set(authHeader(token));
@@ -189,7 +189,7 @@ describe('Chorus Pro', () => {
 
   it('tests credentials by looking up the tenant SIRET', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, siret: '12345678900011', chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
     mockFetch({ '/api/oauth/token': { access_token: 'tok' }, '/rechercher/siret': { success: true } });
 
@@ -200,7 +200,7 @@ describe('Chorus Pro', () => {
 
   it('submits an invoice with an explicit buyer SIRET', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv3', tenant_id: tenantId, invoice_number: 'F-002', amount: 2000, vat_rate: 20 }]);
     mockFetch({ '/api/oauth/token': { access_token: 'tok' }, '/soumettre': { identifiantFactureCPP: 'cp_1' } });
@@ -213,7 +213,7 @@ describe('Chorus Pro', () => {
 
   it('falls back to the linked project\'s client SIRET when no buyer SIRET is given', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
     fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId, name: 'Villa', client_siret: '11122233300011' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv4', tenant_id: tenantId, project_id: 'p1', invoice_number: 'F-003', amount: 500, vat_rate: 20 }]);
@@ -226,7 +226,7 @@ describe('Chorus Pro', () => {
 
   it('requires a buyer SIRET when none is provided and no project is linked', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv5', tenant_id: tenantId, invoice_number: 'F-004', amount: 500, vat_rate: 20 }]);
 
@@ -236,7 +236,7 @@ describe('Chorus Pro', () => {
 
   it('refreshes the status history for a submitted invoice', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, chorus_pro_piste_client_id: 'a', chorus_pro_piste_client_secret: 'b', chorus_pro_technical_login: 'c', chorus_pro_technical_password: 'd' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv6', tenant_id: tenantId, chorus_pro_id: 'cp_3' }]);
     mockFetch({ '/api/oauth/token': { access_token: 'tok' }, '/historique_statut': { listeHistoriqueStatutVo: [{ statut: 'DEPOSEE' }, { statut: 'MISE_A_DISPOSITION' }] } });

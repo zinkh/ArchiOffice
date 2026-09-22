@@ -154,6 +154,7 @@ async function resolveZohoCustomerAsLocalContact(
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
@@ -251,7 +252,7 @@ export async function pushInvoiceToZohoInvoice(
   return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
 }
 
-export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // Keyed by tenantId — this cache is shared by every request the process
   // handles across every tenant. A single unkeyed value here previously meant
   // whichever tenant refreshed last "won" the cache for up to an hour: any
@@ -323,7 +324,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         connected: !!(settings as any)?.zoho_refresh_token,
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && (settings as any)?.zoho_org_id),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/status]", error);
       res.status(500).json({ error: 'Failed to get Zoho status' });
     }
@@ -348,7 +349,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   // to the returned URL itself.
   app.get('/api/zoho/auth', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_client_id || !(settings as any)?.zoho_client_secret || !(settings as any)?.zoho_org_id) {
         return res.status(400).json({ error: 'Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.' });
@@ -366,9 +367,9 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       // One-time nonce mapping back to this tenant — see server/oauthState.ts.
       authUrl.searchParams.set('state', await createOAuthState(tenantId));
       res.json({ url: authUrl.toString() });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/auth]", error);
-      res.status(500).json({ error: 'Erreur lors de la connexion à Zoho' });
+      res.status(error.status || 500).json({ error: 'Erreur lors de la connexion à Zoho' });
     }
   });
 
@@ -430,22 +431,22 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   // DELETE /api/zoho/disconnect
   app.delete('/api/zoho/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       zohoAccessTokenCache.delete(tenantId);
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[DELETE /api/zoho/disconnect]", error);
-      res.status(500).json({ error: 'Failed to disconnect Zoho' });
+      res.status(error.status || 500).json({ error: 'Failed to disconnect Zoho' });
     }
   });
 
   // POST /api/zoho/sync  — bidirectional sync
   app.post('/api/zoho/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_refresh_token) {
         return res.status(400).json({ error: 'Zoho non connecté. Veuillez vous connecter dans les Paramètres.' });
@@ -603,7 +604,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync échouée' });
     }
   });
 }
