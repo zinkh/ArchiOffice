@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { format } from 'date-fns';
-import { getCalendarRange, navigateCalendarDate } from './Calendar';
+import { getCalendarRange, navigateCalendarDate } from '../lib/calendarViews';
 
 const day = (value: Date) => format(value, 'yyyy-MM-dd');
 
