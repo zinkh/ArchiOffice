@@ -484,7 +484,7 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
       res.json({ connected: true, company });
     } catch (error: any) {
       console.error("[POST /api/odoo/test]", error);
-      res.status(400).json({ connected: false, error: error.message });
+      res.status(error.status || 400).json({ connected: false, error: error.message });
     }
   });
 }
