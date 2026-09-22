@@ -3040,6 +3040,38 @@ export default function Settings() {
             </div>
           )}
 
+          {/* ── Poste lié au cloud : resynchronisation forcée à la demande ──
+              La synchro continue (server/cloudSync.ts) suit sync_log depuis
+              un filigrane et rattrape le flux normal, mais rien ne permettait
+              jusqu'ici de rejouer l'import complet une fois importCompleted
+              passé à vrai — utile pour un diagnostic (le job précédent, en
+              mémoire du process serveur, ne survit pas à un redémarrage de
+              l'appli) ou pour rattraper des lignes qu'un import antérieur
+              aurait laissées de côté sans avertissement remarqué à l'écran. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === true && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconCloud size={15} /> Synchronisation cloud
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié et synchronisé. En cas de doute sur des données manquantes, vous pouvez forcer une
+                resynchronisation complète — elle reprend tout ce que le cloud porte pour ce cabinet sans dupliquer ce
+                qui est déjà présent ici.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              <button
+                type="button"
+                onClick={handleRetryCloudImport}
+                disabled={isRetryingCloudImport}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              >
+                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                Forcer une resynchronisation complète
+              </button>
+            </div>
+          )}
+
           {/* ── Client Electron "compte local" — bascule vers un compte cloud ── */}
           {isOfflineBuild() && cloudLinked === false && (
             <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
