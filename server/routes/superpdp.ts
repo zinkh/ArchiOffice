@@ -13,6 +13,7 @@ import { loadInvoiceClientContact } from '../invoiceClientContact';
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
 }
 
 const SUPERPDP_BASE = 'https://api.superpdp.tech';
@@ -92,7 +93,7 @@ async function buildEnInvoice(supabaseAdmin: any, tenantId: string, invoice: any
   });
 }
 
-export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin }: RouteDeps) {
   // GET /api/superpdp/status
   app.get('/api/superpdp/status', async (req: any, res: any) => {
     try {
@@ -107,17 +108,17 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
   // DELETE /api/superpdp/disconnect
   app.delete('/api/superpdp/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({ superpdp_client_id: null, superpdp_client_secret: null }).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (e: any) {
-      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(500).json({ error: e.message }); }
+      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // POST /api/superpdp/test — verify credentials by fetching company info
   app.post('/api/superpdp/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
       const cfg = s as any;
       if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Configuration incomplète' });
