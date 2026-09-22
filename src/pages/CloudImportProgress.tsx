@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconCommand } from '@tabler/icons-react';
-import { getImportProgress, getExportProgress, retryImport, ImportJobStatus, ExportJobStatus } from '../lib/cloudSync';
+import { getImportProgress, getExportProgress, retryImport, ImportJobStatus, ExportJobStatus, ImportJobWarning } from '../lib/cloudSync';
 
 type Phase = 'export' | 'import';
 
@@ -31,6 +31,11 @@ export default function CloudImportProgress() {
   const [status, setStatus] = useState<ProgressLike | null>(null);
   const [phase, setPhase] = useState<Phase>('export');
   const [conflicts, setConflicts] = useState<ExportJobStatus['conflicts']>([]);
+  // Lignes qu'aucune des deux passes de server/initialImport.ts n'a pu
+  // importer (typiquement une référence vers une ligne absente côté cloud
+  // pour ce tenant) — l'import se termine quand même, mais ce n'est pas rien
+  // à taire : sans cet écran, ces lignes disparaissaient silencieusement.
+  const [importWarnings, setImportWarnings] = useState<ImportJobWarning[]>([]);
   const [finished, setFinished] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -69,7 +74,12 @@ export default function CloudImportProgress() {
         if (cancelled) return;
         setStatus(job);
         if (job.status === 'done') {
-          window.location.href = '/';
+          if (job.warnings.length > 0) {
+            setImportWarnings(job.warnings);
+            setFinished(true);
+          } else {
+            window.location.href = '/';
+          }
           return;
         }
         if (job.status !== 'error') setTimeout(pollImportOnly, 1000);
@@ -105,6 +115,7 @@ export default function CloudImportProgress() {
         if (cancelled) return;
         setStatus(job);
         if (job.status === 'done') {
+          setImportWarnings(job.warnings);
           setFinished(true);
           return;
         }
@@ -123,10 +134,10 @@ export default function CloudImportProgress() {
   // Once both phases are done, auto-continue only when nothing needs the
   // user's attention — a conflict list stays on screen until acknowledged.
   useEffect(() => {
-    if (finished && conflicts.length === 0) {
+    if (finished && conflicts.length === 0 && importWarnings.length === 0) {
       window.location.href = '/';
     }
-  }, [finished, conflicts]);
+  }, [finished, conflicts, importWarnings]);
 
   const percent = status && status.tablesTotal > 0 ? Math.round((status.tablesDone / status.tablesTotal) * 100) : 0;
   const titleKey = isUpgradeFlow
@@ -171,16 +182,38 @@ export default function CloudImportProgress() {
               {t('cloud_import_continue_anyway')}
             </button>
           </div>
-        ) : finished && conflicts.length > 0 ? (
+        ) : finished && (conflicts.length > 0 || importWarnings.length > 0) ? (
           <div className="space-y-4">
-            <p className="text-sm text-center text-amber-600 dark:text-amber-400">
-              {t('cloud_upgrade_conflicts_intro', { count: conflicts.length })}
-            </p>
-            <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-40 overflow-y-auto">
-              {conflicts.map((c) => (
-                <li key={c.table}>{t('cloud_upgrade_conflict_row', { table: c.table, count: c.rowCount })}</li>
-              ))}
-            </ul>
+            {conflicts.length > 0 && (
+              <>
+                <p className="text-sm text-center text-amber-600 dark:text-amber-400">
+                  {t('cloud_upgrade_conflicts_intro', { count: conflicts.length })}
+                </p>
+                <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-40 overflow-y-auto">
+                  {conflicts.map((c) => (
+                    <li key={c.table}>{t('cloud_upgrade_conflict_row', { table: c.table, count: c.rowCount })}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {importWarnings.length > 0 && (
+              <>
+                {/* Lignes qu'aucune des deux passes de server/initialImport.ts
+                    n'a pu rattacher (typiquement une clé étrangère vers une
+                    ligne absente pour ce tenant, côté cloud) — le reste du
+                    cabinet a bien été importé, mais ces lignes précises ne
+                    le seront jamais tant que la donnée d'origine n'est pas
+                    corrigée côté cloud. */}
+                <p className="text-sm text-center text-amber-600 dark:text-amber-400">
+                  Quelques lignes n'ont pas pu être importées — le reste de vos données est bien disponible.
+                </p>
+                <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-40 overflow-y-auto">
+                  {importWarnings.map((w) => (
+                    <li key={w.table}>{w.table} — {w.rowCount} ligne(s) : {w.message}</li>
+                  ))}
+                </ul>
+              </>
+            )}
             <button
               type="button"
               onClick={() => { window.location.href = '/'; }}
