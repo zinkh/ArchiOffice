@@ -996,6 +996,37 @@ ou une proposition). `site_reports` a rejoint les périmètres par défaut de
 `charge-projet` et `pilote-chantier` (`AGENT_DEFAULT_ACTION_SCOPES`), à côté
 de `meetings`.
 
+**Ce périmètre par défaut ne s'applique qu'à un agent créé APRÈS ce
+changement.** `AGENT_DEFAULT_ACTION_SCOPES` (comme les préréglages de
+`migrate_add_agent_autonomy.sql`) n'est lu qu'à la création d'un agent depuis
+un template, jamais relu ensuite : `action_scopes` est une colonne posée une
+fois sur `agents`, propre à CET agent, et un agent déjà instancié avant ce
+changement garde le tableau qu'il avait. Ajouter `site_reports` au code ne
+change donc rien pour un agent déjà en service tant que son `action_scopes`
+n'est pas lui-même mis à jour — vérifié en base (`tkhcpkwakvqsnmpgfkjp`,
+projet Supabase ArchiOffice) après le fix ci-dessus : tous les agents
+existants portant `meetings` (secrétaire, chargé de projet, pilote de
+chantier, urbaniste, y compris les gabarits de template à `tenant_id NULL`)
+n'avaient pas `site_reports`, ce qui explique qu'un agent continuait de
+créer une réunion classique en réponse à « réunion de chantier » malgré la
+ressource déjà présente côté serveur — le modèle ne pouvait tout simplement
+pas la voir.
+
+**`supabase/migrate_agent_site_reports_scope_backfill.sql`** corrige ça :
+`UPDATE agents SET action_scopes = array_append(action_scopes,
+'site_reports') WHERE 'meetings' = ANY(action_scopes) AND NOT
+('site_reports' = ANY(action_scopes))` — ciblé, pas un défaut générique :
+seul un agent déjà autorisé à créer des réunions ('meetings' présent) gagne
+'site_reports' à côté, appliquée via le MCP Supabase (`apply_migration`)
+directement sur le projet de production le 2026-09-23, et vérifiée en
+relisant `agents.action_scopes` avant/après. Un nouveau cabinet, ou un
+nouvel agent créé depuis un template après ce correctif, reçoit déjà les
+deux via `AGENT_DEFAULT_ACTION_SCOPES` — ce backfill ne concerne que ce qui
+existait avant. Toute future ressource ajoutée à `AGENT_RESOURCES` avec la
+même intention (compléter un périmètre déjà accordé) doit prévoir le même
+backfill ciblé, pas seulement la modification du code : le code décrit ce
+qu'un NOUVEL agent reçoit, jamais ce qu'un agent existant a déjà en base.
+
 **« Réunion » sans autre précision reste ambigu, et un agent ne doit pas
 trancher au hasard.** Une demande nommant explicitement l'une des deux (« de
 chantier »/DET, ou au contraire une visite de candidature/proposition) se
