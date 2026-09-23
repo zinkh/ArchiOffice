@@ -1167,6 +1167,36 @@ export interface InvoicePhase {
   montant_phase: number;
 }
 
+/** Statut de présence à une réunion de chantier : Présent, Retard, Absent Excusé, Absent Non Excusé. */
+export type PresenceStatus = 'P' | 'R' | 'AE' | 'ANE';
+
+export interface SiteReportAttendee {
+  name: string;
+  role: string;
+  /** Intervenant du projet (project_stakeholders) dont cette ligne reprend la présence — absent pour une ligne saisie librement. */
+  contact_id?: string;
+  present: boolean;
+  excused?: boolean;
+  /** Statut détaillé P/R/AE/ANE. Une ligne ancienne sans ce champ se déduit de present/excused. */
+  status?: PresenceStatus;
+  /** Coché : cet intervenant reçoit la diffusion du CR (colonne « D » du modèle). */
+  diffusion?: boolean;
+}
+
+/** Suivi d'un lot pour un CR donné (page 2 du modèle : présence, effectif, retards, intempéries). */
+export interface SiteReportLotTracking {
+  lot_id: string;
+  status?: PresenceStatus;
+  effectif?: number;
+  retard_execution?: boolean;
+  retard_remise_docs?: boolean;
+  intemperies?: boolean;
+  convoque_reunion_suivante?: boolean;
+  lieu?: string;
+  /** Lot concerné par des travaux (W), des documents à remettre (D), les deux, ou aucun. */
+  concerned?: 'W' | 'D' | 'WD';
+}
+
 export interface SiteReport {
   id: string;
   project_id: string;
@@ -1180,7 +1210,8 @@ export interface SiteReport {
   meteo?: string;
   temperature?: number;
   effectif_total?: number;
-  attendance?: { name: string; role: string; present: boolean; excused?: boolean }[];
+  attendance?: SiteReportAttendee[];
+  lot_tracking?: SiteReportLotTracking[];
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
 }
@@ -1188,6 +1219,7 @@ export interface SiteReport {
 export interface SiteReportNote {
   id: string;
   report_id: string;
+  /** Rubrique du CR — texte libre, personnalisable par l'architecte (pas de liste fermée). */
   category: string;
   note_number: number;
   responsible_company?: string;

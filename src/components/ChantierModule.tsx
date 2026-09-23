@@ -3,21 +3,25 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconTrash, IconCamera,
   IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh,
+  IconRefresh, IconListDetails,
 } from '@tabler/icons-react';
-import { Project, ProjectLot, SiteReport, Observation, OrdreDeService } from '../types';
-import { autoSaveDocument } from '../lib/autoSaveDocument';
+import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cn } from '../lib/utils';
+import type { AgencySettings } from '../lib/proposalExport';
 
 interface ChantierModuleProps {
   project: Project;
   lots_list: ProjectLot[];
   ordresDeService: OrdreDeService[];
   osSituationsContent: React.ReactNode;
+  contacts: Contact[];
+  settings?: AgencySettings | null;
 }
+
+const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé' };
 
 type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'photos';
 
@@ -59,13 +63,15 @@ function isBadWeather(meteo?: string) {
   return WEATHER_ALERT_KEYWORDS.some(k => lower.includes(k));
 }
 
-export default function ChantierModule({ project, lots_list, ordresDeService, osSituationsContent }: ChantierModuleProps) {
+export default function ChantierModule({ project, lots_list, ordresDeService, osSituationsContent, contacts, settings }: ChantierModuleProps) {
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportObservations, setReportObservations] = useState<Observation[]>([]);
   const [allObservations, setAllObservations] = useState<Observation[]>([]);
+  const [reportNotes, setReportNotes] = useState<SiteReportNote[]>([]);
+  const [newRubriqueName, setNewRubriqueName] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newReportDate, setNewReportDate] = useState(new Date().toISOString().split('T')[0]);
@@ -103,9 +109,18 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     if (Array.isArray(data)) setAllObservations(data);
   }, [project.id]);
 
+  const fetchReportNotes = useCallback(async () => {
+    if (!selectedReportId) { setReportNotes([]); return; }
+    const res = await fetch(`/api/reports/${selectedReportId}/notes`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data)) setReportNotes(data);
+  }, [selectedReportId]);
+
   useEffect(() => { fetchReports(); }, [fetchReports]);
   useEffect(() => { fetchReportObservations(); }, [fetchReportObservations]);
   useEffect(() => { fetchAllObservations(); }, [fetchAllObservations]);
+  useEffect(() => { fetchReportNotes(); }, [fetchReportNotes]);
 
   useEffect(() => {
     if (isModalOpen && project.address) {
@@ -185,18 +200,93 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     }
   };
 
-  const setAttendance = (index: number, patch: Partial<{ name: string; role: string; present: boolean; excused: boolean }>) => {
+  const setAttendance = (index: number, patch: Partial<SiteReportAttendee>) => {
     const list = [...(selectedReport?.attendance || [])];
     list[index] = { ...list[index], ...patch };
     updateReportField('attendance', list);
+  };
+
+  const setAttendanceStatus = (index: number, status: PresenceStatus) => {
+    setAttendance(index, { status, present: status === 'P' || status === 'R', excused: status === 'AE' });
   };
 
   const ensureAttendanceRow = (lot: ProjectLot) => {
     const list = selectedReport?.attendance || [];
     if (list.some(a => a.role === lot.lot_title)) return;
     const name = lot.contact_name?.split(' - ')[1] || lot.contact_name?.split(' - ')[0] || '';
-    updateReportField('attendance', [...list, { name, role: lot.lot_title, present: true }]);
+    updateReportField('attendance', [...list, { name, role: lot.lot_title, present: true, status: 'P' as PresenceStatus }]);
   };
+
+  // Présence des intervenants du projet (MOA/AMO/MOE/CT/CSPS...), distincte
+  // de la présence des lots ci-dessus : même tableau `attendance`, ligne
+  // repérée par contact_id plutôt que par intitulé de lot.
+  const stakeholderAttendanceIndex = (s: { contact_id?: string; role: string; name: string }) =>
+    (selectedReport?.attendance || []).findIndex(a =>
+      s.contact_id ? a.contact_id === s.contact_id : (!a.contact_id && a.role === s.role && a.name === s.name)
+    );
+
+  const ensureStakeholderAttendance = (s: { contact_id?: string; role: string; name: string }) => {
+    if (stakeholderAttendanceIndex(s) >= 0) return;
+    const list = selectedReport?.attendance || [];
+    updateReportField('attendance', [...list, { name: s.name, role: s.role, contact_id: s.contact_id, present: true, status: 'P' as PresenceStatus }]);
+  };
+
+  // Suivi par lot, page 2 du CR (effectif, retards, intempéries...) — table
+  // séparée de la présence, indexée par lot_id. Crée la ligne à la volée.
+  const setLotTracking = (lotId: string, patch: Partial<Omit<SiteReportLotTracking, 'lot_id'>>) => {
+    const list = [...(selectedReport?.lot_tracking || [])];
+    const idx = list.findIndex(t => t.lot_id === lotId);
+    if (idx < 0) { list.push({ lot_id: lotId, ...patch }); } else { list[idx] = { ...list[idx], ...patch }; }
+    updateReportField('lot_tracking', list);
+  };
+
+  const addRubrique = async () => {
+    const category = newRubriqueName.trim();
+    if (!category || !selectedReportId) return;
+    setNewRubriqueName('');
+    await addRubriqueEntry(category);
+  };
+
+  const addRubriqueEntry = async (category: string) => {
+    if (!selectedReportId) return;
+    const res = await fetch(`/api/reports/${selectedReportId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category,
+        note_number: reportNotes.length + 1,
+        issue_date: selectedReport?.date || new Date().toISOString().split('T')[0],
+        text: '',
+        status: 'open',
+      }),
+    });
+    if (!res.ok) return;
+    const created = await res.json();
+    setReportNotes(prev => [...prev, created]);
+  };
+
+  const saveNoteField = async (noteId: string, field: keyof SiteReportNote, value: any) => {
+    setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, [field]: value } : n)));
+    await fetch(`/api/notes/${noteId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+  };
+
+  const deleteNote = async (noteId: string) => {
+    setReportNotes(prev => prev.filter(n => n.id !== noteId));
+    await fetch(`/api/notes/${noteId}`, { method: 'DELETE' });
+  };
+
+  const rubriquesByCategory = useMemo(() => {
+    const groups = new Map<string, SiteReportNote[]>();
+    reportNotes.forEach(n => {
+      if (!groups.has(n.category)) groups.set(n.category, []);
+      groups.get(n.category)!.push(n);
+    });
+    return Array.from(groups.entries());
+  }, [reportNotes]);
 
   const addDecision = () => {
     const list = selectedReport?.decisions || [];
@@ -269,38 +359,20 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 
   const generatePdf = async () => {
     if (!selectedReport) return;
+    if (!settings) { alert("Réglages du cabinet non chargés, réessayez dans un instant."); return; }
     setIsGeneratingPdf(true);
     try {
-      const { default: jsPDF } = await import('jspdf');
-      const { default: autoTable } = await import('jspdf-autotable');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      pdf.setFontSize(16);
-      pdf.text(`COMPTE RENDU DE CHANTIER N°${selectedReport.report_number}`, 14, 18);
-      pdf.setFontSize(10);
-      pdf.text(`${project.name} — ${project.client || ''}`, 14, 25);
-      pdf.text(`${selectedReport.date}  ·  ${selectedReport.meteo || ''}  ${selectedReport.temperature ?? ''}°C`, 14, 31);
-      autoTable(pdf, {
-        startY: 38,
-        head: [['Lot', 'Type', 'Description', 'Statut', 'Échéance']],
-        body: reportObservations.map(o => [
-          o.lot?.lot_title || '—',
-          TYPE_LABELS[o.type || 'observation'],
-          o.texte + (o.urgence === 'bloquant' ? ' [BLOQUANT]' : ''),
-          o.statut,
-          o.due_date || '—',
-        ]),
-        styles: { fontSize: 8 },
-      });
-      const filename = `CR_${selectedReport.report_number}_${project.name}.pdf`;
-      pdf.save(filename);
-      autoSaveDocument({
-        blob: pdf.output('blob'),
-        filename,
-        name: `CR Chantier N°${selectedReport.report_number} - ${project.name}`,
-        projectId: project.id,
-        phase: 'DET',
-        category: 'Report',
-      });
+      const { exportSiteReportToPDF } = await import('../lib/siteReportExport');
+      await exportSiteReportToPDF(
+        selectedReport,
+        reportNotes,
+        observationsByLot,
+        { id: project.id, name: project.name, project_code: project.project_code, address: project.address, client: project.client },
+        lots_list,
+        project.stakeholders_list || [],
+        contacts,
+        settings,
+      );
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
@@ -484,40 +556,188 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     </div>
                   </div>
 
-                  {/* Présences */}
-                  <Section title="Présences" icon={IconUsers}>
-                    <table className="w-full text-sm">
-                      <tbody>
-                        {lots_list.map(lot => {
-                          const idx = (selectedReport.attendance || []).findIndex(a => a.role === lot.lot_title);
-                          const row = idx >= 0 ? selectedReport.attendance![idx] : undefined;
-                          return (
-                            <tr key={lot.id} className="border-b border-[var(--tblr-border)] last:border-0">
-                              <td className="py-2 pr-2">
-                                <div className="font-semibold text-[var(--tblr-text)]">{lot.contact_name?.split(' - ')[0]}</div>
-                                <div className="text-xs text-[var(--tblr-muted)]">{lot.lot_title}</div>
-                              </td>
-                              <td className="py-2 text-right">
-                                <select
-                                  className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
-                                  value={row ? (row.present ? 'present' : row.excused ? 'excused' : 'absent') : 'present'}
-                                  onChange={e => {
-                                    if (idx < 0) { ensureAttendanceRow(lot); return; }
-                                    const v = e.target.value;
-                                    setAttendance(idx, { present: v === 'present', excused: v === 'excused' });
-                                  }}
-                                  onFocus={() => { if (idx < 0) ensureAttendanceRow(lot); }}
-                                >
-                                  <option value="present">Présent</option>
-                                  <option value="absent">Absent</option>
-                                  <option value="excused">Excusé</option>
+                  {/* Présence des intervenants (page de garde du CR) */}
+                  <Section title="Présence des intervenants" icon={IconUsers}>
+                    {(project.stakeholders_list || []).length === 0 && (
+                      <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">
+                        Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis la fiche projet.
+                      </p>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <tbody>
+                          {(project.stakeholders_list || []).map(s => {
+                            const idx = stakeholderAttendanceIndex(s);
+                            const row = idx >= 0 ? selectedReport.attendance![idx] : undefined;
+                            const contact = s.contact_id ? contacts.find(c => c.id === s.contact_id) : undefined;
+                            const status: PresenceStatus = row ? (row.status || (row.present ? 'P' : row.excused ? 'AE' : 'ANE')) : 'P';
+                            return (
+                              <tr key={s.id} className="border-b border-[var(--tblr-border)] last:border-0">
+                                <td className="py-2 pr-2">
+                                  <div className="font-semibold text-[var(--tblr-text)]">{s.role}</div>
+                                  <div className="text-xs text-[var(--tblr-muted)]">
+                                    {[s.name, contact?.company_name].filter(Boolean).join(' — ')}
+                                  </div>
+                                </td>
+                                <td className="py-2 text-right whitespace-nowrap">
+                                  <select
+                                    className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={status}
+                                    onFocus={() => ensureStakeholderAttendance(s)}
+                                    onChange={e => {
+                                      if (idx < 0) { ensureStakeholderAttendance(s); return; }
+                                      setAttendanceStatus(idx, e.target.value as PresenceStatus);
+                                    }}
+                                  >
+                                    {(Object.keys(PRESENCE_LABELS) as PresenceStatus[]).map(v => (
+                                      <option key={v} value={v}>{PRESENCE_LABELS[v]}</option>
+                                    ))}
+                                  </select>
+                                  <label className="ml-3 inline-flex items-center gap-1 text-xs text-[var(--tblr-muted)]">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!row?.diffusion}
+                                      onFocus={() => ensureStakeholderAttendance(s)}
+                                      onChange={e => { if (idx < 0) return; setAttendance(idx, { diffusion: e.target.checked }); }}
+                                    /> Diffusion
+                                  </label>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Section>
+
+                  {/* Présence & suivi des lots (page 2 du CR) */}
+                  <Section title="Présence & suivi des lots" icon={IconBuilding}>
+                    {lots_list.length === 0 && (
+                      <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">Aucun lot renseigné pour ce projet.</p>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="text-[var(--tblr-muted)] text-[10px] font-bold uppercase tracking-wider">
+                          <tr>
+                            <th className="text-left py-1.5 pr-2">Lot / Entreprise</th>
+                            <th className="text-left py-1.5 pr-2">Statut</th>
+                            <th className="text-left py-1.5 pr-2">Effectif</th>
+                            <th className="text-center py-1.5 pr-2">Retard exéc.</th>
+                            <th className="text-center py-1.5 pr-2">Retard docs</th>
+                            <th className="text-center py-1.5 pr-2">Intempéries</th>
+                            <th className="text-center py-1.5 pr-2">Convoqué suiv.</th>
+                            <th className="text-left py-1.5">Lieu</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lots_list.map(lot => {
+                            const idx = (selectedReport.attendance || []).findIndex(a => a.role === lot.lot_title);
+                            const row = idx >= 0 ? selectedReport.attendance![idx] : undefined;
+                            const status: PresenceStatus = row ? (row.status || (row.present ? 'P' : row.excused ? 'AE' : 'ANE')) : 'P';
+                            const t = (selectedReport.lot_tracking || []).find(x => x.lot_id === lot.id);
+                            return (
+                              <tr key={lot.id} className="border-b border-[var(--tblr-border)] last:border-0">
+                                <td className="py-2 pr-2">
+                                  <div className="font-semibold text-[var(--tblr-text)]">{lot.contact_name?.split(' - ')[0]}</div>
+                                  <div className="text-xs text-[var(--tblr-muted)]">{lot.lot_number} — {lot.lot_title}</div>
+                                </td>
+                                <td className="py-2 pr-2 whitespace-nowrap">
+                                  <select
+                                    className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={status}
+                                    onFocus={() => { if (idx < 0) ensureAttendanceRow(lot); }}
+                                    onChange={e => {
+                                      if (idx < 0) { ensureAttendanceRow(lot); return; }
+                                      setAttendanceStatus(idx, e.target.value as PresenceStatus);
+                                    }}
+                                  >
+                                    {(Object.keys(PRESENCE_LABELS) as PresenceStatus[]).map(v => (
+                                      <option key={v} value={v}>{PRESENCE_LABELS[v]}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="py-2 pr-2">
+                                  <input type="number" min={0} className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.effectif ?? ''} onChange={e => setLotTracking(lot.id, { effectif: e.target.value ? parseInt(e.target.value) : undefined })} />
+                                </td>
+                                <td className="py-2 pr-2 text-center">
+                                  <input type="checkbox" checked={!!t?.retard_execution} onChange={e => setLotTracking(lot.id, { retard_execution: e.target.checked })} />
+                                </td>
+                                <td className="py-2 pr-2 text-center">
+                                  <input type="checkbox" checked={!!t?.retard_remise_docs} onChange={e => setLotTracking(lot.id, { retard_remise_docs: e.target.checked })} />
+                                </td>
+                                <td className="py-2 pr-2 text-center">
+                                  <input type="checkbox" checked={!!t?.intemperies} onChange={e => setLotTracking(lot.id, { intemperies: e.target.checked })} />
+                                </td>
+                                <td className="py-2 pr-2 text-center">
+                                  <input type="checkbox" checked={!!t?.convoque_reunion_suivante} onChange={e => setLotTracking(lot.id, { convoque_reunion_suivante: e.target.checked })} />
+                                </td>
+                                <td className="py-2">
+                                  <input className="w-24 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.lieu || ''} onChange={e => setLotTracking(lot.id, { lieu: e.target.value })} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Section>
+
+                  {/* Rubriques personnalisées (corps administratif du CR) */}
+                  <Section
+                    title="Rubriques"
+                    icon={IconListDetails}
+                    action={
+                      <div className="flex items-center gap-2">
+                        <input
+                          className="text-xs px-2 py-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent w-40"
+                          placeholder="Nouvelle rubrique..."
+                          value={newRubriqueName}
+                          onChange={e => setNewRubriqueName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') addRubrique(); }}
+                        />
+                        <button onClick={addRubrique}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all">
+                          <IconPlus size={14} /> Ajouter
+                        </button>
+                      </div>
+                    }
+                  >
+                    {rubriquesByCategory.length === 0 && (
+                      <p className="text-sm text-[var(--tblr-muted)] italic py-4 text-center">Aucune rubrique pour ce compte-rendu.</p>
+                    )}
+                    <div className="space-y-4">
+                      {rubriquesByCategory.map(([category, items]) => (
+                        <div key={category}>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-sm font-bold uppercase tracking-wide text-[var(--tblr-text)]">{category}</span>
+                            <button onClick={() => addRubriqueEntry(category)}
+                              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                              + Entrée
+                            </button>
+                          </div>
+                          <div className="space-y-1.5">
+                            {[...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || '')).map(n => (
+                              <div key={n.id} className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)]">
+                                <input type="date" className="shrink-0 text-xs bg-transparent border-none outline-none w-28"
+                                  defaultValue={n.issue_date} onBlur={e => saveNoteField(n.id, 'issue_date', e.target.value)} />
+                                <input className="flex-1 bg-transparent border-none outline-none text-sm min-w-[120px]"
+                                  defaultValue={n.text} placeholder="Texte..." onBlur={e => saveNoteField(n.id, 'text', e.target.value)} />
+                                <input className="shrink-0 w-32 bg-transparent border-none outline-none text-xs"
+                                  defaultValue={n.responsible_company || ''} placeholder="Société" onBlur={e => saveNoteField(n.id, 'responsible_company', e.target.value)} />
+                                <select className="shrink-0 text-[10px] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
+                                  value={n.status} onChange={e => saveNoteField(n.id, 'status', e.target.value)}>
+                                  <option value="open">Ouvert</option>
+                                  <option value="done">Soldé</option>
                                 </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                <button onClick={() => deleteNote(n.id)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </Section>
 
                   {/* Observations par lot */}

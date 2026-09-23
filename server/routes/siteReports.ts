@@ -86,13 +86,14 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
-      const { category, note_number, responsible_company, issue_date, due_date } = req.body;
+      const { category, note_number, responsible_company, issue_date, due_date, text, status } = req.body;
       const id = crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('site_report_notes').insert({ id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date });
+      const row = { id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date, text: text || null, status: status || 'open' };
+      const { error } = await supabaseAdmin.from('site_report_notes').insert(row);
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Ajout de la note de chantier N° ${note_number}`, category || '', id, 'site_report_note', 'Notes de site');
-      res.status(201).json({ id });
+      res.status(201).json(row);
     } catch (error) {
       console.error("[POST /api/reports/:reportId/notes]", error);
       res.status(500).json({ error: "Failed to create note" });
@@ -104,7 +105,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
-      const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting, meteo, temperature, attendance, statut, decisions } = req.body;
+      const { pageFormat, stakeholders, companies, meetingNotes, nextMeeting, meteo, temperature, attendance, statut, decisions, lot_tracking } = req.body;
       // The live site_reports table predates the snake_case convention used
       // elsewhere in the schema — these three columns were created unquoted
       // from camelCase source, so Postgres folded them to all-lowercase
@@ -124,6 +125,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (attendance !== undefined) update.attendance = attendance;
       if (statut !== undefined) update.statut = statut;
       if (decisions !== undefined) update.decisions = decisions;
+      if (lot_tracking !== undefined) update.lot_tracking = lot_tracking;
       const { error } = await supabaseAdmin.from('site_reports').update(update).eq('id', reportId).eq('tenant_id', tenantId);
       if (error) throw error;
       const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();
@@ -137,6 +139,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
         companies: saved?.companies || [],
         attendance: saved?.attendance || [],
         decisions: saved?.decisions || [],
+        lot_tracking: saved?.lot_tracking || [],
       });
     } catch (error) {
       captureWithContext(error, { route: 'PUT /api/reports/:reportId', tenantId, userId: req.user?.id });
