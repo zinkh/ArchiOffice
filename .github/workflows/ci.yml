@@ -11,6 +11,27 @@ jobs:
     name: Type check & build
     runs-on: ubuntu-latest
 
+    # Lets tests/applySchemaFreshInstall.test.ts replay the Electron client's
+    # entire local-bootstrap SQL history against a real, freshly emptied
+    # Postgres — the only way to catch a migration that references a table a
+    # LATER migration drops, or a USING clause that only works against the
+    # column's original type. Two such bugs shipped in a row, each only ever
+    # surfacing on an actual user's first launch (FakeSupabaseAdmin has no
+    # real Postgres to misbehave against). Gated on PGHOST in the test file
+    # itself, so a contributor's plain `npm test` without Postgres skips it.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v7
 
@@ -40,6 +61,12 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
 
       - name: Build
         run: npm run build
