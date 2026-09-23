@@ -953,6 +953,61 @@ La posture correspondante est écrite dans le prompt (`systemPrompts.ts`) :
 l'agent exécute une demande explicite sans la faire valider, ne réclame jamais
 un champ facultatif, et rend compte de ses hypothèses **après** coup.
 
+### Réunion de chantier vs réunion classique côté agents
+
+Incident signalé par l'architecte : demander à un agent de créer une
+« réunion de chantier » créait une réunion sur `/reunions` (table `meetings`,
+`type: 'projet'`), introuvable ensuite dans l'onglet DET (Direction de
+l'Exécution des Travaux) de la fiche projet — là où une réunion de chantier
+existe réellement. Cause : le commentaire d'`AGENT_RESOURCES['meetings']`
+affirmait qu'une réunion `'projet'` rattachée à un `project_id` ÉTAIT la
+réunion du DET. C'était faux — `/reunions` (`meetings`) et le DET
+(`ChantierModule.tsx`, table `site_reports`, les comptes-rendus de chantier)
+sont deux écrans et deux tables qui ne se recoupent jamais — et l'agent
+suivait ce commentaire à la lettre.
+
+**`site_reports` rejoint `AGENT_RESOURCES`** (`packages/archioffice-agents/
+src/types.ts`), en `create` seul (`update`/`delete`/`list` à `false`) : le
+contenu d'un compte-rendu (présents, décisions, notes de chantier, photos) se
+saisit ensuite sur l'écran DET lui-même, comme pour un humain qui crée
+d'abord le compte-rendu puis le remplit — pas en un seul appel d'agent, et
+`PUT /api/reports/:reportId` réécrit de toute façon tous les champs de
+présentation à chaque appel (`stakeholders`/`companies`/`pageFormat` retombent
+à vide si absents du corps), ce qu'un `update_record` partiel casserait
+silencieusement. `report_number` est calculé automatiquement (nombre de
+comptes-rendus déjà créés pour ce projet + 1), jamais demandé à l'utilisateur
+ni au modèle.
+
+**`POST /api/site-reports`** (`server/routes/siteReports.ts`), une route à
+plat nouvelle, complète — sans le remplacer — `POST /api/projects/:projectId/
+reports` déjà utilisée par `ChantierModule.tsx` : cette dernière attend
+`project_id` dans l'URL, jamais dans le corps, ce que le client HTTP interne
+générique des agents (`server/tools.ts::executeAgentAction`, qui appelle
+toujours `resource.basePath` tel quel) ne sait pas construire. Les deux
+routes partagent désormais `createSiteReport()`, extraite pour ne pas
+dupliquer la numérotation automatique ni la reprise des notes encore
+ouvertes du compte-rendu précédent. `project_id` est vérifié par
+`assertTenantEntity` comme toute référence acceptée depuis le corps d'une
+requête (voir « Références inter-locataires non validées »).
+
+`meetings` reste dans `AGENT_RESOURCES` pour les réunions qui vivent bien sur
+`/reunions` (réunion de projet interne, visite de site pour un appel d'offres
+ou une proposition). `site_reports` a rejoint les périmètres par défaut de
+`charge-projet` et `pilote-chantier` (`AGENT_DEFAULT_ACTION_SCOPES`), à côté
+de `meetings`.
+
+**« Réunion » sans autre précision reste ambigu, et un agent ne doit pas
+trancher au hasard.** Une demande nommant explicitement l'une des deux (« de
+chantier »/DET, ou au contraire une visite de candidature/proposition) se
+résout sans question ; sinon, la règle 14 des instructions générales
+(`systemPrompts.ts`) demande à l'agent de poser une question courte — « une
+réunion de chantier (onglet DET) ou une réunion classique ? » — avant
+d'appeler `create_record`, plutôt que de deviner puis de laisser
+l'utilisateur découvrir l'erreur en cherchant un enregistrement qui n'existe
+pas là où il le cherche. C'est la même règle, générale, qui couvrira toute
+future paire de ressources dont le sens diverge de façon similaire — pas une
+exception écrite seulement pour `meetings`/`site_reports`.
+
 ### Capacités et autonomie des agents
 
 Au-delà du chat et des écritures CRUD (`action_scopes`), un agent porte quatre

@@ -4,6 +4,7 @@
 // from the project's previous report, so a recurring issue doesn't need to
 // be re-entered every week.
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -37,34 +38,75 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     }
   });
 
+  // Partagé par la route imbriquée ci-dessous et par la route à plat
+  // POST /api/site-reports (voir plus bas) qu'utilise l'outil create_record
+  // des agents IA — un compte-rendu de chantier est toujours créé de la même
+  // façon, que project_id vienne du paramètre d'URL ou du corps de la requête.
+  async function createSiteReport(tenantId: string, userId: string, userEmail: string | undefined, projectId: string, body: any) {
+    const { date, meteo, temperature, effectif_total } = body;
+    let { report_number } = body;
+    if (report_number === undefined || report_number === null || report_number === '') {
+      const { count } = await supabaseAdmin.from('site_reports').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('tenant_id', tenantId);
+      report_number = (count || 0) + 1;
+    }
+    const id = crypto.randomUUID();
+    const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
+      id, tenant_id: tenantId, project_id: projectId, date, report_number,
+      meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,
+    });
+    if (insErr) throw insErr;
+    const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
+    const projectName = (project as any)?.name || '';
+    const userName = await getUserName(tenantId, userId, userEmail);
+    logActivity(tenantId, userId, userName, `Création du compte-rendu de chantier N° ${report_number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
+    // Copy open notes from previous report
+    const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
+    if (previousReports && previousReports.length > 0) {
+      const prevId = previousReports[0].id;
+      const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
+      if (openNotes && openNotes.length > 0) {
+        const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
+        await supabaseAdmin.from('site_report_notes').insert(newNotes);
+      }
+    }
+    return { id, project_id: projectId, report_number };
+  }
+
   app.post("/api/projects/:projectId/reports", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { date, report_number, meteo, temperature, effectif_total } = req.body;
-      const id = crypto.randomUUID();
-      const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
-        id, tenant_id: tenantId, project_id: projectId, date, report_number,
-        meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,
-      });
-      if (insErr) throw insErr;
-      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
-      const projectName = (project as any)?.name || '';
-      const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${report_number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
-      // Copy open notes from previous report
-      const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
-      if (previousReports && previousReports.length > 0) {
-        const prevId = previousReports[0].id;
-        const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
-        if (openNotes && openNotes.length > 0) {
-          const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
-          await supabaseAdmin.from('site_report_notes').insert(newNotes);
-        }
-      }
-      res.status(201).json({ id });
+      const result = await createSiteReport(tenantId, req.user.id, req.user.email, projectId, req.body);
+      res.status(201).json({ id: result.id });
     } catch (error) {
       console.error("[POST /api/projects/:projectId/reports]", error);
+      res.status(500).json({ error: "Failed to create report" });
+    }
+  });
+
+  // Route à plat, réservée aux agents IA (create_record sur la ressource
+  // 'site_reports' — voir AGENT_RESOURCES) : la route ci-dessus attend
+  // project_id dans l'URL, jamais dans le corps, ce que le client HTTP
+  // interne générique des agents (server/tools.ts::executeAgentAction) ne
+  // sait pas construire — il appelle toujours `basePath` tel quel. C'est LA
+  // « réunion de chantier » au sens de l'utilisateur : celle qui apparaît
+  // dans l'onglet DET de la fiche projet, distincte de la ressource
+  // 'meetings' (réunions classiques) — voir CLAUDE.md, « Réunion de chantier
+  // vs réunion classique côté agents ».
+  app.post("/api/site-reports", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id } = req.body;
+      if (!project_id) {
+        return res.status(400).json({ error: "project_id est requis." });
+      }
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      const result = await createSiteReport(tenantId, req.user.id, req.user.email, project_id, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("[POST /api/site-reports]", error);
       res.status(500).json({ error: "Failed to create report" });
     }
   });

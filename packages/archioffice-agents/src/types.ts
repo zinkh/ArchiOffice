@@ -126,18 +126,42 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['title', 'due_date', 'project_id', 'status'],
     required: ['title', 'due_date'],
     fields: 'title*, due_date*, project_id, status' },
-  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'meetings', label: 'Réunions (hors chantier)', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, identityField: 'title',
     knownFields: ['title', 'date', 'type', 'project_id', 'proposal_id', 'tender_id', 'notes'],
     required: ['title', 'date'],
     enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
     defaults: { type: 'projet' },
-    // Une « réunion de chantier » est le vocabulaire de l'utilisateur pour
-    // une réunion de type 'projet' rattachée à un project_id : c'est cette
-    // réunion-là qui apparaît dans l'onglet DET (Direction de l'Exécution
-    // des Travaux) de la fiche projet. visite_candidature/visite_proposition
-    // servent d'autres réunions (visite de site pour un appel d'offres ou
-    // une proposition), jamais celles qu'on appelle « réunion de chantier ».
-    fields: "title*, date*, type (projet/visite_candidature/visite_proposition — 'projet' avec project_id est LA réunion de chantier, celle de l'onglet DET du projet), project_id, notes" },
+    // Faux jusqu'au 2026-09-23 : ce commentaire prétendait qu'une réunion de
+    // type 'projet' avec project_id était LA « réunion de chantier » de
+    // l'onglet DET — ce n'est pas vrai, /reunions (cette ressource) et
+    // l'onglet DET de la fiche projet (ressource 'site_reports' ci-dessous)
+    // sont deux écrans et deux tables distincts (`meetings` vs
+    // `site_reports`) qui ne se recoupent jamais. Un agent qui suivait ce
+    // commentaire créait donc une réunion « classique » sur /reunions,
+    // introuvable dans le DET, à chaque demande utilisateur de « réunion de
+    // chantier » — voir CLAUDE.md, « Réunion de chantier vs réunion
+    // classique côté agents ». `type` couvre les réunions internes (projet)
+    // et les visites de site pour un appel d'offres ou une proposition —
+    // jamais une réunion/un compte-rendu de chantier, qui vit dans
+    // 'site_reports'.
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes. " +
+      "N'utilise pas cette ressource pour une « réunion de chantier » explicitement nommée (c'est 'site_reports' qu'il faut) ; si l'utilisateur dit juste « réunion » sans préciser, demande-lui laquelle avant de créer quoi que ce soit — voir la règle sur les ressources ambiguës." },
+  { key: 'site_reports', label: 'Comptes-rendus de chantier (réunions de chantier, onglet DET)', basePath: '/api/site-reports', create: true, update: false, delete: false, list: false,
+    knownFields: ['project_id', 'date', 'meteo', 'temperature', 'effectif_total'],
+    required: ['project_id', 'date'],
+    defaults: { date: '@today' },
+    // C'est LA « réunion de chantier » : le compte-rendu qui apparaît dans
+    // l'onglet DET (Direction de l'Exécution des Travaux) de la fiche
+    // projet — jamais la ressource 'meetings' ci-dessus, qui alimente une
+    // page séparée (/reunions) que le DET ne lit pas. Le numéro de
+    // compte-rendu (report_number) est calculé automatiquement à partir des
+    // comptes-rendus déjà créés pour ce projet ; ne pas le demander à
+    // l'utilisateur. Volontairement create-only : le contenu du
+    // compte-rendu (présents, décisions, notes de chantier, photos) se
+    // saisit ensuite sur l'écran DET lui-même, comme pour un humain qui crée
+    // d'abord le compte-rendu puis le remplit — pas en un seul appel d'agent.
+    fields: "project_id* (le projet/l'affaire concerné), date* (défaut : aujourd'hui), meteo, temperature, effectif_total. " +
+      "Utilise cette ressource dès que l'utilisateur demande explicitement une « réunion de chantier » ou un « compte-rendu de chantier » ; si le mot « réunion » seul reste ambigu (le projet n'est pas clairement en phase chantier, ou rien ne permet de trancher), demande-lui s'il s'agit d'une réunion de chantier (onglet DET) ou d'une réunion classique ('meetings') avant de créer quoi que ce soit." },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
@@ -188,8 +212,8 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
   'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
-  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'site_reports', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
+  'pilote-chantier':     ['meetings', 'site_reports', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
   'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],

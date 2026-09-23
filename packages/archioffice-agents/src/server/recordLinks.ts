@@ -80,6 +80,10 @@ export function buildRecordPath(resourceKey: string, record: Record<string, unkn
     case 'permits':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=INFOS` : null;
     case 'marches_entreprises':
+    // site_reports (comptes-rendus/réunions de chantier) n'a pas non plus de
+    // modale ouvrable par id depuis l'extérieur de ChantierModule.tsx — même
+    // repli que marches_entreprises, poser l'utilisateur sur l'onglet DET.
+    case 'site_reports':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=DET` : null;
     case 'notes_honoraires':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=HONOS` : null;
