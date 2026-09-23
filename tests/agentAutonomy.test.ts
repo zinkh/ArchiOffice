@@ -642,4 +642,39 @@ describe('comptes-rendus de chantier DET', () => {
     expect(result.response.needs_confirmation).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('ajoute un point au brouillon DET sans créer de tâche', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 200 : 200,
+      json: async () => init?.method === 'POST' ? { id: 'obs-1', number: 3 }
+        : url.endsWith('/reports') ? [{ id: 'cr-1', report_number: 1, statut: 'brouillon' }] : [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    expect(buildAgentTools(caps).map(t => t.name)).toContain('add_site_report_observation');
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      'http://localhost/api/projects/vip-tc/reports',
+      'http://localhost/api/reports/cr-1/observations',
+      'http://localhost/api/projects/vip-tc/observations',
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ texte: 'HCT : brancher la base vie', created_report_id: 'cr-1' });
+    expect(result.response).toMatchObject({ success: true, id: 'obs-1', report_id: 'cr-1' });
+  });
+
+  it('demande quel brouillon modifier quand plusieurs existent', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [
+      { id: 'cr-1', statut: 'brouillon' }, { id: 'cr-2', statut: 'brouillon' },
+    ] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(result.response.error).toContain('Plusieurs brouillons');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
