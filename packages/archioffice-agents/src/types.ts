@@ -131,13 +131,9 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     required: ['title', 'date'],
     enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
     defaults: { type: 'projet' },
-    // Une « réunion de chantier » est le vocabulaire de l'utilisateur pour
-    // une réunion de type 'projet' rattachée à un project_id : c'est cette
-    // réunion-là qui apparaît dans l'onglet DET (Direction de l'Exécution
-    // des Travaux) de la fiche projet. visite_candidature/visite_proposition
-    // servent d'autres réunions (visite de site pour un appel d'offres ou
-    // une proposition), jamais celles qu'on appelle « réunion de chantier ».
-    fields: "title*, date*, type (projet/visite_candidature/visite_proposition — 'projet' avec project_id est LA réunion de chantier, celle de l'onglet DET du projet), project_id, notes" },
+    // Les comptes-rendus de chantier de l'onglet DET vivent dans site_reports,
+    // pas dans meetings. L'outil create_site_report les crée explicitement.
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes. Réunion classique uniquement : pour une réunion/visite de chantier ou un CR dans l'onglet DET, utiliser create_site_report." },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
