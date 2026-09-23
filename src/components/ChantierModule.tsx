@@ -125,13 +125,11 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
   }, [isModalOpen, newReportDate, project.address]);
 
   const handleCreateReport = async (duplicateFrom?: SiteReport) => {
-    const report_number = reports.length + 1;
     const res = await fetch(`/api/projects/${project.id}/reports`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         date: duplicateFrom ? duplicateFrom.date : newReportDate,
-        report_number,
         meteo: duplicateFrom ? duplicateFrom.meteo : (fetchedWeather?.meteo || 'Inconnu'),
         temperature: duplicateFrom ? duplicateFrom.temperature : (fetchedWeather?.temperature || 0),
         effectif_total: 0,

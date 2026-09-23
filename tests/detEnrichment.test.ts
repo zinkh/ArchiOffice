@@ -73,6 +73,7 @@ describe('site_reports — attendance/statut/decisions', () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     const projectId = 'project-1';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier test' }]);
 
     const created = await request(app)
       .post(`/api/projects/${projectId}/reports`)

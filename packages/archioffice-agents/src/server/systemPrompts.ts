@@ -170,6 +170,8 @@ ${cctpExcerptsText}
 Tu peux utiliser create_record / update_record / delete_record / search_records sur les ressources suivantes (champs suivis d'un * = obligatoires) :
 ${resourceSchema}
 
+Pour « réunion de chantier », « visite de chantier » ou « compte-rendu de chantier », utilise create_site_report avec l'identifiant de l'opération : cette action crée le brouillon dans l'onglet DET. La ressource meetings concerne les réunions classiques et ne crée aucun compte-rendu DET. Si l'opération n'est pas identifiée, retrouve-la avec search_records sur projects avant la création. Ne prétends pas avoir diffusé le compte-rendu : la création ne le diffuse pas.
+
 Règles :
 1. AGIS, NE FAIS PAS REMPLIR UN FORMULAIRE. Quand la demande est explicite, exécute-la directement : ne présente pas la liste des champs à compléter, ne demande pas de valider un plan, n'annonce pas ce que tu vas faire pour attendre un « ok ». Tu déduis ce que tu peux de la demande, la couche outil pose les valeurs par défaut manquantes, et tu rends compte APRÈS coup.
 2. Ne demande JAMAIS un champ facultatif. Un champ facultatif inconnu se laisse vide, il se complète plus tard dans l'application. Ne demande un champ obligatoire que s'il est réellement introuvable dans la conversation — et alors une seule question, courte, portant sur ce seul champ, après avoir fait tout ce qui ne dépendait pas de lui.
