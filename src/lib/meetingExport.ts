@@ -22,6 +22,15 @@ const SUBSECTION_LABELS: Record<string, string> = {
   visite_proposition: 'Visite proposition',
 };
 
+// Les anciennes fiches créées depuis une proposition ou un appel d'offres
+// étaient systématiquement enregistrées avec type « projet ».
+function meetingTypeLabel(meeting: Meeting): string {
+  const type = meeting.type === 'projet' && meeting.proposal_id ? 'visite_proposition'
+    : meeting.type === 'projet' && meeting.tender_id ? 'visite_candidature'
+    : meeting.type;
+  return SUBSECTION_LABELS[type] || type;
+}
+
 function formatDate(iso: string) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -103,7 +112,7 @@ export async function exportMeetingToPDF(
   y += titleLines.length * 8;
 
   applyFont('normal', 9, '#6b7280');
-  const typeLabel = SUBSECTION_LABELS[meeting.type] || meeting.type;
+  const typeLabel = meetingTypeLabel(meeting);
   pdf.text(`${typeLabel}  ·  ${projectName}  ·  ${formatDate(meeting.date)}`, margin, y);
   y += 9;
 
@@ -273,7 +282,7 @@ export async function exportMeetingToDocx(
     right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
   };
 
-  const typeLabel = SUBSECTION_LABELS[meeting.type] || meeting.type;
+  const typeLabel = meetingTypeLabel(meeting);
 
   // ── Logo ─────────────────────────────────────────────────────────────────
   const logoChildren: (TextRun | ImageRun)[] = [];

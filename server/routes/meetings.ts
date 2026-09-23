@@ -19,6 +19,16 @@ export interface RouteDeps {
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
 }
 
+// Les anciennes réunions liées à un devis ou un appel d'offres ont souvent
+// été stockées avec le type « projet ». Corriger leur lecture sans modifier
+// rétroactivement les lignes historiques ni perdre leur rattachement.
+function withContextualType(meeting: any) {
+  return {
+    ...meeting,
+    type: meeting.proposal_id ? 'visite_proposition' : meeting.tender_id ? 'visite_candidature' : meeting.type,
+  };
+}
+
 export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage }: RouteDeps) {
   app.get("/api/meetings", async (req: any, res: any) => {
     try {
@@ -31,7 +41,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (type) query = query.eq('type', type);
       const { data, error } = await query;
       if (error) throw error;
-      res.json(data || []);
+      res.json((data || []).map(withContextualType));
     } catch (e: any) {
       console.error("[GET /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });
@@ -43,7 +53,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: meeting, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', id).single();
       if (error) throw error;
       const { data: photos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('meeting_id', id).order('uploaded_at');
-      res.json({ ...meeting, photos: photos || [] });
+      res.json({ ...withContextualType(meeting), photos: photos || [] });
     } catch (e: any) {
       console.error("[GET /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
@@ -61,13 +71,16 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (tender_id && !(await assertTenantEntity(supabaseAdmin, 'tenders', tender_id, tenantId))) {
         return res.status(400).json({ error: "Appel d'offres introuvable pour ce cabinet." });
       }
+      // Le type suit le parent, même pour les clients/API qui omettent le
+      // champ ou envoient encore la valeur historique par défaut « projet ».
+      const meetingType = proposal_id ? 'visite_proposition' : tender_id ? 'visite_candidature' : type || 'projet';
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: meetingType, title, date, notes: notes || null, created_at });
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
-      res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
+      res.status(201).json({ id, project_id, proposal_id, tender_id, type: meetingType, title, date, notes, created_at, photos: [] });
     } catch (e: any) {
       console.error("[POST /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });

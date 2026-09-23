@@ -33,6 +33,36 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
 
   const tools: FunctionDeclarationLike[] = [];
 
+  if (actionScopes.includes('projects')) {
+    tools.push({
+      name: 'create_site_report',
+      description: "Crée un compte-rendu de réunion ou visite de chantier dans l'onglet DET de l'opération. Utilise cet outil pour « réunion de chantier », « visite de chantier », « CR de chantier » ou « compte-rendu DET », jamais create_record avec resource meetings. Recherche d'abord l'opération pour obtenir son project_id. La création produit un brouillon et ne le diffuse pas.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          project_id: { type: 'string', description: "Identifiant de l'opération concernée" },
+          date: { type: 'string', description: 'Date de la réunion au format YYYY-MM-DD' },
+          confirm: { type: 'boolean', description: "Laisser vide au premier appel. Mettre true seulement après confirmation explicite de l'utilisateur de créer un second CR à la même date." },
+        },
+        required: ['project_id', 'date'],
+      },
+    });
+    tools.push({
+      name: 'add_site_report_observation',
+      description: "Ajoute une observation directement dans le brouillon du compte-rendu de chantier (onglet DET). Utilise cet outil quand l'utilisateur demande d'inscrire une remarque, un point à traiter ou une action d'entreprise dans un CR. Ne crée pas de tâche de substitution. Recherche l'opération, puis transmets project_id, le texte exact et, si connu, report_id ou le nom/numéro du lot. Sans report_id, l'outil choisit le seul brouillon disponible ou demande de préciser s'il y en a plusieurs.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          project_id: { type: 'string', description: "Identifiant de l'opération" },
+          texte: { type: 'string', description: "Observation complète à inscrire dans le CR, y compris le nom de l'entreprise si fourni" },
+          report_id: { type: 'string', description: 'Identifiant du brouillon DET, si connu' },
+          lot: { type: 'string', description: 'Numéro, intitulé ou entreprise du lot, si connu ; ne pas inventer' },
+        },
+        required: ['project_id', 'texte'],
+      },
+    });
+  }
+
   if (creatable.length > 0) {
     tools.push({
       name: 'create_record',
@@ -328,6 +358,76 @@ export async function executeAgentAction(
   const name = call.name;
   const args = call.args || {};
   const actionScopes = caps.actionScopes;
+
+  if (name === 'add_site_report_observation') {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    const projectId = String(args.project_id || '').trim();
+    const texte = String(args.texte || '').trim();
+    if (!projectId || !texte) return { response: { error: 'project_id et texte sont requis.' } };
+    try {
+      const request = async (path: string, method = 'GET', body?: Record<string, unknown>) => {
+        const res = await fetch(baseUrl + path, { method, headers: internalHeaders(auth, body ? { 'Content-Type': 'application/json' } : undefined), body: body ? JSON.stringify(body) : undefined });
+        const json: any = await res.json().catch(() => null);
+        return { res, json };
+      };
+      const reportsPath = `/api/projects/${encodeURIComponent(projectId)}/reports`;
+      const { res: reportsRes, json: reports } = await request(reportsPath);
+      if (!reportsRes.ok || !Array.isArray(reports)) return { response: { error: reports?.error || `Lecture des comptes-rendus impossible (HTTP ${reportsRes.status}).` } };
+      const drafts = reports.filter((r: any) => r.statut === 'brouillon' || !r.statut);
+      const requestedId = String(args.report_id || '').trim();
+      const report = requestedId ? reports.find((r: any) => String(r.id) === requestedId) : drafts.length === 1 ? drafts[0] : null;
+      if (!report) return { response: { error: requestedId ? 'Ce compte-rendu ne fait pas partie de cette opération.' : drafts.length ? 'Plusieurs brouillons DET : précise le compte-rendu à modifier.' : 'Aucun brouillon DET trouvé pour cette opération.', brouillons: drafts.map((r: any) => ({ id: r.id, numero: r.report_number, date: r.date })) } };
+      if (report.statut && report.statut !== 'brouillon') return { response: { error: 'Ce compte-rendu a déjà été diffusé : indique un brouillon à modifier.' } };
+
+      const observationsPath = `/api/reports/${encodeURIComponent(String(report.id))}/observations`;
+      const { res: obsRes, json: observations } = await request(observationsPath);
+      if (!obsRes.ok || !Array.isArray(observations)) return { response: { error: observations?.error || 'Lecture des observations impossible.' } };
+      const duplicate = observations.find((o: any) => String(o.texte || '').trim().toLocaleLowerCase() === texte.toLocaleLowerCase());
+      if (duplicate) return { response: { success: true, already_exists: true, id: duplicate.id, report_id: report.id, report_number: report.report_number, record_url: buildRecordUrl('site_reports', { id: report.id, project_id: projectId }) } };
+
+      let lotId: string | undefined;
+      const lot = String(args.lot || '').trim().toLocaleLowerCase();
+      if (lot) {
+        const { res: lotsRes, json: lots } = await request(`/api/projects/${encodeURIComponent(projectId)}/lots`);
+        if (!lotsRes.ok || !Array.isArray(lots)) return { response: { error: 'Lecture des lots impossible.' } };
+        const matches = lots.filter((l: any) => [l.id, l.lot_number, l.lot_title, l.contact_name].some(v => String(v || '').trim().toLocaleLowerCase() === lot));
+        if (matches.length !== 1) return { response: { error: matches.length ? 'Plusieurs lots correspondent : précise le numéro.' : `Lot « ${args.lot} » introuvable dans cette opération.`, lots_possibles: lots.map((l: any) => ({ id: l.id, numero: l.lot_number, titre: l.lot_title, entreprise: l.contact_name })) } };
+        lotId = String(matches[0].id);
+      }
+
+      const { res, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/observations`, 'POST', { texte, statut: 'À faire', type: 'observation', created_report_id: report.id, ...(lotId ? { lot_id: lotId } : {}) });
+      if (!res.ok) return { response: { error: json?.error || `Ajout de l'observation impossible (HTTP ${res.status}).` } };
+      return { response: { success: true, id: json.id, number: json.number, texte, report_id: report.id, report_number: report.report_number, project_id: projectId, record_url: buildRecordUrl('site_reports', { id: report.id, project_id: projectId }) }, summary: `Observation ajoutée au CR de chantier n° ${report.report_number}` };
+    } catch (e: any) {
+      return { response: { error: e?.message || "Ajout de l'observation impossible." } };
+    }
+  }
+
+  if (name === 'create_site_report') {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    const projectId = String(args.project_id || '').trim();
+    const date = String(args.date || '').trim();
+    if (!projectId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+      return { response: { error: 'project_id et date (YYYY-MM-DD) valides sont requis.' } };
+    }
+    try {
+      const path = `/api/projects/${encodeURIComponent(projectId)}/reports`;
+      const existing = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
+      const reports: any = await existing.json().catch(() => null);
+      if (!existing.ok || !Array.isArray(reports)) return { response: { error: reports?.error || `Lecture des comptes-rendus impossible (HTTP ${existing.status}).` } };
+      const duplicates = reports.filter((r: any) => r.date === date);
+      if (duplicates.length && args.confirm !== true) return { response: { needs_confirmation: true, existing_matches: duplicates.map((r: any) => ({ id: r.id, report_number: r.report_number, date: r.date })), instruction: 'Un compte-rendu existe déjà pour cette opération à cette date. Demande à l’utilisateur s’il veut réutiliser ce brouillon ou en créer un second. Ne rappelle create_site_report avec confirm: true qu’après son accord explicite.' } };
+      const response = await fetch(baseUrl + path, { method: 'POST', headers: internalHeaders(auth, { 'Content-Type': 'application/json' }), body: JSON.stringify({ date }) });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok) return { response: { error: result.error || `Création impossible (HTTP ${response.status}).` } };
+      const recordUrl = buildRecordUrl('site_reports', { id: result.id, project_id: projectId });
+      return { response: { success: true, id: result.id, report_number: result.report_number, date, project_id: projectId, statut: 'brouillon', record_url: recordUrl }, summary: `Compte-rendu de chantier n° ${result.report_number} créé dans DET` };
+    } catch (e: any) {
+      return { response: { error: e?.message || 'Création du compte-rendu impossible.' } };
+    }
+  }
 
   // fetch_url isn't a CRUD resource — dispatch it separately, before the
   // resource-lookup logic below, and re-check the flag here even though

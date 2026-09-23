@@ -501,7 +501,7 @@ export default function Reunions() {
     if (!newMeetingTitle.trim()) return;
 
     const body: any = {
-      type: 'projet' satisfies Subsection,
+      type: (activeKind === 'project' ? 'projet' : activeKind === 'proposal' ? 'visite_proposition' : 'visite_candidature') satisfies Subsection,
       title: newMeetingTitle.trim(),
       date: newMeetingDate,
       notes: '',

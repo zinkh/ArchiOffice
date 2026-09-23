@@ -69,10 +69,20 @@ describe('observations — type/urgence/photos', () => {
 });
 
 describe('site_reports — attendance/statut/decisions', () => {
+  it('refuse une observation liée au CR d’une autre opération', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('site_reports', [{ id: 'cr-other-project', tenant_id: tenantId, project_id: 'autre-projet', date: '2026-09-23', report_number: 1 }]);
+    const response = await request(app).post('/api/projects/vip-tc/observations').set(authHeader(token))
+      .send({ texte: 'HCT : brancher la base vie', created_report_id: 'cr-other-project' });
+    expect(response.status).toBe(400);
+  });
+
   it('persists meteo/temperature on create and attendance/statut/decisions on update', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     const projectId = 'project-1';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier test' }]);
 
     const created = await request(app)
       .post(`/api/projects/${projectId}/reports`)
