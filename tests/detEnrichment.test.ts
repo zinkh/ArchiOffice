@@ -115,6 +115,7 @@ describe('site_reports — lot_tracking (page 2 du CR)', () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     const projectId = 'project-lot-tracking';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier lot tracking' }]);
 
     const created = await request(app)
       .post(`/api/projects/${projectId}/reports`)
@@ -142,6 +143,7 @@ describe('site_report_notes — rubriques personnalisables', () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     const projectId = 'project-rubriques';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier rubriques' }]);
 
     const report = await request(app)
       .post(`/api/projects/${projectId}/reports`)
