@@ -33,6 +33,22 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
 
   const tools: FunctionDeclarationLike[] = [];
 
+  if (actionScopes.includes('projects')) {
+    tools.push({
+      name: 'create_site_report',
+      description: "Crée un compte-rendu de réunion ou visite de chantier dans l'onglet DET de l'opération. Utilise cet outil pour « réunion de chantier », « visite de chantier », « CR de chantier » ou « compte-rendu DET », jamais create_record avec resource meetings. Recherche d'abord l'opération pour obtenir son project_id. La création produit un brouillon et ne le diffuse pas.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          project_id: { type: 'string', description: "Identifiant de l'opération concernée" },
+          date: { type: 'string', description: 'Date de la réunion au format YYYY-MM-DD' },
+          confirm: { type: 'boolean', description: "Laisser vide au premier appel. Mettre true seulement après confirmation explicite de l'utilisateur de créer un second CR à la même date." },
+        },
+        required: ['project_id', 'date'],
+      },
+    });
+  }
+
   if (creatable.length > 0) {
     tools.push({
       name: 'create_record',
@@ -328,6 +344,31 @@ export async function executeAgentAction(
   const name = call.name;
   const args = call.args || {};
   const actionScopes = caps.actionScopes;
+
+  if (name === 'create_site_report') {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    const projectId = String(args.project_id || '').trim();
+    const date = String(args.date || '').trim();
+    if (!projectId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+      return { response: { error: 'project_id et date (YYYY-MM-DD) valides sont requis.' } };
+    }
+    try {
+      const path = `/api/projects/${encodeURIComponent(projectId)}/reports`;
+      const existing = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
+      const reports: any = await existing.json().catch(() => null);
+      if (!existing.ok || !Array.isArray(reports)) return { response: { error: reports?.error || `Lecture des comptes-rendus impossible (HTTP ${existing.status}).` } };
+      const duplicates = reports.filter((r: any) => r.date === date);
+      if (duplicates.length && args.confirm !== true) return { response: { needs_confirmation: true, existing_matches: duplicates.map((r: any) => ({ id: r.id, report_number: r.report_number, date: r.date })), instruction: 'Un compte-rendu existe déjà pour cette opération à cette date. Demande à l’utilisateur s’il veut réutiliser ce brouillon ou en créer un second. Ne rappelle create_site_report avec confirm: true qu’après son accord explicite.' } };
+      const response = await fetch(baseUrl + path, { method: 'POST', headers: internalHeaders(auth, { 'Content-Type': 'application/json' }), body: JSON.stringify({ date }) });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok) return { response: { error: result.error || `Création impossible (HTTP ${response.status}).` } };
+      const recordUrl = buildRecordUrl('site_reports', { id: result.id, project_id: projectId });
+      return { response: { success: true, id: result.id, report_number: result.report_number, date, project_id: projectId, statut: 'brouillon', record_url: recordUrl }, summary: `Compte-rendu de chantier n° ${result.report_number} créé dans DET` };
+    } catch (e: any) {
+      return { response: { error: e?.message || 'Création du compte-rendu impossible.' } };
+    }
+  }
 
   // fetch_url isn't a CRUD resource — dispatch it separately, before the
   // resource-lookup logic below, and re-check the flag here even though
