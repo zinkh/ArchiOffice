@@ -42,16 +42,28 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { date, report_number, meteo, temperature, effectif_total } = req.body;
+      const { data: project, error: projectError } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
+      if (projectError) throw projectError;
+      if (!project) return res.status(404).json({ error: 'Opération introuvable.' });
+      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+        return res.status(400).json({ error: 'Une date valide au format YYYY-MM-DD est requise.' });
+      }
+      const { data: existing, error: listError } = await supabaseAdmin.from('site_reports').select('report_number').eq('project_id', projectId).eq('tenant_id', tenantId);
+      if (listError) throw listError;
+      const nextNumber = Math.max(0, ...(existing || []).map((r: any) => Number(r.report_number) || 0)) + 1;
+      const number = report_number == null ? nextNumber : Number(report_number);
+      if (!Number.isInteger(number) || number < 1 || (existing || []).some((r: any) => Number(r.report_number) === number)) {
+        return res.status(409).json({ error: 'Numéro de compte-rendu invalide ou déjà utilisé.' });
+      }
       const id = crypto.randomUUID();
       const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
-        id, tenant_id: tenantId, project_id: projectId, date, report_number,
+        id, tenant_id: tenantId, project_id: projectId, date, report_number: number,
         meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,
       });
       if (insErr) throw insErr;
-      const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
       const projectName = (project as any)?.name || '';
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${report_number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
+      logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
       // Copy open notes from previous report
       const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
       if (previousReports && previousReports.length > 0) {
@@ -62,7 +74,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
           await supabaseAdmin.from('site_report_notes').insert(newNotes);
         }
       }
-      res.status(201).json({ id });
+      res.status(201).json({ id, report_number: number });
     } catch (error) {
       console.error("[POST /api/projects/:projectId/reports]", error);
       res.status(500).json({ error: "Failed to create report" });
