@@ -459,7 +459,10 @@ CREATE TABLE IF NOT EXISTS site_reports (
   meetingnotes TEXT, nextmeeting TEXT, meteo TEXT,
   temperature TEXT, effectif_total TEXT,
   attendance JSONB DEFAULT '[]', statut TEXT NOT NULL DEFAULT 'brouillon',
-  decisions JSONB DEFAULT '[]'
+  decisions JSONB DEFAULT '[]',
+  -- Suivi par lot (page 2 du CR : présence P/R/AE/ANE, effectif, retards,
+  -- intempéries, lieu) — supabase/migrate_site_report_lot_tracking.sql
+  lot_tracking JSONB DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 

@@ -3761,6 +3761,8 @@ export default function ProjectDetail() {
                 project={project}
                 lots_list={project.lots_list || []}
                 ordresDeService={ordresDeService}
+                contacts={contacts}
+                settings={settings}
                 osSituationsContent={
               <div className="space-y-8">
                 {/* Ordres de Service Travaux */}

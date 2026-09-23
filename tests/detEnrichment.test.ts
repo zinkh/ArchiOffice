@@ -96,7 +96,7 @@ describe('site_reports — attendance/statut/decisions', () => {
       .put(`/api/reports/${reportId}`)
       .set(authHeader(token))
       .send({
-        attendance: [{ name: 'J. Dupont', role: 'Bâti Delacroix SA', present: true }],
+        attendance: [{ name: 'J. Dupont', role: 'Bâti Delacroix SA', present: true, status: 'P' }],
         statut: 'diffuse',
         decisions: [{ auteur: 'CM', texte: 'Décalage du lot 04', tag: 'planning' }],
       });
@@ -104,5 +104,73 @@ describe('site_reports — attendance/statut/decisions', () => {
     expect(updated.body.statut).toBe('diffuse');
     expect(updated.body.attendance).toHaveLength(1);
     expect(updated.body.decisions).toHaveLength(1);
+  });
+});
+
+// CR de chantier — format classique (page de garde + suivi par lot + rubriques
+// personnalisables) : voir supabase/migrate_site_report_lot_tracking.sql et
+// src/lib/siteReportExport.ts.
+describe('site_reports — lot_tracking (page 2 du CR)', () => {
+  it('persists lot_tracking on update', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const projectId = 'project-lot-tracking';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier lot tracking' }]);
+
+    const created = await request(app)
+      .post(`/api/projects/${projectId}/reports`)
+      .set(authHeader(token))
+      .send({ date: '2026-09-16', report_number: 1 });
+    const reportId = created.body.id;
+
+    const updated = await request(app)
+      .put(`/api/reports/${reportId}`)
+      .set(authHeader(token))
+      .send({
+        lot_tracking: [{ lot_id: 'lot-04', status: 'ANE', effectif: 6, retard_execution: true, intemperies: false }],
+      });
+    expect(updated.status).toBe(200);
+    expect(updated.body.lot_tracking).toEqual([
+      { lot_id: 'lot-04', status: 'ANE', effectif: 6, retard_execution: true, intemperies: false },
+    ]);
+    expect(fakeSupabaseAdmin.getTable('site_reports').find((r: any) => r.id === reportId)?.lot_tracking)
+      .toHaveLength(1);
+  });
+});
+
+describe('site_report_notes — rubriques personnalisables', () => {
+  it('creates a note with its text, then updates it and lists it back', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const projectId = 'project-rubriques';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier rubriques' }]);
+
+    const report = await request(app)
+      .post(`/api/projects/${projectId}/reports`)
+      .set(authHeader(token))
+      .send({ date: '2026-09-16', report_number: 1 });
+    const reportId = report.body.id;
+
+    const created = await request(app)
+      .post(`/api/reports/${reportId}/notes`)
+      .set(authHeader(token))
+      .send({ category: 'ADMINISTRATIF', note_number: 1, issue_date: '2026-09-16', text: 'Devis chiroptères reçus' });
+    expect(created.status).toBe(201);
+    expect(created.body.text).toBe('Devis chiroptères reçus');
+    const noteId = created.body.id;
+    expect(fakeSupabaseAdmin.getTable('site_report_notes').find((n: any) => n.id === noteId)?.text)
+      .toBe('Devis chiroptères reçus');
+
+    const updated = await request(app)
+      .put(`/api/notes/${noteId}`)
+      .set(authHeader(token))
+      .send({ text: 'Devis chiroptères transmis à la MOA', status: 'done' });
+    expect(updated.status).toBe(200);
+
+    const listed = await request(app).get(`/api/reports/${reportId}/notes`).set(authHeader(token));
+    expect(listed.status).toBe(200);
+    expect(listed.body).toHaveLength(1);
+    expect(listed.body[0].text).toBe('Devis chiroptères transmis à la MOA');
+    expect(listed.body[0].status).toBe('done');
   });
 });
