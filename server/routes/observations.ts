@@ -58,8 +58,9 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
-      if (created_report_id && !(await assertTenantEntity(supabaseAdmin, 'site_reports', created_report_id, tenantId))) {
-        return res.status(400).json({ error: "Compte rendu introuvable pour ce cabinet." });
+      if (created_report_id) {
+        const { data: report } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').select('project_id').eq('id', created_report_id).maybeSingle();
+        if (!report || (report as any).project_id !== projectId) return res.status(400).json({ error: "Compte rendu introuvable pour cette opération." });
       }
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
       const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
