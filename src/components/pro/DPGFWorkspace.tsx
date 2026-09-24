@@ -558,6 +558,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {
               id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
               onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+              badge: !!(dpgf.multiBatiments || dpgf.multiPhases),
             },
           ],
         },

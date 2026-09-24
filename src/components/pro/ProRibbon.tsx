@@ -7,6 +7,13 @@ export interface RibbonAction {
   onClick: () => void;
   disabled?: boolean;
   active?: boolean;
+  /**
+   * Pastille sur l'icône, indépendante de `active` : `active` ne dit que si
+   * le panneau de cette action est ouvert, pas si ce qu'il configure l'est
+   * déjà. Un DPGF qui a déjà des bâtiments/phases définis doit rester
+   * repérable au ruban même une fois le panneau refermé.
+   */
+  badge?: boolean;
 }
 
 export interface RibbonGroup {
@@ -78,8 +85,11 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                         disabled:opacity-40 disabled:cursor-not-allowed
                       `}
                     >
-                      <span className="flex items-center justify-center mt-1 shrink-0">
+                      <span className="relative flex items-center justify-center mt-1 shrink-0">
                         {action.icon}
+                        {action.badge && (
+                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-1 ring-white dark:ring-zinc-800" />
+                        )}
                       </span>
                       <span className="text-center break-words leading-tight text-[9px] w-full px-0.5">
                         {action.label}

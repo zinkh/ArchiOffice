@@ -189,29 +189,44 @@ export const SelecteursDecoupage: React.FC<{
   onPhaseChange: (id: string | undefined) => void;
   /** Placeholder de l'option vide, pour dire ce qui est hérité. */
   heriteDe?: string;
-}> = ({ doc, batimentId, phaseId, onBatimentChange, onPhaseChange, heriteDe }) => (
-  <>
-    {doc.multiBatiments && (
-      <select
-        className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
-        value={batimentId ?? ''}
-        onChange={e => onBatimentChange(e.target.value || undefined)}
-        title="Bâtiment"
-      >
-        <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
-        {parOrdre(doc.batiments ?? []).map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
-      </select>
-    )}
-    {doc.multiPhases && (
-      <select
-        className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
-        value={phaseId ?? ''}
-        onChange={e => onPhaseChange(e.target.value || undefined)}
-        title="Phase"
-      >
-        <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
-        {parOrdre(doc.phases ?? []).map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-      </select>
-    )}
-  </>
-);
+}> = ({ doc, batimentId, phaseId, onBatimentChange, onPhaseChange, heriteDe }) => {
+  // Les selects restent volontairement compacts (10 px, colonnes de 56 px
+  // dans le tableau) : le code seul y tient, le libellé complet — s'il
+  // diffère du code, ce qui n'est pas garanti (« B1 » sans libellé saisi) —
+  // passe par le `title` plutôt que d'élargir la case fermée et casser la
+  // mise en page dense du tableau.
+  const batimentSelectionne = (doc.batiments ?? []).find(b => b.id === batimentId);
+  const phaseSelectionnee = (doc.phases ?? []).find(p => p.id === phaseId);
+  const libelleTitre = (code: string, libelle?: string) => libelle ? `${code} — ${libelle}` : code;
+
+  return (
+    <>
+      {doc.multiBatiments && (
+        <select
+          className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
+          value={batimentId ?? ''}
+          onChange={e => onBatimentChange(e.target.value || undefined)}
+          title={batimentSelectionne ? libelleTitre(batimentSelectionne.code, batimentSelectionne.libelle) : 'Bâtiment'}
+        >
+          <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
+          {parOrdre(doc.batiments ?? []).map(b => (
+            <option key={b.id} value={b.id} title={libelleTitre(b.code, b.libelle)}>{b.code}</option>
+          ))}
+        </select>
+      )}
+      {doc.multiPhases && (
+        <select
+          className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
+          value={phaseId ?? ''}
+          onChange={e => onPhaseChange(e.target.value || undefined)}
+          title={phaseSelectionnee ? libelleTitre(phaseSelectionnee.code, phaseSelectionnee.libelle) : 'Phase'}
+        >
+          <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
+          {parOrdre(doc.phases ?? []).map(p => (
+            <option key={p.id} value={p.id} title={libelleTitre(p.code, p.libelle)}>{p.code}</option>
+          ))}
+        </select>
+      )}
+    </>
+  );
+};
