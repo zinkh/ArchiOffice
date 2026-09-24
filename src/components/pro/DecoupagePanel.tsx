@@ -4,39 +4,73 @@
 // pour le raisonnement. Ce panneau les gère, identique pour les trois
 // éditeurs (CCTP, DPGF, BPU/DQE) puisque le registre est le même type partout.
 import React from 'react';
-import { IconX, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconX, IconPlus, IconTrash, IconChevronUp, IconChevronDown } from '@tabler/icons-react';
 import type { Batiment, DecoupageDocument, PhaseOperation } from '../../types/dpgf';
+import { purgerDecoupage, type LotLike } from './treeOps';
 
-interface Props {
-  doc: DecoupageDocument;
-  onPatch: (patch: Partial<DecoupageDocument>) => void;
+interface Props<L extends LotLike> {
+  doc: DecoupageDocument & { lots: L[] };
+  onPatch: (patch: Partial<DecoupageDocument> & { lots?: L[] }) => void;
   onClose: () => void;
 }
 
 const newId = () => crypto.randomUUID();
 const champ = 'px-2 py-1 text-xs border border-zinc-300 rounded focus:ring-1 focus:ring-blue-400 outline-none';
 
-export const DecoupagePanel: React.FC<Props> = ({ doc, onPatch, onClose }) => {
+/** Ordre suivant : au-delà du plus grand déjà attribué, jamais `length`, qui
+ * collisionne avec un `ordre` existant dès qu'un élément a été supprimé
+ * entre-temps (ex. A=0, B=1, suppression de A, un nouvel élément reprendrait
+ * `length`=1, déjà pris par B). */
+const prochainOrdre = (items: { ordre: number }[]) =>
+  items.reduce((max, x) => Math.max(max, x.ordre), -1) + 1;
+
+const parOrdre = <T extends { ordre: number }>(items: T[]) => [...items].sort((a, b) => a.ordre - b.ordre);
+
+/** Échange l'ordre de deux éléments adjacents (dans la liste triée). */
+function permuter<T extends { id: string; ordre: number }>(items: T[], id: string, sens: -1 | 1): T[] {
+  const tries = parOrdre(items);
+  const i = tries.findIndex(x => x.id === id);
+  const j = i + sens;
+  if (i < 0 || j < 0 || j >= tries.length) return items;
+  const a = tries[i], b = tries[j];
+  return items.map(x => {
+    if (x.id === a.id) return { ...x, ordre: b.ordre };
+    if (x.id === b.id) return { ...x, ordre: a.ordre };
+    return x;
+  });
+}
+
+export function DecoupagePanel<L extends LotLike>({ doc, onPatch, onClose }: Props<L>) {
   const batiments = doc.batiments ?? [];
   const phases = doc.phases ?? [];
 
   const ajouterBatiment = () => {
-    const b: Batiment = { id: newId(), code: `B${batiments.length + 1}`, libelle: '', ordre: batiments.length };
+    const b: Batiment = { id: newId(), code: `B${batiments.length + 1}`, libelle: '', ordre: prochainOrdre(batiments) };
     onPatch({ multiBatiments: true, batiments: [...batiments, b] });
   };
   const patchBatiment = (id: string, p: Partial<Batiment>) =>
     onPatch({ batiments: batiments.map(b => b.id === id ? { ...b, ...p } : b) });
+  const deplacerBatiment = (id: string, sens: -1 | 1) =>
+    onPatch({ batiments: permuter(batiments, id, sens) });
   const supprimerBatiment = (id: string) =>
-    onPatch({ batiments: batiments.filter(b => b.id !== id) });
+    onPatch({
+      batiments: batiments.filter(b => b.id !== id),
+      lots: purgerDecoupage(doc.lots, 'batimentId', id),
+    });
 
   const ajouterPhase = () => {
-    const p: PhaseOperation = { id: newId(), code: `PH${phases.length + 1}`, libelle: '', ordre: phases.length };
+    const p: PhaseOperation = { id: newId(), code: `PH${phases.length + 1}`, libelle: '', ordre: prochainOrdre(phases) };
     onPatch({ multiPhases: true, phases: [...phases, p] });
   };
   const patchPhase = (id: string, p: Partial<PhaseOperation>) =>
     onPatch({ phases: phases.map(x => x.id === id ? { ...x, ...p } : x) });
+  const deplacerPhase = (id: string, sens: -1 | 1) =>
+    onPatch({ phases: permuter(phases, id, sens) });
   const supprimerPhase = (id: string) =>
-    onPatch({ phases: phases.filter(p => p.id !== id) });
+    onPatch({
+      phases: phases.filter(p => p.id !== id),
+      lots: purgerDecoupage(doc.lots, 'phaseId', id),
+    });
 
   return (
     <div className="border-b border-zinc-200 dark:border-zinc-700 bg-[#f9fafb] dark:bg-zinc-800/30 px-4 py-3">
@@ -58,13 +92,23 @@ export const DecoupagePanel: React.FC<Props> = ({ doc, onPatch, onClose }) => {
           {doc.multiBatiments && (
             <>
               <div className="space-y-1.5">
-                {batiments.map(b => (
-                  <div key={b.id} className="flex items-center gap-2">
+                {parOrdre(batiments).map((b, i, tries) => (
+                  <div key={b.id} className="flex items-center gap-1">
+                    <div className="flex flex-col -my-1">
+                      <button onClick={() => deplacerBatiment(b.id, -1)} disabled={i === 0}
+                              className="text-zinc-400 hover:text-zinc-700 disabled:opacity-20 disabled:hover:text-zinc-400" title="Monter">
+                        <IconChevronUp size={11} />
+                      </button>
+                      <button onClick={() => deplacerBatiment(b.id, 1)} disabled={i === tries.length - 1}
+                              className="text-zinc-400 hover:text-zinc-700 disabled:opacity-20 disabled:hover:text-zinc-400" title="Descendre">
+                        <IconChevronDown size={11} />
+                      </button>
+                    </div>
                     <input className={`${champ} w-16`} value={b.code} placeholder="Code"
                            onChange={e => patchBatiment(b.id, { code: e.target.value })} />
                     <input className={`${champ} flex-1`} value={b.libelle} placeholder="Libellé"
                            onChange={e => patchBatiment(b.id, { libelle: e.target.value })} />
-                    <button onClick={() => supprimerBatiment(b.id)} className="text-red-400 hover:text-red-600">
+                    <button onClick={() => supprimerBatiment(b.id)} className="text-red-400 hover:text-red-600" title="Supprimer">
                       <IconTrash size={13} />
                     </button>
                   </div>
@@ -92,13 +136,23 @@ export const DecoupagePanel: React.FC<Props> = ({ doc, onPatch, onClose }) => {
           {doc.multiPhases && (
             <>
               <div className="space-y-1.5">
-                {phases.map(p => (
-                  <div key={p.id} className="flex items-center gap-2">
+                {parOrdre(phases).map((p, i, tries) => (
+                  <div key={p.id} className="flex items-center gap-1">
+                    <div className="flex flex-col -my-1">
+                      <button onClick={() => deplacerPhase(p.id, -1)} disabled={i === 0}
+                              className="text-zinc-400 hover:text-zinc-700 disabled:opacity-20 disabled:hover:text-zinc-400" title="Monter">
+                        <IconChevronUp size={11} />
+                      </button>
+                      <button onClick={() => deplacerPhase(p.id, 1)} disabled={i === tries.length - 1}
+                              className="text-zinc-400 hover:text-zinc-700 disabled:opacity-20 disabled:hover:text-zinc-400" title="Descendre">
+                        <IconChevronDown size={11} />
+                      </button>
+                    </div>
                     <input className={`${champ} w-16`} value={p.code} placeholder="Code"
                            onChange={e => patchPhase(p.id, { code: e.target.value })} />
                     <input className={`${champ} flex-1`} value={p.libelle} placeholder="Libellé"
                            onChange={e => patchPhase(p.id, { libelle: e.target.value })} />
-                    <button onClick={() => supprimerPhase(p.id)} className="text-red-400 hover:text-red-600">
+                    <button onClick={() => supprimerPhase(p.id)} className="text-red-400 hover:text-red-600" title="Supprimer">
                       <IconTrash size={13} />
                     </button>
                   </div>
@@ -118,12 +172,13 @@ export const DecoupagePanel: React.FC<Props> = ({ doc, onPatch, onClose }) => {
       {(doc.multiBatiments || doc.multiPhases) && (
         <p className="mt-3 text-[11px] text-zinc-400">
           Un lot, un chapitre ou un article non identifié hérite du bâtiment et de la phase du niveau
-          au-dessus ; ne renseignez que les exceptions.
+          au-dessus ; ne renseignez que les exceptions. Supprimer un bâtiment ou une phase retire aussi
+          son affectation partout où il était posé.
         </p>
       )}
     </div>
   );
-};
+}
 
 /** Un couple de <select> compacts pour identifier bâtiment/phase sur une ligne (lot, chapitre, article). */
 export const SelecteursDecoupage: React.FC<{
@@ -144,7 +199,7 @@ export const SelecteursDecoupage: React.FC<{
         title="Bâtiment"
       >
         <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
-        {(doc.batiments ?? []).map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
+        {parOrdre(doc.batiments ?? []).map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
       </select>
     )}
     {doc.multiPhases && (
@@ -155,7 +210,7 @@ export const SelecteursDecoupage: React.FC<{
         title="Phase"
       >
         <option value="">{heriteDe ? `(${heriteDe})` : '—'}</option>
-        {(doc.phases ?? []).map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
+        {parOrdre(doc.phases ?? []).map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
       </select>
     )}
   </>
