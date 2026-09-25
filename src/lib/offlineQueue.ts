@@ -183,6 +183,9 @@ export async function queuedMultipartRequest<T = any>(request: MultipartWriteReq
   }
 }
 
+/** Émis sur `window` quand une écriture en file atteint enfin le serveur. */
+export const OFFLINE_WRITE_SYNCED_EVENT = 'archioffice:offline-write-synced';
+
 let replaying = false;
 
 /**
@@ -220,6 +223,11 @@ export async function replayPendingWrites(): Promise<void> {
           await throwForHttpError(response);
         }
         await db.pendingWrites.delete(entry.id);
+        // Permet à l'écran qui a mis l'écriture en file (toujours ouvert ou
+        // rouvert depuis) de lever son badge « en attente » — voir
+        // Reunions.tsx. Sans état partagé : chaque écran filtre par
+        // entity/id ce qui le concerne.
+        window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_SYNCED_EVENT, { detail: { id: entry.id, entity: entry.entity } }));
       } catch (error) {
         if (isNetworkError(error)) {
           // Connexion retombée pendant le rejeu : on arrête là, on retentera
