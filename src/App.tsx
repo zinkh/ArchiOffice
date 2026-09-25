@@ -15,6 +15,7 @@ import {
   IconBuilding,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
+import { PendingWritesIndicator } from './components/PendingWritesIndicator';
 import { UpdateBanner } from './components/UpdateBanner';
 import { useNotificationBridge } from './hooks/useNotificationBridge';
 import ImpersonationBanner from './components/ImpersonationBanner';
@@ -346,6 +347,12 @@ function Header() {
           {/* Sync status */}
           <div className="hidden lg:flex mr-2">
             <SyncStatus />
+          </div>
+
+          {/* Écritures « suivi de chantier » en attente d'envoi — visible sur
+              tous les écrans, y compris téléphone : c'est là qu'elle sert. */}
+          <div className="flex mr-2">
+            <PendingWritesIndicator />
           </div>
 
           {/* Search */}

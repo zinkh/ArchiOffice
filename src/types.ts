@@ -436,6 +436,10 @@ export interface ReservePhoto {
   file_url: string;
   caption?: string | null;
   uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
 }
 
 export interface Reserve {
@@ -458,6 +462,8 @@ export interface Reserve {
   description?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Permit {
@@ -507,6 +513,8 @@ export interface GpaReserve {
   description?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Plan {
@@ -1254,6 +1262,8 @@ export interface Observation {
   type?: 'observation' | 'reserve' | 'a_faire';
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface DPGFItem {
@@ -1317,6 +1327,10 @@ export interface MeetingPhoto {
   file_url: string;
   caption?: string;
   uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
 }
 
 // ── Agents IA ──────────────────────────────────────────────────────────────
@@ -1392,6 +1406,8 @@ export interface Meeting {
   updated_at?: string;
   photos?: MeetingPhoto[];
   attendees?: MeetingAttendee[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 /**

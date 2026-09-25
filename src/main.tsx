@@ -5,8 +5,10 @@ import './index.css';
 import './lib/authInterceptor';
 import { i18nReady } from './i18n';
 import { initSentry, Sentry } from './lib/sentry';
+import { initOfflineQueue } from './lib/offlineQueue';
 
 initSentry();
+initOfflineQueue();
 
 // Renders only once the active locale bundle is loaded, so no component ever
 // mounts with i18n uninitialized (translations lazy-load per language — see src/i18n.ts).

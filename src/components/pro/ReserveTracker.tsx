@@ -22,6 +22,7 @@ import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
 import { PlanAnnotator } from '../PlanAnnotator';
 import { SignedImage } from '../SignedImage';
+import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import type { Plan } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
@@ -130,23 +131,33 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
 
   const mobileList = useMemo(() => [...visible].sort((a, b) => (b.number || 0) - (a.number || 0)), [visible]);
 
+  const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
+
+  // Lève le badge « en attente » d'une réserve dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity: syncedEntity } = (e as CustomEvent).detail || {};
+      if (syncedEntity !== entity) return;
+      setReserves(prev => prev.map(r => r.id === id ? { ...r, pendingSync: false } : r));
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, [entity, setReserves]);
+
   const changeStatus = async (res: ReserveLike, status: ReserveLike['status']) => {
     const updated = { ...res, status };
     try {
-      const response = await fetch(`${apiBase}/${res.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (response.ok) setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
+      await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'PUT', url: `${apiBase}/${res.id}`, body: updated });
+      setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
     } catch (err) { console.error(err); }
   };
 
   const deleteReserve = async (res: ReserveLike) => {
     if (!confirm(t('reserve_tracker_confirm_delete', { number: res.number ?? '' }))) return;
     try {
-      const response = await fetch(`${apiBase}/${res.id}`, { method: 'DELETE' });
-      if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
+      await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${res.id}` });
+      setReserves(prev => prev.filter(r => r.id !== res.id));
     } catch (err) { console.error(err); }
   };
 
@@ -178,7 +189,11 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
     }
     return (
       <div className={cn(className, 'relative')}>
-        <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
+        {first.pendingSync ? (
+          <img src={first.localPreviewUrl} alt="" className="w-full h-full object-cover rounded-lg opacity-90" />
+        ) : (
+          <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
+        )}
         {(r.photos?.length || 0) > 1 && (
           <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[9px] font-bold">{r.photos!.length}</span>
         )}
@@ -305,6 +320,9 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                   <div className="flex items-start gap-2">
                     <span className="font-mono text-[11px] font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
                     <span className="font-semibold text-sm text-[var(--tblr-text)] leading-snug line-clamp-2">{res.title}</span>
+                    {res.pendingSync && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                    )}
                   </div>
                   <div className="text-[11px] text-[var(--tblr-muted)] truncate">
                     {[entreprises.join(', ') || lots.join(', '), [res.batiment, res.local].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || '—'}
@@ -368,7 +386,12 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                           <td className="px-4 py-3 font-mono text-[10px] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-[var(--tblr-text)]">{res.title}</div>
+                            <div className="font-medium text-[var(--tblr-text)] flex items-center gap-1.5">
+                              {res.title}
+                              {res.pendingSync && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                              )}
+                            </div>
                             {res.description && <div className="text-[11px] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
                           </td>
                           <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>

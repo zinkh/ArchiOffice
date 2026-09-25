@@ -103,12 +103,20 @@ export function registerReservePhotoRoutes(app: Express, { supabaseAdmin, getTen
         if (!(await ownReserve(tenantId, id))) return res.status(404).json({ error: 'Réserve introuvable.' });
         const file = req.file;
         if (!file) return res.status(400).json({ error: 'Aucun fichier envoyé.' });
+        // Id fourni par le client (file de synchro hors-ligne) : un envoi
+        // rejoué après coupure réseau retrouve la photo déjà déposée au lieu
+        // de la reposer une seconde fois sur le stockage.
+        const clientPhotoId = typeof req.body?.id === 'string' && req.body.id ? req.body.id : null;
+        if (clientPhotoId) {
+          const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').select('*').eq('id', clientPhotoId).maybeSingle();
+          if (existing) return res.status(200).json(existing);
+        }
         const sniffedMime = sniffImageMime(file.buffer);
         if (!sniffedMime) {
           return res.status(400).json({ error: 'Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP.' });
         }
         const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
-        const photoId = crypto.randomUUID();
+        const photoId = clientPhotoId || crypto.randomUUID();
         const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname || 'photo.jpg')}`;
         const file_url = await uploadToStorage(RESERVE_PHOTO_BUCKET, storagePath, buffer, mimetype);
         const uploaded_at = new Date().toISOString();

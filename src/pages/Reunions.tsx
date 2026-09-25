@@ -28,7 +28,9 @@ import {
   IconClipboardList,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { getAccessToken } from '../lib/authToken';
+import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
@@ -403,13 +405,22 @@ export default function Reunions() {
     setSelectedMeeting(null);
     try {
       let url = '';
-      if (kind === 'project') url = `/api/meetings?project_id=${id}&type=${section}`;
-      else if (kind === 'proposal') url = `/api/meetings?proposal_id=${id}`;
-      else url = `/api/meetings?tender_id=${id}`;
-      const data = await apiFetch<Meeting[]>(url);
-      setMeetings(data);
-    } catch {
-      setMeetings([]);
+      let scopeFilter: (m: Meeting) => boolean;
+      if (kind === 'project') {
+        url = `/api/meetings?project_id=${id}&type=${section}`;
+        scopeFilter = m => m.project_id === id && m.type === section;
+      } else if (kind === 'proposal') {
+        url = `/api/meetings?proposal_id=${id}`;
+        scopeFilter = m => m.proposal_id === id;
+      } else {
+        url = `/api/meetings?tender_id=${id}`;
+        scopeFilter = m => m.tender_id === id;
+      }
+      // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, la liste
+      // déjà consultée pour cette affaire reste affichée au lieu de
+      // disparaître — c'est ce que l'ancien apiFetch seul ne permettait pas.
+      const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, setMeetings);
+      if (!hadLocalData && !synced) setMeetings([]);
     } finally {
       setLoadingMeetings(false);
     }
@@ -500,7 +511,9 @@ export default function Reunions() {
   const createMeeting = async () => {
     if (!newMeetingTitle.trim()) return;
 
+    const id = crypto.randomUUID();
     const body: any = {
+      id,
       type: (activeKind === 'project' ? 'projet' : activeKind === 'proposal' ? 'visite_proposition' : 'visite_candidature') satisfies Subsection,
       title: newMeetingTitle.trim(),
       date: newMeetingDate,
@@ -515,15 +528,22 @@ export default function Reunions() {
     setCreatingMeeting(true);
     setCreateError('');
     try {
-      const data = await apiFetch<Meeting>('/api/meetings', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      setMeetings(prev => [data, ...prev]);
+      // Id généré côté client (voir src/lib/offlineQueue.ts) : hors-ligne,
+      // la création est mise en file et rejouée au retour du réseau — la
+      // réunion reste utilisable tout de suite avec les données déjà en main.
+      const { queued, data } = await queuedJsonRequest<Meeting>({ entity: 'meeting', id, method: 'POST', url: '/api/meetings', body });
+      const meeting: Meeting = queued ? { ...body, created_at: new Date().toISOString(), photos: [], pendingSync: true } : data!;
+      setMeetings(prev => [meeting, ...prev]);
       setNewMeetingTitle('');
       setNewMeetingDate(new Date().toISOString().substring(0, 10));
       setShowNewMeeting(false);
-      loadMeetingDetail(data);
+      if (queued) {
+        setSelectedMeeting(meeting);
+        setNotesValue(meeting.notes || '');
+        setMobileView('detail');
+      } else {
+        loadMeetingDetail(meeting);
+      }
     } catch {
       setCreateError('Erreur lors de la création. Veuillez réessayer.');
     } finally {
@@ -531,9 +551,22 @@ export default function Reunions() {
     }
   };
 
+  // Lève le badge « en attente » d'une réunion dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'meeting') return;
+      setMeetings(prev => prev.map(m => m.id === id ? { ...m, pendingSync: false } : m));
+      setSelectedMeeting(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, []);
+
   const deleteMeeting = async (id: string) => {
     if (!confirm(t('reunions_confirm_delete'))) return;
-    await apiFetch(`/api/meetings/${id}`, { method: 'DELETE' });
+    await queuedJsonRequest({ entity: 'meeting', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${id}` });
     setMeetings(prev => prev.filter(m => m.id !== id));
     if (selectedMeeting?.id === id) setSelectedMeeting(null);
   };
@@ -542,9 +575,9 @@ export default function Reunions() {
     if (!selectedMeeting) return;
     setSavingNotes(true);
     try {
-      await apiFetch(`/api/meetings/${selectedMeeting.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue }),
+      await queuedJsonRequest({
+        entity: 'meeting', id: crypto.randomUUID(), method: 'PUT', url: `/api/meetings/${selectedMeeting.id}`,
+        body: { title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue },
       });
       setSelectedMeeting(prev => prev ? { ...prev, notes: notesValue } : prev);
       setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, notes: notesValue } : m));
@@ -586,22 +619,23 @@ export default function Reunions() {
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedMeeting || !e.target.files?.length) return;
+    const meetingId = selectedMeeting.id;
     const files = Array.from(e.target.files);
     setUploadingPhoto(true);
     try {
-      const token = await getAccessToken();
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch(`/api/meetings/${selectedMeeting.id}/photos`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
+        const photoId = crypto.randomUUID();
+        // Id généré côté client : un envoi rejoué après coupure réseau
+        // (src/lib/offlineQueue.ts) retrouve la même photo au lieu de la
+        // déposer une seconde fois.
+        const { queued, data } = await queuedMultipartRequest<MeetingPhoto>({
+          entity: 'meetingPhoto', id: photoId, method: 'POST', url: `/api/meetings/${meetingId}/photos`,
+          blob: file, blobFieldName: 'file', blobFilename: file.name, extraFields: { id: photoId },
         });
-        if (res.ok) {
-          const photo = await res.json();
-          setSelectedMeeting(prev => prev ? { ...prev, photos: [...(prev.photos || []), photo] } : prev);
-        }
+        const photo: MeetingPhoto = queued
+          ? { id: photoId, meeting_id: meetingId, file_url: '', uploaded_at: new Date().toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(file) }
+          : data!;
+        setSelectedMeeting(prev => prev && prev.id === meetingId ? { ...prev, photos: [...(prev.photos || []), photo] } : prev);
       }
     } finally {
       setUploadingPhoto(false);
@@ -609,16 +643,31 @@ export default function Reunions() {
     }
   };
 
+  // Lève le badge « en attente » d'une photo dès que son envoi a
+  // effectivement atteint le serveur, et remplace l'aperçu local par le
+  // fichier réel (l'objet renvoyé n'est pas connu à la mise en file, donc on
+  // recharge juste la fiche réunion pour le récupérer).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'meetingPhoto' || !selectedMeeting) return;
+      loadMeetingDetail(selectedMeeting);
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeeting?.id]);
+
   const deletePhoto = async (photoId: string) => {
     if (!selectedMeeting) return;
-    await apiFetch(`/api/meetings/${selectedMeeting.id}/photos/${photoId}`, { method: 'DELETE' });
+    await queuedJsonRequest({ entity: 'meetingPhoto', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${selectedMeeting.id}/photos/${photoId}` });
     setSelectedMeeting(prev => prev ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) } : prev);
   };
 
   const saveCaption = async (photoId: string) => {
-    await apiFetch(`/api/meetings/photos/${photoId}/caption`, {
-      method: 'PATCH',
-      body: JSON.stringify({ caption: captionValue }),
+    await queuedJsonRequest({
+      entity: 'meetingPhoto', id: crypto.randomUUID(), method: 'PATCH', url: `/api/meetings/photos/${photoId}/caption`,
+      body: { caption: captionValue },
     });
     setSelectedMeeting(prev => prev ? {
       ...prev,
@@ -919,7 +968,14 @@ export default function Reunions() {
                 >
                   <div className="flex items-start justify-between gap-1">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{meeting.title}</p>
+                      <p className="text-[13px] font-medium truncate flex items-center gap-1.5" style={{ color: 'var(--tblr-text)' }}>
+                        {meeting.title}
+                        {meeting.pendingSync && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold flex-shrink-0" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
+                            en attente
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
                         <IconCalendar size={11} />
                         {formatDate(meeting.date)}
@@ -985,7 +1041,14 @@ export default function Reunions() {
             {/* Header */}
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
-                <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{selectedMeeting.title}</h1>
+                <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
+                  {selectedMeeting.title}
+                  {selectedMeeting.pendingSync && (
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
+                      En attente d'envoi
+                    </span>
+                  )}
+                </h1>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={handleExportPDF}
@@ -1032,7 +1095,13 @@ export default function Reunions() {
                 <IconUsers size={16} />
                 Intervenants
               </h2>
-              <AttendeesPanel meetingId={selectedMeeting.id} />
+              {selectedMeeting.pendingSync ? (
+                <p className="text-sm italic" style={{ color: 'var(--tblr-muted)' }}>
+                  Disponible une fois la réunion synchronisée (en attente d'envoi).
+                </p>
+              ) : (
+                <AttendeesPanel meetingId={selectedMeeting.id} />
+              )}
             </div>
 
             <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
@@ -1111,12 +1180,27 @@ export default function Reunions() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                   {(selectedMeeting.photos || []).map(photo => (
                     <div key={photo.id} className="group relative rounded-xl overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
-                      <SignedImage
-                        src={photo.file_url}
-                        alt={photo.caption || 'Photo'}
-                        className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => setLightboxPhoto(photo)}
-                      />
+                      {photo.pendingSync ? (
+                        // Pas encore de file_url côté serveur (envoi en file, hors-ligne) :
+                        // aperçu local, SignedImage n'aurait rien à résoudre.
+                        <img
+                          src={photo.localPreviewUrl}
+                          alt={photo.caption || 'Photo'}
+                          className="w-full h-full object-cover cursor-pointer opacity-70"
+                        />
+                      ) : (
+                        <SignedImage
+                          src={photo.file_url}
+                          alt={photo.caption || 'Photo'}
+                          className="w-full h-full object-cover cursor-pointer"
+                          onClick={() => setLightboxPhoto(photo)}
+                        />
+                      )}
+                      {photo.pendingSync && (
+                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white bg-black/50 backdrop-blur-sm">
+                          En attente d'envoi
+                        </span>
+                      )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex flex-col justify-between p-2 opacity-0 group-hover:opacity-100">
                         <div className="flex justify-end gap-1">
                           <button onClick={() => setLightboxPhoto(photo)} className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors">
@@ -1208,12 +1292,21 @@ export default function Reunions() {
           <button onClick={() => setLightboxPhoto(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
             <IconX size={20} />
           </button>
-          <SignedImage
-            src={lightboxPhoto.file_url}
-            alt={lightboxPhoto.caption || 'Photo'}
-            className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            onClick={e => e.stopPropagation()}
-          />
+          {lightboxPhoto.pendingSync ? (
+            <img
+              src={lightboxPhoto.localPreviewUrl}
+              alt={lightboxPhoto.caption || 'Photo'}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              onClick={e => e.stopPropagation()}
+            />
+          ) : (
+            <SignedImage
+              src={lightboxPhoto.file_url}
+              alt={lightboxPhoto.caption || 'Photo'}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              onClick={e => e.stopPropagation()}
+            />
+          )}
           {lightboxPhoto.caption && <p className="mt-3 text-white/70 text-sm text-center">{lightboxPhoto.caption}</p>}
         </div>
       )}

@@ -32,6 +32,13 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description } = req.body;
+      // Rejouer la même création après une coupure réseau (file de synchro
+      // hors-ligne) ne doit ni créer une seconde réserve, ni consommer un
+      // second numéro dans la séquence du projet.
+      if (bodyId) {
+        const { data: existing } = await supabaseAdmin.from('reserves').select('*').eq('id', bodyId).eq('tenant_id', tenantId).maybeSingle();
+        if (existing) return res.status(200).json({ ...(existing as any), photos: (await attachReservePhotos(supabaseAdmin, tenantId, 'opr', [existing as any]))[0]?.photos || [] });
+      }
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }

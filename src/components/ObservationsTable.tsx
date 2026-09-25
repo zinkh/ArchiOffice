@@ -12,6 +12,9 @@ import {
 import { IconPlus, IconTrash, IconColumns, IconChevronDown } from '@tabler/icons-react';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
+import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 
 interface Props {
   projectId: string;
@@ -74,19 +77,20 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     ? `/api/reports/${reportId}/observations`
     : `/api/projects/${projectId}/observations`;
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les
+  // observations déjà consultées pour cette affaire/ce compte rendu restent
+  // affichées plutôt que de disparaître.
+  const scopeFilter = useCallback(
+    (o: Observation) => (reportId ? (o.report_ids || []).includes(reportId) : o.project_id === projectId),
+    [reportId, projectId],
+  );
+
   const fetchObservations = useCallback(() => {
     setLoadError(false);
-    fetch(endpoint)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        if (Array.isArray(data)) setObservations(data);
-        else throw new Error('Unexpected response shape');
-      })
+    cachedListFirst(db.observationsCache, scopeFilter, endpoint, setObservations)
+      .then(({ hadLocalData, synced }) => { if (!hadLocalData && !synced) setLoadError(true); })
       .catch(err => { console.error(err); setLoadError(true); });
-  }, [endpoint]);
+  }, [endpoint, scopeFilter]);
 
   useEffect(() => { fetchObservations(); }, [fetchObservations]);
 
@@ -103,17 +107,15 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const saveField = useCallback((id: string, field: string, value: string) => {
     clearTimeout(debounceRef.current[id + field]);
     debounceRef.current[id + field] = setTimeout(() => {
-      fetch(`/api/observations/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      })
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setSaveError(false); })
+      queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${id}`, body: { [field]: value } })
+        .then(() => setSaveError(false))
         // The optimistic update already landed in local state regardless of
         // outcome — a failed PUT here means the UI can be showing an edit
         // the server never persisted, silently, with nothing to tell the
         // user their change didn't stick (see 2026-09-08 incident: writes
         // occasionally 500 transiently with no corresponding DB error).
+        // Hors-ligne, la modification est mise en file (src/lib/offlineQueue.ts)
+        // plutôt que rejetée : ce n'est donc plus un échec ici.
         .catch(err => { console.error(err); setSaveError(true); });
     }, 300);
   }, []);
@@ -122,20 +124,33 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     setObservations(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
   }, []);
 
-  const addRow = () => {
-    fetch(`/api/projects/${projectId}/observations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texte: '', statut: 'À faire', type: typeFilter || 'observation', created_report_id: currentReportId || null }),
-    })
-      .then(r => r.json())
-      .then(newObs => setObservations(prev => [...prev, newObs]))
-      .catch(console.error);
+  // Lève le badge « en attente » d'une observation dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'observation') return;
+      setObservations(prev => prev.map(o => o.id === id ? { ...o, pendingSync: false } : o));
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, []);
+
+  const addRow = async () => {
+    // Id généré côté client : une création rejouée après coupure réseau
+    // (file de synchro hors-ligne) ne crée jamais deux observations.
+    const id = crypto.randomUUID();
+    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || 'observation', created_report_id: currentReportId || undefined };
+    try {
+      const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
+      const newObs: Observation = queued ? { ...body, project_id: projectId, pendingSync: true } : data!;
+      setObservations(prev => [...prev, newObs]);
+    } catch (err) { console.error(err); }
   };
 
   const deleteRow = useCallback((id: string) => {
     if (!confirm(t('observations_table_confirm_delete'))) return;
-    fetch(`/api/observations/${id}`, { method: 'DELETE' })
+    queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${id}` })
       .then(() => setObservations(prev => prev.filter(o => o.id !== id)))
       .catch(console.error);
   }, []);
@@ -198,16 +213,21 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       cell: info => {
         const row = info.row.original;
         return (
-          <input
-            type="text"
-            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white"
-            defaultValue={info.getValue() || ''}
-            placeholder="Saisir une observation..."
-            onBlur={e => {
-              updateLocal(row.id, { texte: e.target.value });
-              saveField(row.id, 'texte', e.target.value);
-            }}
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white"
+              defaultValue={info.getValue() || ''}
+              placeholder="Saisir une observation..."
+              onBlur={e => {
+                updateLocal(row.id, { texte: e.target.value });
+                saveField(row.id, 'texte', e.target.value);
+              }}
+            />
+            {row.pendingSync && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+            )}
+          </div>
         );
       },
     }),

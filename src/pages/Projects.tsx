@@ -7,6 +7,7 @@ import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../ty
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { db } from '../db';
+import { queuedJsonRequest } from '../lib/offlineQueue';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -552,8 +553,9 @@ export default function Projects() {
         alert(t('projects_save_server_failed'));
       }
     } else {
-      // 3. Queue for sync
-      await db.syncQueue.add({ table: 'projects', method, data: editForm });
+      // 3. Queue for sync — rejouée par src/lib/offlineQueue.ts au retour du
+      // réseau (l'ancienne db.syncQueue n'était jamais relue par personne).
+      await queuedJsonRequest({ entity: 'project', id: editForm.id, method, url, body: editForm });
       alert(t('projects_save_offline'));
       setIsEditing(false);
       if (isNew) setIsModalOpen(false);

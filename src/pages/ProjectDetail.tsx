@@ -53,6 +53,8 @@ import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
@@ -646,10 +648,11 @@ export default function ProjectDetail() {
     }
   };
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les réserves
+  // déjà consultées pour cette affaire restent affichées.
   const fetchReserves = async () => {
     try {
-      const res = await fetch(`/api/reserves?project_id=${id}`);
-      if (res.ok) setReserves(await res.json());
+      await cachedListFirst(db.reservesCache, r => r.project_id === id, `/api/reserves?project_id=${id}`, setReserves);
     } catch (err) {
       console.error(err);
     }
@@ -657,8 +660,7 @@ export default function ProjectDetail() {
 
   const fetchGpaReserves = async () => {
     try {
-      const res = await fetch(`/api/gpa-reserves?project_id=${id}`);
-      if (res.ok) setGpaReserves(await res.json());
+      await cachedListFirst(db.gpaReservesCache, r => r.project_id === id, `/api/gpa-reserves?project_id=${id}`, setGpaReserves);
     } catch (err) {
       console.error(err);
     }
