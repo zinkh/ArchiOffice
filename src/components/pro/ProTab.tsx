@@ -4,6 +4,7 @@ import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { BPUWorkspace } from './BPUWorkspace';
+import { LotsManager } from './LotsManager';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
@@ -16,7 +17,7 @@ import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
   IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
-  IconChecklist, IconCamera, IconHistory,
+  IconChecklist, IconCamera, IconHistory, IconClipboardList,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -25,12 +26,14 @@ import { validateProDocument } from '../../lib/proValidation';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
+type SubTab = 'LOTS' | 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
 interface DpgfVersion { id: string; label: string; phase?: string; version?: string; created_at: string }
 
 interface ProTabProps {
   projectId: string;
   projectName?: string;
+  /** Rappelé après création/suppression d'un lot, pour que la fiche projet (qui en garde une copie dans `lots_list`) se resynchronise. */
+  onLotsChanged?: () => void;
 }
 
 const EMPTY_DPGF = (projectId: string): DPGF => ({
@@ -73,7 +76,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
+export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsChanged }) => {
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
@@ -344,6 +347,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
   const TABS: PillTabItem[] = [
+    { id: 'LOTS', label: 'LOTS', icon: IconClipboardList },
     { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
     { id: 'DPGF', label: 'DPGF', icon: IconTable },
     { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
@@ -358,6 +362,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const activeVersion = (isBpuTab ? bpu?.version : dpgf?.version) ?? '1.0';
 
   const PRINT_TITLES: Record<SubTab, string> = {
+    LOTS:       'Lots de travaux',
     CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
     DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
     ESTIMATION: 'Estimation Prévisionnelle',
@@ -451,6 +456,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex">
+
+        {/* LOTS */}
+        {activeSubTab === 'LOTS' && (
+          <div className="flex-1 overflow-y-auto px-4">
+            <LotsManager projectId={projectId} onChange={onLotsChanged} />
+          </div>
+        )}
 
         {/* CCTP */}
         {activeSubTab === 'CCTP' && (

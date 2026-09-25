@@ -379,10 +379,9 @@ interface ACTModuleProps {
   projectName: string;
   lots: ProjectLot[];
   contacts: Contact[];
-  onLotsChange: (lots: ProjectLot[]) => void;
 }
 
-export default function ACTModule({ projectId, projectName, lots, contacts, onLotsChange }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, lots, contacts }: ACTModuleProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
@@ -396,10 +395,6 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
       .then(r => setCorpsEtat(r.corpsEtat || []))
       .catch(() => { /* le classement par corps d'état reste facultatif */ });
   }, []);
-
-  // Lot form
-  const [showLotForm, setShowLotForm] = useState(false);
-  const [lotForm, setLotForm] = useState({ lot_number: '', lot_title: '' });
 
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
@@ -443,26 +438,6 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
   const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
-  };
-
-  // ── Lot helpers ───────────────────────────────────────────────────────────
-
-  const addLot = () => {
-    if (!lotForm.lot_title.trim()) return;
-    const newLot: ProjectLot = {
-      id: crypto.randomUUID(),
-      project_id: projectId,
-      lot_number: lotForm.lot_number || String(lots.length + 1),
-      lot_title: lotForm.lot_title,
-    };
-    onLotsChange([...lots, newLot]);
-    setLotForm({ lot_number: '', lot_title: '' });
-    setShowLotForm(false);
-  };
-
-  const removeLot = (id: string) => {
-    if (!confirm(t('act_module_confirm_delete_lot'))) return;
-    onLotsChange(lots.filter(l => l.id !== id));
   };
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
@@ -527,25 +502,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
           {/* Lots */}
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
+            <div className="p-5 border-b border-[var(--tblr-border)]">
               <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                 <IconClipboardList size={15} /> Lots de travaux
               </h3>
-              <button onClick={() => setShowLotForm(!showLotForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
-                <IconPlus size={13} /> Ajouter un lot
-              </button>
+              <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Repris de l'onglet PRO — créez ou modifiez les lots depuis PRO / DPGF</p>
             </div>
-            {showLotForm && (
-              <div className="px-5 py-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] flex gap-3">
-                <input className="w-20 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="N°" value={lotForm.lot_number} onChange={e => setLotForm({ ...lotForm, lot_number: e.target.value })} />
-                <input className="flex-1 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Désignation du lot (ex : Gros œuvre)" value={lotForm.lot_title} onChange={e => setLotForm({ ...lotForm, lot_title: e.target.value })}
-                  onKeyDown={e => e.key === 'Enter' && addLot()} />
-                <button onClick={addLot} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700">Ajouter</button>
-                <button onClick={() => setShowLotForm(false)} className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700"><IconX size={14} /></button>
-              </div>
-            )}
             <table className="w-full text-sm">
               <thead className="bg-[var(--tblr-surface-2)]">
                 <tr>
@@ -553,7 +515,6 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Désignation</th>
                   <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise attribuée</th>
                   <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT</th>
-                  <th className="w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -568,14 +529,11 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                       <td className="px-4 py-3 text-right font-bold text-zinc-700 dark:text-zinc-300">
                         {attr?.montant ? fmt(attr.montant) : fmt((lot.base_amount || 0) + (lot.options_amount || 0))}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => removeLot(lot.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={13} /></button>
-                      </td>
                     </tr>
                   );
                 })}
                 {lots.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucun lot défini. Ajoutez les lots de travaux.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucun lot défini. Créez les lots de travaux dans l'onglet PRO.</td></tr>
                 )}
               </tbody>
             </table>

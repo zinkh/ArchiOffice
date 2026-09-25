@@ -2992,7 +2992,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} /></div>}
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
             {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">
@@ -4341,13 +4341,6 @@ export default function ProjectDetail() {
                   projectName={project.name}
                   lots={project.lots_list || []}
                   contacts={contacts}
-                  onLotsChange={updatedLots => {
-                    setProject({ ...project, lots_list: updatedLots });
-                    apiFetch(`/api/projects/${id}`, {
-                      method: 'PUT',
-                      body: JSON.stringify({ ...project, lots_list: updatedLots }),
-                    }).catch(console.error);
-                  }}
                 />
               </div>
             )}

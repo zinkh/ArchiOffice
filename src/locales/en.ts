@@ -1681,5 +1681,4 @@ export default {
       "observations_table_confirm_delete": "Delete this observation?",
       "mfa_settings_confirm_disable": "Disable two-factor authentication? Your account will only be protected by your password.",
       "ligne_ouvrage_editor_saved": "Saved",
-      "act_module_confirm_delete_lot": "Delete this lot?",
 };
