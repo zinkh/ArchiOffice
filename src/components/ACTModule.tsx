@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconCheck, IconChevronRight, IconChevronLeft,
@@ -12,7 +13,13 @@ import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
 import type { Referentiels, CorpsEtat } from '../types/library';
 import { useSettings } from '../hooks/useSettings';
-import { exportEntreprisesConsulteesToExcel, exportEntreprisesConsulteesToPDF, groupByCorpsEtat } from '../lib/actExport';
+import {
+  exportEntreprisesConsulteesToExcel, exportEntreprisesConsulteesToPDF, groupByLot,
+  exportLotsToExcel, exportLotsToPDF,
+} from '../lib/actExport';
+import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
+import { ContactModal } from './ContactModal';
+import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,8 +38,8 @@ interface EntrepriseConsultee {
   email?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
-  /** Code de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages). */
-  corps_etat_code?: string;
+  /** Codes de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages) — une entreprise en couvre souvent plusieurs. */
+  corps_etat_codes?: string[];
   dce_transmis_le?: string;
   relance_le?: string;
   offre_recue_le?: string;
@@ -372,6 +379,73 @@ async function generateComparatifExcel(lots: ProjectLot[], consultation: Consult
   XLSX.writeFile(wb, `Comparatif_${projectName.replace(/\s+/g, '_')}.xlsx`);
 }
 
+// ── Sélecteur multiple de corps d'état (nomenclature FFB) ────────────────────
+// Une entreprise couvre souvent plusieurs métiers (ex. Menuiserie ET
+// Serrurerie) — un menu déroulant à cases à cocher plutôt qu'un <select>
+// simple, sur le même modèle de popover que EntrepriseAutocomplete.
+
+function CorpsEtatPicker({ corpsEtat, selected, onToggle }: { corpsEtat: CorpsEtat[]; selected: string[]; onToggle: (code: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    function onClickOutside(ev: MouseEvent) {
+      const target = ev.target as Node;
+      if ((wrapperRef.current && wrapperRef.current.contains(target)) || (dropdownRef.current && dropdownRef.current.contains(target))) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const recalc = () => {
+      if (!wrapperRef.current) return;
+      const r = wrapperRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) });
+    };
+    recalc();
+    window.addEventListener('scroll', recalc, true);
+    window.addEventListener('resize', recalc);
+    return () => { window.removeEventListener('scroll', recalc, true); window.removeEventListener('resize', recalc); };
+  }, [open]);
+
+  const labels = selected.map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full min-h-[30px] text-left text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500 flex flex-wrap gap-1"
+      >
+        {labels.length === 0 && <span className="text-[var(--tblr-muted)]">— Non classé —</span>}
+        {labels.map(l => (
+          <span key={l} className="px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">{l}</span>
+        ))}
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+          className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl max-h-72 overflow-y-auto p-1.5 flex flex-col gap-0.5"
+        >
+          {corpsEtat.map(ce => (
+            <label key={ce.code} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer">
+              <input type="checkbox" checked={selected.includes(ce.code)} onChange={() => onToggle(ce.code)} className="rounded w-3.5 h-3.5" />
+              {ce.libelle}
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 interface ACTModuleProps {
@@ -396,6 +470,46 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
       .catch(() => { /* le classement par corps d'état reste facultatif */ });
   }, []);
 
+  // Contacts créés ou modifiés (corps d'état) depuis ce module : superposés à
+  // la liste reçue du parent, qui ne se resynchronise pas toute seule tant que
+  // la fiche projet n'est pas rechargée.
+  const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
+  const allContacts = useMemo(() => {
+    const byId = new Map(contacts.map(c => [c.id, c]));
+    for (const c of extraContacts) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [contacts, extraContacts]);
+  const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
+
+  // Nouvelle fiche entreprise à créer depuis la saisie de la consultation.
+  const [contactModalFor, setContactModalFor] = useState<{ rowId: string; name: string } | null>(null);
+
+  /** Codes FFB déjà déclarés sur la fiche contact, pour préremplir la consultation à la sélection. */
+  const corpsEtatCodesFromContact = useCallback((contact: Contact): string[] => {
+    const libelles = new Set((contact.corps_etat || []).map(l => l.trim().toLowerCase()));
+    return corpsEtat.filter(ce => libelles.has(ce.libelle.trim().toLowerCase())).map(ce => ce.code);
+  }, [corpsEtat]);
+
+  /**
+   * Répercute la sélection de corps d'état de cette consultation sur la fiche
+   * contact — sans jamais toucher aux étiquettes qui ne viennent pas de la
+   * nomenclature FFB (des tags libres saisis ailleurs sur ce même champ).
+   */
+  const syncCorpsEtatToContact = useCallback(async (contactId: string, codes: string[]) => {
+    const contact = allContacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const ffbLibelles = new Set(corpsEtat.map(ce => ce.libelle));
+    const autresTags = (contact.corps_etat || []).filter(tag => !ffbLibelles.has(tag));
+    const selectedLibelles = codes.map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
+    const next = [...autresTags, ...selectedLibelles];
+    const unchanged = next.length === (contact.corps_etat || []).length && next.every(l => (contact.corps_etat || []).includes(l));
+    if (unchanged) return;
+    try {
+      await apiFetch(`/api/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify({ corps_etat: next }) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contactId), { ...contact, corps_etat: next }]);
+    } catch (err) { console.error('Échec de la synchronisation du corps d\'état vers le contact:', err); }
+  }, [allContacts, corpsEtat]);
+
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
   const [qrForm, setQrForm] = useState({ entreprise_id: '', question: '', reponse: '', publique: false });
@@ -411,7 +525,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
     try {
       const data = await apiFetch<any>(`/api/projects/${projectId}/act`);
       if (data?.consultation && Object.keys(data.consultation).length > 0) {
-        setConsultation({ ...EMPTY_CONSULTATION, ...data.consultation });
+        // Une consultation enregistrée avant le passage à plusieurs corps
+        // d'état par entreprise ne porte que l'ancien champ singulier — migré
+        // à la lecture plutôt que perdu, jamais réécrit tant que rien d'autre
+        // ne change (l'enregistrement suivant l'actera).
+        const entreprises = (data.consultation.entreprises || []).map((e: any) =>
+          e.corps_etat_codes ? e : { ...e, corps_etat_codes: e.corps_etat_code ? [e.corps_etat_code] : [] }
+        );
+        setConsultation({ ...EMPTY_CONSULTATION, ...data.consultation, entreprises });
       }
       if (data?.act_phase) setPhase(data.act_phase as Phase);
     } catch { /* first load */ }
@@ -438,6 +559,13 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
 
   const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
+  };
+
+  const toggleCorpsEtat = (e: EntrepriseConsultee, code: string) => {
+    const codes = e.corps_etat_codes || [];
+    const next = codes.includes(code) ? codes.filter(c => c !== code) : [...codes, code];
+    updateEntreprise(e.id, { corps_etat_codes: next });
+    if (e.contact_id) void syncCorpsEtatToContact(e.contact_id, next);
   };
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
@@ -502,11 +630,29 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
 
           {/* Lots */}
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <div className="p-5 border-b border-[var(--tblr-border)]">
-              <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
-                <IconClipboardList size={15} /> Lots de travaux
-              </h3>
-              <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Repris de l'onglet PRO — créez ou modifiez les lots depuis PRO / DPGF</p>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
+                  <IconClipboardList size={15} /> Lots de travaux
+                </h3>
+                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Repris de l'onglet PRO — créez ou modifiez les lots depuis PRO / DPGF</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportLotsToExcel(lots, projectName)}
+                  disabled={lots.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-all"
+                >
+                  <IconDownload size={13} /> Excel
+                </button>
+                <button
+                  onClick={() => settings && exportLotsToPDF(lots, settings, projectName)}
+                  disabled={!settings || lots.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition-all"
+                >
+                  <IconDownload size={13} /> PDF
+                </button>
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-[var(--tblr-surface-2)]">
@@ -663,48 +809,34 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--tblr-border)]">
-                  {groupByCorpsEtat(consultation.entreprises, corpsEtat).map(groupe => (
-                    <React.Fragment key={groupe.libelle}>
+                  {groupByLot(consultation.entreprises, lots).map(groupe => (
+                    <React.Fragment key={groupe.key}>
                       <tr className="bg-zinc-100 dark:bg-zinc-800">
                         <td colSpan={10} className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
                           {groupe.libelle}
                         </td>
                       </tr>
                       {groupe.entreprises.map(e => (
-                        <tr key={e.id} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', e.ne_repond_pas && 'opacity-60')}>
+                        <tr key={`${e.id}::${groupe.key}`} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', e.ne_repond_pas && 'opacity-60')}>
                           <td className="px-4 py-3">
-                            <select
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                              value={e.contact_id || ''}
-                              onChange={ev => {
-                                const contact = contacts.find(c => c.id === ev.target.value);
-                                const nom = contact ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim()) : '';
-                                const email = contact?.email_work || contact?.email || '';
-                                updateEntreprise(e.id, { contact_id: ev.target.value, nom, email });
+                            <EntrepriseAutocomplete
+                              contacts={entrepriseContacts}
+                              contactId={e.contact_id}
+                              fallbackName={e.nom}
+                              onSelect={c => {
+                                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+                                const email = c.email_work || c.email || '';
+                                updateEntreprise(e.id, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
                               }}
-                            >
-                              <option value="">— Sélectionner —</option>
-                              {contacts.map(c => (
-                                <option key={c.id} value={c.id}>{c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</option>
-                              ))}
-                            </select>
-                            {!e.contact_id && (
-                              <input className="mt-1 w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                                placeholder="Ou saisir un nom" value={e.nom}
-                                onChange={ev => updateEntreprise(e.id, { nom: ev.target.value })} />
-                            )}
+                              onCreate={name => setContactModalFor({ rowId: e.id, name })}
+                            />
                           </td>
                           <td className="px-4 py-3">
-                            <select
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                              value={e.corps_etat_code || ''}
-                              onChange={ev => updateEntreprise(e.id, { corps_etat_code: ev.target.value || undefined })}
-                            >
-                              <option value="">— Non classé —</option>
-                              {corpsEtat.map(ce => (
-                                <option key={ce.code} value={ce.code}>{ce.libelle}</option>
-                              ))}
-                            </select>
+                            <CorpsEtatPicker
+                              corpsEtat={corpsEtat}
+                              selected={e.corps_etat_codes || []}
+                              onToggle={code => toggleCorpsEtat(e, code)}
+                            />
                           </td>
                           <td className="px-4 py-3">
                             <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
@@ -1459,6 +1591,22 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
           Phase suivante <IconChevronRight size={14} />
         </button>
       </div>
+
+      {contactModalFor && (
+        <ContactModal
+          isOpen
+          initialCategory={CONTACT_CATEGORY_ENTREPRISE}
+          initialData={{ company_name: contactModalFor.name }}
+          onClose={() => setContactModalFor(null)}
+          onSuccess={c => {
+            setExtraContacts(prev => [...prev, c]);
+            const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+            const email = c.email_work || c.email || '';
+            updateEntreprise(contactModalFor.rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
+            setContactModalFor(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -18,11 +18,13 @@ interface ContactModalProps {
    * filtrées par catégorie — y compris de celle qui venait de le créer.
    */
   initialCategory?: string;
+  /** Champs pré-remplis à l'ouverture (ex. le nom tapé dans un champ de recherche qui n'a rien trouvé). */
+  initialData?: Partial<Contact>;
 }
 
-export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: ContactModalProps) {
+export function ContactModal({ isOpen, onClose, onSuccess, initialCategory, initialData }: ContactModalProps) {
   const { t } = useTranslation();
-  const [newContact, setNewContact] = useState<Partial<Contact>>({ category: initialCategory || '' });
+  const [newContact, setNewContact] = useState<Partial<Contact>>({ category: initialCategory || '', ...initialData });
   const [categories, setCategories] = useState<ContactCategory[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
-    setNewContact({ category: initialCategory || '' });
+    setNewContact({ category: initialCategory || '', ...initialData });
     let cancelled = false;
     fetchJson<ContactCategory[]>('/api/contact-categories')
       .then(data => {
@@ -51,6 +53,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
       })
       .catch(err => console.error('Failed to fetch contact categories:', err));
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialCategory]);
 
   const defaultContact: Contact = {
