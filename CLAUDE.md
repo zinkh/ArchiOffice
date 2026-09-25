@@ -1487,6 +1487,13 @@ et le code CCTP inatteignable de `ProjectDetail.tsx`
 (`fetchSpecifications`/`handleCreateSpec`, jamais appelés depuis un rendu, et
 l'état `specifications`/`isAddingSpec`/`newSpecTitle` qui allait avec).
 
+Les routes historiques ligne-à-ligne `/api/dpgf/:projectId` et `/api/dpgf`
+adossées à `dpgf_items` restent temporairement disponibles pour les situations
+et marchés existants, mais renvoient les en-têtes HTTP `Deprecation`, `Sunset`,
+`Link` et `Warning`. Tout nouveau code doit utiliser le document structuré
+`/api/projects/:projectId/dpgf`, seule source du CCTP, de la DPGF et de
+l'estimation. La date cible de retrait est le 31 mars 2027.
+
 **La table `cctps` elle-même n'a pas été supprimée**, à dessein : une
 instance de production en porte une ligne, écrite par l'ancien hook mort —
 la retirer sans savoir si un cabinet compte dessus serait une perte de

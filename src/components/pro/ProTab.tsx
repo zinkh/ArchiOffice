@@ -16,14 +16,17 @@ import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
   IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
+  IconChecklist, IconCamera, IconHistory,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
 import { apiFetch } from '../../lib/api';
+import { validateProDocument } from '../../lib/proValidation';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
+interface DpgfVersion { id: string; label: string; phase?: string; version?: string; created_at: string }
 
 interface ProTabProps {
   projectId: string;
@@ -73,12 +76,40 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
+  const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
 
   // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
   const dpgfDoc = useAutosavedDoc<DPGF>({
     key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
   });
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
+
+  const controlerDossier = useCallback(() => {
+    if (!dpgf) return;
+    const issues = validateProDocument(dpgf);
+    if (!issues.length) return window.alert('Contrôle terminé : aucune anomalie détectée.');
+    const errors = issues.filter(i => i.severity === 'error');
+    const warnings = issues.filter(i => i.severity === 'warning');
+    window.alert([
+      `Contrôle PRO/DCE : ${errors.length} erreur(s), ${warnings.length} vigilance(s).`, '',
+      ...issues.slice(0, 40).map(i => `${i.severity === 'error' ? '⛔' : '⚠'} ${i.message}`),
+      ...(issues.length > 40 ? [`… et ${issues.length - 40} autre(s).`] : []),
+    ].join('\n'));
+  }, [dpgf]);
+
+  const creerInstantane = useCallback(async () => {
+    if (!dpgf) return;
+    await handleSave();
+    const label = window.prompt('Libellé de la version (ex. APD validé, DCE indice A) :', `${dpgf.version || '1.0'} — ${dpgf.titre}`)?.trim();
+    if (!label) return;
+    const phase = window.prompt('Phase associée (APS, APD, PRO, DCE…) :', '')?.trim() || null;
+    await apiFetch(`/api/projects/${projectId}/dpgf/versions`, { method: 'POST', body: JSON.stringify({ label, phase, version: dpgf.version }) });
+    window.alert(`Version « ${label} » figée.`);
+  }, [dpgf, handleSave, projectId]);
+
+  const ouvrirVersions = useCallback(async () => {
+    setVersions(await apiFetch<DpgfVersion[]>(`/api/projects/${projectId}/dpgf/versions`));
+  }, [projectId]);
 
   // Offres reçues sur le DPGF. Chargées à part du document lui-même (route
   // dédiée, cf. server/routes/dpgf.ts) : GET /api/projects/:id/dpgf ne rend
@@ -372,6 +403,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
         {/* Save status + print + split — always visible on the right */}
         <div className="ml-auto flex items-center gap-2 px-3 no-print">
+          {!isBpuTab && dpgf && <>
+            <button onClick={controlerDossier} title="Contrôler la cohérence CCTP–DPGF–estimation" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconChecklist size={14} /> Contrôler</button>
+            <button onClick={() => void creerInstantane()} title="Figer l'état courant" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconCamera size={14} /> Figer</button>
+            <button onClick={() => void ouvrirVersions()} title="Historique des versions" className="p-1.5 border rounded"><IconHistory size={14} /></button>
+          </>}
           {activeSaveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
           {activeSaveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
           {activeSaveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
@@ -405,6 +441,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           )}
         </div>
       </div>
+
+      {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
+        <div className="w-full max-w-2xl max-h-[75vh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>
+          <div className="divide-y">{versions.length ? versions.map(v => <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3"><div><div className="font-medium text-sm">{v.label}</div><div className="text-xs text-zinc-500">{v.phase || 'Sans phase'} · v{v.version || '—'} · {new Date(v.created_at).toLocaleString('fr-FR')}</div></div><button className="px-3 py-1.5 text-xs border rounded text-amber-700" onClick={async () => { if (!window.confirm(`Restaurer « ${v.label} » ? L'état courant doit être figé au préalable si vous souhaitez le conserver.`)) return; const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' }); setDpgf(restored); setVersions(null); }}>Restaurer</button></div>) : <div className="p-6 text-sm text-zinc-500">Aucune version figée.</div>}</div>
+        </div>
+      </div>}
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex">
