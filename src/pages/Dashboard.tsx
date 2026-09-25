@@ -3,18 +3,18 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   IconActivity,
-  IconAlertCircle,
-  IconCircleCheck,
-  IconClock,
   IconChevronRight,
-  IconTrendingUp,
-  IconTrendingDown,
   IconPlus,
   IconFileInvoice,
   IconBriefcase,
   IconFileText,
   IconCurrencyEuro,
+  IconHourglass,
   IconReceiptOff,
+  IconAlertCircle,
+  IconClock,
+  IconWallet,
+  IconCash,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
@@ -42,16 +42,33 @@ import { useUser } from '../UserContext';
 import ManagerDashboard from '../components/dashboard/ManagerDashboard';
 import ResponsibleDashboard from '../components/dashboard/ResponsibleDashboard';
 import {
-  PIE_COLORS,
-  BAR_COLOR,
-  BUDGET_ESTIMATED_COLOR,
-  BUDGET_ACTUAL_COLOR,
   StatusBadge,
-  StatCard,
   TblrTooltip,
   SectionCard,
   QuickAction,
+  StatCard,
+  HeroCard,
+  RadialGauge,
+  Sparkline,
+  RankedBars,
+  CATEGORY_COLORS,
+  STATUS_GROUP_COLORS,
+  REVENUE_INVOICED_COLOR,
+  REVENUE_PAID_COLOR,
+  ELEVATED_SHADOW,
 } from '../components/dashboard/DashboardWidgets';
+import {
+  normalizeProjectStatus,
+  statusBreakdown,
+  categoryBreakdown,
+  monthlyRevenue,
+  feesProgressByProject,
+  invoiceTotal,
+  isPaid,
+  isIssued,
+  isOverdue,
+  UNCATEGORIZED,
+} from '../lib/dashboardMetrics';
 
 export default function Dashboard() {
   const { currentUser } = useUser();
@@ -64,6 +81,8 @@ export default function Dashboard() {
 // Admin dashboard — unchanged from before role-based dashboards were introduced.
 function AdminDashboardView() {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
+  const firstName = (currentUser?.name ?? '').trim().split(/\s+/)[0] ?? '';
   const navigate = useNavigate();
   const { openChat } = useAgentChat();
   const [projects,   setProjects]   = useState<Project[]>([]);
@@ -101,57 +120,44 @@ function AdminDashboardView() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   const pendingTenders   = tenders.filter(t => !t.status || t.status === 'pending' || t.status === 'Pending').length;
-  const overdueInvoices  = invoices.filter(inv => inv.status === 'overdue' || inv.status === 'Overdue').length;
-  const totalRevenue     = invoices
-    .filter(inv => inv.status === 'paid' || inv.status === 'Paid')
-    .reduce((s, inv) => s + (inv.total_amount || inv.amount || 0), 0);
   const pendingProposals = proposals.filter(p => p.status === 'Pending' || p.status === 'Draft').length;
+  const upcomingDeadlines = milestones.filter(m => !m.completed).length;
 
   const formatEur = (n: number) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
+  const formatEurShort = (n: number) =>
+    n >= 1000 ? `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(n / 1000)} k€` : `${Math.round(n)} €`;
 
-  const upcomingDeadlines = milestones.filter(m => !m.completed).length;
+  // ── Finances : tout est lu sur les factures émises (hors brouillons) ──
+  const finance = React.useMemo(() => {
+    const issued = invoices.filter(isIssued);
+    const invoiced = issued.reduce((s, inv) => s + invoiceTotal(inv), 0);
+    const paid = issued.filter(isPaid).reduce((s, inv) => s + invoiceTotal(inv), 0);
+    const overdue = issued.filter(isOverdue);
+    return {
+      invoiced,
+      paid,
+      receivable: invoiced - paid,
+      overdueCount: overdue.length,
+      unpaidCount: issued.filter(inv => !isPaid(inv)).length,
+      overdueAmount: overdue.reduce((s, inv) => s + invoiceTotal(inv), 0),
+      collectionRate: invoiced > 0 ? Math.round((paid / invoiced) * 100) : 0,
+    };
+  }, [invoices]);
 
-  const statusData = [
-    { name: 'Terminés',      value: projects.filter(p => p.status === 'Completed').length },
-    { name: 'En cours',      value: projects.filter(p => p.status === 'In Progress').length },
-    { name: 'Planification', value: projects.filter(p => p.status === 'Planning').length },
-    { name: 'En attente',    value: projects.filter(p => p.status === 'On Hold').length },
-  ].filter(d => d.value > 0);
-
-  const categoryData = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-    projects.forEach(p => { const c = p.client || 'Autre'; counts[c] = (counts[c] || 0) + 1; });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
-  }, [projects]);
-
-  // ── Budget tracking: estimated (devis budget) vs actual (paid invoices) per project ──
-  const budgetByProject = React.useMemo(() => {
-    const actualByProjectId: Record<string, number> = {};
-    invoices
-      .filter(inv => inv.status === 'paid' || inv.status === 'Paid')
-      .forEach(inv => {
-        const key = inv.project_id;
-        if (!key) return;
-        actualByProjectId[key] = (actualByProjectId[key] || 0) + (inv.total_amount || inv.amount || 0);
-      });
-    return projects
-      .filter(p => p.budget > 0)
-      .map(p => ({
-        name: p.name.length > 16 ? `${p.name.slice(0, 15)}…` : p.name,
-        fullName: p.name,
-        estimated: p.budget,
-        actual: actualByProjectId[p.id] || 0,
-      }))
-      .sort((a, b) => b.estimated - a.estimated)
-      .slice(0, 6);
-  }, [projects, invoices]);
-
-  const totalEstimatedBudget = React.useMemo(() => projects.reduce((s, p) => s + (p.budget || 0), 0), [projects]);
-  const totalActualBudget = React.useMemo(
-    () => invoices.filter(inv => inv.status === 'paid' || inv.status === 'Paid').reduce((s, inv) => s + (inv.total_amount || inv.amount || 0), 0),
-    [invoices]
+  // ── Affaires : statuts normalisés (FR/EN), aucune affaire hors du compte ──
+  const statusData = React.useMemo(
+    () => statusBreakdown(projects).map(d => ({ ...d, name: t(`dashboard_status_${d.group}`) })),
+    [projects, t]
   );
+  const activeProjects = React.useMemo(
+    () => projects.filter(p => normalizeProjectStatus(p.status) === 'active').length,
+    [projects]
+  );
+  const categoryData = React.useMemo(() => categoryBreakdown(projects), [projects]);
+  const revenueSeries = React.useMemo(() => monthlyRevenue(invoices), [invoices]);
+  const paidThisMonth = revenueSeries[revenueSeries.length - 1]?.paid ?? 0;
+  const feesRows = React.useMemo(() => feesProgressByProject(projects, invoices), [projects, invoices]);
 
   // ── Proactive AI suggestions — simple rule-based read of the data already
   // on this page (no extra network round-trip). Each suggestion opens the
@@ -227,91 +233,275 @@ function AdminDashboardView() {
         <ErrorState compact message={loadError} onRetry={loadAll} />
       )}
 
-      {/* ── Financial summary cards (2 cols on mobile) ── */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard
-          label="CA encaissé"
-          value={formatEur(totalRevenue)}
-          icon={IconCurrencyEuro}
-          accent="#206bc4"
-          accentBg="#e8f0fb"
-          cardBg="#eef3fb"
-          trend="Factures payées"
-          trendUp={true}
-          to="/invoices"
-        />
-        <StatCard
-          label="Factures en retard"
-          value={overdueInvoices}
-          icon={IconReceiptOff}
-          accent="#d63939"
-          accentBg="#ffe3e3"
-          cardBg="#fef2f2"
-          trend={overdueInvoices > 0 ? 'À régulariser' : 'Aucun retard'}
-          trendUp={overdueInvoices === 0}
-          to="/invoices"
-        />
-        <StatCard
-          label={t('active_projects')}
-          value={projects.filter(p => p.status === 'In Progress').length}
-          icon={IconActivity}
-          accent="#206bc4"
-          accentBg="#e8f0fb"
-          trend="Projets actifs"
-          trendUp={true}
-          to="/projects"
-        />
-        <StatCard
-          label="Devis en attente"
-          value={pendingProposals}
-          icon={IconAlertCircle}
-          accent="#f76707"
-          accentBg="#fff4e6"
-          trend={pendingProposals > 0 ? 'En cours de réponse' : 'Aucun en attente'}
-          trendUp={pendingProposals === 0}
-          to="/proposals"
-        />
-      </div>
+      {/* ── Grille principale, partitionnée à la manière de Sneat : accueil
+          et indicateurs financiers, puis facturation et indicateurs d'activité,
+          puis trois cartes d'analyse ── */}
+      <div className="grid grid-cols-12 gap-4">
+        <div className="col-span-12 xl:col-span-8">
+          <HeroCard
+            title={firstName ? t('dashboard_hero_title', { name: firstName }) : t('dashboard_hero_title_anon')}
+            action={
+              <Link
+                to="/invoices"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+              >
+                {finance.overdueCount > 0 ? t('dashboard_hero_cta_overdue') : t('dashboard_hero_cta')}
+                <IconChevronRight size={14} />
+              </Link>
+            }
+          >
+            <p>
+              {t('dashboard_hero_paid_month', { amount: formatEur(paidThisMonth) })}{' '}
+              {finance.overdueCount > 0
+                ? <strong style={{ color: '#d63939' }}>{t('dashboard_kpi_overdue', { count: finance.overdueCount })}.</strong>
+                : t('dashboard_kpi_no_overdue') + '.'}
+            </p>
+            <p className="mt-1">{t('dashboard_hero_activity', { active: activeProjects, deadlines: upcomingDeadlines })}</p>
+          </HeroCard>
+        </div>
 
-      {/* 2nd row of stats */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard
-          label={t('pending_tenders')}
-          value={pendingTenders}
-          icon={IconBriefcase}
-          accent="#ae3ec9"
-          accentBg="#f8d7ff"
-          trend={pendingTenders > 0 ? "Appels d'offres" : 'Aucun en attente'}
-          to="/tenders"
-        />
-        <StatCard
-          label={t('completed_month')}
-          value={projects.filter(p => p.status === 'Completed').length}
-          icon={IconCircleCheck}
-          accent="#2fb344"
-          accentBg="#d3f9d8"
-          trend="Projets livrés"
-          trendUp={true}
-          to="/projects"
-        />
-        <StatCard
-          label={t('upcoming_deadlines')}
-          value={upcomingDeadlines}
-          icon={IconClock}
-          accent="#d63939"
-          accentBg="#ffe3e3"
-          trend={upcomingDeadlines > 0 ? 'Jalons à traiter' : 'Tout à jour'}
-          trendUp={upcomingDeadlines === 0}
-        />
-        <StatCard
-          label="Total projets"
-          value={projects.length}
-          icon={IconFileText}
-          accent="#6c7a91"
-          accentBg="#f1f3f6"
-          trend="Tous statuts"
-          to="/projects"
-        />
+        <div className="col-span-12 xl:col-span-4 grid grid-cols-2 gap-4">
+          <StatCard
+            label={t('dashboard_kpi_revenue')}
+            value={formatEur(finance.paid)}
+            icon={IconCurrencyEuro}
+            accent="#206bc4"
+            accentBg="#e8f0fb"
+            cardBg="#eef3fb"
+            trend={t('dashboard_kpi_revenue_hint', { total: formatEur(finance.invoiced) })}
+            trendUp={true}
+            to="/invoices"
+          >
+            <Sparkline data={revenueSeries.slice(-6).map(m => m.paid)} color="#206bc4" height={36} />
+          </StatCard>
+          <StatCard
+            label={t('dashboard_overdue_invoices')}
+            value={finance.overdueCount}
+            icon={IconReceiptOff}
+            accent="#d63939"
+            accentBg="#ffe3e3"
+            cardBg="#fef2f2"
+            trend={finance.overdueCount > 0 ? formatEur(finance.overdueAmount) : t('dashboard_kpi_no_overdue')}
+            trendUp={finance.overdueCount === 0}
+            to="/invoices"
+          />
+        </div>
+
+        {/* Facturation sur 12 mois + jauge d'encaissement, dans une même carte */}
+        <div className="col-span-12 xl:col-span-8">
+          <div
+            className="rounded-xl overflow-hidden grid grid-cols-1 md:grid-cols-3 h-full"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: ELEVATED_SHADOW }}
+          >
+            <div className="md:col-span-2 p-4 md:border-r" style={{ borderColor: 'var(--tblr-border)' }}>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[15px] font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('dashboard_revenue_12m')}</h2>
+                <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ background: REVENUE_INVOICED_COLOR }} />
+                    {t('dashboard_invoiced')}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ background: REVENUE_PAID_COLOR }} />
+                    {t('dashboard_paid')}
+                  </span>
+                </div>
+              </div>
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsBarChart data={revenueSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }} barGap={3}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tblr-border)" />
+                    <XAxis dataKey="label" tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={52} tickFormatter={formatEurShort} />
+                    <Tooltip content={<TblrTooltip valueFormatter={formatEur} />} cursor={{ fill: 'var(--tblr-surface-2)' }} />
+                    <Bar dataKey="invoiced" name={t('dashboard_invoiced')} fill={REVENUE_INVOICED_COLOR} radius={[6, 6, 6, 6]} maxBarSize={10} />
+                    <Bar dataKey="paid" name={t('dashboard_paid')} fill={REVENUE_PAID_COLOR} radius={[6, 6, 6, 6]} maxBarSize={10} />
+                  </RechartsBarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="p-4 flex flex-col items-center justify-center gap-3 border-t md:border-t-0" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span
+                className="text-[11px] font-semibold px-2 py-0.5 rounded"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+              >
+                {new Date().getFullYear()}
+              </span>
+              <RadialGauge value={finance.collectionRate} label={t('dashboard_gauge_label')} />
+              <p className="text-[12px] font-medium text-center" style={{ color: 'var(--tblr-muted)' }}>
+                {t('dashboard_gauge_caption', { rate: finance.collectionRate })}
+              </p>
+              <div className="grid grid-cols-2 gap-3 w-full">
+                {[
+                  { label: t('dashboard_invoiced'), value: finance.invoiced, icon: IconWallet, color: '#1c7ed6' },
+                  { label: t('dashboard_paid'), value: finance.paid, icon: IconCash, color: '#2fb344' },
+                ].map(item => (
+                  <div key={item.label} className="flex items-center gap-2 min-w-0">
+                    <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: item.color + '1f', color: item.color }}>
+                      <item.icon size={16} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{item.label}</p>
+                      <p className="text-[13px] font-semibold tabular-nums truncate" style={{ color: 'var(--tblr-text)' }}>{formatEurShort(item.value)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-span-12 xl:col-span-4 grid grid-cols-2 gap-4 content-start">
+          <StatCard
+            label={t('dashboard_kpi_active')}
+            value={activeProjects}
+            icon={IconActivity}
+            accent="#206bc4"
+            accentBg="#e8f0fb"
+            trend={t('dashboard_kpi_active_hint', { total: projects.length })}
+            trendUp={true}
+            to="/projects"
+          />
+          <StatCard
+            label={t('dashboard_kpi_proposals')}
+            value={pendingProposals}
+            icon={IconAlertCircle}
+            accent="#f76707"
+            accentBg="#fff4e6"
+            trend={t('dashboard_kpi_proposals_hint')}
+            to="/proposals"
+          />
+          <StatCard
+            label={t('dashboard_mini_tenders')}
+            value={pendingTenders}
+            icon={IconBriefcase}
+            accent="#ae3ec9"
+            accentBg="#f8d7ff"
+            trend={t('dashboard_tenders_hint')}
+            to="/tenders"
+          />
+          <StatCard
+            label={t('dashboard_mini_milestones')}
+            value={upcomingDeadlines}
+            icon={IconClock}
+            accent="#d63939"
+            accentBg="#ffe3e3"
+            trend={upcomingDeadlines > 0 ? t('dashboard_milestones_hint') : t('dashboard_milestones_ok')}
+            trendUp={upcomingDeadlines === 0}
+          />
+          {/* Reste à encaisser, carte large avec courbe du facturé */}
+          <div
+            className="col-span-2 rounded-xl p-4 flex items-center gap-4 cursor-pointer relative overflow-hidden"
+            style={{ background: '#fff9db', border: '1px solid #f59f0033', boxShadow: ELEVATED_SHADOW }}
+            onClick={() => navigate('/invoices')}
+          >
+            <div className="shrink-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#e67700' }}>{t('dashboard_kpi_receivable')}</p>
+              <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: '#ffec99', color: '#e67700' }}>
+                {t('dashboard_unpaid_count', { count: finance.unpaidCount })}
+              </span>
+              <p className="text-2xl font-bold mt-2 leading-none tabular-nums" style={{ color: '#e67700' }}>{formatEur(finance.receivable)}</p>
+            </div>
+            <div className="flex-1 min-w-0">
+              <Sparkline data={revenueSeries.slice(-8).map(m => m.invoiced)} color="#f59f00" height={60} />
+            </div>
+            <div className="absolute -bottom-3 -right-3 pointer-events-none" style={{ color: '#f59f00', opacity: 0.12 }}>
+              <IconHourglass size={80} strokeWidth={1.2} />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Trois cartes d'analyse ── */}
+        <div className="col-span-12 md:col-span-6 xl:col-span-4">
+          <SectionCard title={t('dashboard_project_status')}>
+            {statusData.length === 0 ? (
+              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
+            ) : (
+              <>
+                <div className="h-44 relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={statusData} cx="50%" cy="50%" innerRadius={56} outerRadius={76} paddingAngle={3} cornerRadius={6} dataKey="value" stroke="none">
+                        {statusData.map(d => <Cell key={d.group} fill={STATUS_GROUP_COLORS[d.group]} />)}
+                      </Pie>
+                      <Tooltip content={<TblrTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[26px] font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>{projects.length}</span>
+                    <span className="text-[11px] mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_projects_total')}</span>
+                  </div>
+                </div>
+                <ul className="mt-3 space-y-2">
+                  {statusData.map(d => (
+                    <li key={d.group} className="flex items-center gap-2.5 text-[12px]">
+                      <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: STATUS_GROUP_COLORS[d.group] + '1f' }}>
+                        <span className="w-2 h-2 rounded-full" style={{ background: STATUS_GROUP_COLORS[d.group] }} />
+                      </span>
+                      <span className="flex-1" style={{ color: 'var(--tblr-text)' }}>{d.name}</span>
+                      <strong className="tabular-nums" style={{ color: 'var(--tblr-text)' }}>{d.value}</strong>
+                      <span className="w-10 text-right tabular-nums" style={{ color: 'var(--tblr-muted)' }}>
+                        {Math.round((d.value / projects.length) * 100)} %
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </SectionCard>
+        </div>
+
+        <div className="col-span-12 md:col-span-6 xl:col-span-4">
+          <SectionCard
+            title={t('dashboard_categories')}
+            action={<span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_categories_hint')}</span>}
+          >
+            {categoryData.length === 0 ? (
+              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
+            ) : (
+              <RankedBars rows={categoryData} muted={UNCATEGORIZED} />
+            )}
+          </SectionCard>
+        </div>
+
+        <div className="col-span-12 xl:col-span-4">
+          <SectionCard title={t('dashboard_fees_progress')}>
+            {feesRows.length === 0 ? (
+              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
+            ) : (
+              <ul className="space-y-4">
+                {feesRows.map((r, i) => {
+                  const color = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+                  return (
+                    <li key={r.id} className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/projects/${r.id}`)}>
+                      <span className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold shrink-0" style={{ background: color + '1f', color }}>
+                        {r.name.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }} title={r.name}>{r.name}</p>
+                        <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                          {r.fees > 0
+                            ? t('dashboard_fees_line', { paid: formatEur(r.paid), fees: formatEur(r.fees) })
+                            : t('dashboard_fees_unknown')}
+                        </p>
+                        {r.fees > 0 && (
+                          <div className="h-1.5 rounded-full overflow-hidden flex mt-1.5" style={{ background: 'var(--tblr-surface-2)' }}>
+                            <div style={{ width: `${Math.min(100, (r.paid / r.fees) * 100)}%`, background: REVENUE_PAID_COLOR }} />
+                            <div style={{ width: `${Math.max(0, Math.min(100, (r.invoiced / r.fees) * 100) - Math.min(100, (r.paid / r.fees) * 100))}%`, background: REVENUE_INVOICED_COLOR }} />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[13px] font-semibold tabular-nums shrink-0" style={{ color: r.pct !== null ? '#2f9e44' : 'var(--tblr-text)' }}>
+                        {r.pct !== null ? `${r.pct} %` : formatEurShort(r.invoiced)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </SectionCard>
+        </div>
       </div>
 
       {/* ── Quick actions (mobile-prominent) ── */}
@@ -326,105 +516,6 @@ function AdminDashboardView() {
           <QuickAction icon={IconBriefcase}     label="Appel d'offres"  to="/tenders"   color="#ae3ec9" />
         </div>
       </div>
-
-      {/* ── Charts (desktop only) ── */}
-      <div className="hidden lg:grid grid-cols-2 gap-4">
-        <SectionCard title={t('dashboard_project_status')}>
-          {statusData.length === 0 ? (
-            <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
-          ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
-                    {statusData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<TblrTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-            {statusData.map((d, i) => (
-              <div key={d.name} className="flex items-center gap-1.5 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
-                <span className="w-2 h-2 rounded-full inline-block" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                {d.name} <strong style={{ color: 'var(--tblr-text)' }}>{d.value}</strong>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard title={t('dashboard_top_categories')}>
-          {categoryData.length === 0 ? (
-            <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucune donnée</p>
-          ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsBarChart data={categoryData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--tblr-border)" />
-                  <XAxis type="number" hide />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    width={90}
-                    tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip content={<TblrTooltip />} cursor={{ fill: 'var(--tblr-surface-2)' }} />
-                  <Bar dataKey="value" fill={BAR_COLOR} radius={[0, 2, 2, 0]} barSize={14} />
-                </RechartsBarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </SectionCard>
-      </div>
-
-      {/* ── Budget tracking: estimated vs actual (paid) per project ── */}
-      <SectionCard
-        title={t('dashboard_budget_tracking')}
-        action={
-          <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full inline-block" style={{ background: BUDGET_ESTIMATED_COLOR }} />
-              {t('budget_estimated')}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full inline-block" style={{ background: BUDGET_ACTUAL_COLOR }} />
-              {t('budget_actual')}
-            </span>
-          </div>
-        }
-      >
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
-            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_estimated')}</p>
-            <p className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>{formatEur(totalEstimatedBudget)}</p>
-          </div>
-          <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
-            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_actual')}</p>
-            <p className="text-lg font-bold" style={{ color: totalActualBudget > totalEstimatedBudget ? '#d63939' : 'var(--tblr-text)' }}>
-              {formatEur(totalActualBudget)}
-            </p>
-          </div>
-        </div>
-        {budgetByProject.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
-        ) : (
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsBarChart data={budgetByProject} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tblr-border)" />
-                <XAxis dataKey="name" tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: 'var(--tblr-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={56} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                <Tooltip content={<TblrTooltip />} cursor={{ fill: 'var(--tblr-surface-2)' }} />
-                <Bar dataKey="estimated" name={t('budget_estimated')} fill={BUDGET_ESTIMATED_COLOR} radius={[3, 3, 0, 0]} barSize={16} />
-                <Bar dataKey="actual" name={t('budget_actual')} fill={BUDGET_ACTUAL_COLOR} radius={[3, 3, 0, 0]} barSize={16} />
-              </RechartsBarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </SectionCard>
 
       {/* ── Proactive AI suggestions ── */}
       <SectionCard
