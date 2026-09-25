@@ -631,6 +631,50 @@ cause commune :
    insécable classique, U+00A0, par précaution) par une espace normale,
    un caractère WinAnsi ordinaire correctement mesuré et rendu.
 
+### Rédaction assistée de la note méthodologique d'un appel d'offres
+
+Onglet Note méthodologique de `/appels-offres/:id` (`src/pages/TenderDetail.tsx`,
+`server/routes/tenderAi.ts`, `server/routes/tenderMethodology.ts`) — réservée
+au plan Enterprise comme le reste de l'assistance IA sur les appels d'offres
+(`requireEnterprisePlan`). Deux gestes, tous deux sur le patron réserve →
+exécute → règle déjà en place pour le chat des agents :
+
+1. **« Préremplir les titres »** (`POST .../methodology/prefill-sections`)
+   pose le plan de sections avant toute rédaction. Sans DCE attaché à
+   l'appel d'offres, pas d'appel IA : `DEFAULT_METHODOLOGY_TITLES` (une
+   structure usuelle de mémoire technique MOE) suffit et ne coûte rien. Un
+   DCE attaché fait préférer le sommaire réellement exigé par le règlement
+   de consultation quand il en impose un. Les titres déjà présents (comparés
+   sans tenir compte de la casse) ne sont jamais dupliqués.
+2. **« Rédiger avec IA »** (`POST .../methodology/:noteId/draft-ai`) rédige
+   le contenu d'une section en combinant TOUJOURS ce qui est disponible,
+   plutôt que de faire choisir entre des sources exclusives (un bouton par
+   source avait été essayé, puis abandonné — une note gagne à croiser les
+   deux, jamais à choisir) :
+   - les spécialités mobilisées ET le nom du cotraitant nommément saisi en
+     face de chacune (onglet Partenaires, `tender_specialties.contact_id` →
+     `contacts.name`) — sans ce nom, la note ne pouvait citer que des
+     intitulés de métier génériques ;
+   - le texte des documents DCE de l'affaire (`documents` avec
+     `resource_type='tenders'`) — même lecture qu'« Analyser le DCE » ;
+   - la bibliothèque documentaire du cabinet (présentation, exemples de
+     notes déjà rédigées, présentation des cotraitants habituels...) :
+     `documents` avec `resource_type='agency_library'`, une seule ligne
+     logique par cabinet — `resource_id` est le `tenant_id` lui-même, pas
+     l'id d'une fiche, donc `POST /api/documents` le vérifie par égalité
+     directe plutôt que par `assertTenantEntity` (aucune table
+     `agency_library` à interroger). Gérée depuis `/settings` (onglet
+     Cabinet, `AgencyMethodologyLibraryCard.tsx`) avec le même composant
+     `ResourceAttachments` que les autres pièces jointes rattachées
+     génériquement.
+
+   Chacune des deux sources documentaires est best-effort et indépendante de
+   l'autre : l'absence de l'une n'empêche jamais d'utiliser l'autre, et la
+   rédaction reste possible avec le seul contexte de l'affaire si aucune des
+   deux n'est disponible. `extractCombinedText()` (`tenderAi.ts`) factorise
+   la lecture partagée par ce geste et par « Analyser le DCE »/« Chercher
+   dans le DCE ».
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres

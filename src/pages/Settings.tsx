@@ -25,6 +25,7 @@ import { MailAccountsCard } from '../components/MailAccountsCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
+import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -2553,6 +2554,12 @@ export default function Settings() {
               numAffaireDigits: settings.numAffaireDigits,
             }))}
           </div>
+
+          {/* Bibliothèque de notes méthodologiques — action immédiate
+              (dépôt/suppression de fichiers), pas de formulaire via
+              saveSection/renderSaveButton, même principe que les cartes de
+              connexion ci-dessous. */}
+          <AgencyMethodologyLibraryCard />
         </>
       )}
 

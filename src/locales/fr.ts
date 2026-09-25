@@ -45,6 +45,8 @@ export default {
       "agent_mail_inbox_triage_none": "Aucun (courrier entrant désactivé)",
       "agent_mail_inbox_no_agent": "Aucun agent actif dans ce cabinet. Créez-en un depuis la page Agents avant de désigner un agent de triage.",
       "agent_mail_inbox_error": "Une erreur est survenue.",
+      "agency_library_title": "Bibliothèque de notes méthodologiques",
+      "agency_library_explanation": "Déposez ici les documents du cabinet (présentation, exemples de notes méthodologiques déjà rédigées, présentation des cotraitants habituels...) que l'IA pourra reprendre pour rédiger les notes méthodologiques des appels d'offres — bouton « Depuis la bibliothèque » de l'onglet Note méthodologique, plan Enterprise.",
       "notif_empty": "Aucune notification dans cette catégorie.",
       "notif_by": "par",
       "notif_archived_title": "Activités archivées",
@@ -780,7 +782,12 @@ export default {
       "tender_detail_note_redige": "Rédigé",
       "tender_detail_note_a_rediger": "À rédiger",
       "tender_detail_draft_with_ai": "Rédiger avec IA",
+      "tender_detail_draft_with_ai_hint": "Rédiger à partir du contexte de l'affaire (spécialités, cotraitants), enrichi des documents du DCE et de la bibliothèque du cabinet quand ils sont disponibles.",
       "tender_detail_drafting": "Rédaction en cours...",
+      "tender_detail_draft_error": "Échec de la rédaction assistée.",
+      "tender_detail_prefill_sections": "Préremplir les titres",
+      "tender_detail_prefilling": "Préremplissage...",
+      "tender_detail_prefill_error": "Échec du préremplissage des titres.",
       "tender_detail_add_note_section_placeholder": "Titre de la nouvelle section",
 
       // Veille RSS des appels d'offres

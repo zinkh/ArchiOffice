@@ -137,6 +137,8 @@ export default function TenderDetail() {
   const [methodologyLoaded, setMethodologyLoaded] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [draftingNoteId, setDraftingNoteId] = useState<string | null>(null);
+  const [prefillingSections, setPrefillingSections] = useState(false);
+  const [methodologyError, setMethodologyError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -548,13 +550,29 @@ export default function TenderDetail() {
   const draftNoteWithAi = async (note: TenderMethodologyNote) => {
     if (!tender) return;
     setDraftingNoteId(note.id);
+    setMethodologyError(null);
     try {
       const { content } = await apiFetch<{ content: string }>(`/api/tenders/${tender.id}/methodology/${note.id}/draft-ai`, { method: 'POST' });
       setMethodologyNotes(prev => prev.map(n => n.id === note.id ? { ...n, content, status: 'redige' } : n));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setMethodologyError(err?.message || t('tender_detail_draft_error'));
     } finally {
       setDraftingNoteId(null);
+    }
+  };
+  const prefillMethodologySections = async () => {
+    if (!tender) return;
+    setPrefillingSections(true);
+    setMethodologyError(null);
+    try {
+      const { notes } = await apiFetch<{ notes: TenderMethodologyNote[] }>(`/api/tenders/${tender.id}/methodology/prefill-sections`, { method: 'POST' });
+      setMethodologyNotes(prev => [...prev, ...notes]);
+    } catch (err: any) {
+      console.error(err);
+      setMethodologyError(err?.message || t('tender_detail_prefill_error'));
+    } finally {
+      setPrefillingSections(false);
     }
   };
 
@@ -1265,6 +1283,23 @@ export default function TenderDetail() {
       {activeTab === 'methodologie' && (
         <div className="space-y-4">
           {!isEnterprise && <EnterpriseLockBanner label={t('tender_detail_ai_enterprise_only')} />}
+          {methodologyError && (
+            <div className="flex items-center gap-2 p-3 rounded-lg text-sm" style={{ background: 'var(--tblr-danger-lt)', color: 'var(--tblr-danger)' }}>
+              <IconAlertTriangle size={16} /> {methodologyError}
+            </div>
+          )}
+          {isEnterprise && (
+            <div className="flex justify-end">
+              <button
+                onClick={prefillMethodologySections}
+                disabled={prefillingSections}
+                className="flex items-center gap-1.5 text-xs font-bold uppercase px-3 py-1.5 rounded-lg disabled:opacity-60"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+              >
+                <IconSparkles size={14} /> {prefillingSections ? t('tender_detail_prefilling') : t('tender_detail_prefill_sections')}
+              </button>
+            </div>
+          )}
           {methodologyNotes.map(note => (
             <div key={note.id} className="rounded-lg p-5 space-y-3" style={surfaceCardStyle()}>
               <div className="flex items-center justify-between gap-3">
@@ -1279,6 +1314,7 @@ export default function TenderDetail() {
                     <button
                       onClick={() => draftNoteWithAi(note)}
                       disabled={draftingNoteId === note.id}
+                      title={t('tender_detail_draft_with_ai_hint') as string}
                       className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
                       style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                     >

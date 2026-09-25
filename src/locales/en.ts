@@ -38,6 +38,8 @@ export default {
       "telegram_connections_instructions_named": "On Telegram, open @{{bot}} and send this message:",
       "telegram_connections_instructions_generic": "On Telegram, open the ArchiOffice bot and send this message:",
       "telegram_connections_error": "Something went wrong.",
+      "agency_library_title": "Methodology note library",
+      "agency_library_explanation": "Upload the firm's documents here (presentation, examples of already-written methodology notes, presentation of your usual co-contractors...) so AI can reuse them when drafting tender methodology notes — the \"From the firm library\" button in the Methodology Note tab, Enterprise plan.",
       "notif_empty": "No notifications in this category.",
       "notif_by": "by",
       "notif_archived_title": "Archived activity",
@@ -771,7 +773,12 @@ export default {
       "tender_detail_note_redige": "Drafted",
       "tender_detail_note_a_rediger": "To draft",
       "tender_detail_draft_with_ai": "Draft with AI",
+      "tender_detail_draft_with_ai_hint": "Draft from the project context (specialties, co-contractors), enriched with the tender file and the firm library when available.",
       "tender_detail_drafting": "Drafting...",
+      "tender_detail_draft_error": "AI drafting failed.",
+      "tender_detail_prefill_sections": "Prefill titles",
+      "tender_detail_prefilling": "Prefilling...",
+      "tender_detail_prefill_error": "Failed to prefill titles.",
       "tender_detail_add_note_section_placeholder": "New section title",
 
       // Tender RSS watch
