@@ -15,6 +15,7 @@ export interface CadastreParcel {
   commune: string;
   insee: string;
   contenance?: number;
+  geometry?: GeoJSON.Geometry;
 }
 
 // Vue aérienne officielle (IGN Géoplateforme, sans clé) — remplace les tuiles
@@ -260,7 +261,10 @@ export const MapLibreCadastre = ({
       }
       selectedId.current = id;
       instance.setFeatureState({ source: 'parcelles', id }, { selected: true });
-      onParcelSelectRef.current?.(feature.properties as CadastreParcel);
+      onParcelSelectRef.current?.({
+        ...(feature.properties as CadastreParcel),
+        geometry: feature.geometry as GeoJSON.Geometry,
+      });
     });
 
     // Without a listener, MapLibre's own fallback is to print any internal

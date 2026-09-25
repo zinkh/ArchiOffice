@@ -96,6 +96,7 @@ export default function Proposals() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
+  const [selectedParcelGeometry, setSelectedParcelGeometry] = useState<GeoJSON.Geometry | null>(null);
   const [exportProposal, setExportProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -911,7 +912,7 @@ export default function Proposals() {
                         />
                       </InfoPanelBoundary>
                       <InfoPanelBoundary label="Cadastre"><CadastreDownload address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
                     </div>
@@ -925,6 +926,7 @@ export default function Proposals() {
                               address={newProposal.adresse_terrain || ''}
                               banId={newProposal.ban_id_terrain}
                               onParcelSelect={(parcel: CadastreParcel) => {
+                                setSelectedParcelGeometry(parcel.geometry || null);
                                 const reference = [
                                   parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
                                   parcel.section,
