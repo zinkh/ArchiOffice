@@ -128,6 +128,7 @@ export const MapLibreCadastre = ({
   const marker = useRef<maplibregl.Marker | null>(null);
   const [contextLost, setContextLost] = useState(false);
   const [zoom, setZoom] = useState(19);
+  const [parcelStatus, setParcelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const hoveredId = useRef<number | string | null>(null);
   const selectedId = useRef<number | string | null>(null);
   const fetchAbort = useRef<AbortController | null>(null);
@@ -149,11 +150,17 @@ export const MapLibreCadastre = ({
     const b = instance.getBounds();
     const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
 
+    setParcelStatus('loading');
     fetch(`/api/cadastre/parcel?bbox=${bbox}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        if (res.ok) return res.json();
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error || `Cadastre indisponible (${res.status})`);
+      })
       .then((data) => {
-        if (!data?.features) return;
+        if (!data?.features) throw new Error('Réponse cadastrale invalide');
         source.setData(data);
+        setParcelStatus('ready');
         if (center && !fittedParcel.current) {
           fittedParcel.current = true;
           const containing = data.features.find((f: GeoJSON.Feature) => f.geometry && pointInGeometry(center, f.geometry));
@@ -168,7 +175,10 @@ export const MapLibreCadastre = ({
         }
       })
       .catch((err) => {
-        if (err.name !== 'AbortError') console.warn('[MapLibreCadastre] parcel fetch failed', err);
+        if (err.name !== 'AbortError') {
+          setParcelStatus('error');
+          console.warn('[MapLibreCadastre] parcel fetch failed', err);
+        }
       });
   }, []);
 
@@ -310,6 +320,11 @@ export const MapLibreCadastre = ({
     initMap();
   };
 
+  const handleParcelRetry = () => {
+    if (!map.current) return;
+    fetchParcelles(map.current, fittedParcel.current ? undefined : [lon, lat]);
+  };
+
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
@@ -318,6 +333,24 @@ export const MapLibreCadastre = ({
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
             Zoomez pour afficher le cadastre (niveau {CADASTRE_MIN_ZOOM}+)
           </div>
+        </div>
+      )}
+      {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'loading' && !contextLost && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
+            Chargement du cadastre…
+          </div>
+        </div>
+      )}
+      {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'error' && !contextLost && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
+          <button
+            type="button"
+            onClick={handleParcelRetry}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+          >
+            Cadastre indisponible — Réessayer
+          </button>
         </div>
       )}
       {contextLost && (

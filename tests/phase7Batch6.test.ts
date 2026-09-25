@@ -288,6 +288,55 @@ describe('Geo Proxy input validation', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects cadastre/parcel with inverted or oversized bounds', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const inverted = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.2,48.7,6.1,48.8' }).set(authHeader(token));
+    const oversized = await request(app).get('/api/cadastre/parcel').query({ bbox: '6,48,6.5,48.5' }).set(authHeader(token));
+    expect(inverted.status).toBe(400);
+    expect(oversized.status).toBe(400);
+  });
+
+  describe('cadastre network calls', () => {
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('proxies, maps and caches a cadastral bbox response', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          features: [{
+            geometry: { type: 'Polygon', coordinates: [[[6.11, 48.71], [6.12, 48.71], [6.12, 48.72], [6.11, 48.71]]] },
+            properties: { idu: '54395000AB0123', code_insee: '54395', contenance: 420 },
+          }],
+        }),
+      })) as any;
+
+      const query = { bbox: '6.110001,48.710001,6.120001,48.720001' };
+      const first = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+      const second = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+
+      expect(first.status).toBe(200);
+      expect(first.headers['x-cache']).toBe('MISS');
+      expect(first.body.features[0].properties).toMatchObject({ section: 'AB', numero: '00123', contenance: 420 });
+      expect(second.status).toBe(200);
+      expect(second.headers['x-cache']).toBe('HIT');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a timed-out cadastral call to 504', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => { const e: any = new Error('aborted'); e.name = 'AbortError'; throw e; }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.130001,48.730001,6.140001,48.740001' }).set(authHeader(token));
+      expect(res.status).toBe(504);
+    });
+  });
+
   // The following five (rnb-buildings, georisques, urbanisme, bdnb-geocode,
   // bdnb) joined geoProxy.ts in a later lot — same module, same sandbox
   // network limitation, so only their validation branches are exercised here.
