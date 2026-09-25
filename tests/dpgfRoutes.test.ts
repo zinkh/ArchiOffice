@@ -62,6 +62,26 @@ describe('DPGF — document', () => {
   });
 });
 
+describe('DPGF — versions figées', () => {
+  it('crée, liste et restaure un instantané', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    seedDpgf(tenantId, 'p-version');
+    const created = await request(app).post('/api/projects/p-version/dpgf/versions').set(authHeader(token))
+      .send({ label: 'DCE indice A', phase: 'DCE', version: 'A' });
+    expect(created.status).toBe(201);
+    expect(created.body.label).toBe('DCE indice A');
+
+    ligne('dpgfs', r => r.project_id === 'p-version').data = JSON.stringify({ ...documentDpgf(), titre: 'Modifié' });
+    const restored = await request(app).post(`/api/projects/p-version/dpgf/versions/${created.body.id}/restore`).set(authHeader(token));
+    expect(restored.status).toBe(200);
+    expect(restored.body.titre).toBe('DPGF');
+
+    const list = await request(app).get('/api/projects/p-version/dpgf/versions').set(authHeader(token));
+    expect(list.body).toHaveLength(1);
+  });
+});
+
 describe('DPGF — offres reçues', () => {
   it('ajoute, modifie puis supprime une offre', async () => {
     const tenantId = makeTenant();

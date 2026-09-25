@@ -49,6 +49,17 @@ export interface DecoupageNoeud {
   phaseId?: string;
 }
 
+/** Ventilation contrôlable de la quantité d'un article par zone ou local. */
+export interface QuantiteDetail {
+  id: string;
+  batimentId?: string;
+  phaseId?: string;
+  niveau?: string;
+  local?: string;
+  quantite: number;
+  note?: string;
+}
+
 export interface Ligne extends DecoupageNoeud {
   id: string;
   numero: string;
@@ -74,6 +85,8 @@ export interface Ligne extends DecoupageNoeud {
    * ferait ressaisir chaque projet dans un vocabulaire qui n'est pas le sien.
    */
   localisation?: string;
+  /** Quand elle existe, la quantité de la ligne est la somme de ces postes. */
+  quantiteDetails?: QuantiteDetail[];
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
   cctpOnly?: boolean;

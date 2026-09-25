@@ -581,6 +581,18 @@ CREATE TABLE IF NOT EXISTS dpgfs (
   project_id TEXT, cctp_id TEXT, data TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dpgf_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT NOT NULL,
+  dpgf_id TEXT REFERENCES dpgfs(id) ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL, phase TEXT, version TEXT,
+  document JSONB NOT NULL, created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dpgf_versions_project ON dpgf_versions(tenant_id, project_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL UNIQUE,
@@ -724,6 +736,7 @@ ALTER TABLE receptions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reserves             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dpgf_versions        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_phase_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE situations           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detail_situations    ENABLE ROW LEVEL SECURITY;
@@ -835,6 +848,8 @@ CREATE POLICY "tenant_isolation" ON plans
 CREATE POLICY "tenant_isolation" ON reserves
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON dpgf_items
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON dpgf_versions
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON project_phase_history
   USING (tenant_id = my_tenant_id());
