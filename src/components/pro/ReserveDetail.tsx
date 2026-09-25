@@ -6,6 +6,7 @@ import {
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { SignedImage } from '../SignedImage';
+import { queuedJsonRequest, queuedMultipartRequest } from '../../lib/offlineQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
   type ReserveLike, type ReserveStatus, RESERVE_STATUSES, StatusSelect, PlanExcerpt,
@@ -108,15 +109,27 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm(prev => ({ ...prev, [key]: value }));
 
-  const uploadOne = async (reserveId: string, file: File): Promise<ReservePhoto | null> => {
-    const body = new FormData();
-    body.append('file', file, file.name || 'photo.jpg');
-    const res = await fetch(`${apiBase}/${reserveId}/photos`, { method: 'POST', body });
-    if (!res.ok) {
-      const err = await res.json().catch(() => null);
-      throw new Error(err?.error || `Envoi de la photo refusé (${res.status})`);
+  const reserveKind = apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr';
+  const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
+  const photoEntity = apiBase === '/api/gpa-reserves' ? 'gpaReservePhoto' : 'reservePhoto';
+
+  // Id généré côté client, comme la réserve elle-même : un envoi rejoué
+  // après coupure réseau (src/lib/offlineQueue.ts) retrouve la même photo
+  // au lieu de la déposer une seconde fois, et n'a pas besoin d'attendre
+  // que la réserve ait elle-même atteint le serveur pour partir.
+  const uploadOne = async (reserveId: string, file: File): Promise<ReservePhoto> => {
+    const photoId = window.crypto.randomUUID();
+    const { queued: wasQueued, data } = await queuedMultipartRequest<ReservePhoto>({
+      entity: photoEntity, id: photoId, method: 'POST', url: `${apiBase}/${reserveId}/photos`,
+      blob: file, blobFieldName: 'file', blobFilename: file.name || 'photo.jpg', extraFields: { id: photoId },
+    });
+    if (wasQueued) {
+      return {
+        id: photoId, reserve_id: reserveId, reserve_kind: reserveKind, file_url: '',
+        uploaded_at: new Date().toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(file),
+      };
     }
-    return res.json();
+    return data!;
   };
 
   const handleFiles = async (files: FileList | null) => {
@@ -142,8 +155,10 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const removePhoto = async (photo: ReservePhoto) => {
     if (!reserve) return;
     if (!confirm(t('reserve_detail_confirm_delete_photo'))) return;
-    const res = await fetch(`${apiBase}/${reserve.id}/photos/${photo.id}`, { method: 'DELETE' });
-    if (res.ok) setPhotos(prev => prev.filter(p => p.id !== photo.id));
+    try {
+      await queuedJsonRequest({ entity: photoEntity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${reserve.id}/photos/${photo.id}` });
+      setPhotos(prev => prev.filter(p => p.id !== photo.id));
+    } catch { /* refusée par le serveur : la photo reste affichée */ }
   };
 
   const removeQueued = (index: number) => setQueued(prev => {
@@ -173,30 +188,26 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
       };
       let saved: ReserveLike;
       if (isNew) {
-        const res = await fetch(apiBase, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, id: window.crypto.randomUUID() }),
+        // Id généré côté client (déjà le cas avant la file de synchro
+        // hors-ligne) : le serveur l'accepte tel quel, et une création
+        // rejouée après coupure réseau ne crée jamais deux réserves — voir
+        // src/lib/offlineQueue.ts et CLAUDE.md « fiabiliser la synchro ».
+        const id = window.crypto.randomUUID();
+        const { queued: wasQueued, data } = await queuedJsonRequest<ReserveLike>({
+          entity, id, method: 'POST', url: apiBase, body: { ...payload, id },
         });
-        if (!res.ok) throw new Error('Création impossible.');
-        saved = await res.json();
+        saved = wasQueued ? ({ ...payload, id, photos: [], pendingSync: true } as ReserveLike) : data!;
         const uploaded: ReservePhoto[] = [];
         for (const q of queued) {
           try {
-            const photo = await uploadOne(saved.id, q.file);
-            if (photo) uploaded.push(photo);
+            uploaded.push(await uploadOne(saved.id, q.file));
           } catch (err) {
             console.error('[ReserveDetail] photo non envoyée', err);
           }
         }
         saved = { ...saved, photos: uploaded };
       } else {
-        const res = await fetch(`${apiBase}/${reserve!.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error('Enregistrement impossible.');
+        await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'PUT', url: `${apiBase}/${reserve!.id}`, body: payload });
         saved = { ...(reserve as ReserveLike), ...payload, photos } as ReserveLike;
       }
       onSaved(saved);
@@ -211,8 +222,9 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const handleDelete = async () => {
     if (!reserve) return;
     if (!confirm(t('reserve_detail_confirm_delete_reserve', { number: reserve.number ?? '' }))) return;
-    const res = await fetch(`${apiBase}/${reserve.id}`, { method: 'DELETE' });
-    if (res.ok) { onDeleted(reserve.id); onClose(); }
+    await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${reserve.id}` });
+    onDeleted(reserve.id);
+    onClose();
   };
 
   const retard = reserve ? reserveOverdueDays({ status: form.status, due_date: form.due_date }) : 0;
@@ -274,7 +286,14 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               </button>
               {photos.map(photo => (
                 <div key={photo.id} className="relative aspect-square group">
-                  <SignedImage src={photo.file_url} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg" />
+                  {photo.pendingSync ? (
+                    <img src={photo.localPreviewUrl} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg opacity-90" />
+                  ) : (
+                    <SignedImage src={photo.file_url} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg" />
+                  )}
+                  {photo.pendingSync && (
+                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-bold">En attente d'envoi</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => removePhoto(photo)}
