@@ -229,7 +229,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const { id } = req.params;
       const {
         name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, is_chantier, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
+        is_complete_mission, is_chantier, offline_enabled, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -260,7 +260,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       }
       const { error: ue } = await supabaseAdmin.from('projects').update({
         name: finalName, client: finalClient, client_id: finalClientId || null, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, offline_enabled: !!offline_enabled, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,

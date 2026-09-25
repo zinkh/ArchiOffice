@@ -263,6 +263,8 @@ export interface Project {
   is_public_client?: boolean;
   is_complete_mission?: boolean;
   is_chantier?: boolean;
+  /** Précharge ce projet en lecture seule dans le cache hors-ligne (voir src/lib/offlinePrefetch.ts). */
+  offline_enabled?: boolean;
   etudes_notes?: string;
   chantier_notes?: string;
   surface?: number;

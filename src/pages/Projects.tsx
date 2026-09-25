@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
 import { db } from '../db';
 import { queuedJsonRequest } from '../lib/offlineQueue';
+import { refreshOfflineProjects } from '../lib/offlinePrefetch';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -317,6 +318,10 @@ export default function Projects() {
 
         // 4. Update UI
         if (Array.isArray(data)) setProjects(data.map((p: any) => ({ ...p, is_complete_mission: !!p.is_complete_mission })));
+        // Rafraîchit en tâche de fond le cache hors-ligne des projets cochés
+        // « disponible hors connexion » (src/lib/offlinePrefetch.ts) — jamais
+        // bloquant pour l'affichage de la liste, no-op si aucun projet coché.
+        if (Array.isArray(data)) refreshOfflineProjects(data).catch(() => {});
       } catch (err) {
         console.error(err);
         // Only surface the error if we have nothing (even stale/local) to show —

@@ -48,6 +48,11 @@ export class AppDatabase extends Dexie {
   reservesCache!: Table<Reserve>;
   gpaReservesCache!: Table<GpaReserve>;
   observationsCache!: Table<Observation>;
+  // Préchargement « disponible hors connexion » (src/lib/offlinePrefetch.ts) :
+  // le payload de GET /api/projects/:id/full tel quel, un seul projet par
+  // ligne — pas de risque d'écraser le cache d'un autre projet ici, jamais
+  // besoin du même garde-fou que les tables *Cache ci-dessus.
+  projectSnapshots!: Table<{ id: string; data: any; cachedAt: number }>;
   settings!: Table<{
     id: string;
     agencyName: string;
@@ -102,6 +107,12 @@ export class AppDatabase extends Dexie {
       reservesCache: 'id, project_id',
       gpaReservesCache: 'id, project_id',
       observationsCache: 'id, project_id',
+    });
+    // v7 : préchargement par projet coché « disponible hors connexion »
+    // (offline_enabled) — voir src/lib/offlinePrefetch.ts et
+    // supabase/migrate_project_offline_enabled.sql.
+    this.version(7).stores({
+      projectSnapshots: 'id, cachedAt',
     });
   }
 }

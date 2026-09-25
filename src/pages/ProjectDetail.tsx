@@ -54,6 +54,7 @@ import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
+import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offlinePrefetch';
 import { db } from '../db';
 import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
@@ -602,31 +603,46 @@ export default function ProjectDetail() {
     }
   };
 
+  const applyFullProjectData = (data: any) => {
+    setProject({
+      ...data.project,
+      is_complete_mission: isFlagTrue(data.project.is_complete_mission),
+      is_chantier: isFlagTrue(data.project.is_chantier),
+    });
+    setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+    setMilestonesLoaded(true);
+    setInvoices(data.invoices);
+    setOrdresDeService(data.ordres_de_service);
+    setAvenantsMoe(data.avenants_moe || []);
+    setMarchesTravaux(data.marches_entreprises || []);
+    setVisas(data.visas);
+    setReceptions(data.receptions);
+    setReserves(data.reserves);
+    setPlans(data.plans);
+  };
+
+  // Cache d'abord (src/lib/offlinePrefetch.ts) : un projet ouvert en ligne au
+  // moins une fois — coché « disponible hors connexion » ou non — garde un
+  // instantané consultable si le réseau tombe ensuite. Pour un projet
+  // volontairement préchargé, l'instantané peut même dater d'avant la toute
+  // première ouverture de sa fiche aujourd'hui.
   const fetchFullProject = async () => {
+    const cached = await cachedProjectSnapshot(id!);
+    if (cached) applyFullProjectData(cached);
+    if (!navigator.onLine) return;
     try {
       const res = await fetch(`/api/projects/${id}/full`);
       if (res.ok) {
         const data = await res.json();
-        setProject({
-          ...data.project,
-          is_complete_mission: isFlagTrue(data.project.is_complete_mission),
-          is_chantier: isFlagTrue(data.project.is_chantier),
-        });
-        setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
-        setMilestonesLoaded(true);
-        setInvoices(data.invoices);
-        setOrdresDeService(data.ordres_de_service);
-        setAvenantsMoe(data.avenants_moe || []);
-        setMarchesTravaux(data.marches_entreprises || []);
-        setVisas(data.visas);
-        setReceptions(data.receptions);
-        setReserves(data.reserves);
-        setPlans(data.plans);
-      } else {
+        applyFullProjectData(data);
+        await db.projectSnapshots.put({ id: id!, data, cachedAt: Date.now() });
+      } else if (!cached) {
         navigate('/projects');
       }
     } catch (err) {
       console.error('Failed to fetch full project:', err);
+      // Coupure réseau après le rendu depuis le cache (s'il y en avait un) :
+      // on garde ce qui est déjà affiché plutôt que de naviguer ailleurs.
     }
   };
 
@@ -3532,6 +3548,25 @@ export default function ProjectDetail() {
                           />
                           <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
                             Chantier
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="offline_enabled"
+                            className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+                            checked={!!project.offline_enabled}
+                            onChange={e => {
+                              const checked = e.target.checked;
+                              setProject({ ...project, offline_enabled: checked });
+                              // Précharge tout de suite plutôt que d'attendre le
+                              // prochain passage par /projects (src/lib/offlinePrefetch.ts)
+                              // — sans réseau, ce préchargement ne fait simplement rien.
+                              if (checked) prefetchProjectForOffline(project.id).catch(() => {});
+                            }}
+                          />
+                          <label htmlFor="offline_enabled" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                            Disponible hors connexion
                           </label>
                         </div>
                       </div>
