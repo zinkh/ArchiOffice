@@ -189,7 +189,12 @@ CREATE TABLE IF NOT EXISTS projects (
   effectif_public TEXT, effectif_personnel TEXT, ind TEXT, date_modification TEXT,
   is_complete_mission BOOLEAN DEFAULT false, is_chantier BOOLEAN DEFAULT false, etudes_notes TEXT, chantier_notes TEXT,
   surface TEXT, construction_cost TEXT, remuneration TEXT, progression TEXT,
-  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT
+  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT,
+  -- Disponible hors connexion (voir supabase/migrate_project_offline_enabled.sql) :
+  -- cochée depuis la fiche projet, déclenche le préchargement en lecture seule
+  -- des données du projet dans le cache Dexie du navigateur — jamais activée
+  -- pour tous les projets à la fois, pour ne pas alourdir l'app sur les autres.
+  offline_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS project_categories_junction (

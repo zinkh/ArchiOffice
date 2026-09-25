@@ -1,0 +1,13 @@
+-- Disponible hors connexion, projet par projet.
+--
+-- Jusqu'ici, seuls réunions/réserves/observations (le "suivi de chantier")
+-- avaient une file de synchro hors-ligne fiable — voir CLAUDE.md
+-- « fiabiliser la synchro hors-ligne ». Étendre ce même travail
+-- d'idempotence à TOUTES les routes de l'application (devis, factures,
+-- documents...) alourdirait le serveur pour un gain que la plupart des
+-- cabinets n'utiliseraient jamais. Cette colonne fait l'inverse : une case
+-- à cocher, par projet, qui déclenche un PRÉCHARGEMENT en LECTURE SEULE
+-- (src/lib/offlinePrefetch.ts) des données de ce seul projet dans le cache
+-- Dexie du navigateur — aucun coût serveur supplémentaire, et rien ne change
+-- pour un cabinet qui ne coche jamais cette case.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS offline_enabled BOOLEAN NOT NULL DEFAULT false;
