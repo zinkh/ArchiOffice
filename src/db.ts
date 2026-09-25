@@ -20,7 +20,7 @@ export interface PendingWrite {
   blobFieldName?: string;
   blobFilename?: string;
   extraFields?: Record<string, string>;
-  entity: 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'project';
+  entity: 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'project' | 'siteReport';
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;

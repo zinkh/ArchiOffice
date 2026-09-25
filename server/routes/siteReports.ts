@@ -41,7 +41,14 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { date, report_number, meteo, temperature, effectif_total } = req.body;
+      const { id: bodyId, date, report_number, meteo, temperature, effectif_total } = req.body;
+      // Id fourni par le client (file de synchro hors-ligne,
+      // src/lib/offlineQueue.ts) : rejouer la même création après une
+      // coupure réseau ne doit jamais créer deux comptes-rendus.
+      if (bodyId) {
+        const { data: existing } = await supabaseAdmin.from('site_reports').select('id, report_number').eq('id', bodyId).eq('tenant_id', tenantId).maybeSingle();
+        if (existing) return res.status(200).json({ id: (existing as any).id, report_number: (existing as any).report_number });
+      }
       const { data: project, error: projectError } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
       if (projectError) throw projectError;
       if (!project) return res.status(404).json({ error: 'Opération introuvable.' });
@@ -55,7 +62,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (!Number.isInteger(number) || number < 1 || (existing || []).some((r: any) => Number(r.report_number) === number)) {
         return res.status(409).json({ error: 'Numéro de compte-rendu invalide ou déjà utilisé.' });
       }
-      const id = crypto.randomUUID();
+      const id = bodyId || crypto.randomUUID();
       const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
         id, tenant_id: tenantId, project_id: projectId, date, report_number: number,
         meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,

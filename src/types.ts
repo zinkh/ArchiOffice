@@ -1224,6 +1224,8 @@ export interface SiteReport {
   lot_tracking?: SiteReportLotTracking[];
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
+  /** Créé hors ligne, pas encore atteint le serveur — voir src/lib/offlineQueue.ts. */
+  pendingSync?: boolean;
 }
 
 export interface SiteReportNote {
