@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile } from './types';
+import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, Reserve, GpaReserve, Observation } from './types';
 
 /**
  * Une écriture (POST/PUT/PATCH) différée faute de réseau, rejouée par
@@ -39,6 +39,15 @@ export class AppDatabase extends Dexie {
   projectCategories!: Table<ProjectCategory>;
   projectTemplates!: Table<ProjectTemplate>;
   pendingWrites!: Table<PendingWrite>;
+  // Cache de lecture hors-ligne « suivi de chantier » (voir
+  // src/lib/offlineReadCache.ts) : jamais vidées en bloc comme le ferait un
+  // `table.clear()` global, seulement les lignes du périmètre rechargé
+  // (un projet, un devis...) — sinon consulter les réunions d'une affaire
+  // effacerait le cache de toutes les autres.
+  meetingsCache!: Table<Meeting>;
+  reservesCache!: Table<Reserve>;
+  gpaReservesCache!: Table<GpaReserve>;
+  observationsCache!: Table<Observation>;
   settings!: Table<{
     id: string;
     agencyName: string;
@@ -84,6 +93,15 @@ export class AppDatabase extends Dexie {
     this.version(5).stores({
       syncQueue: null,
       pendingWrites: 'id, tenantId, status, createdAt',
+    });
+    // v6 : cache de lecture hors-ligne pour réunions, réserves OPR/GPA et
+    // observations — voir src/lib/offlineReadCache.ts et CLAUDE.md
+    // « fiabiliser la synchro hors-ligne ».
+    this.version(6).stores({
+      meetingsCache: 'id, project_id, proposal_id, tender_id',
+      reservesCache: 'id, project_id',
+      gpaReservesCache: 'id, project_id',
+      observationsCache: 'id, project_id',
     });
   }
 }

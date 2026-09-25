@@ -13,6 +13,8 @@ import { IconPlus, IconTrash, IconColumns, IconChevronDown } from '@tabler/icons
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 
 interface Props {
   projectId: string;
@@ -75,19 +77,20 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     ? `/api/reports/${reportId}/observations`
     : `/api/projects/${projectId}/observations`;
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les
+  // observations déjà consultées pour cette affaire/ce compte rendu restent
+  // affichées plutôt que de disparaître.
+  const scopeFilter = useCallback(
+    (o: Observation) => (reportId ? (o.report_ids || []).includes(reportId) : o.project_id === projectId),
+    [reportId, projectId],
+  );
+
   const fetchObservations = useCallback(() => {
     setLoadError(false);
-    fetch(endpoint)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        if (Array.isArray(data)) setObservations(data);
-        else throw new Error('Unexpected response shape');
-      })
+    cachedListFirst(db.observationsCache, scopeFilter, endpoint, setObservations)
+      .then(({ hadLocalData, synced }) => { if (!hadLocalData && !synced) setLoadError(true); })
       .catch(err => { console.error(err); setLoadError(true); });
-  }, [endpoint]);
+  }, [endpoint, scopeFilter]);
 
   useEffect(() => { fetchObservations(); }, [fetchObservations]);
 

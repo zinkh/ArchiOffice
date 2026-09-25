@@ -29,6 +29,8 @@ import {
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
@@ -403,13 +405,22 @@ export default function Reunions() {
     setSelectedMeeting(null);
     try {
       let url = '';
-      if (kind === 'project') url = `/api/meetings?project_id=${id}&type=${section}`;
-      else if (kind === 'proposal') url = `/api/meetings?proposal_id=${id}`;
-      else url = `/api/meetings?tender_id=${id}`;
-      const data = await apiFetch<Meeting[]>(url);
-      setMeetings(data);
-    } catch {
-      setMeetings([]);
+      let scopeFilter: (m: Meeting) => boolean;
+      if (kind === 'project') {
+        url = `/api/meetings?project_id=${id}&type=${section}`;
+        scopeFilter = m => m.project_id === id && m.type === section;
+      } else if (kind === 'proposal') {
+        url = `/api/meetings?proposal_id=${id}`;
+        scopeFilter = m => m.proposal_id === id;
+      } else {
+        url = `/api/meetings?tender_id=${id}`;
+        scopeFilter = m => m.tender_id === id;
+      }
+      // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, la liste
+      // déjà consultée pour cette affaire reste affichée au lieu de
+      // disparaître — c'est ce que l'ancien apiFetch seul ne permettait pas.
+      const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, setMeetings);
+      if (!hadLocalData && !synced) setMeetings([]);
     } finally {
       setLoadingMeetings(false);
     }

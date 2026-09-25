@@ -10,6 +10,8 @@ import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 import { cn } from '../lib/utils';
 import type { AgencySettings } from '../lib/proposalExport';
 
@@ -95,19 +97,26 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     if (data.length > 0 && !selectedReportId) setSelectedReportId(data[0].id);
   }, [project.id, selectedReportId]);
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les
+  // observations déjà consultées pour ce compte rendu/cette affaire restent
+  // affichées plutôt que de disparaître.
   const fetchReportObservations = useCallback(async () => {
     if (!selectedReportId) { setReportObservations([]); return; }
-    const res = await fetch(`/api/reports/${selectedReportId}/observations`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setReportObservations(data);
+    await cachedListFirst(
+      db.observationsCache,
+      o => (o.report_ids || []).includes(selectedReportId),
+      `/api/reports/${selectedReportId}/observations`,
+      setReportObservations,
+    );
   }, [selectedReportId]);
 
   const fetchAllObservations = useCallback(async () => {
-    const res = await fetch(`/api/projects/${project.id}/observations`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setAllObservations(data);
+    await cachedListFirst(
+      db.observationsCache,
+      o => o.project_id === project.id,
+      `/api/projects/${project.id}/observations`,
+      setAllObservations,
+    );
   }, [project.id]);
 
   const fetchReportNotes = useCallback(async () => {
