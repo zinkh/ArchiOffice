@@ -7,7 +7,7 @@ import {
   IconUsers, IconBuildingSkyscraper, IconCreditCard,
   IconLoader2, IconRefresh, IconChevronDown, IconTrash,
   IconPlus, IconCalendar, IconMail, IconAlertTriangle, IconX, IconCoin,
-  IconCircleCheck, IconShieldLock, IconMessageCircle, IconRobot,
+  IconCircleCheck, IconShieldLock, IconMessageCircle, IconRobot, IconFileSearch,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -618,6 +618,117 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── Moteur de lecture des documents (local ou Nomic) ────────────────────────
+
+interface DocumentParserState {
+  current: { engine: 'local' | 'nomic'; source: 'database' | 'environment' | 'default' };
+  engines: { engine: 'local' | 'nomic'; label: string; configured: boolean; envKey: string | null }[];
+}
+
+function DocumentParserPanel({ onClose }: { onClose: () => void }) {
+  const [state, setState] = useState<DocumentParserState | null>(null);
+  const [engine, setEngine] = useState<'local' | 'nomic'>('local');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch<DocumentParserState>('/api/admin/document-parser');
+      setState(data);
+      setEngine(data.current.engine);
+    } catch (e: any) {
+      setError(e.message ?? 'Erreur de chargement');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await apiFetch('/api/admin/document-parser', { method: 'PUT', body: JSON.stringify({ engine }) });
+      setSaved(true);
+      await load();
+    } catch (e: any) {
+      setError(e.message ?? "Erreur lors de l'enregistrement");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const dirty = !!state && engine !== state.current.engine;
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <IconFileSearch size={16} style={{ color: 'var(--tblr-primary)' }} />
+          <h2 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>Lecture des documents</h2>
+        </div>
+        <button onClick={onClose} style={{ color: 'var(--tblr-muted)' }}><IconX size={16} /></button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        Moteur qui lit les PDF, plans et pièces du DCE pour les agents, l'analyse du DCE et la
+        génération du CCTP, pour tous les cabinets. Le moteur local est gratuit mais lit mal les
+        plans ; Nomic Parse est entraîné sur les pièces d'ingénierie et se facture à la page sur le
+        compte Nomic de la plateforme. En cas d'échec de Nomic, le moteur local prend le relais.
+        La bibliothèque des agents, relue à chaque message, reste toujours en lecture locale.
+      </p>
+
+      {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      {loading || !state ? (
+        <IconLoader2 size={18} className="animate-spin" style={{ color: 'var(--tblr-muted)' }} />
+      ) : (
+        <>
+          <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            Actuellement : <span className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{state.current.engine}</span>
+            {' '}({state.current.source === 'environment' ? 'défini par DOCUMENT_PARSER' : AI_SOURCE_LABELS[state.current.source] ?? state.current.source})
+          </div>
+          <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+            {state.engines.map(e => (
+              <li key={e.engine} className="flex items-center gap-2 py-2.5">
+                <label className="flex items-center gap-2 cursor-pointer" title={e.configured ? undefined : `Renseignez ${e.envKey} pour pouvoir activer ce moteur`}>
+                  <input
+                    type="radio"
+                    name="document-parser-engine"
+                    checked={engine === e.engine}
+                    disabled={!e.configured}
+                    onChange={() => { setEngine(e.engine); setSaved(false); }}
+                  />
+                  <span className="text-sm" style={{ color: e.configured ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>{e.label}</span>
+                </label>
+                {!e.configured && (
+                  <span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>clé manquante ({e.envKey})</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
+              style={{ background: 'var(--tblr-primary)', color: '#fff', opacity: (saving || !dirty) ? 0.5 : 1 }}
+            >
+              {saving ? <IconLoader2 size={14} className="animate-spin" /> : <IconCircleCheck size={14} />}
+              Appliquer
+            </button>
+            {saved && !dirty && <span className="text-xs text-emerald-600 dark:text-emerald-400">Enregistré</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PlatformAdminsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [admins, setAdmins] = useState<PlatformAdminRow[]>([]);
@@ -726,6 +837,7 @@ export default function AdminDashboard() {
   const [creditTarget, setCreditTarget] = useState<TenantRow | null>(null);
   const [showPlatformAdmins, setShowPlatformAdmins] = useState(false);
   const [showAiProvider, setShowAiProvider] = useState(false);
+  const [showDocumentParser, setShowDocumentParser] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -852,6 +964,14 @@ export default function AdminDashboard() {
             Fournisseur IA
           </button>
           <button
+            onClick={() => setShowDocumentParser(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          >
+            <IconFileSearch size={14} />
+            Lecture des documents
+          </button>
+          <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
@@ -880,6 +1000,8 @@ export default function AdminDashboard() {
       {showPlatformAdmins && <PlatformAdminsPanel onClose={() => setShowPlatformAdmins(false)} />}
 
       {showAiProvider && <AiProviderPanel onClose={() => setShowAiProvider(false)} />}
+
+      {showDocumentParser && <DocumentParserPanel onClose={() => setShowDocumentParser(false)} />}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">

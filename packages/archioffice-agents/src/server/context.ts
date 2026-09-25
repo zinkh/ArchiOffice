@@ -9,6 +9,7 @@ import { AGENT_RESOURCES } from '../types.js';
 // 1.x is a pure-JS text-only extractor with zero native dependencies.
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { parseWithActiveEngine } from './documentParser.js';
 import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
 import { readExternalFile } from './externalFiles.js';
 
@@ -69,7 +70,7 @@ function parseStorageRef(fileUrl: string): { bucket: string; path: string } | nu
 // plain fetch() against the stored reference URL, which would 401/403.
 // Falls back to a direct fetch for anything that isn't one of our own
 // storage refs (e.g. a document imported from an external link).
-async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+export async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
   // Un fichier hébergé sur l'espace de stockage du cabinet (Google Drive,
   // Dropbox, Nextcloud, kDrive) n'est joignable ni par Storage ni par un fetch
   // direct : seul l'hôte sait construire l'adaptateur. Sans ce passage, les
@@ -208,11 +209,25 @@ function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string;
 // volontairement, pour rester le sous-ensemble strictement nécessaire plutôt
 // que de dupliquer toute la marche à suivre de la boucle contentFetches
 // ci-dessous (redirection PDF scanné vers rasterizePdf comprise).
-export async function extractKnowledgeDocText(supabaseAdmin: any, tenantId: string, doc: { name: string; file_url: string }): Promise<string | null> {
+export async function extractKnowledgeDocText(
+  supabaseAdmin: any,
+  tenantId: string,
+  doc: { name: string; file_url: string },
+  // Faux pour la bibliothèque d'un agent, relue à CHAQUE tour de chaque
+  // conversation : Nomic se paie à la page, et le même DTU refacturé à chaque
+  // message n'apporterait rien qu'une lecture locale n'ait déjà donné.
+  // Vrai pour une lecture ponctuelle (analyse du DCE, génération du CCTP).
+  allowNomic: boolean = true,
+): Promise<string | null> {
   const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
   if (!fetched) return null;
   const { buffer, contentType } = fetched;
   const lowerName = String(doc.name || '').toLowerCase();
+
+  // Nomic Parse quand il est le moteur choisi dans /admin (plans et pièces du
+  // DCE surtout, voir documentParser.ts) ; null = moteur local ci-dessous.
+  const nomicText = allowNomic ? await parseWithActiveEngine(lowerName, buffer) : null;
+  if (nomicText) return nomicText;
 
   let text: string | null = null;
   if (lowerName.endsWith('.pdf')) {
@@ -463,6 +478,21 @@ export async function buildAgentContext(
           // isOcrCandidate/ocrDocument existant, inchangé.
         }
 
+        // Moteur Nomic choisi dans /admin : lecture complète (couche texte,
+        // OCR, tableaux) d'un PDF ou d'un document Office — après la branche
+        // vision ci-dessus, qui reste préférée pour une photo. Null = moteur
+        // local, y compris après un échec de Nomic.
+        const nomicText = await parseWithActiveEngine(lowerName, buffer);
+        if (nomicText) {
+          ctx.documentContents.push({
+            id: doc.id,
+            name: doc.name,
+            content: '[Document lu par Nomic Parse.]\n\n' + nomicText.slice(0, MAX_DOC_BYTES),
+          });
+          console.log(`[agent context] document "${doc.name}" extracted by Nomic in ${Date.now() - docStart}ms (${nomicText.length} chars)`);
+          return;
+        }
+
         let text: string | null = null;
         let ocrNote = '';
         if (lowerName.endsWith('.pdf')) {
@@ -567,7 +597,7 @@ export async function buildAgentContext(
 
     const knowledgeFetches = ((knowledgeDocs as any[]) || []).map((doc: any) =>
       withTimeout(
-        extractKnowledgeDocText(supabaseAdmin, tenantId, doc).then(text => {
+        extractKnowledgeDocText(supabaseAdmin, tenantId, doc, false).then(text => {
           if (text) ctx.knowledgeDocuments.push({ title: doc.name, excerpt: text.slice(0, MAX_KNOWLEDGE_DOC_CHARS) });
         }),
         KNOWLEDGE_EXTRACTION_TIMEOUT_MS

@@ -8,6 +8,7 @@
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { ocrDocument, isOcrCandidate } from './ocr.js';
+import { parseWithActiveEngine } from './documentParser.js';
 
 // Un devis ou une notice technique dépasse vite quelques milliers de
 // caractères — 20000 reste un ordre de grandeur raisonnable pour un document
@@ -39,6 +40,13 @@ export interface ExtractedText {
  */
 export async function extractDocumentText(filename: string, mimeType: string, buffer: Buffer): Promise<ExtractedText> {
   const lower = filename.toLowerCase();
+  // Moteur Nomic choisi dans /admin : il couvre à lui seul couche texte, OCR
+  // et tableaux. Null = moteur local, y compris après un échec de Nomic.
+  const nomicText = await parseWithActiveEngine(filename, buffer);
+  if (nomicText) {
+    return { text: nomicText, note: '[Document lu par Nomic Parse.]\n\n' };
+  }
+
   let text: string | null = null;
   if (lower.endsWith('.pdf') || mimeType === 'application/pdf') {
     text = (await pdfParse(buffer)).text;

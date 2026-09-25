@@ -44,6 +44,7 @@ import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences"
 import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
 import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
@@ -507,7 +508,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -539,7 +540,7 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
@@ -988,6 +989,7 @@ export async function createApp() {
   registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
   registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -1053,7 +1055,7 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
   // Le package agents n'importe rien depuis server/ (module propriétaire
   // autonome) et ne peut donc pas construire lui-même un adaptateur de
   // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
@@ -1061,6 +1063,10 @@ export async function createApp() {
   // déposées depuis qu'un cabinet a branché son espace, en rapportant
   // simplement que le document est vide.
   setExternalFileReader(readExternalBusinessFile);
+  // Même principe pour le moteur de lecture des documents (local ou Nomic,
+  // choisi dans /admin) : les extracteurs du package n'ont pas de client
+  // Supabase à eux pour relire ce réglage.
+  setDocumentParserSettingsClient(supabaseAdmin);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     reserveAiCredit,
