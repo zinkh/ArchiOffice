@@ -30,6 +30,7 @@ export function HistoricalMonuments({ lat: initialLat, lon: initialLon, address 
   const [error, setError] = useState('');
   const [lat, setLat] = useState(initialLat || 0);
   const [lon, setLon] = useState(initialLon || 0);
+  const [cityCode, setCityCode] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
   const handleCopyAll = (e: React.MouseEvent) => {
@@ -54,45 +55,58 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
   };
 
   useEffect(() => {
-    if (initialLat) setLat(initialLat);
-    if (initialLon) setLon(initialLon);
-  }, [initialLat, initialLon]);
+    if (!address) {
+      setLat(initialLat || 0);
+      setLon(initialLon || 0);
+      return;
+    }
 
-  useEffect(() => {
-    if (!address || (lat && lon)) return;
+    const controller = new AbortController();
+    setMonuments([]);
+    setCityCode('');
 
     const geocode = async () => {
       setLoading(true);
+      setError('');
       try {
-        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
+        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}&limit=1`, { signal: controller.signal });
         if (res.ok) {
           const data = await res.json();
           if (data.features?.length > 0) {
             const feature = data.features[0];
             setLat(feature.geometry.coordinates[1]);
             setLon(feature.geometry.coordinates[0]);
+            setCityCode(feature.properties.citycode || '');
+          } else {
+            setError('Adresse introuvable');
           }
         }
-      } catch (e) {
-        console.error("Geocoding failed for HistoricalMonuments", e);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          console.error("Geocoding failed for HistoricalMonuments", e);
+          setError('Impossible de localiser cette adresse');
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
 
     geocode();
-  }, [address, lat, lon]);
+    return () => controller.abort();
+  }, [address, initialLat, initialLon]);
 
   useEffect(() => {
-    if (!lat || !lon) return;
+    if (!lat || !lon || !cityCode) return;
+
+    const controller = new AbortController();
 
     const fetchMonuments = async () => {
       setLoading(true);
       setError('');
       try {
         // Search for monuments within 500m via our backend proxy
-        const url = `/api/historical-monuments?lat=${lat}&lon=${lon}&distance=500`;
-        const response = await fetch(url);
+        const url = `/api/historical-monuments?lat=${lat}&lon=${lon}&insee=${encodeURIComponent(cityCode)}&distance=500`;
+        const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.error || 'Failed to fetch historical monuments');
@@ -101,15 +115,18 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
         const data = await response.json();
         setMonuments(data.records || []);
       } catch (err: any) {
-        console.error('Culture API error:', err);
-        setError('Could not retrieve historical monuments');
+        if (err.name !== 'AbortError') {
+          console.error('Culture API error:', err);
+          setError('Impossible de récupérer les monuments historiques');
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
 
     fetchMonuments();
-  }, [lat, lon]);
+    return () => controller.abort();
+  }, [lat, lon, cityCode]);
 
   if (!lat || !lon) return null;
 
