@@ -61,7 +61,14 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
   app.post("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
+      const { id: bodyId, project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
+      // Id fourni par le client (file de synchro hors-ligne,
+      // src/lib/offlineQueue.ts) : rejouer la même création après une
+      // coupure réseau ne doit jamais créer deux réunions.
+      if (bodyId) {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', bodyId).maybeSingle();
+        if (existing) return res.status(200).json({ ...withContextualType(existing), photos: [] });
+      }
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
@@ -74,7 +81,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       // Le type suit le parent, même pour les clients/API qui omettent le
       // champ ou envoient encore la valeur historique par défaut « projet ».
       const meetingType = proposal_id ? 'visite_proposition' : tender_id ? 'visite_candidature' : type || 'projet';
-      const id = crypto.randomUUID();
+      const id = bodyId || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: meetingType, title, date, notes: notes || null, created_at });
       if (error) throw error;
@@ -129,12 +136,20 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { caption } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
+      // Id fourni par le client (file de synchro hors-ligne) : un envoi
+      // rejoué après coupure réseau retrouve la photo déjà déposée au lieu
+      // de la reposer une seconde fois sur le stockage.
+      const clientPhotoId = typeof req.body?.id === 'string' && req.body.id ? req.body.id : null;
+      if (clientPhotoId) {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('id', clientPhotoId).maybeSingle();
+        if (existing) return res.status(200).json(existing);
+      }
       const sniffedMime = sniffImageMime(file.buffer);
       if (!sniffedMime) {
         return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
       }
       const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
-      const photoId = crypto.randomUUID();
+      const photoId = clientPhotoId || crypto.randomUUID();
       const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('meeting-photos', storagePath, buffer, mimetype);
       const uploaded_at = new Date().toISOString();
