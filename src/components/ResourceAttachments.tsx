@@ -26,7 +26,8 @@ export interface ResourceAttachment {
 export type AttachableResourceType =
   | 'projects' | 'contacts' | 'proposals' | 'tenders' | 'permits' | 'meetings'
   | 'receptions' | 'reserves' | 'contrats_moe' | 'ordres_de_service' | 'visas'
-  | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents';
+  | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents'
+  | 'agency_library';
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return '';

@@ -1,19 +1,27 @@
 // Assistance IA sur le dossier de candidature d'un appel d'offres — réservée
 // au plan Enterprise (comme l'automatisation MAF, voir
-// src/pages/MafDeclaration.tsx). Deux gestes :
+// src/pages/MafDeclaration.tsx). Quatre gestes :
 //
 // 1. "Analyser le DCE" — lit le texte des documents attachés à l'appel
 //    d'offres (resource_type='tenders') et en déduit une liste de pièces
 //    demandées (tender_pieces), avec le statut 'detectee_ia' tant que
 //    personne ne les a confirmées "fournies".
-// 2. "Rédiger avec IA" — ébauche le contenu d'une section de note
-//    méthodologique à partir du contexte de l'affaire.
+// 2. "Chercher dans le DCE" — même lecture, pour l'enveloppe prévisionnelle
+//    des honoraires.
+// 3. "Préremplir les titres" — pose le plan de sections d'une note
+//    méthodologique, depuis le DCE quand il en impose un, sinon depuis une
+//    structure usuelle.
+// 4. Rédiger le contenu d'une section de note méthodologique, à partir du
+//    seul contexte de l'affaire, ou enrichi par le texte du DCE ou par la
+//    bibliothèque documentaire du cabinet (resource_type='agency_library',
+//    réglée depuis /settings — voir ATTACHABLE_RESOURCE_TYPES).
 //
-// Les deux suivent le patron réserve → exécute → règle déjà en place pour
+// Tous suivent le patron réserve → exécute → règle déjà en place pour
 // le chat des agents (server.ts, packages/archioffice-agents/src/server/
 // routes.ts) plutôt que le lire-puis-déduire plus ancien de aiSuggestions.ts :
 // un coût pessimiste est réservé avant l'appel au modèle, réglé contre le
-// coût réel ensuite, remboursé en cas d'échec.
+// coût réel ensuite, remboursé en cas d'échec — sauf "Préremplir les titres"
+// sans DCE attaché, qui n'appelle aucun modèle et ne coûte donc rien.
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
 import { aiGenerationLimiter } from '../rateLimit';
@@ -36,12 +44,41 @@ export interface RouteDeps {
 const MAX_DCE_CHARS = 40_000; // borne le coût d'un appel, comme MAX_DOC_BYTES côté agents
 const SECTIONS = ['candidature', 'offre_technique', 'offre_financiere'];
 
+// Titres proposés faute de DCE à analyser (voir prefill-sections ci-dessous) —
+// la structure usuelle d'un mémoire technique de candidature MOE en marché
+// public français, pas une liste exhaustive : l'architecte reste libre d'en
+// renommer, supprimer ou ajouter après coup comme n'importe quelle section.
+const DEFAULT_METHODOLOGY_TITLES = [
+  'Compréhension des enjeux du projet',
+  "Organisation et moyens de l'équipe de maîtrise d'œuvre",
+  'Méthodologie de conception',
+  'Méthodologie de suivi de chantier',
+  "Démarche environnementale et développement durable",
+  "Planning prévisionnel de l'opération",
+];
+
 function requireEnterprisePlan(plan: string, res: any): boolean {
   if (plan !== 'enterprise') {
     res.status(403).json({ error: "Cette assistance IA est réservée au plan Enterprise." });
     return false;
   }
   return true;
+}
+
+// Lit et concatène le texte extrait d'un ensemble de documents (DCE d'un
+// appel d'offres, ou bibliothèque du cabinet), jusqu'à MAX_DCE_CHARS — même
+// borne pour les deux sources, par cohérence de coût. Partagé par
+// analyze-dce, estimate-enveloppe et les deux gestes de la note
+// méthodologique ci-dessous plutôt que dupliqué une quatrième fois.
+async function extractCombinedText(supabaseAdmin: any, tenantId: string, docs: Array<{ name: string; file_url: string }>): Promise<string> {
+  const { extractKnowledgeDocText } = await import('@zinkh/archioffice-agents/server');
+  let combinedText = '';
+  for (const doc of docs) {
+    if (combinedText.length >= MAX_DCE_CHARS) break;
+    const text = await extractKnowledgeDocText(supabaseAdmin, tenantId, doc as any).catch(() => null);
+    if (text) combinedText += `\n\n--- ${doc.name} ---\n${text.slice(0, MAX_DCE_CHARS - combinedText.length)}`;
+  }
+  return combinedText;
 }
 
 export function registerTenderAiRoutes(app: Express, deps: RouteDeps) {
@@ -208,6 +245,13 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
     const tenantId = await getTenantId(req.user.id);
     try {
       const { id: tenderId, noteId } = req.params;
+      // 'dce' relit le dossier de consultation attaché à CET appel d'offres
+      // (comme analyze-dce/estimate-enveloppe ci-dessus) ; 'agency' relit la
+      // bibliothèque du cabinet (présentation, exemples de notes déjà
+      // rédigées, présentation des cotraitants...) réglée depuis /settings —
+      // voir ATTACHABLE_RESOURCE_TYPES's 'agency_library'. Absent des deux,
+      // la rédaction reste celle d'origine : le seul contexte de l'affaire.
+      const source = req.body?.source === 'dce' || req.body?.source === 'agency' ? req.body.source : null;
       const { plan } = await getTenantPlan(tenantId);
       if (!requireEnterprisePlan(plan, res)) return;
 
@@ -219,12 +263,26 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
       const { data: specialties } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').select('specialty_name').eq('tender_id', tenderId);
       const specialtyLabels = (specialties || []).map((s: any) => s.specialty_name).filter(Boolean).join(', ');
 
+      let sourceText = '';
+      if (source === 'dce') {
+        const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'tenders').eq('resource_id', tenderId);
+        if (!docs?.length) return res.status(400).json({ error: "Aucun document DCE attaché — déposez d'abord le règlement de consultation ou le CCTP." });
+        sourceText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
+        if (!sourceText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents DCE (scan illisible ou format non supporté)." });
+      } else if (source === 'agency') {
+        const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'agency_library').eq('resource_id', tenantId);
+        if (!docs?.length) return res.status(400).json({ error: "Aucun document dans la bibliothèque du cabinet — déposez-en depuis les Préférences." });
+        sourceText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
+        if (!sourceText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents de la bibliothèque (scan illisible ou format non supporté)." });
+      }
+
       const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       const prompt = `Tu rédiges une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
 Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.
 ${tender.description ? `Description de l'opération : ${tender.description}\n` : ''}${specialtyLabels ? `Spécialités mobilisées : ${specialtyLabels}\n` : ''}
+${source === 'dce' ? `Voici des extraits du dossier de consultation des entreprises (DCE) de cette affaire — appuie-toi dessus pour coller aux enjeux et exigences réels du marché :\n${sourceText}\n` : ''}${source === 'agency' ? `Voici des extraits de documents du cabinet (présentation, exemples de notes méthodologiques déjà rédigées, présentation de ses cotraitants habituels...) — reprends-en le style, le vocabulaire et les éléments factuels pertinents :\n${sourceText}\n` : ''}
 Rédige le contenu de la section "${note.title}" de cette note méthodologique : un texte professionnel en français, 2 à 4 paragraphes, sans titre ni markdown, prêt à être relu et complété par l'équipe.`;
 
       const estimatedInputTokens = Math.ceil(prompt.length / 4);
@@ -254,6 +312,92 @@ Rédige le contenu de la section "${note.title}" de cette note méthodologique :
       console.error("Tender methodology draft error:", e.message);
       Sentry.captureException(e, { tags: { feature: 'tender-methodology-draft' } });
       res.status(500).json({ error: "Échec de la rédaction assistée : " + e.message });
+    }
+  });
+
+  // "Préremplir les titres" — pose le plan de sections de la note
+  // méthodologique avant toute rédaction. Sans DCE attaché, pas d'appel IA :
+  // DEFAULT_METHODOLOGY_TITLES suffit et ne coûte rien. Un DCE attaché fait
+  // préférer la structure réellement exigée par le règlement de consultation
+  // (certains RC imposent un sommaire précis pour la note méthodologique,
+  // avec un nombre de pages par partie) à ce plan générique.
+  app.post("/api/tenders/:id/methodology/prefill-sections", aiGenerationLimiter, async (req: any, res: any) => {
+    const tenantId = await getTenantId(req.user.id);
+    try {
+      const { id: tenderId } = req.params;
+      const { plan } = await getTenantPlan(tenantId);
+      if (!requireEnterprisePlan(plan, res)) return;
+
+      const { data: tender } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('id, title, client, type').eq('id', tenderId).maybeSingle();
+      if (!tender) return res.status(404).json({ error: "Appel d'offres introuvable." });
+
+      const { data: existingNotes } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_methodology_notes').select('title, sort_order').eq('tender_id', tenderId);
+      const existingTitles = new Set((existingNotes || []).map((n: any) => String(n.title).trim().toLowerCase()));
+      let nextSortOrder = (existingNotes || []).length;
+
+      let titles: string[] = DEFAULT_METHODOLOGY_TITLES;
+      let source: 'dce' | 'default' = 'default';
+
+      const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'tenders').eq('resource_id', tenderId);
+      if (docs?.length) {
+        const combinedText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
+        if (combinedText.trim()) {
+          const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+          const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+
+          const prompt = `Tu prépares le sommaire d'une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
+Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.
+Voici des extraits du dossier de consultation des entreprises (DCE) :
+${combinedText}
+
+Si le règlement de consultation impose un sommaire précis pour la note méthodologique (parties attendues, critères de jugement de l'offre technique...), reprends-le. Sinon, propose un sommaire usuel pour ce type de marché. Réponds UNIQUEMENT avec un JSON valide (sans markdown), de la forme :
+{"titles": ["Titre de la première section", "Titre de la deuxième section", ...]}`;
+
+          const estimatedInputTokens = Math.ceil(prompt.length / 4);
+          const reservedCents = await estimateReserveCents(provider.id, provider.model, estimatedInputTokens);
+          if (!(await reserveAiCredit(tenantId, reservedCents))) {
+            return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+          }
+
+          let result;
+          try {
+            result = await provider.chat({ messages: [{ role: 'user', content: prompt }] });
+          } catch (e) {
+            await refundAiCredit(tenantId, reservedCents).catch(() => {});
+            throw e;
+          }
+          await settleAiCredit({
+            tenantId, userId: req.user.id, agentId: null, conversationId: null, endpointType: 'tender_ai',
+            provider: provider.id, model: provider.model, reservedCents,
+            inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
+          });
+
+          const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+          const parsedTitles = jsonMatch ? JSON.parse(jsonMatch[0])?.titles : null;
+          if (Array.isArray(parsedTitles) && parsedTitles.length) {
+            titles = parsedTitles.filter((t: any) => typeof t === 'string' && t.trim()).map((t: string) => t.trim().slice(0, 200));
+            source = 'dce';
+          }
+        }
+      }
+
+      const toInsert = titles
+        .filter(title => !existingTitles.has(title.toLowerCase()))
+        .map(title => ({
+          id: crypto.randomUUID(), tender_id: tenderId, title, content: '', status: 'a_rediger',
+          sort_order: nextSortOrder++,
+        }));
+
+      if (toInsert.length) {
+        const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_methodology_notes').insert(toInsert);
+        if (error) throw error;
+      }
+      res.json({ notes: toInsert, source });
+    } catch (e: any) {
+      if (e?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
+      console.error("Tender methodology prefill error:", e.message);
+      Sentry.captureException(e, { tags: { feature: 'tender-methodology-prefill' } });
+      res.status(500).json({ error: "Échec du préremplissage des titres : " + e.message });
     }
   });
 }

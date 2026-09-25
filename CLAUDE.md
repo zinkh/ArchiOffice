@@ -631,6 +631,41 @@ cause commune :
    insécable classique, U+00A0, par précaution) par une espace normale,
    un caractère WinAnsi ordinaire correctement mesuré et rendu.
 
+### Rédaction assistée de la note méthodologique d'un appel d'offres
+
+Onglet Note méthodologique de `/appels-offres/:id` (`src/pages/TenderDetail.tsx`,
+`server/routes/tenderAi.ts`, `server/routes/tenderMethodology.ts`) — réservée
+au plan Enterprise comme le reste de l'assistance IA sur les appels d'offres
+(`requireEnterprisePlan`). Trois gestes, tous sur le patron réserve → exécute
+→ règle déjà en place pour le chat des agents :
+
+1. **« Préremplir les titres »** (`POST .../methodology/prefill-sections`)
+   pose le plan de sections avant toute rédaction. Sans DCE attaché à
+   l'appel d'offres, pas d'appel IA : `DEFAULT_METHODOLOGY_TITLES` (une
+   structure usuelle de mémoire technique MOE) suffit et ne coûte rien. Un
+   DCE attaché fait préférer le sommaire réellement exigé par le règlement
+   de consultation quand il en impose un. Les titres déjà présents (comparés
+   sans tenir compte de la casse) ne sont jamais dupliqués.
+2. **« Depuis le DCE »** rédige le contenu d'une section en s'appuyant sur le
+   texte extrait des documents DCE de l'affaire (`resource_type='tenders'`) —
+   même lecture qu'« Analyser le DCE ».
+3. **« Depuis la bibliothèque »** rédige en s'appuyant sur la bibliothèque
+   documentaire du cabinet (présentation, exemples de notes déjà rédigées,
+   présentation des cotraitants habituels...) : `documents` avec
+   `resource_type='agency_library'`, une seule ligne logique par cabinet —
+   `resource_id` est le `tenant_id` lui-même, pas l'id d'une fiche, donc
+   `POST /api/documents` le vérifie par égalité directe plutôt que par
+   `assertTenantEntity` (aucune table `agency_library` à interroger). Gérée
+   depuis `/settings` (onglet Cabinet, `AgencyMethodologyLibraryCard.tsx`)
+   avec le même composant `ResourceAttachments` que les autres pièces
+   jointes rattachées génériquement.
+
+Un quatrième bouton, « Contexte de l'affaire », garde le comportement
+d'origine (titre, client, spécialités mobilisées, sans lecture de document) —
+`extractCombinedText()` (`tenderAi.ts`) factorise la lecture DCE/bibliothèque
+partagée par ces trois gestes et par « Analyser le DCE »/« Chercher dans le
+DCE ».
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres
