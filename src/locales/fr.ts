@@ -1790,5 +1790,4 @@ export default {
       "observations_table_confirm_delete": "Supprimer cette observation ?",
       "mfa_settings_confirm_disable": "Désactiver la double authentification ? Votre compte ne sera plus protégé que par votre mot de passe.",
       "ligne_ouvrage_editor_saved": "Enregistré",
-      "act_module_confirm_delete_lot": "Supprimer ce lot ?",
 };
