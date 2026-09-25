@@ -308,7 +308,10 @@ describe('Geo Proxy input validation', () => {
       expect(res.body.records).toHaveLength(1);
       expect(res.body.records[0].recordid).toBe('PA00123456');
       expect(res.body.records[0].fields.dist).toBeLessThan(500);
-      expect(String((global.fetch as any).mock.calls[0][0])).toContain('COG_Insee_lors_de_la_protection__exact=54395');
+      const requestedUrl = String((global.fetch as any).mock.calls[0][0]);
+      expect(requestedUrl).toContain('COG_Insee_lors_de_la_protection__exact=54395');
+      expect(requestedUrl).toContain('page_size=200');
+      expect(requestedUrl).not.toContain('page_size=1000');
     } finally {
       global.fetch = originalFetch;
     }

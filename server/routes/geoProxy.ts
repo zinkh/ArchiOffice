@@ -580,7 +580,9 @@ export function registerGeoProxyRoutes(app: Express) {
       if (!/^\d{5}$/.test(insee)) return res.status(400).json({ error: "Invalid INSEE code" });
 
       const params = new URLSearchParams({
-        page_size: '1000',
+        // L'API tabulaire refuse toute valeur supérieure à 200.
+        page_size: '200',
+        page: '1',
         COG_Insee_lors_de_la_protection__exact: insee,
         columns: [
           'Reference', 'Denomination_de_l_edifice', 'Adresse_forme_index',
@@ -590,12 +592,28 @@ export function registerGeoProxyRoutes(app: Express) {
           'coordonnees_au_format_WGS84',
         ].join(','),
       });
-      const url = `https://tabular-api.data.gouv.fr/api/resources/${HISTORICAL_MONUMENTS_RESOURCE_ID}/data/?${params}`;
-      const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 20_000);
-      if (!response.ok) return res.status(response.status).json({ error: `data.gouv.fr returned ${response.status}` });
-      const payload = await response.json();
+      const endpoint = `https://tabular-api.data.gouv.fr/api/resources/${HISTORICAL_MONUMENTS_RESOURCE_ID}/data/`;
+      const fetchPage = async (page: number) => {
+        params.set('page', String(page));
+        const response = await fetchWithTimeout(`${endpoint}?${params}`, { headers: { Accept: 'application/json' } }, 20_000);
+        if (!response.ok) {
+          const details = await response.text().catch(() => '');
+          const error: any = new Error(`data.gouv.fr returned ${response.status}: ${details.substring(0, 200)}`);
+          error.status = response.status;
+          throw error;
+        }
+        return response.json();
+      };
 
-      const records = (payload.data || [])
+      const firstPage = await fetchPage(1);
+      const total = Number(firstPage.meta?.total || firstPage.data?.length || 0);
+      const pageCount = Math.min(Math.ceil(total / 200), 10);
+      const otherPages = pageCount > 1
+        ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => fetchPage(index + 2)))
+        : [];
+      const rows = [firstPage, ...otherPages].flatMap((page: any) => page.data || []);
+
+      const records = rows
         .map((row: any) => {
           const coords = parseWgs84Coordinates(row.coordonnees_au_format_WGS84);
           if (!coords) return null;
@@ -627,7 +645,7 @@ export function registerGeoProxyRoutes(app: Express) {
 
     } catch (error: any) {
       console.error("[Culture] Proxy Error:", error.message);
-      res.status(error.name === 'AbortError' ? 504 : 500).json({
+      res.status(error.name === 'AbortError' ? 504 : (error.status || 500)).json({
         error: error.name === 'AbortError' ? "Culture API request timed out" : "Internal server error",
         details: error.message
       });
