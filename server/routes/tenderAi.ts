@@ -12,9 +12,12 @@
 //    méthodologique, depuis le DCE quand il en impose un, sinon depuis une
 //    structure usuelle.
 // 4. Rédiger le contenu d'une section de note méthodologique, à partir du
-//    seul contexte de l'affaire, ou enrichi par le texte du DCE ou par la
-//    bibliothèque documentaire du cabinet (resource_type='agency_library',
-//    réglée depuis /settings — voir ATTACHABLE_RESOURCE_TYPES).
+//    contexte de l'affaire (spécialités mobilisées, nommément le cotraitant
+//    retenu pour chacune quand il est connu — onglet Partenaires), enrichi
+//    de tout ce qui est disponible parmi le texte du DCE et la bibliothèque
+//    documentaire du cabinet (resource_type='agency_library', réglée depuis
+//    /settings — voir ATTACHABLE_RESOURCE_TYPES) : les deux sources se
+//    combinent, l'une n'exclut jamais l'autre.
 //
 // Tous suivent le patron réserve → exécute → règle déjà en place pour
 // le chat des agents (server.ts, packages/archioffice-agents/src/server/
@@ -245,13 +248,6 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
     const tenantId = await getTenantId(req.user.id);
     try {
       const { id: tenderId, noteId } = req.params;
-      // 'dce' relit le dossier de consultation attaché à CET appel d'offres
-      // (comme analyze-dce/estimate-enveloppe ci-dessus) ; 'agency' relit la
-      // bibliothèque du cabinet (présentation, exemples de notes déjà
-      // rédigées, présentation des cotraitants...) réglée depuis /settings —
-      // voir ATTACHABLE_RESOURCE_TYPES's 'agency_library'. Absent des deux,
-      // la rédaction reste celle d'origine : le seul contexte de l'affaire.
-      const source = req.body?.source === 'dce' || req.body?.source === 'agency' ? req.body.source : null;
       const { plan } = await getTenantPlan(tenantId);
       if (!requireEnterprisePlan(plan, res)) return;
 
@@ -260,29 +256,42 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
       const { data: note } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_methodology_notes').select('id, title').eq('id', noteId).eq('tender_id', tenderId).maybeSingle();
       if (!note) return res.status(404).json({ error: "Section introuvable." });
 
-      const { data: specialties } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').select('specialty_name').eq('tender_id', tenderId);
-      const specialtyLabels = (specialties || []).map((s: any) => s.specialty_name).filter(Boolean).join(', ');
+      // Spécialités mobilisées ET le cotraitant nommément saisi en face de
+      // chacune (onglet Partenaires, tender_specialties.contact_id) — sans
+      // ça, la note ne pouvait citer aucun nom, seulement des intitulés de
+      // métier génériques.
+      const { data: specialties } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').select('specialty_name, contact_id').eq('tender_id', tenderId);
+      const specialtyContactIds = [...new Set((specialties || []).map((s: any) => s.contact_id).filter(Boolean))];
+      const { data: specialtyContacts } = specialtyContactIds.length
+        ? await supabaseAdmin.from('contacts').select('id, name').eq('tenant_id', tenantId).in('id', specialtyContactIds)
+        : { data: [] as any[] };
+      const contactNameById = new Map((specialtyContacts || []).map((c: any) => [c.id, c.name]));
+      const specialtyLabels = (specialties || [])
+        .map((s: any) => {
+          const contactName = s.contact_id ? contactNameById.get(s.contact_id) : null;
+          return s.specialty_name ? `${s.specialty_name}${contactName ? ` (${contactName})` : ''}` : contactName;
+        })
+        .filter(Boolean).join(', ');
 
-      let sourceText = '';
-      if (source === 'dce') {
-        const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'tenders').eq('resource_id', tenderId);
-        if (!docs?.length) return res.status(400).json({ error: "Aucun document DCE attaché — déposez d'abord le règlement de consultation ou le CCTP." });
-        sourceText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
-        if (!sourceText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents DCE (scan illisible ou format non supporté)." });
-      } else if (source === 'agency') {
-        const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'agency_library').eq('resource_id', tenantId);
-        if (!docs?.length) return res.status(400).json({ error: "Aucun document dans la bibliothèque du cabinet — déposez-en depuis les Préférences." });
-        sourceText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
-        if (!sourceText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents de la bibliothèque (scan illisible ou format non supporté)." });
-      }
+      // Combine les deux sources documentaires plutôt que de choisir entre
+      // elles : le DCE de l'affaire (enjeux et exigences réels du marché) et
+      // la bibliothèque du cabinet (style, exemples déjà rédigés,
+      // présentation de ses cotraitants habituels) s'enrichissent l'un
+      // l'autre pour une même section. Best-effort chacune — l'absence de
+      // l'une n'empêche pas d'utiliser l'autre, ni de rédiger avec le seul
+      // contexte de l'affaire si aucune des deux n'est disponible.
+      const { data: dceDocs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'tenders').eq('resource_id', tenderId);
+      const dceText = dceDocs?.length ? await extractCombinedText(supabaseAdmin, tenantId, dceDocs as any) : '';
+      const { data: agencyDocs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'agency_library').eq('resource_id', tenantId);
+      const agencyText = agencyDocs?.length ? await extractCombinedText(supabaseAdmin, tenantId, agencyDocs as any) : '';
 
       const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
       const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
 
       const prompt = `Tu rédiges une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
 Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.
-${tender.description ? `Description de l'opération : ${tender.description}\n` : ''}${specialtyLabels ? `Spécialités mobilisées : ${specialtyLabels}\n` : ''}
-${source === 'dce' ? `Voici des extraits du dossier de consultation des entreprises (DCE) de cette affaire — appuie-toi dessus pour coller aux enjeux et exigences réels du marché :\n${sourceText}\n` : ''}${source === 'agency' ? `Voici des extraits de documents du cabinet (présentation, exemples de notes méthodologiques déjà rédigées, présentation de ses cotraitants habituels...) — reprends-en le style, le vocabulaire et les éléments factuels pertinents :\n${sourceText}\n` : ''}
+${tender.description ? `Description de l'opération : ${tender.description}\n` : ''}${specialtyLabels ? `Spécialités mobilisées, avec le nom du cotraitant retenu quand il est connu — cite-les nommément là où c'est pertinent : ${specialtyLabels}\n` : ''}
+${dceText.trim() ? `Voici des extraits du dossier de consultation des entreprises (DCE) de cette affaire — appuie-toi dessus pour coller aux enjeux et exigences réels du marché :\n${dceText}\n` : ''}${agencyText.trim() ? `Voici des extraits de documents du cabinet (présentation, exemples de notes méthodologiques déjà rédigées, présentation de ses cotraitants habituels...) — reprends-en le style, le vocabulaire et les éléments factuels pertinents :\n${agencyText}\n` : ''}
 Rédige le contenu de la section "${note.title}" de cette note méthodologique : un texte professionnel en français, 2 à 4 paragraphes, sans titre ni markdown, prêt à être relu et complété par l'équipe.`;
 
       const estimatedInputTokens = Math.ceil(prompt.length / 4);
