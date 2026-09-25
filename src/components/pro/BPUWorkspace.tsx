@@ -575,6 +575,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             {
               id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
               onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+              badge: !!(bpu.multiBatiments || bpu.multiPhases),
             },
             {
               id: 'lettres', label: 'Prix en lettres', icon: <IconAbc size={20} />,

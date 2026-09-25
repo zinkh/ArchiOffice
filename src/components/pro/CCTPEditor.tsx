@@ -250,7 +250,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
           <button
             onClick={() => setShowDecoupage(v => !v)}
             title="Bâtiments / phases"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
+            className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
               showDecoupage
                 ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
                 : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
@@ -258,6 +258,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
           >
             <IconBuildingCommunity size={14} />
             Bâtiments / phases
+            {/* Un DPGF qui a déjà des bâtiments/phases définis doit rester
+                repérable même une fois le panneau refermé — même raison que
+                le badge du ruban DPGF/BPU (ProRibbon). */}
+            {(dpgf.multiBatiments || dpgf.multiPhases) && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-1 ring-white dark:ring-zinc-800" />
+            )}
           </button>
           <button
             onClick={() => setShowLibrary(v => !v)}

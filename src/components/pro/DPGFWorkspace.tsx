@@ -558,6 +558,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {
               id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
               onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+              badge: !!(dpgf.multiBatiments || dpgf.multiPhases),
             },
           ],
         },
@@ -602,8 +603,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Formats',
           actions: [
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName) },
-            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName) },
+            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement) },
+            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement) },
           ],
         },
       ],
@@ -639,7 +640,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {dpgf.multiBatiments && dpgf.multiPhases && <option value="batiment-phase">Par bâtiment et phase</option>}
           </select>
           {groupement !== 'lot' && (
-            <span className="text-[11px] text-zinc-400">Lecture seule — repassez « Par lot » pour éditer.</span>
+            <span className="text-[11px] text-zinc-400">
+              Lecture seule — repassez « Par lot » pour éditer. Les exports PDF/Excel suivent ce classement.
+            </span>
           )}
         </div>
       )}
