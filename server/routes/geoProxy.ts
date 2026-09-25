@@ -16,6 +16,35 @@ import type { Express } from 'express';
 import axios from 'axios';
 import { fetchWithTimeout } from '../fetchWithTimeout';
 
+const CADASTRE_TIMEOUT_MS = 20_000;
+const CADASTRE_CACHE_TTL_MS = 5 * 60_000;
+const CADASTRE_CACHE_MAX_ENTRIES = 100;
+const CADASTRE_MAX_BBOX_SPAN_DEG = 0.2;
+
+type CadastreFeatureCollection = { type: 'FeatureCollection'; features: any[] };
+const cadastreCache = new Map<string, { expiresAt: number; data: CadastreFeatureCollection }>();
+
+function getCachedCadastre(key: string): CadastreFeatureCollection | null {
+  const cached = cadastreCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    cadastreCache.delete(key);
+    return null;
+  }
+  cadastreCache.delete(key);
+  cadastreCache.set(key, cached);
+  return cached.data;
+}
+
+function cacheCadastre(key: string, data: CadastreFeatureCollection): void {
+  cadastreCache.set(key, { expiresAt: Date.now() + CADASTRE_CACHE_TTL_MS, data });
+  while (cadastreCache.size > CADASTRE_CACHE_MAX_ENTRIES) {
+    const oldestKey = cadastreCache.keys().next().value;
+    if (!oldestKey) break;
+    cadastreCache.delete(oldestKey);
+  }
+}
+
 interface GeoJSONGeometry {
   type: string;
   coordinates: any;
@@ -626,24 +655,44 @@ export function registerGeoProxyRoutes(app: Express) {
       const { lon, lat, bbox } = req.query;
 
       let geom: { type: string; coordinates: any };
+      let cacheKey: string;
       if (bbox) {
         const parts = String(bbox).split(',').map(Number);
-        if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+        if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
           return res.status(400).json({ error: "Invalid bbox parameter, expected minLon,minLat,maxLon,maxLat" });
         }
         const [minLon, minLat, maxLon, maxLat] = parts;
+        if (minLon < -180 || maxLon > 180 || minLat < -90 || maxLat > 90 || minLon >= maxLon || minLat >= maxLat) {
+          return res.status(400).json({ error: "Invalid bbox bounds" });
+        }
+        if (maxLon - minLon > CADASTRE_MAX_BBOX_SPAN_DEG || maxLat - minLat > CADASTRE_MAX_BBOX_SPAN_DEG) {
+          return res.status(400).json({ error: "Cadastre bbox is too large; zoom in before requesting parcels" });
+        }
         geom = {
           type: 'Polygon',
           coordinates: [[
             [minLon, minLat], [maxLon, minLat], [maxLon, maxLat], [minLon, maxLat], [minLon, minLat],
           ]],
         };
+        cacheKey = `bbox:${parts.map((n) => n.toFixed(6)).join(',')}`;
         console.log(`[Cadastre] Lookup request: bbox=${bbox}`);
       } else if (lon && lat) {
-        geom = { type: 'Point', coordinates: [Number(lon), Number(lat)] };
+        const longitude = Number(lon);
+        const latitude = Number(lat);
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
+          return res.status(400).json({ error: "Invalid longitude/latitude parameters" });
+        }
+        geom = { type: 'Point', coordinates: [longitude, latitude] };
+        cacheKey = `point:${longitude.toFixed(6)},${latitude.toFixed(6)}`;
         console.log(`[Cadastre] Lookup request: lon=${lon}, lat=${lat}`);
       } else {
         return res.status(400).json({ error: "Missing longitude/latitude or bbox parameters" });
+      }
+
+      const cached = getCachedCadastre(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cached);
       }
 
       const apiUrl = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=1000`;
@@ -654,7 +703,7 @@ export function registerGeoProxyRoutes(app: Express) {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json'
         }
-      }, 8000); // 8 second timeout
+      }, CADASTRE_TIMEOUT_MS);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'No response body');
@@ -715,7 +764,11 @@ export function registerGeoProxyRoutes(app: Express) {
       });
 
       console.log(`[Cadastre] Success: Found ${mappedFeatures.length} parcels`);
-      res.json({ type: 'FeatureCollection', features: mappedFeatures });
+      const result: CadastreFeatureCollection = { type: 'FeatureCollection', features: mappedFeatures };
+      cacheCadastre(cacheKey, result);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('X-Cache', 'MISS');
+      res.json(result);
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.error("[Cadastre] Request timed out");
