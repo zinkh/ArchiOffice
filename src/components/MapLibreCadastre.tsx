@@ -33,6 +33,21 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
       tileSize: 256,
       attribution: '&copy; IGN-F/Géoportail',
     },
+    // Couche cadastrale officielle de secours. Elle garantit que les limites
+    // restent visibles même si l'API vectorielle APICARTO est momentanément
+    // vide ou indisponible ; les polygones GeoJSON placés au-dessus gardent
+    // la sélection interactive au clic lorsqu'ils sont disponibles.
+    cadastreRaster: {
+      type: 'raster',
+      tiles: [
+        'https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile' +
+          '&LAYER=CADASTRALPARCELS.PARCELS&STYLE=normal&FORMAT=image/png' +
+          '&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+      ],
+      tileSize: 256,
+      minzoom: CADASTRE_MIN_ZOOM,
+      attribution: '&copy; IGN Cadastre',
+    },
     parcelles: {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -41,6 +56,13 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
   },
   layers: [
     { id: 'ortho-layer', type: 'raster', source: 'ortho' },
+    {
+      id: 'cadastre-raster-layer',
+      type: 'raster',
+      source: 'cadastreRaster',
+      minzoom: CADASTRE_MIN_ZOOM,
+      paint: { 'raster-opacity': 0.42 },
+    },
     {
       id: 'parcelles-fill',
       type: 'fill',
@@ -128,7 +150,7 @@ export const MapLibreCadastre = ({
   const marker = useRef<maplibregl.Marker | null>(null);
   const [contextLost, setContextLost] = useState(false);
   const [zoom, setZoom] = useState(19);
-  const [parcelStatus, setParcelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [parcelStatus, setParcelStatus] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle');
   const hoveredId = useRef<number | string | null>(null);
   const selectedId = useRef<number | string | null>(null);
   const fetchAbort = useRef<AbortController | null>(null);
@@ -160,7 +182,7 @@ export const MapLibreCadastre = ({
       .then((data) => {
         if (!data?.features) throw new Error('Réponse cadastrale invalide');
         source.setData(data);
-        setParcelStatus('ready');
+        setParcelStatus(data.features.length > 0 ? 'ready' : 'empty');
         if (center && !fittedParcel.current) {
           fittedParcel.current = true;
           const containing = data.features.find((f: GeoJSON.Feature) => f.geometry && pointInGeometry(center, f.geometry));
@@ -351,6 +373,13 @@ export const MapLibreCadastre = ({
           >
             Cadastre indisponible — Réessayer
           </button>
+        </div>
+      )}
+      {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'empty' && !contextLost && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
+            Limites IGN affichées — sélection vectorielle indisponible ici
+          </div>
         </div>
       )}
       {contextLost && (

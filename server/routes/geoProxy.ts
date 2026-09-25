@@ -20,6 +20,7 @@ const CADASTRE_TIMEOUT_MS = 20_000;
 const CADASTRE_CACHE_TTL_MS = 5 * 60_000;
 const CADASTRE_CACHE_MAX_ENTRIES = 100;
 const CADASTRE_MAX_BBOX_SPAN_DEG = 0.2;
+const HISTORICAL_MONUMENTS_RESOURCE_ID = '3a52af4a-f9da-4dcc-8110-b07774dfb3bc';
 
 type CadastreFeatureCollection = { type: 'FeatureCollection'; features: any[] };
 const cadastreCache = new Map<string, { expiresAt: number; data: CadastreFeatureCollection }>();
@@ -43,6 +44,23 @@ function cacheCadastre(key: string, data: CadastreFeatureCollection): void {
     if (!oldestKey) break;
     cadastreCache.delete(oldestKey);
   }
+}
+
+function distanceMetres(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const radius = 6_371_000;
+  const toRad = (value: number) => value * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * radius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function parseWgs84Coordinates(value: unknown): { lat: number; lon: number } | null {
+  if (typeof value !== 'string') return null;
+  const [lat, lon] = value.split(',').map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
 }
 
 interface GeoJSONGeometry {
@@ -536,12 +554,16 @@ export function registerGeoProxyRoutes(app: Express) {
     }
   });
 
-  // Proxy for Historical Monuments (Culture API)
+  // Monuments historiques — la précédente API Opendatasoft de
+  // data.culture.gouv.fr redirige désormais vers une page HTML. La ressource
+  // officielle Mérimée reste publiée et actualisée sur data.gouv.fr : on la
+  // filtre d'abord par commune, puis on recalcule nous-mêmes la distance afin
+  // de ne jamais retourner un édifice situé hors du rayon demandé.
   app.get("/api/historical-monuments", async (req, res) => {
     try {
-      const { lat: latQuery, lon: lonQuery, distance: distanceQuery } = req.query;
-      if (!latQuery || !lonQuery) {
-        return res.status(400).json({ error: "Latitude and longitude are required" });
+      const { lat: latQuery, lon: lonQuery, distance: distanceQuery, insee: inseeQuery } = req.query;
+      if (!latQuery || !lonQuery || !inseeQuery) {
+        return res.status(400).json({ error: "Latitude, longitude and INSEE code are required" });
       }
 
       const lat = parseFloat(latQuery as string);
@@ -554,97 +576,59 @@ export function registerGeoProxyRoutes(app: Express) {
       if (!Number.isFinite(distance) || distance <= 0 || distance > 50000) {
         return res.status(400).json({ error: "Invalid distance" });
       }
+      const insee = String(inseeQuery).trim();
+      if (!/^\d{5}$/.test(insee)) return res.status(400).json({ error: "Invalid INSEE code" });
 
-      const dataset = "liste-des-immeubles-proteges-au-titre-des-monuments-historiques";
-      const url = `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/${dataset}/records`;
-
-      // ÉTAPE 1 : appel sans select ni where géo — juste 1 record pour voir les vrais noms
-      console.log(`[Culture] Découverte des champs sur dataset...`);
-      const discoveryResponse = await axios.get(url, {
-        params: {
-          limit: 1,
-        },
-        timeout: 10000
+      const params = new URLSearchParams({
+        page_size: '1000',
+        COG_Insee_lors_de_la_protection__exact: insee,
+        columns: [
+          'Reference', 'Denomination_de_l_edifice', 'Adresse_forme_index',
+          'Commune_forme_index', 'Date_et_typologie_de_la_protection',
+          'Departement_en_lettres', 'Statut_juridique_de_l_edifice',
+          'Precision_de_la_protection', 'Auteur_de_l_edifice',
+          'coordonnees_au_format_WGS84',
+        ].join(','),
       });
+      const url = `https://tabular-api.data.gouv.fr/api/resources/${HISTORICAL_MONUMENTS_RESOURCE_ID}/data/?${params}`;
+      const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 20_000);
+      if (!response.ok) return res.status(response.status).json({ error: `data.gouv.fr returned ${response.status}` });
+      const payload = await response.json();
 
-      if (discoveryResponse.data?.results?.length > 0) {
-        const sample = discoveryResponse.data.results[0];
-        console.log("[Culture] === VRAIS NOMS DE CHAMPS ===");
-        Object.entries(sample).forEach(([k, v]) => {
-          console.log(`  "${k}": ${JSON.stringify(v)?.substring(0, 60)}`);
-        });
-        console.log("[Culture] === FIN CHAMPS ===");
-      }
-
-      // ÉTAPE 2 : appel géographique AVEC where explicite
-      console.log(`[Culture] Requête géo: lat=${lat}, lon=${lon}, distance=${distance}m`);
-
-      const response = await axios.get(url, {
-        params: {
-          limit: 10,
-          select: `*, distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})') as dist`,
-          where: `within_distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})', ${distance}m)`,
-          order_by: `distance(coordonnees_au_format_wgs84, geom'POINT(${lon} ${lat})')`
-        },
-        timeout: 15000
-      });
-
-      const v2Data = response.data;
-
-      if (!v2Data?.results) {
-        return res.json({ records: [] });
-      }
-
-      console.log(`[Culture] ${v2Data.results.length} monument(s) trouvé(s)`);
-      if (v2Data.results.length > 0) {
-        console.log("[Culture] Champs du 1er résultat:", Object.keys(v2Data.results[0]));
-      }
-
-      // Mapping défensif : on prend ce qui existe, peu importe le nom exact
-      const mappedData = {
-        records: v2Data.results.map((r: any) => {
-          // Cherche le champ geo — peut s'appeler coordonnees_au_format_wgs84, coordonnees_ban, geolocalisation, etc.
-          const geoField = r.coordonnees_au_format_wgs84 ?? r.coordonnees_ban ?? r.geolocalisation ?? r.coordonnees_gps ?? null;
-
-          // Cherche la référence Mérimée
-          const refField = r.ref ?? r.reference ?? r.ref_merimee ?? null;
-
+      const records = (payload.data || [])
+        .map((row: any) => {
+          const coords = parseWgs84Coordinates(row.coordonnees_au_format_WGS84);
+          if (!coords) return null;
+          const dist = distanceMetres(lat, lon, coords.lat, coords.lon);
+          if (dist > distance) return null;
           return {
-            recordid: refField || `mh-${Math.random().toString(36).substr(2, 9)}`,
+            recordid: row.Reference,
             fields: {
-              ref_merimee: refField,
-              tico: r.tico ?? r.titre_courant ?? r.denomination_de_l_edifice ?? null,
-              comm: r.com ?? r.commune ?? r.commune_forme_index ?? null,
-              dpt: r.dpt_lettre ?? r.departement ?? r.dep ?? null,
-              stat: r.stat ?? r.statut_juridique_de_l_edifice ?? null,
-              prec_lib: r.ppro ?? r.precision_sur_la_protection ?? null,
-              dpro: r.dpro ?? r.date_et_typologie_de_la_protection ?? null,
-              autr: r.autr ?? r.auteur_de_l_edifice ?? null,
-              adrs: r.adrs ?? r.adresse_forme_index ?? null,
-              coordonnees_ban: geoField,
-              dist: r.dist ?? null,
-            }
+              ref_merimee: row.Reference,
+              tico: row.Denomination_de_l_edifice || 'Monument historique',
+              comm: row.Commune_forme_index || '',
+              dpt: row.Departement_en_lettres || '',
+              stat: row.Statut_juridique_de_l_edifice || row.Date_et_typologie_de_la_protection || 'Protégé MH',
+              prec_lib: row.Precision_de_la_protection || null,
+              dpro: row.Date_et_typologie_de_la_protection || null,
+              autr: row.Auteur_de_l_edifice || null,
+              adrs: row.Adresse_forme_index || null,
+              coordonnees_ban: [coords.lat, coords.lon],
+              dist,
+            },
           };
         })
-      };
+        .filter(Boolean)
+        .sort((a: any, b: any) => a.fields.dist - b.fields.dist)
+        .slice(0, 10);
 
-      res.json(mappedData);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.json({ records });
 
     } catch (error: any) {
-      if (error.response) {
-        console.error(
-          "[Culture] API Error:",
-          error.response.status,
-          JSON.stringify(error.response.data).substring(0, 400)
-        );
-        return res.status(error.response.status).json({
-          error: `Culture API error: ${error.response.status}`,
-          details: error.response.data?.message || error.response.data
-        });
-      }
       console.error("[Culture] Proxy Error:", error.message);
-      res.status(error.code === 'ECONNABORTED' ? 504 : 500).json({
-        error: error.code === 'ECONNABORTED' ? "Culture API request timed out" : "Internal server error",
+      res.status(error.name === 'AbortError' ? 504 : 500).json({
+        error: error.name === 'AbortError' ? "Culture API request timed out" : "Internal server error",
         details: error.message
       });
     }
@@ -695,15 +679,18 @@ export function registerGeoProxyRoutes(app: Express) {
         return res.json(cached);
       }
 
-      const apiUrl = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=1000`;
-      console.log(`[Cadastre] Fetching from IGN: ${apiUrl}`);
+      const fetchIgnCadastre = (geometry: { type: string; coordinates: any }) => {
+        const apiUrl = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(JSON.stringify(geometry))}&_limit=1000`;
+        console.log(`[Cadastre] Fetching from IGN: ${apiUrl}`);
+        return fetchWithTimeout(apiUrl, {
+          headers: {
+            'User-Agent': 'ArchiOffice/1.0 (cadastre lookup)',
+            'Accept': 'application/json'
+          }
+        }, CADASTRE_TIMEOUT_MS);
+      };
 
-      const response = await fetchWithTimeout(apiUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        }
-      }, CADASTRE_TIMEOUT_MS);
+      let response = await fetchIgnCadastre(geom);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'No response body');
@@ -721,7 +708,32 @@ export function registerGeoProxyRoutes(app: Express) {
         return res.status(502).json({ error: "Cadastre API returned invalid response format" });
       }
 
-      const data = await response.json();
+      let data = await response.json();
+
+      // Le point BAN correspond souvent à l'entrée du bâtiment, à une limite
+      // cadastrale ou même à la chaussée. Dans ce cas l'intersection stricte
+      // ne renvoie rien : une petite emprise d'environ 35 m récupère les
+      // parcelles voisines, que le client peut afficher et sélectionner.
+      if (!bbox && (!data.features || data.features.length === 0)) {
+        const longitude = Number(lon);
+        const latitude = Number(lat);
+        const deltaLat = 35 / 111_320;
+        const deltaLon = 35 / (111_320 * Math.max(Math.cos(latitude * Math.PI / 180), 0.2));
+        const nearbyGeom = {
+          type: 'Polygon',
+          coordinates: [[
+            [longitude - deltaLon, latitude - deltaLat],
+            [longitude + deltaLon, latitude - deltaLat],
+            [longitude + deltaLon, latitude + deltaLat],
+            [longitude - deltaLon, latitude + deltaLat],
+            [longitude - deltaLon, latitude - deltaLat],
+          ]],
+        };
+        response = await fetchIgnCadastre(nearbyGeom);
+        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+          data = await response.json();
+        }
+      }
 
       // Map IGN properties to the format expected by the frontend
       const mappedFeatures = (data.features || []).map((f: any) => {
