@@ -1,6 +1,32 @@
 import Dexie, { Table } from 'dexie';
 import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile } from './types';
 
+/**
+ * Une écriture (POST/PUT/PATCH) différée faute de réseau, rejouée par
+ * `src/lib/offlineQueue.ts`. `id` sert de clé d'idempotence : pour une
+ * création, c'est l'id généré côté client pour l'entité elle-même
+ * (réunion, réserve, observation…) — le serveur l'accepte tel quel et
+ * l'insert y est protégé contre le doublon, donc rejouer deux fois la même
+ * entrée ne crée jamais deux lignes.
+ */
+export interface PendingWrite {
+  id: string;
+  tenantId: string | null;
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  kind: 'json' | 'multipart';
+  jsonBody?: any;
+  blob?: Blob;
+  blobFieldName?: string;
+  blobFilename?: string;
+  extraFields?: Record<string, string>;
+  entity: 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'project';
+  status: 'pending' | 'error';
+  attempts: number;
+  lastError?: string;
+  createdAt: number;
+}
+
 export class AppDatabase extends Dexie {
   projects!: Table<Project>;
   contacts!: Table<Contact>;
@@ -12,19 +38,19 @@ export class AppDatabase extends Dexie {
   contactCategories!: Table<ContactCategory>;
   projectCategories!: Table<ProjectCategory>;
   projectTemplates!: Table<ProjectTemplate>;
-  syncQueue!: Table<{ id?: number; table: string; method: string; data: any }>;
-  settings!: Table<{ 
-    id: string; 
-    agencyName: string; 
-    address: string; 
-    phone: string; 
-    email: string; 
-    siret: string; 
-    vatNumber: string; 
-    currency: string; 
-    language: string; 
-    senderOption: 'agency' | 'personal'; 
-    defaultEmailTemplate: string; 
+  pendingWrites!: Table<PendingWrite>;
+  settings!: Table<{
+    id: string;
+    agencyName: string;
+    address: string;
+    phone: string;
+    email: string;
+    siret: string;
+    vatNumber: string;
+    currency: string;
+    language: string;
+    senderOption: 'agency' | 'personal';
+    defaultEmailTemplate: string;
     logoUrl: string;
     seller_iban?: string;
     seller_bic?: string;
@@ -49,6 +75,15 @@ export class AppDatabase extends Dexie {
       settings: 'id',
       actData: 'projectId',
       users: 'id, email'
+    });
+    // v5 : l'ancienne `syncQueue` (schéma `++id, table, method`) n'a jamais été
+    // câblée à rien — table morte, supprimée plutôt que migrée. `pendingWrites`
+    // la remplace avec une clé primaire choisie (l'id de l'entité, pour
+    // l'idempotence), ce que Dexie ne permet pas de faire en modifiant la même
+    // table en place.
+    this.version(5).stores({
+      syncQueue: null,
+      pendingWrites: 'id, tenantId, status, createdAt',
     });
   }
 }
