@@ -150,23 +150,51 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
   }, [isModalOpen, newReportDate, project.address]);
 
   const handleCreateReport = async (duplicateFrom?: SiteReport) => {
-    const res = await fetch(`/api/projects/${project.id}/reports`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        date: duplicateFrom ? duplicateFrom.date : newReportDate,
-        meteo: duplicateFrom ? duplicateFrom.meteo : (fetchedWeather?.meteo || 'Inconnu'),
-        temperature: duplicateFrom ? duplicateFrom.temperature : (fetchedWeather?.temperature || 0),
-        effectif_total: 0,
-      }),
-    });
-    if (!res.ok) return;
-    const newReport = await res.json();
-    setReports(prev => [newReport, ...prev]);
-    setSelectedReportId(newReport.id);
-    setIsModalOpen(false);
-    setFetchedWeather(null);
+    // Id généré côté client : une création rejouée après coupure réseau
+    // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
+    // deux comptes-rendus. Le numéro exact (calculé côté serveur à partir
+    // des comptes-rendus existants) n'est connu qu'une fois la requête
+    // effectivement traitée — hors ligne, une valeur provisoire est
+    // affichée en attendant, corrigée au retour du réseau (voir l'écoute de
+    // OFFLINE_WRITE_SYNCED_EVENT ci-dessous).
+    const id = crypto.randomUUID();
+    const body = {
+      id,
+      date: duplicateFrom ? duplicateFrom.date : newReportDate,
+      meteo: duplicateFrom ? duplicateFrom.meteo : (fetchedWeather?.meteo || 'Inconnu'),
+      temperature: duplicateFrom ? duplicateFrom.temperature : (fetchedWeather?.temperature || 0),
+      effectif_total: 0,
+    };
+    try {
+      const { queued, data } = await queuedJsonRequest<{ id: string; report_number: number }>({
+        entity: 'siteReport', id, method: 'POST', url: `/api/projects/${project.id}/reports`, body,
+      });
+      const provisionalNumber = Math.max(0, ...reports.map(r => r.report_number || 0)) + 1;
+      const newReport: SiteReport = {
+        ...body,
+        project_id: project.id,
+        report_number: queued ? provisionalNumber : data!.report_number,
+        pendingSync: queued,
+      };
+      setReports(prev => [newReport, ...prev]);
+      setSelectedReportId(newReport.id);
+      setIsModalOpen(false);
+      setFetchedWeather(null);
+    } catch (err) { console.error(err); }
   };
+
+  // Lève le badge « en attente » d'un compte-rendu et recale son numéro
+  // (attribué par le serveur, jamais connu avec certitude hors ligne) dès
+  // que sa création a effectivement atteint le serveur.
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'siteReport') return;
+      fetchReports().catch(() => {});
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, [fetchReports]);
 
   const refreshWeather = async (report: SiteReport) => {
     if (!project.address) return;
@@ -494,9 +522,13 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-sm text-[var(--tblr-text)]">CR {r.report_number}</span>
-                        <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[r.statut || 'brouillon'])}>
-                          {STATUT_CR_LABELS[r.statut || 'brouillon']}
-                        </span>
+                        {r.pendingSync ? (
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+                        ) : (
+                          <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[r.statut || 'brouillon'])}>
+                            {STATUT_CR_LABELS[r.statut || 'brouillon']}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-[var(--tblr-muted)] mt-0.5">{r.date}</div>
                     </button>

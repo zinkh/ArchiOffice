@@ -120,6 +120,25 @@ describe('Idempotence des créations hors-ligne', () => {
     expect(fakeSupabaseAdmin.getTable('observations').filter(o => o.id === id)).toHaveLength(1);
   });
 
+  it('POST /api/projects/:projectId/reports avec le même id rejoué ne crée qu’un compte-rendu et ne consomme pas de numéro', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId, name: 'Villa' }]);
+    const id = 'client-report-1';
+
+    const first = await request(app).post('/api/projects/p1/reports').set(authHeader(token))
+      .send({ id, date: '2026-09-01', meteo: 'Ensoleillé', temperature: 18, effectif_total: 0 });
+    expect(first.status).toBe(201);
+    expect(first.body.report_number).toBe(1);
+
+    const replay = await request(app).post('/api/projects/p1/reports').set(authHeader(token))
+      .send({ id, date: '2026-09-01', meteo: 'Ensoleillé', temperature: 18, effectif_total: 0 });
+    expect(replay.status).toBe(200);
+    expect(replay.body.report_number).toBe(1);
+
+    expect(fakeSupabaseAdmin.getTable('site_reports').filter(r => r.id === id)).toHaveLength(1);
+  });
+
   it('POST /api/observations/:id/photos avec le même id rejoué ne double pas la photo dans le tableau', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

@@ -14,6 +14,7 @@ const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   observation: 'Observation',
   observationPhoto: 'Photo d\'observation',
   project: 'Projet',
+  siteReport: 'Compte-rendu de chantier',
 };
 
 /**
