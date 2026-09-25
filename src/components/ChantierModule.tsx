@@ -9,6 +9,7 @@ import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, Si
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
 import { openSignedUrl } from '../lib/signedStorageUrl';
+import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cn } from '../lib/utils';
 import type { AgencySettings } from '../lib/proposalExport';
 
@@ -301,46 +302,65 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 
   const addObservation = async (type: Observation['type'] = 'observation') => {
     if (!selectedReportId) return;
-    const res = await fetch(`/api/projects/${project.id}/observations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texte: '', statut: 'À faire', type, created_report_id: selectedReportId }),
-    });
-    if (!res.ok) return;
-    const newObs = await res.json();
-    setReportObservations(prev => [...prev, newObs]);
-    fetchAllObservations();
+    // Id généré côté client : une création rejouée après coupure réseau
+    // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
+    // deux observations.
+    const id = crypto.randomUUID();
+    const body = { id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId };
+    try {
+      const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${project.id}/observations`, body });
+      const newObs: Observation = queued ? { ...body, project_id: project.id, pendingSync: true } : data!;
+      setReportObservations(prev => [...prev, newObs]);
+      fetchAllObservations().catch(() => {});
+    } catch (err) { console.error(err); }
   };
 
   const saveObservationField = async (obsId: string, field: string, value: any) => {
     setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, [field]: value } : o)));
     try {
-      const res = await fetch(`/api/observations/${obsId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${obsId}`, body: { [field]: value } });
       setSaveError(false);
     } catch (err) {
       // The optimistic update above already landed locally regardless of
       // outcome — a failed PUT here silently leaves the UI showing an edit
       // the server never persisted (see 2026-09-08 incident: writes
       // occasionally 500 transiently with no corresponding DB error).
+      // Hors-ligne, la modification est mise en file plutôt que rejetée :
+      // ce n'est donc plus un échec ici.
       console.error(err);
       setSaveError(true);
     }
-    fetchAllObservations();
+    fetchAllObservations().catch(() => {});
   };
 
+  // Lève le badge « en attente » d'une observation dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'observation') return;
+      setReportObservations(prev => prev.map(o => o.id === id ? { ...o, pendingSync: false } : o));
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, []);
+
   const uploadObservationPhoto = async (obsId: string, file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch(`/api/observations/${obsId}/photos`, { method: 'POST', body: formData });
-    if (!res.ok) return;
-    const data = await res.json();
-    setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, photos: data.photos } : o)));
-    fetchAllObservations();
+    const photoId = crypto.randomUUID();
+    try {
+      const { queued, data } = await queuedMultipartRequest<{ photos: string[] }>({
+        entity: 'observationPhoto', id: photoId, method: 'POST', url: `/api/observations/${obsId}/photos`,
+        blob: file, blobFieldName: 'file', blobFilename: file.name, extraFields: { id: photoId },
+      });
+      if (!queued) {
+        setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, photos: data!.photos } : o)));
+        fetchAllObservations().catch(() => {});
+      }
+      // Hors-ligne, la photo est en file : pas d'URL serveur à afficher tant
+      // qu'elle n'a pas été envoyée (photos est un simple tableau d'URL, pas
+      // d'objet à marquer « en attente » comme pour les réunions/réserves —
+      // voir CLAUDE.md « fiabiliser la synchro hors-ligne »).
+    } catch (err) { console.error(err); }
   };
 
   const observationsByLot = useMemo(() => {
@@ -989,6 +1009,9 @@ function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSa
         placeholder="Description..."
         onBlur={e => onSave(obs.id, 'texte', e.target.value)}
       />
+      {obs.pendingSync && (
+        <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+      )}
       {obs.urgence === 'bloquant' && (
         <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-1 rounded bg-red-600 text-white">{URGENCE_LABELS.bloquant}</span>
       )}

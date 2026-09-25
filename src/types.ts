@@ -1262,6 +1262,8 @@ export interface Observation {
   type?: 'observation' | 'reserve' | 'a_faire';
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface DPGFItem {
