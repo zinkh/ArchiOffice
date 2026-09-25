@@ -497,12 +497,12 @@ export function registerGeoProxyRoutes(app: Express) {
       let url = "";
 
       if (grid) {
-        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${grid}&status=document.production`;
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?gridName=${encodeURIComponent(String(grid))}&status=document.production&limit=1000`;
       } else if (partition) {
-        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?partition=${partition}&status=document.production`;
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?partition=${encodeURIComponent(String(partition))}&status=document.production&limit=1000`;
       } else if (insee) {
         // Default to grid search if only insee is provided
-        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&status=document.production`;
+        url = `https://www.geoportail-urbanisme.gouv.fr/api/document?gridName=${encodeURIComponent(String(insee))}&status=document.production&limit=1000`;
       } else {
         return res.status(400).json({ error: "Missing search parameters (insee, grid, or partition)" });
       }
@@ -526,6 +526,60 @@ export function registerGeoProxyRoutes(app: Express) {
     } catch (error: any) {
       console.error("[GPU] Proxy Error:", error);
       res.status(500).json({ error: "Internal server error during GPU lookup" });
+    }
+  });
+
+  // Spatial GPU lookup: APICarto returns the zone and the exact document
+  // covering the selected cadastral parcel (including intercommunal PLUi).
+  app.post("/api/urban-planning/parcel", async (req, res) => {
+    try {
+      const geometry = req.body?.geometry as GeoJSONGeometry | undefined;
+      if (!geometry || !['Polygon', 'MultiPolygon', 'Point'].includes(geometry.type)) {
+        return res.status(400).json({ error: 'Géométrie de parcelle invalide.' });
+      }
+      const encoded = JSON.stringify(geometry);
+      if (encoded.length > 300_000) return res.status(413).json({ error: 'Géométrie trop volumineuse.' });
+      const result = await axios.get<ApicartoPluResponse<ZoneUrbaProperties>>(
+        'https://apicarto.ign.fr/api/gpu/zone-urba',
+        { params: { geom: encoded }, timeout: 15000 },
+      );
+      const zones = (result.data.features || []).map((feature) => ({
+        zone: feature.properties,
+        geometry: feature.geometry,
+      }));
+      let gpuDocuments: any[] = [];
+      try {
+        const documentResult = await axios.get<ApicartoPluResponse<any>>(
+          'https://apicarto.ign.fr/api/gpu/document',
+          { params: { geom: encoded }, timeout: 10000 },
+        );
+        gpuDocuments = (documentResult.data.features || []).map((feature) => feature.properties);
+      } catch (documentError: any) {
+        console.warn('[GPU] Parcel document lookup failed:', documentError.message);
+      }
+      const documents = [...new Map((gpuDocuments.length ? gpuDocuments : zones
+        .map((item) => item.zone)
+        .filter((zone) => zone.idurba || zone.partition)
+        .map((zone) => [zone.idurba || zone.partition, {
+          idurba: zone.idurba,
+          partition: zone.partition,
+          insee: zone.insee,
+          type: zone.typezone,
+          name: zone.libelong || zone.libelle,
+          documentName: zone.nomfic,
+          documentUrl: zone.urlfic,
+          approvalDate: zone.datappro,
+        }])) .map((doc: any) => [doc.id || doc.gpu_doc_id || doc.idurba || doc.partition, {
+          id: doc.id || doc.gpu_doc_id,
+          partition: doc.partition,
+          name: doc.grid_title || doc.name || doc.libelong || doc.libelle,
+          type: doc.du_type || doc.typedoc || doc.typezone,
+          gridName: doc.grid_name,
+        }]))].map(([, value]) => value);
+      return res.json({ zones, documents });
+    } catch (error: any) {
+      console.error('[GPU] Parcel lookup failed:', error.message);
+      return res.status(503).json({ error: 'Service Urbanisme (GPU) temporairement indisponible.' });
     }
   });
 

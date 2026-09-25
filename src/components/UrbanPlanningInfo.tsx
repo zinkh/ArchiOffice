@@ -23,9 +23,10 @@ interface UrbanPlanningInfoProps {
   insee?: string;
   coords?: { lat: number; lon: number } | null;
   address?: string;
+  geometry?: GeoJSON.Geometry | null;
 }
 
-export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, address }: UrbanPlanningInfoProps) {
+export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, address, geometry }: UrbanPlanningInfoProps) {
   const [documents, setDocuments] = useState<GPUDocumentDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -66,12 +67,31 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
   }, [address, insee]);
 
   useEffect(() => {
-    if (!insee) return;
+    if (!insee && !geometry) return;
 
     const fetchUrbanPlanning = async () => {
       setLoading(true);
       setError('');
       try {
+        if (geometry) {
+          const spatialRes = await fetch('/api/urban-planning/parcel', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ geometry }),
+          });
+          if (!spatialRes.ok) throw new Error((await spatialRes.json().catch(() => null))?.error || 'Recherche GPU impossible');
+          const spatial = await spatialRes.json();
+          const spatialDocs = (spatial.documents || []).filter((doc: any) => doc.id);
+          const detailed = await Promise.all(spatialDocs.slice(0, 10).map(async (doc: any) => {
+            const detailRes = await fetch(`/api/urban-planning/details/${encodeURIComponent(doc.id)}`);
+            const detail = detailRes.ok ? await detailRes.json() : {};
+            const files = Array.isArray(detail.writingMaterials)
+              ? detail.writingMaterials.map(([name, url]: [string, string]) => ({ name, url }))
+              : Object.entries(detail.writingMaterials || {}).map(([name, url]) => ({ name, url: url as string }));
+            return { ...doc, ...detail, files };
+          }));
+          setDocuments(detailed);
+          return;
+        }
         // 1. Search for documents using both grid and partition for better coverage
         // Grid search is broader, partition is more specific for PLU/POS
         const gridUrl = `/api/urban-planning/documents?grid=${insee}`;
