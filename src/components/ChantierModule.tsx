@@ -510,7 +510,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                 <div className="px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
                   Comptes-rendus · {reports.length}
                 </div>
-                <div className="max-h-[70vh] overflow-y-auto">
+                <div className="max-h-[70dvh] overflow-y-auto">
                   {reports.map(r => (
                     <button
                       key={r.id}

@@ -340,7 +340,7 @@ function LandingFooter() {
 
 export default function Landing() {
   return (
-    <div id="top" className="min-h-screen font-sans" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}>
+    <div id="top" className="min-h-svh font-sans" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}>
       <LandingNav />
       <Hero />
       <FeatureGrid />

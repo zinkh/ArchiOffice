@@ -72,7 +72,7 @@ export function MobileNavDrawer({ open, onClose, children }: MobileNavDrawerProp
               if (draggedRef.current) { e.preventDefault(); e.stopPropagation(); }
             }}
             className="fixed inset-y-0 left-0 z-50 w-72 md:hidden flex flex-col overflow-y-auto overscroll-contain"
-            style={{ x, background: 'var(--tblr-surface)', borderRight: '1px solid var(--tblr-border)' }}
+            style={{ x, background: 'var(--tblr-surface)', borderRight: '1px solid var(--tblr-border)', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingLeft: 'env(safe-area-inset-left, 0px)' }}
           >
             {children}
           </motion.div>

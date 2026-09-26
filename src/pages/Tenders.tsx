@@ -748,7 +748,7 @@ export default function Tenders() {
                   <IconX size={20} />
                 </button>
               </div>
-              <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85vh] overflow-y-auto">
+              <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85dvh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_project_title_label')}</label>

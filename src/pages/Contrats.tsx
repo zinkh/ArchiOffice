@@ -499,7 +499,7 @@ function ContratModal({
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-4 max-h-[60dvh] overflow-y-auto">
 
               {/* TAB: Général */}
               {tab === 'general' && (

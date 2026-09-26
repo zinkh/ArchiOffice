@@ -157,7 +157,7 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+      <div className="w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
           <h2 className="font-semibold text-base" style={{ color: 'var(--tblr-text)' }}>
             {isEdit ? t('references_edit_modal_title') : t('references_add_modal_title')}
@@ -565,7 +565,7 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
-      <div className="w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+      <div className="w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -1441,7 +1441,7 @@ export default function References() {
       {/* Mobile / small-screen detail modal */}
       {selectedItem && (
         <div className="lg:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88dvh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
               <h3 className="font-semibold text-base truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedItem.name}</h3>
               <button onClick={() => setSelectedItem(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={18} style={{ color: 'var(--tblr-muted)' }} /></button>

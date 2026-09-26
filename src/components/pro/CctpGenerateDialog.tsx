@@ -75,7 +75,7 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={running ? undefined : onClose}>
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90dvh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold">Générer le CCTP à partir des pièces de l'affaire</h2>
           <button onClick={onClose} disabled={running} className="text-zinc-400 hover:text-zinc-700"><IconX size={18} /></button>
