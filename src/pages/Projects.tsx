@@ -792,12 +792,9 @@ export default function Projects() {
         <ProjectCardSkeletonGrid />
       ) : projectsError && projects.length === 0 ? null : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {projectsPagination.pageItems.map((project, i) => (
+          {projectsPagination.pageItems.map(project => (
             <motion.div
               key={project.id}
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.04 }}
               onClick={() => handleProjectClick(project)}
               className="rounded-lg overflow-hidden group flex flex-col cursor-pointer transition-shadow hover:shadow-md"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}

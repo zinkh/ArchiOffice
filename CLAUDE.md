@@ -2263,6 +2263,14 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   la colonne sur le point projeté du geste ; pas sur une grille serrée comme
   les jours d'un mois. Une tâche déposée va en bas de sa colonne : l'ordre à
   l'intérieur d'une colonne n'est pas enregistré.
+- **Pas d'apparition en cascade sur les pages de travail** (liste des
+  affaires, équipe, notifications) : elle rejouait à chaque visite d'une page
+  consultée des dizaines de fois par jour. Réservée aux moments rares
+  (page d'accueil publique). Les ajouts discrets restent : arrivée d'un
+  nouveau message dans le chat des agents (seulement s'il date de moins de
+  4 s, jamais l'historique rechargé), étapes de l'accueil qui glissent dans
+  le sens du parcours, libellés « Enregistré » en fondu (`SwapText`,
+  `src/components/ui/SwapText.tsx`).
 - **Couche plateforme mobile** (`index.html`, `src/index.css`, bloc
   « Téléphone et tablette ») : `viewport-fit=cover` (sans lui, tous les
   `env(safe-area-inset-*)` valent 0 : la barre de raccourcis mobile passait

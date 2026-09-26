@@ -10,6 +10,26 @@ import {
   IconCircleCheck, IconShieldLock, IconMessageCircle, IconRobot, IconFileSearch,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+
+/** « Enregistré » apparaît et disparaît en fondu plutôt que d'un coup. */
+function SavedNotice({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {show && (
+        <motion.span
+          className="text-xs text-emerald-600 dark:text-emerald-400"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+        >
+          Enregistré
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
 
 export const PLAN_LABELS: Record<string, string> = {
   trial: 'Essai', starter: 'Starter', pro: 'Pro', enterprise: 'Entreprise',
@@ -602,9 +622,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
               {saving ? <IconLoader2 size={14} className="animate-spin" /> : <IconCircleCheck size={14} />}
               Appliquer
             </button>
-            {saved && !dirty && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400">Enregistré</span>
-            )}
+            <SavedNotice show={saved && !dirty} />
           </div>
 
           <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
@@ -721,7 +739,7 @@ function DocumentParserPanel({ onClose }: { onClose: () => void }) {
               {saving ? <IconLoader2 size={14} className="animate-spin" /> : <IconCircleCheck size={14} />}
               Appliquer
             </button>
-            {saved && !dirty && <span className="text-xs text-emerald-600 dark:text-emerald-400">Enregistré</span>}
+            <SavedNotice show={saved && !dirty} />
           </div>
         </>
       )}
