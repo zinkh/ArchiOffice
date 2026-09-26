@@ -1,6 +1,6 @@
 # 004 : Panneau de chat des agents, agrandissement sans animation de mise en page
 
-- **Statut** : TODO
+- **Statut** : DONE
 - **Commit** : bedc65f
 - **Gravité** : MOYENNE
 - **Catégorie** : Performance

@@ -475,7 +475,7 @@ export default function Proposals() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => document.getElementById('xml-file-upload')?.click()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconFileText size={18} />
@@ -484,7 +484,7 @@ export default function Proposals() {
           <input id="xml-file-upload" type="file" className="hidden" accept=".xml" onChange={handleImport} />
           <button
             onClick={handleOpenCreateModal}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -1278,7 +1278,7 @@ export default function Proposals() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
                   style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                 >
                   {t('btn_cancel')}
@@ -1286,7 +1286,7 @@ export default function Proposals() {
                 <button
                   type="submit"
                   form="proposal-form"
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {editingProposal ? t('proposals_update_btn') : t('proposals_create_btn')}

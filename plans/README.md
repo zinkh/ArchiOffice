@@ -5,11 +5,11 @@ est autonome : un agent sans contexte peut l'exécuter tel quel.
 
 | # | Plan | Gravité | Statut |
 |---|---|---|---|
-| 001 | [Remplacer `transition-all` par des transitions ciblées](001-remplacer-transition-all.md) | HAUTE | TODO |
-| 002 | [Sortie animée des 9 modales qui disparaissent d'un coup](002-sortie-des-modales.md) | MOYENNE | TODO |
-| 003 | [Recherche globale sans animation de largeur](003-recherche-globale-sans-animation-de-largeur.md) | MOYENNE | TODO |
-| 004 | [Panneau de chat des agents, agrandissement sans animation de mise en page](004-panneau-chat-agents.md) | MOYENNE | TODO |
-| 005 | [Unifier le retour à l'appui sur celui des boutons `.btn`](005-retour-a-l-appui-unifie.md) | MOYENNE | TODO |
+| 001 | [Remplacer `transition-all` par des transitions ciblées](001-remplacer-transition-all.md) | HAUTE | DONE |
+| 002 | [Sortie animée des 9 modales qui disparaissent d'un coup](002-sortie-des-modales.md) | MOYENNE | DONE |
+| 003 | [Recherche globale sans animation de largeur](003-recherche-globale-sans-animation-de-largeur.md) | MOYENNE | DONE |
+| 004 | [Panneau de chat des agents, agrandissement sans animation de mise en page](004-panneau-chat-agents.md) | MOYENNE | DONE |
+| 005 | [Unifier le retour à l'appui sur celui des boutons `.btn`](005-retour-a-l-appui-unifie.md) | MOYENNE | DONE |
 
 ## Ordre d'exécution recommandé
 

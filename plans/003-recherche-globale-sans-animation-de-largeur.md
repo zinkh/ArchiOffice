@@ -1,6 +1,6 @@
 # 003 : Ne plus animer la largeur du champ de recherche globale
 
-- **Statut** : TODO
+- **Statut** : DONE
 - **Commit** : bedc65f
 - **Gravité** : MOYENNE
 - **Catégorie** : Fréquence, performance

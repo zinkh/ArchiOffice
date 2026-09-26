@@ -664,7 +664,7 @@ export default function Invoices() {
             <button
               onClick={handleZohoSync}
               disabled={isSyncingZoho}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold press disabled:opacity-60"
               style={{ background: '#f76707', color: '#fff' }}
             >
               <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
@@ -673,7 +673,7 @@ export default function Invoices() {
           )}
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -714,14 +714,14 @@ export default function Invoices() {
             placeholder={t('invoices_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition"
             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
         <div className="flex items-center gap-2 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
           <button
             onClick={() => setIsGroupedByProject(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -731,7 +731,7 @@ export default function Invoices() {
           </button>
           <button
             onClick={() => setIsGroupedByProject(false)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={!isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -1168,7 +1168,7 @@ export default function Invoices() {
 
       <AnimatePresence>
         {isGeneratorOpen && selectedInvoice && (
-          <InvoiceGenerator
+          <InvoiceGenerator key="invoice-generator"
             onClose={() => setIsGeneratorOpen(false)}
             onSave={(updated) => {
               setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
@@ -1217,7 +1217,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
                         ? { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1228,7 +1228,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'acompte'
                         ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1404,7 +1404,7 @@ export default function Invoices() {
                         key={type}
                         type="button"
                         onClick={() => setEditForm({ ...editForm, invoice_type: type })}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition"
                         style={editForm.invoice_type === type
                           ? type === 'acompte'
                             ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }

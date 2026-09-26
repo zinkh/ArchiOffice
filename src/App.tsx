@@ -381,7 +381,7 @@ function Header() {
                   borderRadius: 'var(--tblr-radius)',
                   fontSize: '13px',
                 }}
-                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[width,border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
+                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
               />
               {isSearching && (
                 <div

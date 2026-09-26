@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconLayoutKanban, IconSearch, IconPlus } from '@tabler/icons-react';
@@ -228,18 +229,20 @@ export default function Kanban() {
         )}
       </div>
 
-      {modal && (
-        <TaskFormModal
-          initial={modal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          onClose={closeModal}
-          onSaved={afterWrite}
-          onDeleted={afterWrite}
-          onOpenProject={id => navigate(`/projects/${id}`)}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <TaskFormModal key="task-form-modal"
+            initial={modal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            onClose={closeModal}
+            onSaved={afterWrite}
+            onDeleted={afterWrite}
+            onOpenProject={id => navigate(`/projects/${id}`)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

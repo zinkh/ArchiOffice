@@ -230,7 +230,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               <button
                 onClick={handleExport}
                 disabled={!!exporting || reserves.length === 0}
-                className="flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                 title="Exporter la liste de réserves en PDF"
               >
                 {exporting ? <IconLoader2 size={14} className="animate-spin" /> : <IconFileTypePdf size={14} />}
@@ -238,7 +238,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               </button>
               <button
                 onClick={openForCreation}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
               >
                 <IconPlus size={14} />
                 Créer une réserve

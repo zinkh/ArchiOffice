@@ -77,7 +77,7 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                       className={`
                         flex flex-col items-center justify-start gap-0.5
                         px-1.5 py-1 rounded min-w-[44px] max-w-[60px] h-[52px]
-                        text-[0.6875rem] border transition-all leading-tight
+                        text-[0.6875rem] border transition leading-tight
                         ${action.active
                           ? 'bg-[#cce0f5] dark:bg-blue-900/40 border-blue-400 text-blue-800 dark:text-blue-200'
                           : 'bg-transparent border-transparent hover:bg-[#dce8f8] hover:border-[#aac4dc] text-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600'

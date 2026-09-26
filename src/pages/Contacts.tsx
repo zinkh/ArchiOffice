@@ -911,241 +911,250 @@ export default function Contacts() {
       </div>
 
       {/* Add/Edit Contact Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div
-            ref={launchOriginRef}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto"
-            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-          >
-            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-              <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
-                {isEditing ? t('contacts_edit_title') : t('add_contact')}
-              </h3>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setIsEditing(false);
-                  setEditingId(null);
-                }}
-                style={{ color: 'var(--tblr-muted)' }}
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-8">
-              <ContactFormFields
-                contact={newContact}
-                categories={categories}
-                onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
-                corpsEtatSuggestions={corpsEtatOptions}
-                specialiteSuggestions={specialiteOptions}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('affaires')} (Projects)</label>
-                  <select
-                    multiple
-                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
-                    style={inputStyle}
-                    value={newContact.affaires?.split(',').filter(Boolean) || []}
-                    onChange={e => {
-                      const options = e.target.selectedOptions;
-                      const values: string[] = [];
-                      for (let i = 0; i < options.length; i++) {
-                        values.push(options[i].value);
-                      }
-                      setNewContact({...newContact, affaires: values.join(',')});
-                    }}
-                  >
-                    {projects.map(p => (
-                      <option key={p.id} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('candidatures')} (Tenders)</label>
-                  <select
-                    multiple
-                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
-                    style={inputStyle}
-                    value={newContact.candidatures?.split(',').filter(Boolean) || []}
-                    onChange={e => {
-                      const options = e.target.selectedOptions;
-                      const values: string[] = [];
-                      for (let i = 0; i < options.length; i++) {
-                        values.push(options[i].value);
-                      }
-                      setNewContact({...newContact, candidatures: values.join(',')});
-                    }}
-                  >
-                    {tenders.map(t => (
-                      <option key={t.id} value={t.title}>{t.title}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-4 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+      <AnimatePresence>
+        {isModalOpen && (
+          <motion.div key="contact-edit-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
+                  {isEditing ? t('contacts_edit_title') : t('add_contact')}
+                </h3>
                 <button
-                  type="button"
                   onClick={() => {
                     setIsModalOpen(false);
                     setIsEditing(false);
                     setEditingId(null);
                   }}
-                  className="px-4 py-2 rounded-lg transition-colors"
-                  style={{ color: 'var(--tblr-text)' }}
+                  style={{ color: 'var(--tblr-muted)' }}
                 >
-                  {t('btn_cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg transition-colors"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  {isEditing ? t('contacts_update_btn') : t('contacts_save_btn')}
+                  ✕
                 </button>
               </div>
-            </form>
-            {isEditing && editingId && (
-              <div className="p-6 pt-0">
-                <h4 className="text-sm font-bold uppercase tracking-widest pb-2 mb-4" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('correspondence_title')}</h4>
-                <CorrespondenceTab localType="contact" localId={editingId} contactEmail={newContact.email || newContact.email_work || newContact.email_home} />
-              </div>
-            )}
+              <form onSubmit={handleSubmit} className="p-6 space-y-8">
+                <ContactFormFields
+                  contact={newContact}
+                  categories={categories}
+                  onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+                  corpsEtatSuggestions={corpsEtatOptions}
+                  specialiteSuggestions={specialiteOptions}
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('affaires')} (Projects)</label>
+                    <select
+                      multiple
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
+                      style={inputStyle}
+                      value={newContact.affaires?.split(',').filter(Boolean) || []}
+                      onChange={e => {
+                        const options = e.target.selectedOptions;
+                        const values: string[] = [];
+                        for (let i = 0; i < options.length; i++) {
+                          values.push(options[i].value);
+                        }
+                        setNewContact({...newContact, affaires: values.join(',')});
+                      }}
+                    >
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('candidatures')} (Tenders)</label>
+                    <select
+                      multiple
+                      className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 h-24"
+                      style={inputStyle}
+                      value={newContact.candidatures?.split(',').filter(Boolean) || []}
+                      onChange={e => {
+                        const options = e.target.selectedOptions;
+                        const values: string[] = [];
+                        for (let i = 0; i < options.length; i++) {
+                          values.push(options[i].value);
+                        }
+                        setNewContact({...newContact, candidatures: values.join(',')});
+                      }}
+                    >
+                      {tenders.map(t => (
+                        <option key={t.id} value={t.title}>{t.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-4 pt-4" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setIsEditing(false);
+                      setEditingId(null);
+                    }}
+                    className="px-4 py-2 rounded-lg transition-colors"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('btn_cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-lg transition-colors"
+                    style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                  >
+                    {isEditing ? t('contacts_update_btn') : t('contacts_save_btn')}
+                  </button>
+                </div>
+              </form>
+              {isEditing && editingId && (
+                <div className="p-6 pt-0">
+                  <h4 className="text-sm font-bold uppercase tracking-widest pb-2 mb-4" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('correspondence_title')}</h4>
+                  <CorrespondenceTab localType="contact" localId={editingId} contactEmail={newContact.email || newContact.email_work || newContact.email_home} />
+                </div>
+              )}
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Category Management Modal */}
-      {isCategoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div
-            ref={launchOriginRef}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
-            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-          >
-            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-              <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_manage_categories')}</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} style={{ color: 'var(--tblr-muted)' }}>
-                ✕
-              </button>
-            </div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                <input
-                  className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                  style={inputStyle}
-                  placeholder={t('contacts_new_category_placeholder')}
-                  value={newCategoryName}
-                  onChange={e => setNewCategoryName(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg transition-colors"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  {t('contacts_add_category_btn')}
+      <AnimatePresence>
+        {isCategoryModalOpen && (
+          <motion.div key="contact-category-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_manage_categories')}</h3>
+                <button onClick={() => setIsCategoryModalOpen(false)} style={{ color: 'var(--tblr-muted)' }}>
+                  ✕
                 </button>
-              </form>
-              <div className="space-y-2">
-                {categories.map(cat => (
-                  <div key={cat.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                    <span style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
-                    <button
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      className="transition-colors"
-                      style={{ color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-danger)'}
-                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'}
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
-                ))}
               </div>
-            </div>
+              <div className="p-6 flex-1 overflow-y-auto">
+                <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
+                  <input
+                    className="flex-1 px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                    style={inputStyle}
+                    placeholder={t('contacts_new_category_placeholder')}
+                    value={newCategoryName}
+                    onChange={e => setNewCategoryName(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-lg transition-colors"
+                    style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                  >
+                    {t('contacts_add_category_btn')}
+                  </button>
+                </form>
+                <div className="space-y-2">
+                  {categories.map(cat => (
+                    <div key={cat.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                      <span style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                      <button
+                        onClick={() => handleDeleteCategory(cat.id)}
+                        className="transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-danger)'}
+                        onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--tblr-muted)'}
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
       <MappingModal />
 
       {/* CardDAV Sync Modal */}
-      {cardDavModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div
-            ref={launchOriginRef}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl shadow-xl w-full max-w-md"
-            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-          >
-            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-              <h3 className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>Synchronisation CardDAV</h3>
-              <button onClick={() => setCardDavModal(false)} style={{ color: 'var(--tblr-muted)' }}>✕</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
-                Connectez votre carnet d'adresses Nextcloud ou tout serveur compatible CardDAV.
-              </p>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>URL du carnet d'adresses</label>
-                <input
-                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                  placeholder="https://nextcloud.example.com/remote.php/dav/addressbooks/users/alice/contacts/"
-                  value={cardDavUrl}
-                  onChange={e => setCardDavUrl(e.target.value)}
-                />
+      <AnimatePresence>
+        {cardDavModal && (
+          <motion.div key="carddav-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-xl shadow-xl w-full max-w-md"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+                <h3 className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>Synchronisation CardDAV</h3>
+                <button onClick={() => setCardDavModal(false)} style={{ color: 'var(--tblr-muted)' }}>✕</button>
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Nom d'utilisateur</label>
-                <input
-                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                  value={cardDavUser}
-                  onChange={e => setCardDavUser(e.target.value)}
-                />
+              <div className="p-6 space-y-4">
+                <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+                  Connectez votre carnet d'adresses Nextcloud ou tout serveur compatible CardDAV.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>URL du carnet d'adresses</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    placeholder="https://nextcloud.example.com/remote.php/dav/addressbooks/users/alice/contacts/"
+                    value={cardDavUrl}
+                    onChange={e => setCardDavUrl(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Nom d'utilisateur</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={cardDavUser}
+                    onChange={e => setCardDavUser(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe / Token</label>
+                  <input
+                    type="password"
+                    className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={cardDavPass}
+                    onChange={e => setCardDavPass(e.target.value)}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe / Token</label>
-                <input
-                  type="password"
-                  className="w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                  value={cardDavPass}
-                  onChange={e => setCardDavPass(e.target.value)}
-                />
+              <div className="p-6 flex justify-end gap-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <button
+                  onClick={() => setCardDavModal(false)}
+                  className="px-4 py-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleCardDavSync}
+                  disabled={syncingCardDav}
+                  className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                >
+                  {syncingCardDav && <IconRefresh size={14} className="animate-spin" />}
+                  Synchroniser
+                </button>
               </div>
-            </div>
-            <div className="p-6 flex justify-end gap-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-              <button
-                onClick={() => setCardDavModal(false)}
-                className="px-4 py-2 rounded-lg text-sm"
-                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleCardDavSync}
-                disabled={syncingCardDav}
-                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
-                style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-              >
-                {syncingCardDav && <IconRefresh size={14} className="animate-spin" />}
-                Synchroniser
-              </button>
-            </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -396,16 +396,14 @@ export function TenderRssWatch() {
               <IconRefresh size={16} className={polling ? 'animate-spin' : ''} />
               {t('tender_rss_poll_now')}
             </button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={handleOpenCreateSource}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm"
+              className="press flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm"
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
               <IconPlus size={16} />
               {t('tender_rss_add_source')}
-            </motion.button>
+            </button>
           </div>
         </div>
 
@@ -972,16 +970,14 @@ export function TenderRssWatch() {
                   >
                     {t('btn_cancel')}
                   </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                  <button
                     type="submit"
                     disabled={isSaving}
-                    className="px-4 py-2 rounded-md font-medium text-sm shadow-sm disabled:opacity-60"
+                    className="press px-4 py-2 rounded-md font-medium text-sm shadow-sm disabled:opacity-60"
                     style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                   >
                     {t('save')}
-                  </motion.button>
+                  </button>
                 </div>
               </form>
             </motion.div>

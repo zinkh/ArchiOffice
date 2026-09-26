@@ -22,6 +22,7 @@
   --tblr-success:       #2fb344;
   --tblr-warning:       #f76707;
   --tblr-danger:        #d63939;
+  --ease-out:           cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .dark {
@@ -158,6 +159,18 @@
   .btn:active:not(:disabled) {
     transform: scale(0.97);
     filter: brightness(0.94);
+    transition-duration: 0.05s;
+  }
+  /* Même retour à l'appui que .btn, pour les éléments qui gardent leur propre
+     padding et leurs couleurs. Enfoncement immédiat, retour en douceur. */
+  .press {
+    transition: background-color 0.12s, color 0.12s, border-color 0.12s,
+                box-shadow 0.12s, filter 0.12s, opacity 0.12s,
+                transform 0.16s var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
     transition-duration: 0.05s;
   }
   .btn-primary  { background: var(--tblr-primary); color: #fff; border-color: var(--tblr-primary); }
@@ -510,6 +523,7 @@ button, [role="button"], [role="tab"], .btn {
   html { scroll-behavior: auto !important; }
   .animate-pulse { animation: none !important; }
   .btn:active:not(:disabled) { transform: none; }
+  .press:active:not(:disabled) { transform: none; }
 }
 
 /* Réduire la transparence : les voiles floutés deviennent opaques. */

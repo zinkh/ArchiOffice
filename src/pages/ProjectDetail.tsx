@@ -1669,7 +1669,7 @@ export default function ProjectDetail() {
           {currentUser?.system_role === 'admin' && (
             <button
               onClick={() => { setDeleteProjectConfirmInput(''); setShowDeleteProjectConfirm(true); }}
-              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
               title={t('delete')}
             >
               <IconTrash size={18} />
@@ -1685,7 +1685,7 @@ export default function ProjectDetail() {
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition-all disabled:opacity-50"
+            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
             style={{ background: 'var(--tblr-primary)' }}
           >
             {isSaving ? (
@@ -1768,7 +1768,7 @@ export default function ProjectDetail() {
                     title="Contrat de Maîtrise d'Œuvre"
                     description="Contrat(s) associés à ce projet depuis la boîte à outils MOE"
                     action={
-                      <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all">
+                      <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
                         Gérer les contrats
                       </a>
@@ -1964,7 +1964,7 @@ export default function ProjectDetail() {
                     ) : (
                       <button
                         onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Nouvel avenant
@@ -2059,7 +2059,7 @@ export default function ProjectDetail() {
                       )}
                       <div className="flex justify-end gap-3">
                         <button onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">Créer l'avenant</button>
+                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">Créer l'avenant</button>
                       </div>
                     </div>
                   )}
@@ -2130,12 +2130,12 @@ export default function ProjectDetail() {
                               <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  {os.status === 'draft' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[0.6875rem] font-bold transition-all"><IconSend size={11} /> Soumettre</button>}
+                                  {os.status === 'draft' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[0.6875rem] font-bold transition"><IconSend size={11} /> Soumettre</button>}
                                   {os.status === 'submitted' && (<>
-                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition-all"><IconCheck size={11} /> Approuver</button>
-                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[0.6875rem] font-bold transition-all"><IconX size={11} /> Rejeter</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition"><IconCheck size={11} /> Approuver</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[0.6875rem] font-bold transition"><IconX size={11} /> Rejeter</button>
                                   </>)}
-                                  {os.status === 'rejected' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[0.6875rem] font-bold transition-all"><IconRefresh size={11} /> Rouvrir</button>}
+                                  {os.status === 'rejected' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[0.6875rem] font-bold transition"><IconRefresh size={11} /> Rouvrir</button>}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right">
@@ -2580,7 +2580,7 @@ export default function ProjectDetail() {
                               setEditingNote(null);
                               setIsAddingNote(true);
                             }}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
                             Nouvelle note
@@ -2918,7 +2918,7 @@ export default function ProjectDetail() {
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
                             <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
+                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">
                               {editingNote ? 'Mettre à jour' : 'Créer la note'}
                             </button>
                           </div>
@@ -3010,7 +3010,7 @@ export default function ProjectDetail() {
                           </div>
                         )}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-lg font-bold border border-white/30 transition-all">
+                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-lg font-bold border border-white/30 transition">
                             <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
                             Change Cover Image
                           </label>
@@ -3191,7 +3191,7 @@ export default function ProjectDetail() {
                           <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>Milestones</h3>
                           <button 
                             onClick={() => setIsAddingMilestone(!isAddingMilestone)}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
                             Ajouter un milestone
@@ -3230,7 +3230,7 @@ export default function ProjectDetail() {
                               </button>
                               <button 
                                 onClick={handleAddMilestone}
-                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                               >
                                 Ajouter
                               </button>
@@ -3292,7 +3292,7 @@ export default function ProjectDetail() {
                                       .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
                                   }
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
                               >
                                 <IconTrash size={14} />
                               </button>
@@ -3664,7 +3664,7 @@ export default function ProjectDetail() {
                                   if (res.ok) setProjectMembers(prev => prev.filter(pm => (pm.user_id || pm.id) !== userId));
                                 } catch (err) { console.error(err); }
                               }}
-                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
                               title="Retirer du projet"
                             >✕</button>
                           </div>
@@ -3687,7 +3687,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingPermit(!isAddingPermit)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         {isAddingPermit ? 'Annuler' : 'Ajouter'}
@@ -3725,7 +3725,7 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -3771,7 +3771,7 @@ export default function ProjectDetail() {
                                     const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
                                     if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
                                   }}
-                                  className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                  className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
                                   title="Supprimer"
                                 >
                                   <IconTrash size={14} />
@@ -3822,7 +3822,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingOs(!isAddingOs)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Nouvel OS
@@ -3859,7 +3859,7 @@ export default function ProjectDetail() {
                       {marchesTravaux.length === 0 && !isAddingMarche && (
                         <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-700 dark:text-amber-400">
                           <span>Aucun marché de travaux sur ce projet — un OS doit être rattaché à un marché.</span>
-                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[0.6875rem] whitespace-nowrap transition-all">+ Créer un marché</button>
+                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[0.6875rem] whitespace-nowrap transition">+ Créer un marché</button>
                         </div>
                       )}
                       {isAddingMarche && (
@@ -3881,7 +3881,7 @@ export default function ProjectDetail() {
                             value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
                           <div className="flex gap-2 justify-end">
                             <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1.5 text-xs font-bold text-[var(--tblr-muted)]">Annuler</button>
-                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition-all">Créer le marché</button>
+                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition">Créer le marché</button>
                           </div>
                         </div>
                       )}
@@ -3938,7 +3938,7 @@ export default function ProjectDetail() {
                         </div>
                         <div className="md:col-span-2 flex items-end">
                           <button onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition-all">
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
                             Créer l'OS
                           </button>
                         </div>
@@ -3990,14 +3990,14 @@ export default function ProjectDetail() {
                                 {os.status === 'draft' && (
                                   <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
                                     title="Émettre l'OS"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[0.6875rem] font-bold transition-all">
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[0.6875rem] font-bold transition">
                                     <IconSend size={11} /> Émettre
                                   </button>
                                 )}
                                 {os.status === 'submitted' && (
                                   <button onClick={() => handleUpdateOsStatus(os.id, 'approved')}
                                     title="Enregistrer AR"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition-all">
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition">
                                     <IconCheck size={11} /> AR reçu
                                   </button>
                                 )}
@@ -4046,7 +4046,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingRfi(!isAddingRfi)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         {isAddingRfi ? 'Annuler' : 'Ajouter'}
@@ -4074,7 +4074,7 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -4114,7 +4114,7 @@ export default function ProjectDetail() {
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
                                 title="Supprimer"
                               >
                                 <IconTrash size={14} />
@@ -4190,7 +4190,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingInvoice(!isAddingInvoice)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Ajouter une facture
@@ -4262,7 +4262,7 @@ export default function ProjectDetail() {
                               console.error(err);
                             }
                           }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -4403,7 +4403,7 @@ export default function ProjectDetail() {
                                 key={s}
                                 onClick={() => setVisaForm(f => ({ ...f, status: s }))}
                                 className={cn(
-                                  "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition-all border",
+                                  "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition border",
                                   visaForm.status === s
                                     ? s === 'approved' ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/40 dark:border-green-700 dark:text-green-400'
                                       : s === 'rejected' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/40 dark:border-red-700 dark:text-red-400'
@@ -4503,7 +4503,7 @@ export default function ProjectDetail() {
                           setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                           setIsVisaModalOpen(true);
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Ajouter un visa
@@ -4688,7 +4688,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => { setShowPvForm(true); setEditingReceptionId(null); setPvForm(defaultPvForm()); }}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Créer PV de réception
@@ -4874,7 +4874,7 @@ export default function ProjectDetail() {
                               setPvForm(defaultPvForm());
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
                           {editingReceptionId ? 'Enregistrer' : 'Créer le PV'}
                         </button>
@@ -5172,7 +5172,7 @@ export default function ProjectDetail() {
                         <button
                           onClick={() => doeInputRef.current?.click()}
                           disabled={doeUploading}
-                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                         >
                           <IconFilePlus size={14} />
                           {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
@@ -5353,7 +5353,7 @@ export default function ProjectDetail() {
                               planInputRef.current?.click();
                             }}
                             disabled={planUploading}
-                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all whitespace-nowrap disabled:opacity-50"
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition whitespace-nowrap disabled:opacity-50"
                           >
                             <IconUpload size={14} />
                             <span className="hidden sm:inline">{planUploading ? 'Upload...' : 'Importer un plan'}</span>
@@ -5474,7 +5474,7 @@ export default function ProjectDetail() {
                   Annuler
                 </button>
                 <button onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar}
-                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-all">
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition">
                   {arSaving ? 'Enregistrement…' : 'Confirmer AR'}
                 </button>
               </div>
@@ -5520,7 +5520,7 @@ export default function ProjectDetail() {
                 <button
                   disabled={deleteProjectConfirmInput.trim().toLowerCase() !== t('projects_delete_confirm_word').toLowerCase() || isDeletingProject}
                   onClick={handleDelete}
-                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
                 >
                   {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
                 </button>

@@ -484,7 +484,7 @@ export default function Notifications() {
               ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
               rows={2}
               placeholder="Partagez quelque chose avec l'équipe... (@ pour mentionner, Ctrl+Entrée pour publier)"
-              className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition-all"
+              className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition"
               value={composer.value}
               onChange={composer.handleChange}
               onKeyDown={e => composer.handleKeyDown(e, ke => { if (ke.ctrlKey || ke.metaKey) { ke.preventDefault(); handlePost(); } })}
@@ -553,7 +553,7 @@ export default function Notifications() {
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={cn(
-                  "flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all shrink-0",
+                  "flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition shrink-0",
                   isActive
                     ? "border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10"
                     : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/30"

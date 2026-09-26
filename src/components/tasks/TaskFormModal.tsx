@@ -118,11 +118,12 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <motion.div
         ref={launchOriginRef}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
         className="w-full max-w-lg rounded-xl shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)' }}
       >
@@ -257,7 +258,7 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
           </div>
         </form>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 

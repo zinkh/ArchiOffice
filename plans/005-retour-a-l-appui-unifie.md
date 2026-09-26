@@ -1,6 +1,6 @@
 # 005 : Unifier le retour à l'appui sur celui des boutons `.btn`
 
-- **Statut** : TODO
+- **Statut** : DONE
 - **Commit** : bedc65f
 - **Gravité** : MOYENNE
 - **Catégorie** : Physique, accessibilité

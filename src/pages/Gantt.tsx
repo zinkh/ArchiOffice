@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
 import { IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { addMonths, subMonths, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isWithinInterval } from 'date-fns';
@@ -370,8 +371,8 @@ export default function Gantt() {
                               >
                                 {/* Progress Fill */}
                                 <div 
-                                  className="absolute left-0 top-0 bottom-0 bg-purple-500 dark:bg-purple-600 transition-all duration-300"
-                                  style={{ width: `${task.progress}%` }}
+                                  className="absolute inset-0 bg-purple-500 dark:bg-purple-600 origin-left transition-transform duration-300 ease-[var(--ease-out)]"
+                                  style={{ transform: `scaleX(${Math.min(100, Math.max(0, task.progress || 0)) / 100})` }}
                                 />
                                 
                                 {/* Content Overlay */}
@@ -407,17 +408,19 @@ export default function Gantt() {
           </div>
         </div>
       </div>
-      {modal && (
-        <TaskFormModal
-          initial={modal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); load(); }}
-          onDeleted={() => { setModal(null); load(); }}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <TaskFormModal key="task-form-modal"
+            initial={modal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            onClose={() => setModal(null)}
+            onSaved={() => { setModal(null); load(); }}
+            onDeleted={() => { setModal(null); load(); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

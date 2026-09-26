@@ -184,7 +184,7 @@ export default function AgentConfig() {
               <button
                 key={c}
                 onClick={() => setAvatarColor(c)}
-                className="w-7 h-7 rounded-full border-2 transition-all"
+                className="w-7 h-7 rounded-full border-2 transition"
                 style={{ background: c, borderColor: avatarColor === c ? 'var(--tblr-text)' : 'transparent' }}
               />
             ))}

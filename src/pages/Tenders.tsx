@@ -893,7 +893,7 @@ export default function Tenders() {
                           checked={newTender.mandatory_visit || false}
                           onChange={e => setNewTender({...newTender, mandatory_visit: e.target.checked})}
                         />
-                        <div className="w-10 h-5 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"
+                        <div className="w-10 h-5 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition peer-checked:bg-blue-600"
                           style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}
                         ></div>
                       </div>
@@ -1043,7 +1043,7 @@ export default function Tenders() {
                 <button
                   type="submit"
                   disabled={isSaving || showSuccess}
-                  className="w-full py-2 rounded-lg font-medium transition-all mt-4 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
+                  className="w-full py-2 rounded-lg font-medium transition mt-4 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
                   style={showSuccess
                     ? { background: 'var(--tblr-success)', color: '#fff' }
                     : { background: 'var(--tblr-primary)', color: '#fff' }

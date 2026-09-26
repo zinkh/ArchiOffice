@@ -141,7 +141,7 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold uppercase text-[var(--tblr-muted)]">Pièces jointes</span>
-        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition-all">
+        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition">
           {uploading ? <IconLoader2 size={13} className="animate-spin" /> : <IconUpload size={13} />}
           Ajouter
           <input type="file" multiple className="hidden" disabled={uploading} onChange={e => handleUpload(e.target.files)} />
@@ -172,7 +172,7 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
               <button
                 type="button"
                 onClick={() => handleDelete(doc)}
-                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded shrink-0"
+                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded shrink-0"
                 title="Supprimer"
               >
                 <IconTrash size={13} />

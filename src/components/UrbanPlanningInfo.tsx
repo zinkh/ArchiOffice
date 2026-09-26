@@ -202,7 +202,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
                       href={file.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-between group px-2 py-1.5 bg-white dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 rounded hover:border-blue-200 dark:hover:border-blue-800 transition-all"
+                      className="flex items-center justify-between group px-2 py-1.5 bg-white dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 rounded hover:border-blue-200 dark:hover:border-blue-800 transition"
                     >
                       <div className="flex items-center gap-2 overflow-hidden">
                         <IconFileTypePdf size={12} className="text-red-500 shrink-0" />

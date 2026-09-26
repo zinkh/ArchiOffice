@@ -45,7 +45,7 @@ export function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, t
   const navigate = useNavigate();
   return (
     <div
-      className="rounded-xl p-4 flex flex-col gap-2 cursor-pointer transition-all active:scale-[0.98] relative overflow-hidden"
+      className="rounded-xl p-4 flex flex-col gap-2 cursor-pointer press relative overflow-hidden"
       style={{
         background: cardBg ?? 'var(--tblr-surface)',
         border: `1px solid ${cardBg ? accent + '33' : 'var(--tblr-border)'}`,
@@ -140,7 +140,7 @@ export function QuickAction({ icon: Icon, label, to, color }: { icon: React.Elem
   return (
     <button
       onClick={() => navigate(to)}
-      className="flex flex-col items-center gap-2 p-3 rounded-xl transition-all active:scale-95 flex-1"
+      className="flex flex-col items-center gap-2 p-3 rounded-xl press flex-1"
       style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
     >
       <span

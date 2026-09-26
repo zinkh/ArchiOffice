@@ -1,6 +1,6 @@
 # 001 : Remplacer `transition-all` par des transitions ciblées
 
-- **Statut** : TODO
+- **Statut** : DONE
 - **Commit** : bedc65f
 - **Gravité** : HAUTE
 - **Catégorie** : Performance

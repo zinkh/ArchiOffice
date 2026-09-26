@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -883,29 +884,33 @@ export default function CalendarPage() {
       </div>
       )}
 
-      {eventModal && (
-        <CalendarEventModal
-          initial={eventModal}
-          projects={projects}
-          onClose={closeEventModal}
-          onSaved={handleEventSaved}
-          onDeleted={handleEventDeleted}
-          onOpenProject={projectId => { setEventModal(null); navigate(`/projects/${projectId}`); }}
-        />
-      )}
+      <AnimatePresence>
+        {eventModal && (
+          <CalendarEventModal key="calendar-event-modal"
+            initial={eventModal}
+            projects={projects}
+            onClose={closeEventModal}
+            onSaved={handleEventSaved}
+            onDeleted={handleEventDeleted}
+            onOpenProject={projectId => { setEventModal(null); navigate(`/projects/${projectId}`); }}
+          />
+        )}
+      </AnimatePresence>
 
-      {taskModal && (
-        <TaskFormModal
-          initial={taskModal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          onClose={() => setTaskModal(null)}
-          onSaved={afterTaskWrite}
-          onDeleted={afterTaskWrite}
-          onOpenProject={projectId => { setTaskModal(null); navigate(`/projects/${projectId}`); }}
-        />
-      )}
+      <AnimatePresence>
+        {taskModal && (
+          <TaskFormModal key="task-form-modal"
+            initial={taskModal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            onClose={() => setTaskModal(null)}
+            onSaved={afterTaskWrite}
+            onDeleted={afterTaskWrite}
+            onOpenProject={projectId => { setTaskModal(null); navigate(`/projects/${projectId}`); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

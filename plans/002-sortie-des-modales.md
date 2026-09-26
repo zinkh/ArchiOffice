@@ -1,6 +1,6 @@
 # 002 : Donner une sortie animée aux 9 modales qui disparaissent d'un coup
 
-- **Statut** : TODO
+- **Statut** : DONE
 - **Commit** : bedc65f
 - **Gravité** : MOYENNE
 - **Catégorie** : Interruption, cohérence
