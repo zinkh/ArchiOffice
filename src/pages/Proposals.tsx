@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
@@ -37,7 +38,7 @@ const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var
 
 const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
   <div>
-    <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+    <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
       {label} {required && <span className="text-red-500">*</span>}
     </label>
     {type === "select" ? (
@@ -517,13 +518,13 @@ export default function Proposals() {
               { label: t('proposals_col_proposal'), primary: true, render: p => (
                 <div>
                   <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{p.title}</p>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{p.reference}</p>
+                  <p className="text-[0.6875rem] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{p.reference}</p>
                 </div>
               )},
               { label: t('proposals_col_client'), render: p => p.client_name || 'Unknown' },
               { label: t('proposals_col_amount'), render: p => <span className="font-mono font-bold">{formatCurrency(p.amount)}</span> },
               { label: t('proposals_col_status'), render: p => (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{
+                <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={{
                   background: p.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : p.status === 'Rejected' ? 'rgba(214,57,57,0.1)' : p.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
                   color: p.status === 'Accepted' ? 'var(--tblr-success)' : p.status === 'Rejected' ? 'var(--tblr-danger)' : p.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                   border: '1px solid currentColor',
@@ -567,8 +568,8 @@ export default function Proposals() {
                       </div>
                       <div>
                         <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{proposal.title}</p>
-                        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString()}</p>
+                        <p className="text-[0.6875rem] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </td>
@@ -579,7 +580,7 @@ export default function Proposals() {
                     {formatCurrency(proposal.amount)}
                   </td>
                   <td className="px-6 py-4">
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{
+                    <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={{
                       background: proposal.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : proposal.status === 'Rejected' ? 'rgba(var(--tblr-danger-rgb,214,57,57),0.1)' : proposal.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
                       color: proposal.status === 'Accepted' ? 'var(--tblr-success)' : proposal.status === 'Rejected' ? 'var(--tblr-danger)' : proposal.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                       border: '1px solid currentColor',
@@ -670,9 +671,10 @@ export default function Proposals() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -694,7 +696,7 @@ export default function Proposals() {
                 {/* Section 1: General Info */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">01</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
                     {t('proposals_section_general')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -710,12 +712,12 @@ export default function Proposals() {
                 {/* Section 2: Client Details */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">02</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
                     {t('proposals_section_client')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                      <label className="block text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
                         Client Database <span className="text-red-500">*</span>
                       </label>
                       <ContactAutocomplete 
@@ -794,7 +796,7 @@ export default function Proposals() {
                 {/* Section 3: Project Specifics */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">03</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
                     {t('proposals_section_project')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -806,7 +808,7 @@ export default function Proposals() {
                 {/* Section 4: Terrain & Technical */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">04</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">04</span>
                     {t('proposals_section_terrain')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -881,7 +883,7 @@ export default function Proposals() {
                 {/* Section 5: Surfaces & Capacity */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">05</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">05</span>
                     {t('proposals_section_surfaces')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -899,7 +901,7 @@ export default function Proposals() {
                 {newProposal.adresse_terrain && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">06</span>
                       {t('proposals_section_urban_risks')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -918,7 +920,7 @@ export default function Proposals() {
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <InfoPanelBoundary label="Cadastre">
@@ -940,13 +942,13 @@ export default function Proposals() {
                               }}
                             />
                           </InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">
                             Vue aérienne · Cadastre
                           </div>
                         </div>
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <InfoPanelBoundary label="Géorisques"><GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
                         </div>
                       </div>
                     </div>
@@ -956,23 +958,23 @@ export default function Proposals() {
                 {/* Section 07: Honoraires */}
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">07</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">07</span>
                     Honoraires
                   </h3>
                   {/* Mode selector for Montant des travaux */}
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
+                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
                     <button
                       type="button"
                       onClick={() => setCostMode('manual')}
-                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                     >
                       Saisie manuelle
                     </button>
                     <button
                       type="button"
                       onClick={() => setCostMode('ratio')}
-                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                     >
                       Calcul par ratio
                     </button>
@@ -981,12 +983,12 @@ export default function Proposals() {
                     <button
                       type="button"
                       onClick={() => setIsMiqcpWizardOpen(true)}
-                      className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                     >
                       {t('miqcp_wizard_open_btn')}
                     </button>
                     {miqcpAssessment && (
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
                         {t('miqcp_wizard_summary', {
                           cc: miqcpAssessment.coefficientComplexite.toFixed(2),
                           taux: miqcpAssessment.tauxReference.toFixed(2),
@@ -1002,15 +1004,15 @@ export default function Proposals() {
                     </div>
                   ) : (
                     <div className="space-y-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                      <p className="text-[0.6875rem] text-blue-600 dark:text-blue-400 font-medium">
                         Montant des travaux = Surface existante × Ratio réhabilitation + Surface extension/neuf × Ratio extension
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="space-y-1">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
                           <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
                             {newProposal.surface_plancher || '0'} m²
-                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1020,10 +1022,10 @@ export default function Proposals() {
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
                         />
                         <div className="space-y-1">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
                           <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
                             {newProposal.surface_plancher_ext || '0'} m²
-                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1034,7 +1036,7 @@ export default function Proposals() {
                         />
                       </div>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
+                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
                         <span className="text-sm font-bold text-blue-700 dark:text-blue-400">
                           {(newProposal.construction_cost || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €
                         </span>
@@ -1048,13 +1050,13 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedExePercent.toFixed(2)} %
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedTotalPercent.toFixed(2)} %
                       </div>
@@ -1063,13 +1065,13 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {formatCurrency(vatAmount)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
                       <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-400">
                         {formatCurrency(totalTTC)}
                       </div>
@@ -1081,7 +1083,7 @@ export default function Proposals() {
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">08</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">08</span>
                       {t('proposals_section_cotraitants')}
                     </h3>
                     <button
@@ -1150,12 +1152,12 @@ export default function Proposals() {
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">10</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">10</span>
                       {t('proposals_section_fee_distribution')}
                     </h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
                         <input 
                           type="number" 
                           min="0" 
@@ -1168,14 +1170,14 @@ export default function Proposals() {
                       <button 
                         type="button"
                         onClick={() => exportFeeDistributionToXlsx(newProposal.fee_distribution, newProposal.specialties_list, contacts, newProposal.vat_rate, newProposal.reference || 'Projet')}
-                        className="text-[10px] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
                       <button
                         type="button"
                         onClick={handleLoadMiqcpPhaseRepartition}
-                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                       >
                         {t('miqcp_wizard_load_phase_repartition_btn')}
                       </button>
@@ -1187,7 +1189,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_base')}
                       </button>
@@ -1199,7 +1201,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_execution')}
                       </button>
@@ -1211,7 +1213,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_complementary')}
                       </button>
@@ -1240,7 +1242,7 @@ export default function Proposals() {
                 {editingProposal && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">09</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">09</span>
                       {t('proposals_section_schedule')}
                     </h3>
                     <MilestoneGantt 

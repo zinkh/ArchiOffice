@@ -4,6 +4,7 @@ import {
   IconCheck, IconEye, IconEyeOff, IconAlertTriangle, IconInbox, IconSearch
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
 import { MobileAccordionTable } from './MobileAccordionTable';
@@ -420,7 +421,7 @@ export function TenderRssWatch() {
                   { label: t('tender_rss_source_name'), primary: true, render: (s: TenderRssSource) => (
                     <div>
                       <p className="font-medium text-sm">{s.name}</p>
-                      <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                         {s.source_type === 'boamp' || s.source_type === 'ted' ? `${t(`tender_rss_source_type_${s.source_type}`)} · ${describeSource(s, t)}` : s.url}
                       </p>
                     </div>
@@ -452,7 +453,7 @@ export function TenderRssWatch() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span
-                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
+                          className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold uppercase shrink-0"
                           style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
                         >
                           {s.source_type === 'boamp' ? 'BOAMP' : s.source_type === 'ted' ? 'TED' : 'RSS'}
@@ -645,7 +646,7 @@ export function TenderRssWatch() {
 
         {/* Detail panel — large screens only */}
         <div
-          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-2rem)] rounded-lg overflow-hidden"
+          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100dvh-2rem)] rounded-lg overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
           {selectedMatch ? (
@@ -689,9 +690,10 @@ export function TenderRssWatch() {
         {isSourceModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-md overflow-hidden"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >

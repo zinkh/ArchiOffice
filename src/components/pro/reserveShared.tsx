@@ -26,7 +26,7 @@ export function reserveOverdueDays(r: Pick<ReserveLike, 'status' | 'due_date'>):
 
 export function statusPillClass(status: ReserveStatus): string {
   return cn(
-    'border-none rounded-full text-[10px] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer',
+    'border-none rounded-full text-[0.6875rem] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer',
     status === 'Levée' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
     status === 'Quitus Transmis' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
     status === 'En cours' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :

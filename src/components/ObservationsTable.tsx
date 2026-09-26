@@ -225,7 +225,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
               }}
             />
             {row.pendingSync && (
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+              <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
             )}
           </div>
         );
@@ -239,7 +239,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         const val = info.getValue() || 'À faire';
         return (
           <select
-            className={`w-full p-1 rounded text-[10px] font-bold uppercase tracking-wider border-none cursor-pointer ${statutColors[val] || ''}`}
+            className={`w-full p-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider border-none cursor-pointer ${statutColors[val] || ''}`}
             value={val}
             onChange={e => {
               updateLocal(row.id, { statut: e.target.value as Observation['statut'] });
@@ -259,7 +259,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         const val = info.getValue() || 'normal';
         return (
           <select
-            className={`w-full p-1 rounded text-[10px] font-bold uppercase tracking-wider border-none cursor-pointer ${urgenceColors[val] || ''}`}
+            className={`w-full p-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider border-none cursor-pointer ${urgenceColors[val] || ''}`}
             value={val}
             onChange={e => {
               updateLocal(row.id, { urgence: e.target.value as Observation['urgence'] });
@@ -441,7 +441,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
                   <th
                     key={header.id}
                     style={{ width: header.getSize() }}
-                    className="p-2 text-left text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+                    className="p-2 text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>

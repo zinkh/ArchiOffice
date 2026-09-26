@@ -233,7 +233,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               <button
                 onClick={() => toggleSection(section.key)}
                 className={cn(
-                  'w-full flex items-center justify-between px-3 py-1.5 mb-0.5 rounded text-[10px] font-semibold uppercase tracking-widest transition-colors group',
+                  'w-full flex items-center justify-between px-3 py-1.5 mb-0.5 rounded text-[0.6875rem] font-semibold uppercase tracking-widest transition-colors group',
                   hasActive && isCollapsed
                     ? 'text-[var(--tblr-primary)]'
                     : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'
@@ -260,7 +260,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         to={item.path}
                         onClick={onNavigate}
                         className={cn(
-                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[0.8125rem] font-medium transition-colors',
                           isActive
                             ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
                             : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
@@ -273,7 +273,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         <span className="flex-1">{t(item.name)}</span>
                         {item.path === '/team' && pendingJoinRequests > 0 && (
                           <span
-                            className="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center leading-none text-white"
+                            className="min-w-[18px] h-[18px] px-1 rounded-full text-[0.6875rem] font-bold flex items-center justify-center leading-none text-white"
                             style={{ background: 'var(--tblr-warning, #f59f00)' }}
                             title={t('team_join_requests_title') as string}
                           >
@@ -292,7 +292,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         to="/superpdp"
                         onClick={onNavigate}
                         className={cn(
-                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[0.8125rem] font-medium transition-colors',
                           isActive
                             ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
                             : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
@@ -312,7 +312,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         to="/chorus-pro"
                         onClick={onNavigate}
                         className={cn(
-                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[0.8125rem] font-medium transition-colors',
                           isActive
                             ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
                             : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
@@ -332,7 +332,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         to="/maf-declaration"
                         onClick={onNavigate}
                         className={cn(
-                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+                          'flex items-center gap-2.5 px-3 py-1.5 rounded text-[0.8125rem] font-medium transition-colors',
                           isActive
                             ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
                             : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
@@ -357,7 +357,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             to="/admin"
             onClick={onNavigate}
             className={cn(
-              'flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors',
+              'flex items-center gap-2.5 px-3 py-1.5 rounded text-[0.8125rem] font-medium transition-colors',
               location.pathname === '/admin'
                 ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
                 : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
@@ -376,7 +376,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             to="/billing"
             onClick={onNavigate}
             className={cn(
-              'flex items-center gap-2 px-3 py-2 rounded text-[12px] font-medium transition-colors border',
+              'flex items-center gap-2 px-3 py-2 rounded text-[0.75rem] font-medium transition-colors border',
               isTrialExpired
                 ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
                 : 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800'
@@ -426,7 +426,7 @@ export function Sidebar() {
         </Link>
         {!settings?.logoUrl && settings?.agencyName && (
           <p
-            className="mt-0.5 text-[11px] truncate pl-[36px]"
+            className="mt-0.5 text-[0.6875rem] truncate pl-[36px]"
             style={{ color: 'var(--tblr-muted)' }}
           >
             {settings.agencyName}

@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
@@ -809,12 +810,12 @@ export default function Projects() {
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-3 left-3">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
+                  <span className="px-2 py-0.5 rounded text-[0.6875rem] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
                     #{project.project_code || '---'}
                   </span>
                 </div>
                 <div className="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={
+                  <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold backdrop-blur-md" style={
                     project.status === 'In Progress' ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' } :
                     project.status === 'Completed' ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } :
                     { background: 'rgba(255,255,255,0.85)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }
@@ -822,7 +823,7 @@ export default function Projects() {
                     {project.status}
                   </span>
                   {project.category && (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
+                    <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
                       {project.category}
                     </span>
                   )}
@@ -831,7 +832,7 @@ export default function Projects() {
               <div className="p-4 flex-1 flex flex-col">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[15px] font-semibold truncate transition-colors" style={{ color: 'var(--tblr-text)' }}>{project.name}</h3>
+                    <h3 className="text-[0.9375rem] font-semibold truncate transition-colors" style={{ color: 'var(--tblr-text)' }}>{project.name}</h3>
                     <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{project.client}</p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 ml-2">
@@ -853,11 +854,11 @@ export default function Projects() {
                 </p>
                 <div className="flex items-center justify-between pt-3 mt-auto" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</p>
+                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</p>
                     <p>{t('budget')}</p>
                   </div>
                   <div className="text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>
-                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString()}</p>
+                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString()}</p>
                     <p>{t('deadline')}</p>
                   </div>
                 </div>
@@ -951,9 +952,10 @@ export default function Projects() {
         {isModalOpen && selectedProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
             >
               <div className="relative h-48 bg-zinc-100 dark:bg-zinc-800 shrink-0">
@@ -1110,7 +1112,7 @@ export default function Projects() {
                               onChange={handleImageUpload}
                             />
                           </label>
-                          <p className="text-[10px] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
+                          <p className="text-[0.6875rem] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
                         </div>
                       </div>
                     </div>
@@ -1594,7 +1596,7 @@ export default function Projects() {
                           } : undefined}
                         />
                       </InfoPanelBoundary>
-                      <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
+                      <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
                     </div>
                   </div>
                 )}
@@ -1614,7 +1616,7 @@ export default function Projects() {
                     <div className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800 mb-4 space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="col-span-2">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
+                          <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
                           <input
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                             placeholder={t('projects_milestone_example')}
@@ -1623,7 +1625,7 @@ export default function Projects() {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
+                          <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
                           <input 
                             type="date"
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -1678,7 +1680,7 @@ export default function Projects() {
                               )}>
                                 {milestone.title}
                               </p>
-                              <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+                              <div className="flex items-center gap-1 text-[0.6875rem] text-zinc-400">
                                 <IconCalendar size={10} />
                                 <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString()}</span>
                               </div>
@@ -1710,7 +1712,8 @@ export default function Projects() {
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
           >
@@ -1757,7 +1760,8 @@ export default function Projects() {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
           >

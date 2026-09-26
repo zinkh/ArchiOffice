@@ -94,7 +94,7 @@ const OrgNodeCard: React.FC<OrgNodeProps> = ({ node }) => {
 
         {/* Department Badge */}
         <span className={cn(
-          "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
+          "text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
           getDeptBadgeColor(node.department)
         )}>
           {node.department}
@@ -103,7 +103,7 @@ const OrgNodeCard: React.FC<OrgNodeProps> = ({ node }) => {
         {/* Salary Detail (if provided) */}
         {node.salary && (
           <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800 w-full">
-            <p className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500">
+            <p className="text-[0.6875rem] font-mono text-zinc-400 dark:text-zinc-500">
               {node.salary}
             </p>
           </div>

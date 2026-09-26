@@ -9,6 +9,7 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
@@ -37,7 +38,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
       <Icon size={11} />
       {cfg.label}
     </span>
@@ -404,7 +405,7 @@ export default function OrdresDeService() {
             <div className="absolute -bottom-2 -right-2 opacity-10" style={{ color: s.color }}><s.icon size={56} /></div>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: s.color + '22', color: s.color }}><s.icon size={18} /></div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
+              <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
               <p className="text-2xl font-bold leading-none" style={{ color: s.color }}>{s.value}</p>
             </div>
           </div>
@@ -462,7 +463,7 @@ export default function OrdresDeService() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <tr className="text-[0.6875rem] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
                   <th className="px-4 py-3">N° OS</th>
                   <th className="px-4 py-3">Objet</th>
                   <th className="px-4 py-3">Affaire / Entreprise</th>
@@ -486,11 +487,11 @@ export default function OrdresDeService() {
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }} title={os.title}>{os.title}</p>
-                        {os.lot && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
+                        {os.lot && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
                       </td>
                       <td className="px-4 py-3">
                         {project && <p className="text-xs font-medium truncate max-w-[150px]" style={{ color: 'var(--tblr-text)' }}>{project.name}</p>}
-                        {os.entreprise && <p className="text-[11px] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
+                        {os.entreprise && <p className="text-[0.6875rem] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                         {os.date_emission
@@ -506,7 +507,7 @@ export default function OrdresDeService() {
                             {os.status === 'draft' && (
                               <button
                                 onClick={() => handleStatusChange(os, 'submitted')}
-                                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
+                                className="text-[0.6875rem] px-2 py-0.5 rounded font-bold transition-all"
                                 style={{ background: '#e8f0fb', color: '#206bc4' }}
                                 title="Émettre l'OS"
                               >
@@ -517,7 +518,7 @@ export default function OrdresDeService() {
                               <>
                                 <button
                                   onClick={() => handleStatusChange(os, 'approved')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#d3f9d8', color: '#2f9e44' }}
                                   title="Enregistrer l'accusé de réception"
                                 >
@@ -525,7 +526,7 @@ export default function OrdresDeService() {
                                 </button>
                                 <button
                                   onClick={() => handleStatusChange(os, 'rejected')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#ffe3e3', color: '#d63939' }}
                                   title="Annuler"
                                 >
@@ -540,7 +541,7 @@ export default function OrdresDeService() {
                         {os.date_ar ? (
                           <div>
                             <p className="text-xs font-medium" style={{ color: '#2f9e44' }}>AR : {new Date(os.date_ar).toLocaleDateString('fr-FR')}</p>
-                            {os.date_execution && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
+                            {os.date_execution && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
                           </div>
                         ) : (
                           <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>
@@ -607,9 +608,10 @@ export default function OrdresDeService() {
         {isFormOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="my-4 w-full max-w-2xl rounded-2xl shadow-2xl"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -627,7 +629,7 @@ export default function OrdresDeService() {
               <div className="p-6 space-y-5">
                 {/* Identifiants */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° OS *</label>
@@ -642,7 +644,7 @@ export default function OrdresDeService() {
 
                 {/* Objet */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Titre *</label>
@@ -664,7 +666,7 @@ export default function OrdresDeService() {
 
                 {/* Parties */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Affaire</label>
@@ -739,7 +741,7 @@ export default function OrdresDeService() {
 
                 {/* Délais & Coûts */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai d'exécution</label>
@@ -843,7 +845,7 @@ export default function OrdresDeService() {
         {/* AR modal */}
         {arModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-4"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -880,7 +882,7 @@ export default function OrdresDeService() {
         {/* Delete confirm */}
         {osToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-5 text-center"
               style={{ background: 'var(--tblr-surface)' }}
             >

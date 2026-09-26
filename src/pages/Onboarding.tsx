@@ -304,7 +304,7 @@ export default function Onboarding() {
               return (
                 <React.Fragment key={s.id}>
                   <div className={`w-9 flex-shrink-0 flex justify-center transition-opacity ${active ? 'opacity-100' : done ? 'opacity-80' : 'opacity-40'}`}>
-                    <span className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400 text-center leading-tight">{s.label}</span>
+                    <span className="text-[0.6875rem] font-medium text-zinc-600 dark:text-zinc-400 text-center leading-tight">{s.label}</span>
                   </div>
                   {i < STEPS.length - 1 && <div className="flex-1 max-w-[36px]" />}
                 </React.Fragment>

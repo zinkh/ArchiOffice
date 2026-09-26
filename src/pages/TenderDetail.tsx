@@ -687,7 +687,7 @@ export default function TenderDetail() {
           >
             {tabItem.label}
             {tabItem.count !== undefined && (
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>{tabItem.count}</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[0.6875rem] font-bold" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>{tabItem.count}</span>
             )}
           </button>
         ))}
@@ -770,7 +770,7 @@ export default function TenderDetail() {
                     <button
                       onClick={estimateEnveloppeWithAi}
                       disabled={isEstimatingEnveloppe}
-                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1.5 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                      className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1.5 rounded-lg disabled:opacity-60 whitespace-nowrap"
                       style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                     >
                       <IconSparkles size={12} className={isEstimatingEnveloppe ? 'animate-pulse' : ''} />
@@ -778,7 +778,7 @@ export default function TenderDetail() {
                     </button>
                   )}
                 </div>
-                {!isEnterprise && <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_ai_enterprise_hint')}</p>}
+                {!isEnterprise && <p className="text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_enveloppe_ai_enterprise_hint')}</p>}
                 {enveloppeError && (
                   <p className="text-xs flex items-center gap-1" style={{ color: 'var(--tblr-danger)' }}><IconAlertTriangle size={12} /> {enveloppeError}</p>
                 )}
@@ -829,7 +829,7 @@ export default function TenderDetail() {
                       <select
                         value={comp.risk_level}
                         onChange={e => updateCompetitorRisk(comp, e.target.value as TenderCompetitor['risk_level'])}
-                        className="text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none"
+                        className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full outline-none"
                         style={{ background: RISK_COLORS[comp.risk_level].bg, color: RISK_COLORS[comp.risk_level].color, border: 'none' }}
                       >
                         <option value="faible">{t('tender_detail_risk_faible')}</option>
@@ -875,7 +875,7 @@ export default function TenderDetail() {
                             {groupementMemberLabel(m)}{m.role ? ` — ${m.role}` : ''}
                           </p>
                         ))}
-                        {st.honoraires_retenus_montant != null && <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(st.honoraires_retenus_montant)}</p>}
+                        {st.honoraires_retenus_montant != null && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(st.honoraires_retenus_montant)}</p>}
                       </div>
                     </div>
                   ))}
@@ -904,7 +904,7 @@ export default function TenderDetail() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_groupement_label')}</label>
-                <button onClick={addGroupementRow} className="text-[10px] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
+                <button onClick={addGroupementRow} className="text-[0.6875rem] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
                   <IconPlus size={12} /> {t('tender_detail_result_groupement_add')}
                 </button>
               </div>
@@ -949,7 +949,7 @@ export default function TenderDetail() {
               </span>
             </div>
             {resultPercent === null && !tender.enveloppe_previsionnelle && (
-              <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_hint')}</p>
+              <p className="text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_result_percent_hint')}</p>
             )}
             <button onClick={saveResult} disabled={isSavingResult} className="w-full text-xs font-bold uppercase px-3 py-1.5 rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>{isSavingResult ? t('saving') : t('save')}</button>
           </div>
@@ -972,7 +972,7 @@ export default function TenderDetail() {
               {activityNotes.map(note => (
                 <div key={note.id} className="text-sm">
                   <p style={{ color: 'var(--tblr-text)' }}>{note.content}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{note.author_name} · {new Date(note.created_at).toLocaleString('fr-FR')}</p>
+                  <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{note.author_name} · {new Date(note.created_at).toLocaleString('fr-FR')}</p>
                 </div>
               ))}
               {activityNotes.length === 0 && <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_no_activity_notes')}</p>}
@@ -1021,17 +1021,17 @@ export default function TenderDetail() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{piece.label}</span>
-                          {piece.quantity_required && <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>({piece.quantity_required} {t('tender_detail_required_count_suffix')})</span>}
+                          {piece.quantity_required && <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>({piece.quantity_required} {t('tender_detail_required_count_suffix')})</span>}
                           {piece.status === 'detectee_ia' && (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{t('tender_detail_detected_ia')}</span>
+                            <span className="text-[0.6875rem] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{t('tender_detail_detected_ia')}</span>
                           )}
                         </div>
-                        {piece.source_hint && <p className="text-[10px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{piece.source_hint}</p>}
+                        {piece.source_hint && <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{piece.source_hint}</p>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={() => markPieceStatus(piece, piece.status === 'fournie' ? 'a_fournir' : 'fournie')}
-                          className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full"
+                          className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full"
                           style={piece.status === 'fournie'
                             ? { background: 'var(--tblr-success-lt)', color: 'var(--tblr-success)' }
                             : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
@@ -1100,7 +1100,7 @@ export default function TenderDetail() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_required_specialties_label')}</label>
-              <button onClick={addSpecialtyRow} className="text-[10px] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
+              <button onClick={addSpecialtyRow} className="text-[0.6875rem] flex items-center gap-1 font-bold uppercase" style={{ color: 'var(--tblr-primary)' }}>
                 <IconPlus size={12} /> {t('tenders_add_specialty_btn')}
               </button>
             </div>
@@ -1178,7 +1178,7 @@ export default function TenderDetail() {
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{sol.specialty_name}</p>
                     <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>{contactName}</p>
                     {sol.sent_at && (
-                      <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                         {t('tender_detail_solicitation_sent_on', { date: new Date(sol.sent_at).toLocaleDateString('fr-FR') })}
                         {sol.relance_count > 0 && ` · ${t('tender_detail_solicitation_relance_count', { count: sol.relance_count })}`}
                       </p>
@@ -1188,7 +1188,7 @@ export default function TenderDetail() {
                     <select
                       value={sol.status}
                       onChange={e => setSolicitationStatus(sol, e.target.value as TenderPartnerSolicitation['status'])}
-                      className="text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none"
+                      className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full outline-none"
                       style={
                         sol.status === 'accepte' ? { background: 'var(--tblr-success-lt)', color: 'var(--tblr-success)', border: 'none' }
                         : sol.status === 'decline' ? { background: 'var(--tblr-danger-lt)', color: 'var(--tblr-danger)', border: 'none' }
@@ -1204,7 +1204,7 @@ export default function TenderDetail() {
                     <button
                       onClick={() => sendSolicitation(sol, sol.status !== 'a_solliciter')}
                       disabled={isBusy}
-                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
+                      className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
                       style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                     >
                       <IconMail size={12} /> {isBusy ? t('tender_detail_solicitation_sending') : (sol.status === 'a_solliciter' ? t('tender_detail_solicitation_send') : t('tender_detail_solicitation_relance'))}
@@ -1305,7 +1305,7 @@ export default function TenderDetail() {
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{note.title}</h3>
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={note.status === 'redige'
+                  <span className="text-[0.6875rem] font-bold uppercase px-1.5 py-0.5 rounded-full" style={note.status === 'redige'
                     ? { background: 'var(--tblr-success-lt)', color: 'var(--tblr-success)' }
                     : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                     {note.status === 'redige' ? t('tender_detail_note_redige') : t('tender_detail_note_a_rediger')}
@@ -1315,7 +1315,7 @@ export default function TenderDetail() {
                       onClick={() => draftNoteWithAi(note)}
                       disabled={draftingNoteId === note.id}
                       title={t('tender_detail_draft_with_ai_hint') as string}
-                      className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
+                      className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60"
                       style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
                     >
                       <IconWand size={12} /> {draftingNoteId === note.id ? t('tender_detail_drafting') : t('tender_detail_draft_with_ai')}

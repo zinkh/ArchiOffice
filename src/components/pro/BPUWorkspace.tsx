@@ -734,7 +734,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         {/* ── Volet arbre ────────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
+            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
               {colSet === 'bpu' ? 'Bordereau' : 'Structure'}
             </div>
             {bpu.lots.map(lot => (
@@ -754,7 +754,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   {showTotaux && <span className="text-[#1e5090] font-mono shrink-0 ml-1">{formatCurrency(lot.sousTotal)}</span>}
                 </button>
                 {expandedLots.has(lot.id) && lot.chapitres.map(chap => (
-                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">
                     {chap.numero} {chap.titre}
                   </div>
                 ))}
@@ -770,7 +770,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             {/* TVA — sans objet sur un bordereau, qui n'a pas de montant. */}
             {showTotaux && (
               <div className="border-t border-zinc-200 dark:border-zinc-700 mt-2 p-2">
-                <div className="text-[11px] text-zinc-500 mb-1">TVA (%)</div>
+                <div className="text-[0.6875rem] text-zinc-500 mb-1">TVA (%)</div>
                 <input
                   type="number" value={bpu.TVA}
                   onChange={e => patchBpu({ TVA: parseFloat(e.target.value) || 0 })}
@@ -833,7 +833,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
                           <EditableCell rKey={rKey} field="titre" value={row.lot.titre} />
-                          {t && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 text-zinc-700">{t.code}</span>}
+                          {t && <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold bg-zinc-200 text-zinc-700">{t.code}</span>}
                           {projectLots.length > 0 && (
                             <select
                               value={row.lot.projectLotId ?? ''}
@@ -841,7 +841,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                               onChange={e => mutateLots(lots => lots.map((l, i) =>
                                 i === row.lotIdx ? { ...l, projectLotId: e.target.value || undefined } : l))}
                               title="Lot du projet correspondant — requis pour verser au comparatif ACT"
-                              className={`text-[10px] font-normal px-1 py-0.5 rounded border bg-white/70
+                              className={`text-[0.6875rem] font-normal px-1 py-0.5 rounded border bg-white/70
                                 ${row.lot.projectLotId ? 'border-zinc-300 text-zinc-600' : 'border-amber-300 text-amber-700'}`}
                             >
                               <option value="">Lot du projet…</option>
@@ -953,7 +953,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <div className="flex items-center gap-2">
                         <div className="flex-1 min-w-0"><EditableCell rKey={rKey} field="designation" value={l.designation} /></div>
                         {nature !== 'base' && (
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${NATURE_COLORS[nature]}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 ${NATURE_COLORS[nature]}`}>
                             {NATURE_LABELS[nature]}
                           </span>
                         )}
@@ -969,7 +969,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       {hasChildren ? null : <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric />}
                     </td>
                     {showLettres && (
-                      <td className="px-1 py-0.5 text-[11px] text-zinc-500 italic">
+                      <td className="px-1 py-0.5 text-[0.6875rem] text-zinc-500 italic">
                         <EditableCell rKey={rKey} field="prixUnitaireLettres" value={lettres} />
                       </td>
                     )}
@@ -1119,7 +1119,7 @@ const MarchePanel: React.FC<{ bpu: BPU; onPatch: (p: Partial<BPU>) => void; onCl
   const m = bpu.marche;
   const set = (patch: Partial<typeof m>) => onPatch({ marche: { ...m, ...patch } });
   const field = 'px-2 py-1 text-xs border border-zinc-300 rounded focus:ring-1 focus:ring-blue-400 outline-none w-full';
-  const label = 'block text-[11px] font-semibold text-zinc-500 mb-1';
+  const label = 'block text-[0.6875rem] font-semibold text-zinc-500 mb-1';
 
   // Durée maximale, reconductions comprises : la valeur qui plafonne le marché.
   const dureeMax = (m.dureeInitialeMois ?? 0) + (m.nbReconductions ?? 0) * (m.dureeReconductionMois ?? m.dureeInitialeMois ?? 0);
@@ -1244,7 +1244,7 @@ const NatureMenu: React.FC<{ current: NatureArticle; onPick: (n: NatureArticle) 
     <span className="relative inline-block">
       <button
         onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
-        className="text-zinc-400 hover:text-zinc-700 opacity-40 hover:opacity-100 text-[10px] font-bold px-1"
+        className="text-zinc-400 hover:text-zinc-700 opacity-40 hover:opacity-100 text-[0.6875rem] font-bold px-1"
         title="Nature de l'article (base, PSE, variante, option)"
       >
         {current === 'base' ? '·' : NATURE_LABELS[current].charAt(0)}

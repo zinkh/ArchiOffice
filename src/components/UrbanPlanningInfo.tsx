@@ -157,7 +157,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded uppercase tracking-wider">Urbanisme (GPU)</span>
+          <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Urbanisme (GPU)</span>
         </div>
         {loading && <IconLoader2 size={14} className="animate-spin text-blue-500" />}
       </div>
@@ -178,14 +178,14 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
                     <IconFileDescription size={14} className="text-blue-500" />
                     {doc.type} - {doc.name}
                   </h4>
-                  <p className="text-[10px] text-zinc-500 mt-0.5">Updated: {new Date(doc.updateDate).toLocaleDateString()}</p>
+                  <p className="text-[0.6875rem] text-zinc-500 mt-0.5">Updated: {new Date(doc.updateDate).toLocaleDateString()}</p>
                 </div>
                 {doc.archiveUrl && (
                   <a 
                     href={doc.archiveUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded text-[0.6875rem] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
                   >
                     <IconDownload size={12} />
                     Archive (ZIP)
@@ -195,7 +195,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
 
               {doc.files && doc.files.length > 0 && (
                 <div className="grid grid-cols-1 gap-1 mt-2">
-                  <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-tight mb-1">Documents principaux :</p>
+                  <p className="text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-tight mb-1">Documents principaux :</p>
                   {doc.files?.slice(0, 5).map((file, idx) => (
                     <a 
                       key={idx}
@@ -206,19 +206,19 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
                     >
                       <div className="flex items-center gap-2 overflow-hidden">
                         <IconFileTypePdf size={12} className="text-red-500 shrink-0" />
-                        <span className="text-[10px] text-zinc-600 dark:text-zinc-400 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">{file.name}</span>
+                        <span className="text-[0.6875rem] text-zinc-600 dark:text-zinc-400 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">{file.name}</span>
                       </div>
                       <IconChevronRight size={10} className="text-zinc-300 group-hover:text-blue-400 shrink-0" />
                     </a>
                   ))}
                   {doc.files.length > 5 && (
-                    <p className="text-[9px] text-zinc-400 italic mt-1">+{doc.files.length - 5} more files in archive</p>
+                    <p className="text-[0.6875rem] text-zinc-400 italic mt-1">+{doc.files.length - 5} more files in archive</p>
                   )}
                 </div>
               )}
             </div>
           ))}
-          <p className="text-[9px] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
+          <p className="text-[0.6875rem] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
             Note: Document availability depends on the commune's publication status on the Géoportail de l'Urbanisme.
           </p>
           <a 

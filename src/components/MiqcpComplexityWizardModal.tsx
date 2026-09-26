@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { IconX, IconChevronLeft, IconChevronRight, IconCalculator } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -94,9 +95,10 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
     <AnimatePresence>
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          ref={launchOriginRef}
+          initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
+          exit={{ opacity: 0, scale: 0.9 }}
           className="rounded-lg shadow-xl w-full max-w-2xl overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         >
@@ -112,7 +114,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
             </button>
           </div>
 
-          <div className="px-6 pt-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
+          <div className="px-6 pt-4 flex items-center gap-2 text-[0.6875rem] font-bold uppercase tracking-wider">
             {[1, 2, 3].map(s => (
               <div key={s} className="flex items-center gap-2 flex-1">
                 <div
@@ -130,7 +132,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
               <div className="space-y-4">
                 <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('miqcp_wizard_step1_intro')}</p>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+                  <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
                     {t('miqcp_wizard_domaine_label')}
                   </label>
                   <select
@@ -145,7 +147,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+                  <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
                     {t('miqcp_wizard_ouvrage_label')}
                   </label>
                   <select
@@ -159,13 +161,13 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
                     ))}
                   </select>
                   {result.plageComplexite && (
-                    <p className="text-[10px] mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                    <p className="text-[0.6875rem] mt-1" style={{ color: 'var(--tblr-muted)' }}>
                       {t('miqcp_wizard_plage_label')}: {result.plageComplexite.bas} — {result.plageComplexite.haut}
                     </p>
                   )}
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+                  <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
                     {t('miqcp_wizard_montant_label')}
                   </label>
                   <input
@@ -175,7 +177,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
                     value={montantHT}
                     onChange={e => setMontantHT(Number(e.target.value))}
                   />
-                  <p className="text-[10px] mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                  <p className="text-[0.6875rem] mt-1" style={{ color: 'var(--tblr-muted)' }}>
                     {t('miqcp_wizard_taux_reference_label')}: {result.tauxReference.toFixed(2)} %
                   </p>
                 </div>
@@ -200,7 +202,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
                               type="button"
                               title={MIQCP_SCALE_LABELS[v]}
                               onClick={() => setScores(prev => ({ ...prev, [criterion.id]: v }))}
-                              className={`py-1.5 rounded text-[10px] font-bold transition-colors ${
+                              className={`py-1.5 rounded text-[0.6875rem] font-bold transition-colors ${
                                 (scores[criterion.id] ?? 0) === v
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
@@ -232,7 +234,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
                     <Row label={t('miqcp_wizard_result_honoraires')} value={formatCurrency(result.montantHonorairesEstime)} bold />
                   </div>
                 </div>
-                <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('miqcp_wizard_result_note')}</p>
+                <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('miqcp_wizard_result_note')}</p>
               </div>
             )}
           </div>

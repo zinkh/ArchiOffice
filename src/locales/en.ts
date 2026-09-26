@@ -169,6 +169,7 @@ export default {
       "add_contact": "Add Contact",
       "no_contacts": "No contacts found",
       "templates": "Templates",
+      "gantt_shift_days": "{{sign}}{{count}} d",
       "update_progress": "Update Progress",
       "save": "Save",
       "saving": "Saving",

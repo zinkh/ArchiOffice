@@ -178,6 +178,7 @@ export default {
       "add_contact": "Ajouter un contact",
       "no_contacts": "Aucun contact trouvé",
       "templates": "Modèles",
+      "gantt_shift_days": "{{sign}}{{count}} j",
       "update_progress": "Mettre à jour la progression",
       "save": "Enregistrer",
       "saving": "Enregistrement",

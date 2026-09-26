@@ -172,7 +172,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
   };
 
   const champ = 'px-2 py-1.5 text-sm border border-zinc-300 rounded focus:ring-1 focus:ring-blue-400 outline-none w-full';
-  const label = 'block text-[11px] font-semibold text-zinc-500 mb-1';
+  const label = 'block text-[0.6875rem] font-semibold text-zinc-500 mb-1';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -204,7 +204,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
                 <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
                        onChange={e => { setFichier(e.target.files?.[0] ?? null); setErreur(null); }} />
               </label>
-              <p className="mt-2 text-[11px] text-zinc-400">
+              <p className="mt-2 text-[0.6875rem] text-zinc-400">
                 Une offre reçue en PDF se saisit à la main sur l'écran suivant, dans la même structure.
               </p>
             </div>
@@ -301,7 +301,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
                         <td className="py-1 pr-2">
                           <div className="truncate max-w-[280px]">{r.articleDesignation}</div>
                           {r.alertes.length > 0 && (
-                            <div className="text-[10px] text-amber-700 flex items-center gap-1">
+                            <div className="text-[0.6875rem] text-amber-700 flex items-center gap-1">
                               <IconAlertTriangle size={10} /> {r.alertes.join(' · ')}
                             </div>
                           )}
@@ -319,7 +319,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
                           {ecart == null ? '' : `${ecart > 0 ? '+' : ''}${ecart.toFixed(0)} %`}
                         </td>
                         <td className="py-1 pr-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${CONFIANCE_STYLE[r.confiance] ?? ''}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold ${CONFIANCE_STYLE[r.confiance] ?? ''}`}>
                             {CONFIANCE_LABEL[r.confiance] ?? r.confiance}
                           </span>
                         </td>
@@ -332,7 +332,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
               {/* Lignes du fichier sans article : rattachement à la main. */}
               {resultat.nonAppariees.length > 0 && (
                 <div className="mt-5">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                  <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
                     Lignes du fichier non rattachées ({resultat.nonAppariees.length})
                   </h3>
                   <table className="w-full text-xs border-collapse">
@@ -347,7 +347,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
                           </td>
                           <td className="py-1 pr-2 w-64">
                             <select
-                              className="w-full px-1 py-0.5 text-[11px] border border-zinc-300 rounded"
+                              className="w-full px-1 py-0.5 text-[0.6875rem] border border-zinc-300 rounded"
                               value={manuels.get(i) ?? ''}
                               disabled={ignorees.has(i)}
                               onChange={e => setManuels(prev => {
@@ -364,7 +364,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
                           </td>
                           <td className="py-1 w-16 text-right">
                             <button
-                              className="text-[10px] text-zinc-400 hover:text-zinc-700 underline"
+                              className="text-[0.6875rem] text-zinc-400 hover:text-zinc-700 underline"
                               onClick={() => setIgnorees(prev => {
                                 const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s;
                               })}
@@ -384,7 +384,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
 
         {/* ── Pied de modale ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-zinc-200 dark:border-zinc-700">
-          <span className="text-[11px] text-zinc-400">
+          <span className="text-[0.6875rem] text-zinc-400">
             {etape === 'rapprochement' && 'Rien n’est enregistré tant que vous n’avez pas validé.'}
           </span>
           <div className="flex items-center gap-2">

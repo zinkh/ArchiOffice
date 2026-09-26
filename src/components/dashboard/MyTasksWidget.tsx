@@ -42,7 +42,7 @@ export default function MyTasksWidget() {
       <SectionCard
         title={t('dashboard_my_tasks')}
         action={
-          <Link to="/kanban" className="flex items-center gap-1 text-[12px] font-medium" style={{ color: 'var(--tblr-primary)' }}>
+          <Link to="/kanban" className="flex items-center gap-1 text-[0.75rem] font-medium" style={{ color: 'var(--tblr-primary)' }}>
             {t('view_all')} <IconChevronRight size={14} />
           </Link>
         }
@@ -50,7 +50,7 @@ export default function MyTasksWidget() {
         {loading ? (
           <ListSkeleton rows={3} />
         ) : upcoming.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_my_tasks_empty')}</p>
+          <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_my_tasks_empty')}</p>
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
             {upcoming.map(task => {
@@ -67,13 +67,13 @@ export default function MyTasksWidget() {
                 >
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PRIORITY_COLORS[task.priority || 'normal'] }} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{task.title}</p>
-                    <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                    <p className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{task.title}</p>
+                    <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                       {task.project_id ? (projectNameById.get(task.project_id) || '—') : t('task_no_project')}
                     </p>
                   </div>
                   {deadline && (
-                    <span className="flex items-center gap-1 text-[11px] shrink-0" style={{ color: overdue ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}>
+                    <span className="flex items-center gap-1 text-[0.6875rem] shrink-0" style={{ color: overdue ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}>
                       <IconCalendar size={12} />
                       {format(parseISO(deadline), 'dd/MM')}
                     </span>

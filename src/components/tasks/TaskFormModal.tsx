@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { motion } from 'motion/react';
+import { launchOriginRef } from '../../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
 import { IconX, IconAlertTriangle, IconLoader2, IconTrash, IconExternalLink } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
@@ -119,7 +120,8 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
+        ref={launchOriginRef}
+        initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-lg rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         style={{ background: 'var(--tblr-surface)' }}
@@ -133,7 +135,7 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
               <button
                 type="button"
                 onClick={() => onOpenProject(initial.project_id as string)}
-                className="flex items-center gap-1 text-[11px] font-medium shrink-0 hover:underline"
+                className="flex items-center gap-1 text-[0.6875rem] font-medium shrink-0 hover:underline"
                 style={{ color: 'var(--tblr-primary)' }}
               >
                 <IconExternalLink size={12} /> {t('calendar_view_project')}

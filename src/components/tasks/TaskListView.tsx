@@ -67,7 +67,7 @@ export function TaskListView({ tasks, projects, team, onOpen, onStatusChange, em
   ];
 
   if (sorted.length === 0) {
-    return <p className="text-[13px] text-center py-10" style={{ color: 'var(--tblr-muted)' }}>{emptyLabel || t('kanban_empty')}</p>;
+    return <p className="text-[0.8125rem] text-center py-10" style={{ color: 'var(--tblr-muted)' }}>{emptyLabel || t('kanban_empty')}</p>;
   }
 
   return (

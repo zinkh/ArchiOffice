@@ -7,6 +7,7 @@ import type { Project, Milestone, Task } from '../types';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
+import { useBarDrag } from '../hooks/useBarDrag';
 import PlanningXmlControls from '../components/gantt/PlanningXmlControls';
 import type { TeamMember } from '../types';
 
@@ -19,8 +20,6 @@ export default function Gantt() {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [modal, setModal] = useState<TaskFormInitial | null>(null);
   const [taskCoords, setTaskCoords] = useState<Record<string, { x: number, y: number, w: number, h: number }>>({});
-  const [draggingTask, setDraggingTask] = useState<Task | null>(null);
-  const [dragStartX, setDragStartX] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -99,26 +98,12 @@ export default function Gantt() {
     }
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleTaskDragStart = (e: any, task: Task) => {
-    setDraggingTask(task);
-    setDragStartX(e.clientX);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleTaskDragEnd = async (e: any) => {
-    if (!draggingTask) return;
-    const deltaX = e.clientX - dragStartX;
-    const gridEl = gridRef.current;
-    if (!gridEl) { setDraggingTask(null); return; }
-    const gridWidth = gridEl.clientWidth;
-
-    const daysInView = days.length;
-    const pixelsPerDay = gridWidth / daysInView;
-    const deltaDays = Math.round(deltaX / pixelsPerDay);
-
-    if (deltaDays === 0) { setDraggingTask(null); return; }
+  // Décale une tâche de `deltaDays` jours, de façon optimiste : la barre
+  // prend sa nouvelle place tout de suite, et revient si l'enregistrement
+  // échoue.
+  const shiftTaskDates = async (taskId: string, deltaDays: number) => {
+    const original = tasks.find(t => t.id === taskId);
+    if (!original || deltaDays === 0) return;
 
     const addDays = (dateStr: string, d: number) => {
       const result = new Date(dateStr);
@@ -127,24 +112,27 @@ export default function Gantt() {
     };
 
     const updatedTask: Task = {
-      ...draggingTask,
-      start_date: draggingTask.start_date ? addDays(draggingTask.start_date, deltaDays) : draggingTask.start_date,
-      end_date: draggingTask.end_date ? addDays(draggingTask.end_date, deltaDays) : draggingTask.end_date,
+      ...original,
+      start_date: original.start_date ? addDays(original.start_date, deltaDays) : original.start_date,
+      end_date: original.end_date ? addDays(original.end_date, deltaDays) : original.end_date,
     };
 
-    setTasks(prev => prev.map(t => t.id === draggingTask.id ? updatedTask : t));
-    setDraggingTask(null);
+    setTasks(prev => prev.map(t => t.id === taskId ? updatedTask : t));
 
     try {
-      await apiFetch(`/api/tasks/${draggingTask.id}`, {
+      await apiFetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
         body: JSON.stringify({ start_date: updatedTask.start_date, end_date: updatedTask.end_date }),
       });
     } catch (err) {
       console.error('Failed to update task dates:', err);
-      setTasks(prev => prev.map(t => t.id === draggingTask.id ? draggingTask : t));
+      setTasks(prev => prev.map(t => t.id === taskId ? original : t));
     }
   };
+
+  // Glisser une barre au pointeur (souris et doigt) : elle suit le geste et
+  // se cale sur le jour le plus proche au relâché (voir useBarDrag).
+  const { drag: barDrag, barProps } = useBarDrag({ onCommit: (id, steps) => { void shiftTaskDates(id, steps); } });
 
   const getConflictingTaskIds = useMemo(() => {
     const conflictIds = new Set<string>();
@@ -287,7 +275,7 @@ export default function Gantt() {
                 {days.map(day => (
                   <div
                     key={day.toISOString()}
-                    className="flex-1 min-w-[30px] text-center text-[10px] py-4"
+                    className="flex-1 min-w-[30px] text-center text-[0.6875rem] py-4"
                     style={{
                       borderLeft: '1px solid var(--tblr-border)',
                       background: isSameDay(day, new Date()) ? 'var(--tblr-primary-lt)' : undefined,
@@ -336,7 +324,7 @@ export default function Gantt() {
                             width: `${Math.min(100, (projectEnd.getTime() - projectStart.getTime()) / (endOfMonth(viewDate).getTime() - startOfMonth(viewDate).getTime()) * 100)}%`
                           }}
                         >
-                          <span className="text-[10px] font-medium text-white whitespace-nowrap">{project.status}</span>
+                          <span className="text-[0.6875rem] font-medium text-white whitespace-nowrap">{project.status}</span>
                         </div>
                       ) : null}
                     </div>
@@ -369,9 +357,7 @@ export default function Gantt() {
                              (taskStart < startOfMonth(viewDate) && taskEnd > endOfMonth(viewDate)) ? (
                               <div
                                 data-task-id={task.id}
-                                draggable={true}
-                                onDragStart={(e) => handleTaskDragStart(e, task)}
-                                onDragEnd={handleTaskDragEnd}
+                                {...barProps(task.id, days.length)}
                                 className={cn(
                                   "absolute top-1/2 -translate-y-1/2 h-5 rounded-full bg-purple-200 dark:bg-purple-900/40 shadow-sm flex items-center overflow-hidden cursor-grab active:cursor-grabbing group",
                                   getConflictingTaskIds.has(task.id) && "ring-2 ring-orange-400 ring-offset-1"
@@ -390,9 +376,11 @@ export default function Gantt() {
                                 
                                 {/* Content Overlay */}
                                 <div className="relative z-10 w-full flex items-center justify-between px-2">
-                                  <span className="text-[9px] font-bold text-white drop-shadow-sm flex items-center gap-0.5">
+                                  <span className="text-[0.6875rem] font-bold text-white drop-shadow-sm flex items-center gap-0.5">
                                     {getConflictingTaskIds.has(task.id) && <span title="Date conflict">⚠️</span>}
-                                    {task.progress}%
+                                    {barDrag?.id === task.id
+                                      ? t('gantt_shift_days', { count: barDrag.steps, sign: barDrag.steps > 0 ? '+' : '' })
+                                      : `${task.progress}%`}
                                   </span>
 
                                   <input

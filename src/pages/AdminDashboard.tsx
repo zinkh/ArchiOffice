@@ -52,7 +52,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string | number;
 
 export function PlanBadge({ plan }: { plan: string }) {
   return (
-    <span className={cn('inline-block px-2 py-0.5 rounded text-[11px] font-semibold', PLAN_COLORS[plan] ?? PLAN_COLORS.trial)}>
+    <span className={cn('inline-block px-2 py-0.5 rounded text-[0.6875rem] font-semibold', PLAN_COLORS[plan] ?? PLAN_COLORS.trial)}>
       {PLAN_LABELS[plan] ?? plan}
     </span>
   );
@@ -88,7 +88,7 @@ export function PlanSelect({ tenantId, current, onChange }: { tenantId: string; 
             <select
               value={current}
               onChange={handleChange}
-              className="appearance-none text-[12px] rounded border pl-2 pr-6 py-1 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="appearance-none text-[0.75rem] rounded border pl-2 pr-6 py-1 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
               style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               {['trial', 'starter', 'pro', 'enterprise'].map(p => (
@@ -352,7 +352,7 @@ function AddAiCreditDialog({ tenant, onClose, onAdded }: {
         </button>
         <h2 className="text-base font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Ajouter du crédit IA</h2>
         <p className="text-sm mb-1" style={{ color: 'var(--tblr-muted)' }}>{tenant.name}</p>
-        <p className="text-[12px] mb-4 font-mono" style={{ color: 'var(--tblr-muted)' }}>
+        <p className="text-[0.75rem] mb-4 font-mono" style={{ color: 'var(--tblr-muted)' }}>
           Solde actuel : {((tenant.ai_credit_balance_eur_cents ?? 0) / 100).toFixed(2)} €
         </p>
         {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
@@ -584,7 +584,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
                 </select>
 
                 {!p.configured && (
-                  <span className="text-[11px] sm:w-56" style={{ color: 'var(--tblr-muted)' }}>
+                  <span className="text-[0.6875rem] sm:w-56" style={{ color: 'var(--tblr-muted)' }}>
                     clé manquante ({p.envKey})
                   </span>
                 )}
@@ -607,7 +607,7 @@ function AiProviderPanel({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+          <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
             Le coût par échange varie fortement d'un modèle à l'autre. Un changement se répercute
             immédiatement sur le crédit IA consommé par les cabinets, pas seulement sur la qualité
             des réponses.
@@ -706,7 +706,7 @@ function DocumentParserPanel({ onClose }: { onClose: () => void }) {
                   <span className="text-sm" style={{ color: e.configured ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>{e.label}</span>
                 </label>
                 {!e.configured && (
-                  <span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>clé manquante ({e.envKey})</span>
+                  <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>clé manquante ({e.envKey})</span>
                 )}
               </li>
             ))}
@@ -1035,7 +1035,7 @@ export default function AdminDashboard() {
           </div>
           <div className="flex flex-wrap gap-3 mt-2">
             {(['trial', 'starter', 'pro', 'enterprise'] as const).map((plan: string) => (
-              <span key={plan} className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+              <span key={plan} className="flex items-center gap-1 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                 <span className={cn('w-2 h-2 rounded-sm inline-block', { trial: 'bg-zinc-400', starter: 'bg-blue-500', pro: 'bg-violet-500', enterprise: 'bg-amber-500' }[plan])} />
                 {PLAN_LABELS[plan]} ({stats[plan as keyof Stats] as number})
               </span>
@@ -1082,7 +1082,7 @@ export default function AdminDashboard() {
               <thead>
                 <tr className="border-b" style={{ borderColor: 'var(--tblr-border)' }}>
                   {['Cabinet', 'Admin', 'Plan', 'Utilisateurs', 'Projets', 'Crédits IA', 'Essai expire', 'Créé le', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
+                    <th key={h} className="px-4 py-2.5 text-left text-[0.6875rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
                       {h}
                     </th>
                   ))}
@@ -1110,15 +1110,15 @@ export default function AdminDashboard() {
                     >
                       <td className="px-4 py-3">
                         <Link to={`/admin/tenants/${t.id}`} className="font-medium hover:underline" style={{ color: 'var(--tblr-text)' }}>{t.name}</Link>
-                        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t.slug}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t.slug}</p>
                       </td>
                       <td className="px-4 py-3">
                         {t.owner_email ? (
                           <div>
-                            <p className="text-[12px]" style={{ color: 'var(--tblr-text)' }}>{t.owner_name ?? '—'}</p>
+                            <p className="text-[0.75rem]" style={{ color: 'var(--tblr-text)' }}>{t.owner_name ?? '—'}</p>
                             <a
                               href={`mailto:${t.owner_email}`}
-                              className="text-[11px] flex items-center gap-0.5 hover:underline"
+                              className="text-[0.6875rem] flex items-center gap-0.5 hover:underline"
                               style={{ color: 'var(--tblr-primary)' }}
                             >
                               <IconMail size={10} />
@@ -1142,7 +1142,7 @@ export default function AdminDashboard() {
                           <IconBuildingSkyscraper size={13} style={{ color: 'var(--tblr-muted)' }} />{t.project_count}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-[12px] font-mono" style={{ color: 'var(--tblr-text)' }}>
+                      <td className="px-4 py-3 text-[0.75rem] font-mono" style={{ color: 'var(--tblr-text)' }}>
                         {t.ai_credit_balance_eur_cents != null
                           ? `${(t.ai_credit_balance_eur_cents / 100).toFixed(2)} €`
                           : <span style={{ color: 'var(--tblr-muted)' }}>—</span>}
@@ -1150,7 +1150,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3">
                         {t.plan === 'trial' ? (
                           <span className={cn(
-                            'text-[12px]',
+                            'text-[0.75rem]',
                             trialExpired ? 'text-red-500 font-semibold' : expiringSoonRow ? 'text-amber-500 font-semibold' : ''
                           )} style={trialExpired || expiringSoonRow ? {} : { color: 'var(--tblr-muted)' }}>
                             {trialExpired ? `Expiré (${trialDate})` : trialDate}
@@ -1159,7 +1159,7 @@ export default function AdminDashboard() {
                           <span style={{ color: 'var(--tblr-muted)' }}>—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
+                      <td className="px-4 py-3 text-[0.75rem]" style={{ color: 'var(--tblr-muted)' }}>
                         {new Date(t.created_at).toLocaleDateString('fr-FR')}
                       </td>
                       <td className="px-4 py-3">
@@ -1201,7 +1201,7 @@ export default function AdminDashboard() {
 
         {/* Table footer */}
         {!loading && (
-          <div className="px-4 py-2 border-t text-[11px]" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <div className="px-4 py-2 border-t text-[0.6875rem]" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
             <IconCreditCard size={11} className="inline mr-1" />
               {filtered.length} cabinet{filtered.length !== 1 ? 's' : ''} affiché{filtered.length !== 1 ? 's' : ''}
             {tenants.length !== filtered.length && ` sur ${tenants.length}`}

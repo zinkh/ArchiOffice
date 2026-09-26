@@ -63,7 +63,7 @@ const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var
 function NumberField({ label, value, onChange }: { label: string; value: number | undefined; onChange: (v: number) => void }) {
   return (
     <div>
-      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
+      <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{label}</label>
       <input
         type="number"
         className="w-full px-3 py-2 rounded-lg outline-none text-sm"
@@ -184,12 +184,12 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
           <button
             type="button"
             onClick={() => setIsMiqcpWizardOpen(true)}
-            className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+            className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
           >
             {t('miqcp_wizard_open_btn')}
           </button>
           {miqcpAssessment && (
-            <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+            <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
               {t('miqcp_wizard_summary', { cc: miqcpAssessment.coefficientComplexite.toFixed(2), taux: miqcpAssessment.tauxReference.toFixed(2) })}
             </span>
           )}
@@ -202,13 +202,13 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <NumberField label="Montant Honoraires HT (€)" value={doc.amount} onChange={v => onChange({ amount: v })} />
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
+            <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
             <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
               {calculatedExePercent.toFixed(2)} %
             </div>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
+            <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
             <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
               {calculatedTotalPercent.toFixed(2)} %
             </div>
@@ -217,13 +217,13 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <NumberField label="Taux de TVA (%)" value={doc.vat_rate} onChange={v => onChange({ vat_rate: v })} />
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
+            <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
             <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
               {formatCurrency((doc.amount || 0) * ((doc.vat_rate || 0) / 100))}
             </div>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
+            <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
             <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-400">
               {formatCurrency((doc.amount || 0) + (doc.amount || 0) * ((doc.vat_rate || 0) / 100))}
             </div>
@@ -292,7 +292,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400">{t('proposals_section_fee_distribution')}</h3>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-              <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
+              <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
               <input
                 type="number" min="0" max="4"
                 value={(typeof doc.decimal_precision === 'number' && isNaN(doc.decimal_precision)) ? '' : (doc.decimal_precision ?? '')}
@@ -303,20 +303,20 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             <button
               type="button"
               onClick={() => exportFeeDistributionToXlsx(doc.fee_distribution, doc.specialties_list, contacts, doc.vat_rate, filenameLabel)}
-              className="text-[10px] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
+              className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
             >
               <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
             </button>
-            <button type="button" onClick={handleLoadMiqcpPhaseRepartition} className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+            <button type="button" onClick={handleLoadMiqcpPhaseRepartition} className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
               {t('miqcp_wizard_load_phase_repartition_btn')}
             </button>
-            <button type="button" onClick={() => addMission('Mission base', 'Nouvelle Mission Base')} className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+            <button type="button" onClick={() => addMission('Mission base', 'Nouvelle Mission Base')} className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
               <IconPlus size={12} /> {t('proposals_mission_base')}
             </button>
-            <button type="button" onClick={() => addMission('Mission Exécution', 'Nouvelle Mission Exé')} className="text-[10px] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded">
+            <button type="button" onClick={() => addMission('Mission Exécution', 'Nouvelle Mission Exé')} className="text-[0.6875rem] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded">
               <IconPlus size={12} /> {t('proposals_mission_execution')}
             </button>
-            <button type="button" onClick={() => addMission('Missions complémentaires', 'Nouvelle Mission Comp')} className="text-[10px] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">
+            <button type="button" onClick={() => addMission('Missions complémentaires', 'Nouvelle Mission Comp')} className="text-[0.6875rem] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">
               <IconPlus size={12} /> {t('proposals_mission_complementary')}
             </button>
           </div>

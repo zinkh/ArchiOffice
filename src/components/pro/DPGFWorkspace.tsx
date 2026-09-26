@@ -628,7 +628,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           réordonnent les mêmes articles pour la lecture, sans les dupliquer. */}
       {(dpgf.multiBatiments || dpgf.multiPhases) && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Classement</label>
+          <label className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500">Classement</label>
           <select
             className="px-2 py-1 text-xs border border-zinc-300 rounded outline-none focus:ring-1 focus:ring-blue-400"
             value={groupement}
@@ -640,7 +640,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {dpgf.multiBatiments && dpgf.multiPhases && <option value="batiment-phase">Par bâtiment et phase</option>}
           </select>
           {groupement !== 'lot' && (
-            <span className="text-[11px] text-zinc-400">
+            <span className="text-[0.6875rem] text-zinc-400">
               Lecture seule — repassez « Par lot » pour éditer. Les exports PDF/Excel suivent ce classement.
             </span>
           )}
@@ -656,7 +656,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {/* ── Left tree panel ─────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
+            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
               Structure
             </div>
             {dpgf.lots.map((lot, li) => (
@@ -851,7 +851,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         {l.articleTypeId && (
                           <span
                             title="Article issu de la bibliothèque d’ouvrages"
-                            className="shrink-0 text-[9px] font-bold px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                            className="shrink-0 text-[0.6875rem] font-bold px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
                           >
                             BIB
                           </span>

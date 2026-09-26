@@ -46,7 +46,7 @@ function Bubble({ msg }: { msg: Message }) {
         'max-w-[80%] rounded-xl px-3 py-2 text-sm',
         isTeam ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100' : 'bg-blue-600 text-white'
       )}>
-        <p className="text-[11px] opacity-70 mb-0.5">{isTeam ? (msg.author_name || 'Support ArchiOffice') : (msg.author_name || 'Vous')}</p>
+        <p className="text-[0.6875rem] opacity-70 mb-0.5">{isTeam ? (msg.author_name || 'Support ArchiOffice') : (msg.author_name || 'Vous')}</p>
         {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
         {msg.attachment_url && (
           msg.attachment_type?.startsWith('image/') ? (
@@ -59,7 +59,7 @@ function Bubble({ msg }: { msg: Message }) {
             </button>
           )
         )}
-        <p className="text-[10px] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
+        <p className="text-[0.6875rem] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
       </div>
     </div>
   );
@@ -412,7 +412,7 @@ export default function Support() {
                 >
                   <div>
                     <p className="font-medium text-zinc-900 dark:text-white">{t.subject}</p>
-                    <p className="text-[11px] text-zinc-400">Dernier échange le {new Date(t.last_message_at).toLocaleDateString('fr-FR')}</p>
+                    <p className="text-[0.6875rem] text-zinc-400">Dernier échange le {new Date(t.last_message_at).toLocaleDateString('fr-FR')}</p>
                   </div>
                   <span className={cn('text-xs px-2 py-0.5 rounded-full flex-shrink-0', STATUS_COLORS[t.status])}>{STATUS_LABELS[t.status] || t.status}</span>
                 </button>

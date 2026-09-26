@@ -40,7 +40,7 @@ export function StatTile({ label, value, sub, color = 'neutral', icon: Icon, cla
         {Icon && (
           <Icon size={16} className={isNeutral ? undefined : ACCENT_STYLES[color].icon} style={isNeutral ? { color: 'var(--tblr-muted)' } : undefined} />
         )}
-        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
+        <span className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
       </div>
       <div className="relative text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{value}</div>
       {sub && <div className="relative text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{sub}</div>}

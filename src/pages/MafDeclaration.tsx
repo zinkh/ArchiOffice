@@ -60,13 +60,13 @@ function fmtNum(n: number | undefined) {
 function StatutBadge({ statut }: { statut?: 'brouillon' | 'declaree' }) {
   if (statut === 'declaree') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
         <IconCheck size={10} /> Déclarée
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: '#fff4e6', color: '#e67700' }}>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold" style={{ background: '#fff4e6', color: '#e67700' }}>
       <IconClockHour4 size={10} /> Brouillon
     </span>
   );
@@ -178,7 +178,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
             </h3>
             <p className="text-xs mt-0.5 flex items-center gap-2" style={{ color: 'var(--tblr-muted)' }}>
               Intercalaire {intercalaire} — {year}
-              {isLocked && <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#d3f9d8', color: '#2f9e44' }}>Déclarée — lecture seule</span>}
+              {isLocked && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#d3f9d8', color: '#2f9e44' }}>Déclarée — lecture seule</span>}
             </p>
           </div>
           <button onClick={onClose} className="text-xs px-3 py-1.5 rounded" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>Fermer</button>
@@ -199,7 +199,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
               {projects.map(p => <option key={p.id} value={p.id}>{p.name} {p.client ? `— ${p.client}` : ''}</option>)}
             </select>
             {linkedProject?.maf_intercalaire && linkedProject.maf_intercalaire !== intercalaire && (
-              <p className="mt-1 text-[11px] flex items-center gap-1" style={{ color: '#e67700' }}>
+              <p className="mt-1 text-[0.6875rem] flex items-center gap-1" style={{ color: '#e67700' }}>
                 <IconAlertTriangle size={12} />
                 Ce projet est déclaré en type de mission « {MAF_INTERCALAIRE_LABELS[linkedProject.maf_intercalaire]} » ({linkedProject.maf_intercalaire.replace('_', ' ')}) — vérifiez que l'intercalaire {intercalaire} est le bon.
               </p>
@@ -326,7 +326,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
                       Calculer A depuis les situations de travaux
                     </button>
                     {situationSource && (
-                      <p className="mt-1 text-[11px]" style={{ color: '#1971c2' }}>
+                      <p className="mt-1 text-[0.6875rem]" style={{ color: '#1971c2' }}>
                         ✓ Calculé à partir de la situation n°{situationSource.numero} du {new Date(situationSource.date).toLocaleDateString('fr-FR')}
                       </p>
                     )}
@@ -344,7 +344,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
                       disabled={isLocked}
                       onChange={v => setForm((f: any) => ({ ...f, montantCumulAnneePrecedente: parseFloat(v) || undefined }))} />
                     {form.montantCumulAnneePrecedente !== undefined && form.montantCumulAnneePrecedente > 0 && (
-                      <p className="mt-0.5 text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="mt-0.5 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                         Repris depuis la déclaration {year - 1}
                       </p>
                     )}
@@ -370,7 +370,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
                     <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
                       P — Part d'intérêt pondérée (%)
                       {partFromFee !== null && (
-                        <span className="ml-2 font-normal normal-case text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                        <span className="ml-2 font-normal normal-case text-[0.6875rem] px-1.5 py-0.5 rounded" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
                           Calculé depuis la répartition des honoraires
                         </span>
                       )}
@@ -683,7 +683,7 @@ function SuiviView({ tauxContrat, onChangeStatut }: {
                 <div key={y} className="px-4 py-3 rounded-lg" style={{ background: 'var(--tblr-surface)', border: `1px solid ${allDeclared ? '#2f9e44' : 'var(--tblr-border)'}` }}>
                   <div className="text-xs font-bold uppercase" style={{ color: 'var(--tblr-muted)' }}>{y}</div>
                   <div className="text-base font-bold font-mono" style={{ color: 'var(--tblr-text)' }}>{tauxContrat > 0 ? fmt(totalCotis) : '—'}</div>
-                  <div className="text-[10px] mt-0.5">{allDeclared ? <span style={{ color: '#2f9e44' }}>✓ Toutes déclarées</span> : <span style={{ color: '#e67700' }}>{yearEntries.filter(e => e.statut !== 'declaree').length} en attente</span>}</div>
+                  <div className="text-[0.6875rem] mt-0.5">{allDeclared ? <span style={{ color: '#2f9e44' }}>✓ Toutes déclarées</span> : <span style={{ color: '#e67700' }}>{yearEntries.filter(e => e.statut !== 'declaree').length} en attente</span>}</div>
                 </div>
               );
             })}
@@ -897,7 +897,7 @@ export default function MafDeclaration() {
                 >
                   {inter.replace('_', ' ')}
                   {count > 0 && (
-                    <span className="ml-1 text-[10px] px-1 rounded" style={{ background: activeTab === inter ? 'rgba(255,255,255,0.3)' : 'var(--tblr-primary-lt)', color: activeTab === inter ? '#fff' : 'var(--tblr-primary)' }}>
+                    <span className="ml-1 text-[0.6875rem] px-1 rounded" style={{ background: activeTab === inter ? 'rgba(255,255,255,0.3)' : 'var(--tblr-primary-lt)', color: activeTab === inter ? '#fff' : 'var(--tblr-primary)' }}>
                       {count}
                     </span>
                   )}
@@ -960,7 +960,7 @@ export default function MafDeclaration() {
                             <div className="text-xs flex items-center gap-1.5 mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
                               {proj?.client ?? e.notes ?? ''}
                               {e.sourceSituationNumero && (
-                                <span className="text-[10px] px-1.5 rounded" style={{ background: '#e7f5ff', color: '#1971c2' }}>
+                                <span className="text-[0.6875rem] px-1.5 rounded" style={{ background: '#e7f5ff', color: '#1971c2' }}>
                                   Sit. n°{e.sourceSituationNumero}
                                 </span>
                               )}
