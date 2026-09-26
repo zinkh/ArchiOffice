@@ -265,7 +265,7 @@ export default function Onboarding() {
   const year = new Date().getFullYear();
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-[#050505] flex flex-col items-center justify-center py-12 px-4">
+    <div className="min-h-svh bg-zinc-50 dark:bg-[#050505] flex flex-col items-center justify-center py-12 px-4">
       <div className="w-full max-w-xl">
         {/* Header */}
         <div className="flex flex-col items-center mb-8">

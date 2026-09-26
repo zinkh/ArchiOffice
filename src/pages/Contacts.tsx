@@ -380,7 +380,7 @@ export default function Contacts() {
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-        <div className="rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+        <div className="rounded-xl p-6 w-full max-w-2xl max-h-[80dvh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--tblr-text)' }}>{t('contacts_map_fields_title')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {contactFields.map(field => (
@@ -917,7 +917,7 @@ export default function Contacts() {
             ref={launchOriginRef}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
           >
             <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -1029,7 +1029,7 @@ export default function Contacts() {
             ref={launchOriginRef}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+            className="rounded-xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
           >
             <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>

@@ -158,7 +158,7 @@ export function TenderRssSelected() {
       {/* Detail — mobile/small-screen bottom sheet */}
       {selectedMatch && (
         <div className="lg:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
+          <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden max-h-[88dvh] flex flex-col" style={{ background: 'var(--tblr-surface)' }}>
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
               <h3 className="font-semibold text-base truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedMatch.title}</h3>
               <button onClick={() => setSelectedMatchId(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={18} style={{ color: 'var(--tblr-muted)' }} /></button>

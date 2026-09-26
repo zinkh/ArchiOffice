@@ -127,7 +127,7 @@ export const MiqcpComplexityWizardModal: React.FC<Props> = ({ montantTravaux, in
             ))}
           </div>
 
-          <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+          <div className="p-6 space-y-4 max-h-[65dvh] overflow-y-auto">
             {step === 1 && (
               <div className="space-y-4">
                 <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('miqcp_wizard_step1_intro')}</p>

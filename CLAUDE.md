@@ -2263,6 +2263,16 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   la colonne sur le point projeté du geste ; pas sur une grille serrée comme
   les jours d'un mois. Une tâche déposée va en bas de sa colonne : l'ordre à
   l'intérieur d'une colonne n'est pas enregistré.
+- **Couche plateforme mobile** (`index.html`, `src/index.css`, bloc
+  « Téléphone et tablette ») : `viewport-fit=cover` (sans lui, tous les
+  `env(safe-area-inset-*)` valent 0 : la barre de raccourcis mobile passait
+  sous l'indicateur d'accueil), en-tête et menu mobile rembourrés par les
+  insets ; champs à 16 px sous `(pointer: coarse)` pour qu'iOS ne zoome pas
+  (jamais `maximum-scale=1`) ; `overscroll-behavior: none` sur la racine ;
+  `touch-action: manipulation` et `user-select: none` sur les contrôles seuls ;
+  hauteurs en `dvh` (modales) ou `svh` (pages de connexion). `theme-color` suit
+  le thème APPLIQUÉ (`theme-provider.tsx`), posé par classe et non par le
+  réglage système.
 - **Typographie : 11 px minimum, tailles en `rem`.** Les tailles arbitraires
   s'écrivent `text-[0.6875rem]` et non `text-[11px]`, pour suivre la taille de
   texte choisie dans le navigateur (le corps est à `0.875rem`) ; 10 px n'est

@@ -18,7 +18,7 @@ export const QuantityBreakdownDialog: React.FC<Props> = ({ document, ligne, onCl
   const field = 'px-2 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900';
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-4xl max-h-[85vh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
+      <div className="w-full max-w-4xl max-h-[85dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
         <div className="sticky top-0 flex items-center justify-between px-4 py-3 border-b bg-white dark:bg-zinc-900">
           <div><h3 className="font-semibold">Ventilation des quantités</h3><p className="text-xs text-zinc-500">{ligne.numero} — {ligne.designation}</p></div>
           <button onClick={onClose}><IconX size={18} /></button>

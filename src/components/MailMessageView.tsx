@@ -103,7 +103,7 @@ export default function MailMessageView({ provider, accountId, messageId, folder
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className="rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+        className="rounded-xl shadow-xl w-full max-w-3xl max-h-[85dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         onClick={e => e.stopPropagation()}
       >

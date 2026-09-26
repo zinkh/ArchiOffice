@@ -199,7 +199,9 @@
     vertical-align: middle;
   }
   .tblr-table tbody tr:last-child td { border-bottom: none; }
-  .tblr-table tbody tr:hover { background: var(--tblr-surface-2); }
+  @media (hover: hover) and (pointer: fine) {
+    .tblr-table tbody tr:hover { background: var(--tblr-surface-2); }
+  }
 }
 
 /* ──────────────────────────────────────────────────
@@ -443,6 +445,50 @@
 .org-tree-node:first-child::before, .org-tree-node:last-child::after { border: 0 none !important; }
 .org-tree-node:last-child::before { border-right: 2px solid var(--tblr-border) !important; border-radius: 0 10px 0 0 !important; }
 .org-tree-node:first-child::after { border-radius: 10px 0 0 0 !important; }
+
+/* ──────────────────────────────────────────────────
+   Téléphone et tablette : ce qui distingue une application installée d'un
+   site ouvert dans un navigateur. Hors @layer à dessein : ces règles doivent
+   l'emporter sur les utilitaires Tailwind (text-sm sur un champ, etc.).
+────────────────────────────────────────────────── */
+html {
+  /* Pas de voile gris/bleu au toucher : chaque contrôle a son propre :active. */
+  -webkit-tap-highlight-color: transparent;
+  /* Pas de grossissement automatique du texte en paysage sur iOS. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Ni rebond de page ni « tirer pour actualiser » : l'en-tête collant et les
+     panneaux (menu, fiche de réserve) ont leur propre défilement. */
+  overscroll-behavior: none;
+}
+body {
+  overscroll-behavior: none;
+  /* viewport-fit=cover (index.html) : en paysage, le contenu ne passe pas
+     sous l'encoche. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+/* Clic immédiat (sans le délai du double-tap) sur tout ce qui se touche. */
+button, a, [role="button"], [role="tab"], label, summary, select {
+  touch-action: manipulation;
+}
+/* Un appui long sur un contrôle ne sélectionne pas son libellé. Le texte de
+   contenu, lui, reste sélectionnable. */
+button, [role="button"], [role="tab"], .btn {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* iOS zoome sur tout champ dont le texte fait moins de 16 px, et ne dézoome
+   pas en sortant. On corrige la cause au lieu de bloquer le zoom. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px;
+  }
+}
 
 /* Éléments déplaçables au pointeur (useDragToZone, useBarDrag) : un appui
    long sert à les soulever, il ne doit ni sélectionner le texte ni ouvrir le

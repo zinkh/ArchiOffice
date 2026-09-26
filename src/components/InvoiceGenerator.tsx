@@ -246,7 +246,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
         ref={launchOriginRef}
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90dvh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">

@@ -83,7 +83,7 @@ export default function GoogleAuthCallback() {
   }, []);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'sans-serif', gap: 12, padding: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100svh', fontFamily: 'sans-serif', gap: 12, padding: 24 }}>
       {status === 'loading' && <div style={{ width: 32, height: 32, border: '3px solid #e5e7eb', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />}
       {status === 'done' && <div style={{ fontSize: 32 }}>✓</div>}
       {status === 'error' && <div style={{ fontSize: 32 }}>✗</div>}
