@@ -1350,7 +1350,7 @@ export default function TenderDetail() {
       {/* Sélecteur de références */}
       {isRefPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="rounded-lg shadow-xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
+          <div className="rounded-lg shadow-xl w-full max-w-xl max-h-[85dvh] flex flex-col overflow-hidden" style={surfaceCardStyle()}>
             <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
               <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_detail_add_reference')}</h3>
               <button onClick={() => setIsRefPickerOpen(false)} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>

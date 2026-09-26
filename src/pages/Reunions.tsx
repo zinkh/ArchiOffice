@@ -1296,14 +1296,14 @@ export default function Reunions() {
             <img
               src={lightboxPhoto.localPreviewUrl}
               alt={lightboxPhoto.caption || 'Photo'}
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              className="max-w-full max-h-[80dvh] object-contain rounded-lg"
               onClick={e => e.stopPropagation()}
             />
           ) : (
             <SignedImage
               src={lightboxPhoto.file_url}
               alt={lightboxPhoto.caption || 'Photo'}
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              className="max-w-full max-h-[80dvh] object-contain rounded-lg"
               onClick={e => e.stopPropagation()}
             />
           )}

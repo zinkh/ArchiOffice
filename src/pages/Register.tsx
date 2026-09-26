@@ -92,7 +92,7 @@ export default function Register() {
 
   if (confirmationSent) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505] py-12">
+      <div className="min-h-svh flex items-center justify-center bg-zinc-50 dark:bg-[#050505] py-12">
         <div className="w-full max-w-lg p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800 text-center">
           <div className="flex justify-center mb-6">
             <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
@@ -130,7 +130,7 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#050505] py-12">
+    <div className="min-h-svh flex items-center justify-center bg-zinc-50 dark:bg-[#050505] py-12">
       <div className="w-full max-w-lg p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
         <div className="flex justify-center mb-6">
           <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">

@@ -297,7 +297,10 @@ function Header() {
       style={{
         background: 'var(--tblr-surface)',
         borderColor: 'var(--tblr-border)',
-        height: 'var(--tblr-navbar-h)',
+        // viewport-fit=cover : sous la barre d'état d'une PWA installée,
+        // le fond de l'en-tête remonte jusqu'en haut, son contenu non.
+        height: 'calc(var(--tblr-navbar-h) + env(safe-area-inset-top, 0px))',
+        paddingTop: 'env(safe-area-inset-top, 0px)',
         boxShadow: 'var(--tblr-shadow)',
       }}
     >
@@ -391,7 +394,7 @@ function Header() {
             {/* Search dropdown — Tabler card style */}
             {isSearchOpen && searchQuery.length >= 2 && (
               <div
-                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
+                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70dvh] overflow-y-auto"
                 style={{
                   background: 'var(--tblr-surface)',
                   border: '1px solid var(--tblr-border)',
@@ -658,7 +661,7 @@ function Header() {
 
 function PageLoadingFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+    <div className="min-h-svh flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
       <div
         className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
         style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
@@ -681,7 +684,7 @@ function ProtectedLayout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+      <div className="min-h-svh flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
         <div
           className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
           style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}

@@ -249,7 +249,7 @@ export default function DocumentTemplates() {
       {/* Editor modal */}
       {editorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-2xl shadow-xl max-h-[90dvh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4">{editingId ? t('document_templates_edit_title') : t('document_templates_new_title')}</h3>
             <div className="space-y-3">
               <input className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" placeholder={t('document_templates_name_placeholder')}
@@ -305,7 +305,7 @@ export default function DocumentTemplates() {
       {/* Generate modal */}
       {generateFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-4xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-4xl shadow-xl max-h-[90dvh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4">{t('document_templates_generate_title', { name: generateFor.name })}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-3">

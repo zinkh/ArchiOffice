@@ -176,7 +176,7 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col"
+      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-5xl max-h-[90dvh] flex flex-col"
            onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 dark:border-zinc-700">

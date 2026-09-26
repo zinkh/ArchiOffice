@@ -169,7 +169,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory, init
         ref={launchOriginRef}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
       >
         <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>

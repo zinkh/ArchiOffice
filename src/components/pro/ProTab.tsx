@@ -448,7 +448,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       </div>
 
       {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
-        <div className="w-full max-w-2xl max-h-[75vh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
+        <div className="w-full max-w-2xl max-h-[75dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
           <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>
           <div className="divide-y">{versions.length ? versions.map(v => <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3"><div><div className="font-medium text-sm">{v.label}</div><div className="text-xs text-zinc-500">{v.phase || 'Sans phase'} · v{v.version || '—'} · {new Date(v.created_at).toLocaleString('fr-FR')}</div></div><button className="px-3 py-1.5 text-xs border rounded text-amber-700" onClick={async () => { if (!window.confirm(`Restaurer « ${v.label} » ? L'état courant doit être figé au préalable si vous souhaitez le conserver.`)) return; const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' }); setDpgf(restored); setVersions(null); }}>Restaurer</button></div>) : <div className="p-6 text-sm text-zinc-500">Aucune version figée.</div>}</div>
         </div>
