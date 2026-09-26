@@ -136,7 +136,7 @@ export default function MilestoneGantt({ milestones, startDate, endDate, onUpdat
                   <div key={milestone.id} className="h-6 relative bg-zinc-100/30 dark:bg-zinc-900/20 rounded-full">
                     <div 
                       className={cn(
-                        "absolute top-0 h-full flex items-center px-2 text-[0.6875rem] text-white font-bold transition-all rounded-full shadow-sm",
+                        "absolute top-0 h-full flex items-center px-2 text-[0.6875rem] text-white font-bold transition-colors rounded-full shadow-sm",
                         milestone.completed ? "bg-green-500" : "bg-blue-500"
                       )}
                       style={{ left: `${Math.max(0, startOffset)}%`, width: `${Math.max(width, 2)}%` }}

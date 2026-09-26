@@ -595,7 +595,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 <button
                   onClick={() => goPhase(p.id)}
                   className={cn(
-                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0',
+                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition flex-shrink-0',
                     active ? 'bg-blue-600 text-white shadow-sm' :
                     done ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100' :
                     'text-[var(--tblr-muted)] hover:bg-zinc-100 dark:hover:bg-zinc-800'
@@ -615,7 +615,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
             <button
               onClick={() => save(consultation, phase)}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition"
             >
               <IconCheck size={12} />
               {saving ? 'Enregistrement…' : 'Sauvegarder'}
@@ -641,14 +641,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 <button
                   onClick={() => exportLotsToExcel(lots, projectName)}
                   disabled={lots.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
                   onClick={() => settings && exportLotsToPDF(lots, settings, projectName)}
                   disabled={!settings || lots.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> PDF
                 </button>
@@ -697,7 +697,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               <button onClick={() => {
                 const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
                 update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
-              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
+              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
                 <IconPlus size={13} /> Ajouter
               </button>
             </div>
@@ -773,21 +773,21 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => exportEntreprisesConsulteesToExcel(consultation.entreprises, corpsEtat, lots, projectName)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
                   onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, corpsEtat, lots, settings, projectName)}
                   disabled={!settings}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> PDF
                 </button>
                 <button onClick={() => {
                   const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
                   update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
-                }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
+                }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
                   <IconPlus size={13} /> Ajouter
                 </button>
               </div>
@@ -1244,19 +1244,19 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                     });
                     update({ ...consultation, comparatif: comp });
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
                 >
                   <IconCheck size={13} /> Auto-remplir totaux
                 </button>
                 <button
                   onClick={() => generateComparatifExcel(lots, consultation, projectName)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
                 >
                   <IconDownload size={13} /> Export Excel
                 </button>
                 <button
                   onClick={() => setShowComparatif(!showComparatif)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition"
                 >
                   {showComparatif ? <IconX size={13} /> : <IconEye size={13} />}
                   {showComparatif ? 'Masquer' : 'Afficher'}
@@ -1454,7 +1454,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
             </div>
             <div className="flex gap-2">
               <button onClick={() => generateRAO(lots, consultation, projectName)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all">
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition">
                 <IconDownload size={14} /> RAO Global
               </button>
             </div>
@@ -1491,7 +1491,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                     )}
                   </h3>
                   <button onClick={() => generateRAO(lots, consultation, projectName, lot.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all">
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition">
                     <IconDownload size={13} /> RAO Lot
                   </button>
                 </div>
@@ -1552,7 +1552,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                                   }
                                   update({ ...consultation, attributions: newAttrs });
                                 }} className={cn(
-                                  'px-3 py-1 rounded-lg text-xs font-bold transition-all',
+                                  'px-3 py-1 rounded-lg text-xs font-bold transition',
                                   isAttribue
                                     ? 'bg-green-600 text-white hover:bg-red-100 hover:text-red-600'
                                     : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-green-100 hover:text-green-700'
@@ -1579,14 +1579,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
         <button
           onClick={() => phaseIdx > 0 && goPhase(PHASES[phaseIdx - 1].id)}
           disabled={phaseIdx === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition"
         >
           <IconChevronLeft size={14} /> Phase précédente
         </button>
         <button
           onClick={() => phaseIdx < PHASES.length - 1 && goPhase(PHASES[phaseIdx + 1].id)}
           disabled={phaseIdx === PHASES.length - 1}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition"
         >
           Phase suivante <IconChevronRight size={14} />
         </button>

@@ -324,7 +324,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       cell: info => (
         <button
           onClick={() => deleteRow(info.row.original.id)}
-          className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition-all"
+          className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition"
         >
           <IconTrash size={15} />
         </button>
@@ -413,7 +413,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <span>Impossible de charger les observations (session expirée ou connexion interrompue).</span>
           <button
             onClick={fetchObservations}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition"
           >
             Réessayer
           </button>
@@ -424,7 +424,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez pour vérifier l'état réel avant de reprendre votre saisie.</span>
           <button
             onClick={() => { setSaveError(false); fetchObservations(); }}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition"
           >
             Rafraîchir
           </button>
@@ -471,7 +471,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </table>
         <button
           onClick={addRow}
-          className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition-all flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
+          className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
         >
           <IconPlus size={15} className="text-zinc-400 group-hover:text-blue-500 transition-colors" />
           Nouvelle observation

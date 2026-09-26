@@ -31,7 +31,7 @@ const ORIGINE_LABELS: Record<string, string> = {
   autres:           'Autres',
 };
 
-const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm";
+const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm";
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' } as React.CSSProperties;
 
 function StatusBadge({ status }: { status: string }) {
@@ -507,7 +507,7 @@ export default function OrdresDeService() {
                             {os.status === 'draft' && (
                               <button
                                 onClick={() => handleStatusChange(os, 'submitted')}
-                                className="text-[0.6875rem] px-2 py-0.5 rounded font-bold transition-all"
+                                className="text-[0.6875rem] px-2 py-0.5 rounded font-bold transition"
                                 style={{ background: '#e8f0fb', color: '#206bc4' }}
                                 title="Émettre l'OS"
                               >

@@ -62,7 +62,7 @@ const OrgNodeCard: React.FC<OrgNodeProps> = ({ node }) => {
 
   return (
     <div className={cn(
-      "w-48 p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-md transition-all hover:shadow-lg hover:border-blue-500/50 group cursor-default"
+      "w-48 p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-md transition hover:shadow-lg hover:border-blue-500/50 group cursor-default"
     )}>
       <div className="flex flex-col items-center text-center space-y-2">
         {/* Avatar */}

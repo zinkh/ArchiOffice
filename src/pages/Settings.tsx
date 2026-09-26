@@ -1801,7 +1801,7 @@ export default function Settings() {
               checked={!!(settings as any).maf_enabled}
               onChange={e => setSettings({ ...settings, maf_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1867,7 +1867,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_boamp_enabled}
               onChange={e => setSettings({ ...settings, tender_boamp_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -1931,7 +1931,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_ted_enabled}
               onChange={e => setSettings({ ...settings, tender_ted_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>

@@ -983,7 +983,7 @@ export default function Reunions() {
                     </div>
                     <button
                       onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition"
                       style={{ color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
                       onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}

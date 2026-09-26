@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconChevronRight, IconCalendar } from '@tabler/icons-react';
@@ -86,18 +87,20 @@ export default function MyTasksWidget() {
         )}
       </SectionCard>
 
-      {modal && (
-        <TaskFormModal
-          initial={modal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          onClose={() => setModal(null)}
-          onSaved={afterWrite}
-          onDeleted={afterWrite}
-          onOpenProject={id => { setModal(null); navigate(`/projects/${id}`); }}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <TaskFormModal key="task-form-modal"
+            initial={modal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            onClose={() => setModal(null)}
+            onSaved={afterWrite}
+            onDeleted={afterWrite}
+            onOpenProject={id => { setModal(null); navigate(`/projects/${id}`); }}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

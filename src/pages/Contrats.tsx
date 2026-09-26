@@ -84,7 +84,7 @@ const PRESETS = [
   { label: 'Base avec Exé', cats: ['base', 'exe'] as const },
 ];
 
-const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm';
+const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm';
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 const labelCls = 'block text-[0.6875rem] font-bold uppercase tracking-wider mb-1';
 const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
@@ -710,7 +710,7 @@ function ContratModal({
                           key={mode}
                           type="button"
                           onClick={() => set('mode_honoraires', mode)}
-                          className={cn('p-3 rounded-lg border text-sm font-medium text-left transition-all', form.mode_honoraires === mode
+                          className={cn('p-3 rounded-lg border text-sm font-medium text-left transition', form.mode_honoraires === mode
                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
                             : 'hover:border-gray-400'
                           )}

@@ -651,11 +651,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 40 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
+            initial={{ opacity: 0, transform: 'translateX(40px)' }}
+            animate={{ opacity: 1, transform: 'translateX(0px)' }}
+            exit={{ opacity: 0, transform: 'translateX(40px)' }}
+            transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
             style={expanded ? {
               bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',

@@ -469,7 +469,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
           </div>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shrink-0"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shrink-0"
           >
             <IconPlus size={16} /> Nouveau compte-rendu
           </button>
@@ -489,7 +489,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             key={tabItem.id}
             onClick={() => setActiveTab(tabItem.id)}
             className={cn(
-              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-all',
+              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition',
               activeTab === tabItem.id
                 ? 'bg-blue-600 text-white'
                 : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
@@ -570,16 +570,16 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={generatePdf} disabled={isGeneratingPdf}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconFileDownload size={14} /> PDF
                         </button>
                         <button onClick={() => handleCreateReport(selectedReport)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconCopy size={14} /> Dupliquer
                         </button>
                         <button onClick={() => updateReportField('statut', 'diffuse')}
                           disabled={selectedReport.statut === 'diffuse'}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition">
                           <IconSend size={14} /> Diffuser
                         </button>
                       </div>
@@ -757,7 +757,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                           onKeyDown={e => { if (e.key === 'Enter') addRubrique(); }}
                         />
                         <button onClick={addRubrique}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter
                         </button>
                       </div>
@@ -805,7 +805,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     icon={IconClipboardList}
                     action={
                       <button onClick={() => addObservation('observation')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all">
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} /> Ajouter une observation
                       </button>
                     }
@@ -815,7 +815,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez avant de reprendre votre saisie.</span>
                         <button
                           onClick={() => { setSaveError(false); fetchReportObservations(); }}
-                          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold transition-all"
+                          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold transition"
                         >
                           Rafraîchir
                         </button>
@@ -845,7 +845,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     title="Décisions de la maîtrise d'œuvre"
                     action={
                       <button onClick={addDecision}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} /> Ajouter
                       </button>
                     }

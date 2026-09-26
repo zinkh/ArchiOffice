@@ -860,7 +860,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
             <button
               onClick={handleExport}
               disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition"
             >
               <IconDownload size={16} />
               {isGenerating ? 'Génération...' : 'Exporter PDF'}

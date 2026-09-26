@@ -65,7 +65,7 @@ export function TaskCard({ task, projectName, assigneeName, isDragging, isDone, 
         <div className="flex-1">
           <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--tblr-border)' }}>
             <div
-              className="h-full rounded-full transition-all"
+              className="h-full rounded-full transition-colors"
               style={{ width: `${task.progress || 0}%`, background: isDone ? 'var(--tblr-success)' : 'var(--tblr-primary)' }}
             />
           </div>

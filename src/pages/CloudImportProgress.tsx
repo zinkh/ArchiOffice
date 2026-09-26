@@ -226,8 +226,8 @@ export default function CloudImportProgress() {
           <>
             <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mb-3">
               <div
-                className="h-full bg-blue-600 transition-all duration-300"
-                style={{ width: `${percent}%` }}
+                className="h-full w-full bg-blue-600 origin-left transition-transform duration-300 ease-[var(--ease-out)]"
+                style={{ transform: `scaleX(${Math.min(100, Math.max(0, percent)) / 100})` }}
               />
             </div>
             <p className="text-sm text-center text-zinc-500 dark:text-zinc-400">

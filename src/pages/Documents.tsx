@@ -59,7 +59,7 @@ function IndiceBadge({ indice }: { indice?: string }) {
   );
 }
 
-const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm";
+const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm";
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
 export default function Documents() {
@@ -679,7 +679,7 @@ export default function Documents() {
               </div>
 
               <div
-                className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all"
+                className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition"
                 style={{ borderColor: 'var(--tblr-border)' }}
                 onDrop={e => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
                 onDragOver={e => e.preventDefault()}
@@ -695,7 +695,7 @@ export default function Documents() {
               <button
                 onClick={handleFileUpload}
                 disabled={isUploading || !selectedFile || !isOnline}
-                className="w-full py-2.5 rounded-xl font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full py-2.5 rounded-xl font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: 'var(--tblr-primary)', color: '#fff' }}
               >
                 {isUploading ? 'Envoi...' : 'Ajouter le document'}
@@ -730,7 +730,7 @@ export default function Documents() {
                     <button
                       key={s}
                       onClick={() => handleStatutChange(editingDoc, s)}
-                      className="flex-1 py-2 rounded-lg text-xs font-bold transition-all"
+                      className="flex-1 py-2 rounded-lg text-xs font-bold transition"
                       style={{
                         background: (editingDoc.doc_statut || 'en_cours') === s ? DOC_STATUT_CONFIG[s].color : DOC_STATUT_CONFIG[s].bg,
                         color: (editingDoc.doc_statut || 'en_cours') === s ? '#fff' : DOC_STATUT_CONFIG[s].color,
@@ -792,7 +792,7 @@ export default function Documents() {
                 </div>
               </div>
 
-              <button onClick={handleUpdate} disabled={isUploading} className="w-full py-2.5 rounded-xl font-bold transition-all disabled:opacity-40" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              <button onClick={handleUpdate} disabled={isUploading} className="w-full py-2.5 rounded-xl font-bold transition disabled:opacity-40" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
                 {isUploading ? 'Enregistrement...' : 'Sauvegarder'}
               </button>
             </motion.div>
@@ -824,7 +824,7 @@ export default function Documents() {
                 <button
                   onClick={handleSendDiffusion}
                   disabled={!newDiffName.trim() || isDiffSending}
-                  className="w-full py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-40"
+                  className="w-full py-2 rounded-lg font-bold text-sm transition disabled:opacity-40"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   <IconSend size={14} className="inline mr-1.5" />

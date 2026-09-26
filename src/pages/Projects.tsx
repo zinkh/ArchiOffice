@@ -661,7 +661,7 @@ export default function Projects() {
             <button 
               onClick={() => setViewMode('grid')}
               className={cn(
-                "p-1.5 rounded-md transition-all",
+                "p-1.5 rounded-md transition",
                 viewMode === 'grid' ? "bg-white dark:bg-zinc-700 shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700"
               )}
             >
@@ -670,7 +670,7 @@ export default function Projects() {
             <button 
               onClick={() => setViewMode('table')}
               className={cn(
-                "p-1.5 rounded-md transition-all",
+                "p-1.5 rounded-md transition",
                 viewMode === 'table' ? "bg-white dark:bg-zinc-700 shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700"
               )}
             >
@@ -709,7 +709,7 @@ export default function Projects() {
             placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition"
             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
@@ -762,7 +762,7 @@ export default function Projects() {
               id="projects-sort"
               value={sortConfig?.key ?? ''}
               onChange={(e) => changeSortKey(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+              className="px-3 py-2 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 transition"
               style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="">{t('projects_sort_default')}</option>
@@ -836,7 +836,7 @@ export default function Projects() {
                     <Link
                       to={`/projects/${project.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-1.5 rounded-lg transition-all"
+                      className="p-1.5 rounded-lg transition"
                       style={{ color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
                       onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
@@ -1654,7 +1654,7 @@ export default function Projects() {
                         <div 
                           key={milestone.id}
                           className={cn(
-                            "flex items-center justify-between p-3 rounded-xl border transition-all",
+                            "flex items-center justify-between p-3 rounded-xl border transition",
                             milestone.completed 
                               ? "bg-green-50/30 dark:bg-green-900/10 border-green-100 dark:border-green-900/30 opacity-75" 
                               : "bg-white dark:bg-zinc-800 border-zinc-100 dark:border-zinc-700"
@@ -1706,101 +1706,107 @@ export default function Projects() {
       </AnimatePresence>
 
       {/* Category Management Modal */}
-      {isCategoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div 
-            ref={launchOriginRef}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
-          >
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
-                ✕
-              </button>
-            </div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                <input 
-                  className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
-                  placeholder={t('projects_new_domain_placeholder')}
-                  value={newCategoryName}
-                  onChange={e => setNewCategoryName(e.target.value)}
-                />
-                <button 
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  {t('btn_add')}
+      <AnimatePresence>
+        {isCategoryModalOpen && (
+          <motion.div key="project-category-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div 
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
+                <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+                  ✕
                 </button>
-              </form>
-              <div className="space-y-2">
-                {categories.map(cat => (
-                  <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
-                    <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
-                    <button 
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      className="text-zinc-400 hover:text-red-500 transition-colors"
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
-                ))}
               </div>
-            </div>
+              <div className="p-6 flex-1 overflow-y-auto">
+                <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
+                  <input 
+                    className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
+                    placeholder={t('projects_new_domain_placeholder')}
+                    value={newCategoryName}
+                    onChange={e => setNewCategoryName(e.target.value)}
+                  />
+                  <button 
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    {t('btn_add')}
+                  </button>
+                </form>
+                <div className="space-y-2">
+                  {categories.map(cat => (
+                    <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
+                      <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
+                      <button 
+                        onClick={() => handleDeleteCategory(cat.id)}
+                        className="text-zinc-400 hover:text-red-500 transition-colors"
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div
-            ref={launchOriginRef}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700">
-              <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('projects_delete_confirm_title')}</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
-                {t('projects_delete_confirm_body', { name: deleteTarget.name })}
-              </p>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
-                {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
-              </p>
-              <input
-                autoFocus
-                className="mt-3 w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-zinc-900 dark:text-white"
-                value={deleteConfirmInput}
-                onChange={e => setDeleteConfirmInput(e.target.value)}
-                placeholder={deleteConfirmWord}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
-                    handleDeleteProject(deleteTarget.id);
-                  }
-                }}
-              />
-            </div>
-            <div className="p-6 pt-4 flex justify-end gap-2">
-              <button
-                onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
-              >
-                {t('btn_cancel')}
-              </button>
-              <button
-                disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
-                onClick={() => handleDeleteProject(deleteTarget.id)}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
-              </button>
-            </div>
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div key="project-delete-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700">
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('projects_delete_confirm_title')}</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                  {t('projects_delete_confirm_body', { name: deleteTarget.name })}
+                </p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                  {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
+                </p>
+                <input
+                  autoFocus
+                  className="mt-3 w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-zinc-900 dark:text-white"
+                  value={deleteConfirmInput}
+                  onChange={e => setDeleteConfirmInput(e.target.value)}
+                  placeholder={deleteConfirmWord}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
+                      handleDeleteProject(deleteTarget.id);
+                    }
+                  }}
+                />
+              </div>
+              <div className="p-6 pt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+                >
+                  {t('btn_cancel')}
+                </button>
+                <button
+                  disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
+                  onClick={() => handleDeleteProject(deleteTarget.id)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       <ContactModal
         isOpen={isContactModalOpen}
