@@ -277,7 +277,7 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
                       </button>
                     </div>
                     {img.is_primary && (
-                      <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-semibold bg-blue-600 text-white">{t('references_images_primary_badge')}</span>
+                      <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold bg-blue-600 text-white">{t('references_images_primary_badge')}</span>
                     )}
                   </div>
                 ))}
@@ -289,7 +289,7 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
             <div className="flex items-center justify-between mb-2">
               <div>
                 <label className={labelCls} style={{ ...labelStyle, marginBottom: 0 }}>{t('references_cotraitants_title')}</label>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_hint')}</p>
+                <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_hint')}</p>
               </div>
               <button type="button" onClick={addCotraitant} className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors shrink-0">
                 <IconPlus size={14} /> {t('references_cotraitants_add')}
@@ -746,7 +746,7 @@ function StatusBadge({ status }: { status: string }) {
     : status === 'Completed'
       ? { background: '#d3f9d8', color: '#2f9e44' }
       : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' };
-  return <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={style}>{status}</span>;
+  return <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold" style={style}>{status}</span>;
 }
 
 // ── Detail row helper ─────────────────────────────────────────────────────
@@ -779,17 +779,17 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge status={item.status} />
         {item.source === 'manual' && (
-          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold uppercase tracking-wide" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
             <IconBookmark size={9} />{t('references_source_manual')}
           </span>
         )}
         {item.category && (
-          <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>{item.category}</span>
+          <span className="px-1.5 py-0.5 rounded text-[0.6875rem]" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>{item.category}</span>
         )}
       </div>
 
       <div>
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_general')}</h4>
+        <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_general')}</h4>
         <DetailRow label={t('references_field_client') as string} value={item.client} />
         <DetailRow label={t('references_field_location') as string} value={full?.location} />
         <DetailRow label={t('references_field_start_date') as string} value={full?.start_date ? new Date(full.start_date).toLocaleDateString('fr-FR') : null} />
@@ -800,7 +800,7 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
       </div>
 
       <div>
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_financial')}</h4>
+        <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_detail_section_financial')}</h4>
         <DetailRow label={t('references_field_budget') as string} value={item.budget != null ? formatCurrency(item.budget) : null} />
         <DetailRow label={t('references_field_construction_cost') as string} value={full?.construction_cost != null ? formatCurrency(full.construction_cost) : null} />
         <DetailRow label={t('references_field_remuneration') as string} value={full?.remuneration != null ? formatCurrency(full.remuneration) : null} />
@@ -809,7 +809,7 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
 
       {cotraitants.length > 0 && (
         <div>
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+          <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
             <IconUsers size={12} /> {t('references_cotraitants_title')}
           </h4>
           <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -837,7 +837,7 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
 
       {images.length > 1 && (
         <div>
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+          <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
             <IconPhoto size={12} /> {t('references_images_title')}
           </h4>
           <div className="grid grid-cols-4 gap-1.5">
@@ -857,14 +857,14 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
 
       {full?.description && (
         <div>
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_field_description')}</h4>
+          <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_field_description')}</h4>
           <p className="text-xs whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{full.description}</p>
         </div>
       )}
 
       {Object.keys(customData).length > 0 && (
         <div>
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_custom_data_title')}</h4>
+          <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('references_custom_data_title')}</h4>
           {Object.entries(customData).map(([k, v]) => <DetailRow key={k} label={k} value={v} />)}
         </div>
       )}
@@ -1144,12 +1144,12 @@ export default function References() {
               <div className="flex items-center gap-1.5">
                 <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{item.name}</p>
                 {item.source === 'manual' && (
-                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold uppercase tracking-wide" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                     <IconBookmark size={9} />{t('references_source_manual')}
                   </span>
                 )}
               </div>
-              {item.project_code && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{item.project_code}</p>}
+              {item.project_code && <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{item.project_code}</p>}
             </div>
           </div>
         </td>
@@ -1270,7 +1270,7 @@ export default function References() {
                   </div>
                   <div>
                     <p className="font-medium text-sm">{p.name}</p>
-                    {p.source === 'manual' && <span className="text-[9px] font-semibold" style={{ color: 'var(--tblr-primary)' }}>{t('references_source_manual')}</span>}
+                    {p.source === 'manual' && <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-primary)' }}>{t('references_source_manual')}</span>}
                   </div>
                 </div>
               )},
@@ -1329,7 +1329,7 @@ export default function References() {
                           <div className="flex items-center gap-2">
                             {isExpanded ? <IconChevronDown size={16} style={{ color: 'var(--tblr-muted)' }} /> : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
                             <span className="font-semibold uppercase text-xs tracking-wider" style={{ color: 'var(--tblr-text)' }}>{domain}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>{dp.length}</span>
+                            <span className="text-[0.6875rem] px-1.5 py-0.5 rounded" style={{ background: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>{dp.length}</span>
                           </div>
                         </td>
                         <td colSpan={5} />
@@ -1358,12 +1358,12 @@ export default function References() {
                                   <div className="flex items-center gap-1.5">
                                     <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{item.name}</p>
                                     {item.source === 'manual' && (
-                                      <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                                      <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold uppercase" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                                         <IconBookmark size={9} />{t('references_source_manual')}
                                       </span>
                                     )}
                                   </div>
-                                  {item.project_code && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{item.project_code}</p>}
+                                  {item.project_code && <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>#{item.project_code}</p>}
                                 </div>
                               </div>
                             </td>
@@ -1428,7 +1428,7 @@ export default function References() {
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
-              <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('references_source_project_hint')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('references_source_project_hint')}</p>
               <button onClick={() => navigate(`/projects/${selectedItem.id}`)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0">
                 <IconExternalLink size={13} /> {t('references_view_project')}
               </button>

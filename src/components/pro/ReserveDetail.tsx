@@ -66,7 +66,7 @@ function formFromReserve(r: ReserveLike | null): FormState {
 }
 
 const inputClass = 'w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500';
-const labelClass = 'text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider';
+const labelClass = 'text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider';
 
 /**
  * La fiche d'une réserve — création ou modification — en panneau plein
@@ -302,7 +302,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           )}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--tblr-border)]">
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">
+              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">
                 {isNew ? 'Nouvelle réserve' : `Réserve N° ${reserve?.number ?? '-'}`}
               </div>
               <div className="font-bold text-[var(--tblr-text)] truncate">{form.title || (isNew ? '' : reserve?.title)}</div>
@@ -327,7 +327,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className={labelClass}>Photos ({photos.length + queued.length})</label>
-              {uploading && <span className="flex items-center gap-1 text-[10px] text-[var(--tblr-muted)]"><IconLoader2 size={12} className="animate-spin" /> Envoi…</span>}
+              {uploading && <span className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]"><IconLoader2 size={12} className="animate-spin" /> Envoi…</span>}
             </div>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               <button
@@ -336,7 +336,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 className="aspect-square rounded-lg border-2 border-dashed border-[var(--tblr-border)] flex flex-col items-center justify-center gap-1 text-[var(--tblr-muted)] hover:border-blue-500 hover:text-blue-600 transition-colors"
               >
                 <IconCamera size={24} />
-                <span className="text-[10px] font-bold">Prendre une photo</span>
+                <span className="text-[0.6875rem] font-bold">Prendre une photo</span>
               </button>
               <button
                 type="button"
@@ -344,7 +344,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 className="aspect-square rounded-lg border-2 border-dashed border-[var(--tblr-border)] flex flex-col items-center justify-center gap-1 text-[var(--tblr-muted)] hover:border-blue-500 hover:text-blue-600 transition-colors"
               >
                 <IconPhotoPlus size={24} />
-                <span className="text-[10px] font-bold">Depuis la galerie</span>
+                <span className="text-[0.6875rem] font-bold">Depuis la galerie</span>
               </button>
               {photos.map(photo => (
                 <div key={photo.id} className="relative aspect-square group">
@@ -354,7 +354,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                     <SignedImage src={photo.file_url} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg" />
                   )}
                   {photo.pendingSync && (
-                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-bold">En attente d'envoi</span>
+                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[0.6875rem] font-bold">En attente d'envoi</span>
                   )}
                   <button
                     type="button"
@@ -369,7 +369,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               {queued.map((q, i) => (
                 <div key={q.preview} className="relative aspect-square">
                   <img src={q.preview} alt="Photo à envoyer" className="w-full h-full object-cover rounded-lg opacity-90" />
-                  <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-bold">À envoyer</span>
+                  <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[0.6875rem] font-bold">À envoyer</span>
                   <button type="button" onClick={() => removeQueued(i)} className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white" aria-label="Retirer la photo">
                     <IconX size={12} />
                   </button>

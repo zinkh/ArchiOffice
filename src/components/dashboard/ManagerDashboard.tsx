@@ -189,7 +189,7 @@ export default function ManagerDashboard() {
     <div className="space-y-5">
       <div className="pb-4 hidden sm:block" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('dashboard')}</h1>
-        <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
+        <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
           {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
@@ -231,7 +231,7 @@ export default function ManagerDashboard() {
 
       <SectionCard title={t('kpi_budget_vs_fees')}>
         {budgetByProject.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
+          <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
         ) : (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">

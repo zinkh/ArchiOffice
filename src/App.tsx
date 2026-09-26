@@ -136,7 +136,7 @@ function SyncStatus() {
     return (
       <div className="flex items-center gap-2">
         <div
-          className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+          className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
           style={cloudStatus.isOnline
             ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }
             : { background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
@@ -160,7 +160,7 @@ function SyncStatus() {
   if (!isOnline) {
     return (
       <div
-        className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+        className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
         style={{ background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
       >
         <IconCloudOff size={13} />
@@ -171,7 +171,7 @@ function SyncStatus() {
 
   return (
     <div
-      className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+      className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
       style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}
     >
       <IconCheck size={13} />
@@ -332,7 +332,7 @@ function Header() {
               unique, lui, ne voit rien de nouveau. */}
           {tenants.length > 1 && (
             <span
-              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium truncate max-w-[220px]"
+              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium truncate max-w-[220px]"
               style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
               title={t('tenant_switcher_current')}
             >
@@ -416,7 +416,7 @@ function Header() {
                       return (
                         <div key={key}>
                           <div
-                            className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider border-b"
+                            className="px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider border-b"
                             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}
                           >
                             {label}
@@ -438,7 +438,7 @@ function Header() {
                                 {letter}
                               </span>
                               <div className="min-w-0 flex-1">
-                                <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                                <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
                                   {item._label}
                                 </p>
                                 {(item.client || item.email) && (
@@ -484,7 +484,7 @@ function Header() {
             <IconMessageCircle size={18} />
             {unreadMessages > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {unreadMessages > 99 ? '99+' : unreadMessages}
@@ -505,7 +505,7 @@ function Header() {
             <IconBell size={18} />
             {unreadCount > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
@@ -527,7 +527,7 @@ function Header() {
             <IconBell size={18} />
             {(unreadCount + unreadMessages) > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {(unreadCount + unreadMessages) > 99 ? '99+' : unreadCount + unreadMessages}
@@ -581,10 +581,10 @@ function Header() {
                           />
                         </div>
                         <div className="overflow-hidden">
-                          <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
+                          <p className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
                             {currentUser?.name}
                           </p>
-                          <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                          <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                             {currentUser?.email}
                           </p>
                         </div>
@@ -594,7 +594,7 @@ function Header() {
                     <div className="p-1">
                       <button
                         onClick={() => { navigate('/profile'); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-text)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -604,7 +604,7 @@ function Header() {
                       </button>
                       <button
                         onClick={() => { navigate('/settings'); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-text)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -614,7 +614,7 @@ function Header() {
                       </button>
                       <button
                         onClick={() => { signOut(); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-danger)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -755,7 +755,7 @@ function ProtectedLayout() {
             className="border-t mt-auto py-4 px-6"
             style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
           >
-            <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
+            <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[0.75rem]" style={{ color: 'var(--tblr-muted)' }}>
               <div>{t('footer_rights')}</div>
               <div className="flex gap-4">
                 <Link to="/privacy" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_privacy')}</Link>

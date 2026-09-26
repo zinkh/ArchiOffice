@@ -77,7 +77,7 @@ export function MobileShortcutBar() {
               <Icon size={19} />
               {item.path === '/messages' && unreadMessages > 0 && (
                 <span
-                  className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[3px] rounded-full text-[8px] font-bold text-white flex items-center justify-center leading-none"
+                  className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[3px] rounded-full text-[0.6875rem] font-bold text-white flex items-center justify-center leading-none"
                   style={{ background: 'var(--tblr-danger)' }}
                 >
                   {unreadMessages > 9 ? '9+' : unreadMessages}

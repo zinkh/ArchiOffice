@@ -196,7 +196,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
           <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
         )}
         {(r.photos?.length || 0) > 1 && (
-          <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[9px] font-bold">{r.photos!.length}</span>
+          <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[0.6875rem] font-bold">{r.photos!.length}</span>
         )}
       </div>
     );
@@ -300,7 +300,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <span className="text-[10px] text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
+          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
         </div>
 
         {/* Mobile : une carte par réserve */}
@@ -319,19 +319,19 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 {renderThumb(res, 'w-16 h-16 shrink-0')}
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-start gap-2">
-                    <span className="font-mono text-[11px] font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
+                    <span className="font-mono text-[0.6875rem] font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
                     <span className="font-semibold text-sm text-[var(--tblr-text)] leading-snug line-clamp-2">{res.title}</span>
                     {res.pendingSync && (
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                      <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
                     )}
                   </div>
-                  <div className="text-[11px] text-[var(--tblr-muted)] truncate">
+                  <div className="text-[0.6875rem] text-[var(--tblr-muted)] truncate">
                     {[entreprises.join(', ') || lots.join(', '), [res.batiment, res.local].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || '—'}
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className={cn('text-[11px] font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
+                    <span className={cn('text-[0.6875rem] font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
                       {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : 'Sans échéance'}
-                      {retard > 0 && <span className="ml-1 px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 text-[9px] font-bold">+{retard}j</span>}
+                      {retard > 0 && <span className="ml-1 px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 text-[0.6875rem] font-bold">+{retard}j</span>}
                     </span>
                     <StatusSelect value={res.status} onChange={s => changeStatus(res, s)} />
                   </div>
@@ -347,7 +347,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
         {/* Bureau : tableau groupé par lot / entreprise */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+            <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
               <tr>
                 <th className="px-4 py-3 text-left w-12">N°</th>
                 <th className="px-4 py-3 text-left w-16">Photo</th>
@@ -371,8 +371,8 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                       <td colSpan={8} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
-                          <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserve{groupReserves.length > 1 ? 's' : ''})</span>
+                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
+                          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserve{groupReserves.length > 1 ? 's' : ''})</span>
                         </div>
                       </td>
                     </tr>
@@ -384,27 +384,27 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                           onClick={() => setOpenReserveId(res.id)}
                           className={cn('transition-colors group cursor-pointer', retard > 0 ? 'bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50' : 'hover:bg-[var(--tblr-surface-2)]')}
                         >
-                          <td className="px-4 py-3 font-mono text-[10px] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
+                          <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
                           <td className="px-4 py-3">
                             <div className="font-medium text-[var(--tblr-text)] flex items-center gap-1.5">
                               {res.title}
                               {res.pendingSync && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                                <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
                               )}
                             </div>
-                            {res.description && <div className="text-[11px] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
+                            {res.description && <div className="text-[0.6875rem] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
                           </td>
                           <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
                           <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>
-                          <td className="px-4 py-3 text-[10px] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
+                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
                           <td className="px-4 py-3">
                             <div className="space-y-0.5">
                               <div className={cn('text-xs font-medium', retard > 0 ? 'text-red-500' : 'text-zinc-600 dark:text-zinc-300')}>
                                 {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : '—'}
                               </div>
                               {retard > 0 && (
-                                <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[9px] font-bold">+{retard}j</span>
+                                <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[0.6875rem] font-bold">+{retard}j</span>
                               )}
                             </div>
                           </td>

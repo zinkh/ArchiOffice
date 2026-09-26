@@ -133,17 +133,17 @@ export default function TeamWeekSchedule() {
         <div className="overflow-x-auto">
           <div className="grid min-w-[900px]" style={{ gridTemplateColumns: '180px repeat(7, 1fr) 70px' }}>
             {/* Header row */}
-            <div className="p-2.5 text-[11px] font-semibold" style={{ borderBottom: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }} />
+            <div className="p-2.5 text-[0.6875rem] font-semibold" style={{ borderBottom: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }} />
             {days.map(day => (
               <div
                 key={day.toISOString()}
-                className="p-2.5 text-center text-[11px] font-semibold capitalize"
+                className="p-2.5 text-center text-[0.6875rem] font-semibold capitalize"
                 style={{ borderBottom: '1px solid var(--tblr-border)', borderLeft: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               >
                 {format(day, 'EEE d', { locale })}
               </div>
             ))}
-            <div className="p-2.5 text-center text-[11px] font-semibold" style={{ borderBottom: '1px solid var(--tblr-border)', borderLeft: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            <div className="p-2.5 text-center text-[0.6875rem] font-semibold" style={{ borderBottom: '1px solid var(--tblr-border)', borderLeft: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
               {t('team_schedule_total')}
             </div>
 
@@ -152,7 +152,7 @@ export default function TeamWeekSchedule() {
               <div key={emp.id} style={{ display: 'contents' }}>
                 <div className="p-2.5" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                   <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{emp.name}</p>
-                  {emp.job_title && <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>{emp.job_title}</p>}
+                  {emp.job_title && <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>{emp.job_title}</p>}
                 </div>
                 {days.map(day => {
                   const dateKey = toISODate(day);
@@ -171,8 +171,8 @@ export default function TeamWeekSchedule() {
                         >
                           <IconBeach size={12} className="shrink-0" />
                           <div className="min-w-0">
-                            <p className="text-[10px] font-semibold leading-tight">{t('team_schedule_all_day')}</p>
-                            <p className="text-[9px] leading-tight opacity-90 truncate">{LEAVE_TYPE_LABELS[leave.leave_type]}</p>
+                            <p className="text-[0.6875rem] font-semibold leading-tight">{t('team_schedule_all_day')}</p>
+                            <p className="text-[0.6875rem] leading-tight opacity-90 truncate">{LEAVE_TYPE_LABELS[leave.leave_type]}</p>
                           </div>
                         </div>
                       ) : (
@@ -186,10 +186,10 @@ export default function TeamWeekSchedule() {
                               style={{ background: color + '22', color }}
                               title={projectName || ''}
                             >
-                              <p className="text-[10px] font-semibold leading-tight">
+                              <p className="text-[0.6875rem] font-semibold leading-tight">
                                 {format(new Date(entry.start_time), 'HH:mm')}–{entry.end_time ? format(new Date(entry.end_time), 'HH:mm') : '…'}
                               </p>
-                              {projectName && <p className="text-[9px] leading-tight truncate">{projectName}</p>}
+                              {projectName && <p className="text-[0.6875rem] leading-tight truncate">{projectName}</p>}
                             </div>
                           );
                         })

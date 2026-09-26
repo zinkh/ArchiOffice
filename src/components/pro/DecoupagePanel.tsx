@@ -170,7 +170,7 @@ export function DecoupagePanel<L extends LotLike>({ doc, onPatch, onClose }: Pro
       </div>
 
       {(doc.multiBatiments || doc.multiPhases) && (
-        <p className="mt-3 text-[11px] text-zinc-400">
+        <p className="mt-3 text-[0.6875rem] text-zinc-400">
           Un lot, un chapitre ou un article non identifié hérite du bâtiment et de la phase du niveau
           au-dessus ; ne renseignez que les exceptions. Supprimer un bâtiment ou une phase retire aussi
           son affectation partout où il était posé.
@@ -203,7 +203,7 @@ export const SelecteursDecoupage: React.FC<{
     <>
       {doc.multiBatiments && (
         <select
-          className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
+          className="px-1 py-0.5 text-[0.6875rem] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
           value={batimentId ?? ''}
           onChange={e => onBatimentChange(e.target.value || undefined)}
           title={batimentSelectionne ? libelleTitre(batimentSelectionne.code, batimentSelectionne.libelle) : 'Bâtiment'}
@@ -216,7 +216,7 @@ export const SelecteursDecoupage: React.FC<{
       )}
       {doc.multiPhases && (
         <select
-          className="px-1 py-0.5 text-[10px] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
+          className="px-1 py-0.5 text-[0.6875rem] border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-zinc-500"
           value={phaseId ?? ''}
           onChange={e => onPhaseChange(e.target.value || undefined)}
           title={phaseSelectionnee ? libelleTitre(phaseSelectionnee.code, phaseSelectionnee.libelle) : 'Phase'}

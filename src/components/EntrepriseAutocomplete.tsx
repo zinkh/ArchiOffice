@@ -113,7 +113,7 @@ export function EntrepriseAutocomplete({
                   {c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}
                 </p>
                 {!!(c.corps_etat && c.corps_etat.length) && (
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">{c.corps_etat.join(', ')}</p>
+                  <p className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">{c.corps_etat.join(', ')}</p>
                 )}
               </div>
             </button>

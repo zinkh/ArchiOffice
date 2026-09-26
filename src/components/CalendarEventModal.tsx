@@ -150,7 +150,7 @@ export function CalendarEventModal({ initial, projects, onClose, onSaved, onDele
               <button
                 type="button"
                 onClick={() => onOpenProject(initial.project_id as string)}
-                className="flex items-center gap-1 text-[11px] font-medium shrink-0 hover:underline"
+                className="flex items-center gap-1 text-[0.6875rem] font-medium shrink-0 hover:underline"
                 style={{ color: 'var(--tblr-primary)' }}
               >
                 <IconExternalLink size={12} /> {t('calendar_view_project')}

@@ -43,7 +43,7 @@ function StatutBadge({ statut }: { statut?: string }) {
   const s = DOC_STATUT_CONFIG[(statut as keyof typeof DOC_STATUT_CONFIG) || 'en_cours'];
   const Icon = s.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: s.bg, color: s.color }}>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-bold" style={{ background: s.bg, color: s.color }}>
       <Icon size={10} />
       {s.label}
     </span>
@@ -53,7 +53,7 @@ function StatutBadge({ statut }: { statut?: string }) {
 function IndiceBadge({ indice }: { indice?: string }) {
   if (!indice) return null;
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.6875rem] font-mono font-bold" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>
       Ind.{indice}
     </span>
   );
@@ -347,7 +347,7 @@ export default function Documents() {
           Tous les documents
         </button>
 
-        <div className="px-3 pt-2 pb-1 uppercase tracking-widest text-[10px] font-bold" style={{ color: 'var(--tblr-muted)' }}>Par affaire</div>
+        <div className="px-3 pt-2 pb-1 uppercase tracking-widest text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-muted)' }}>Par affaire</div>
 
         {projectsWithDocs.map(p => {
           const isExpanded = expandedProjects.has(p.id);
@@ -366,7 +366,7 @@ export default function Documents() {
                 >
                   {isExpanded ? <IconFolderOpen size={14} className="shrink-0" /> : <IconFolder size={14} className="shrink-0" />}
                   <span className="truncate text-xs">{p.name}</span>
-                  <span className="ml-auto text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{getProjectDocs(p.id).length}</span>
+                  <span className="ml-auto text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{getProjectDocs(p.id).length}</span>
                 </button>
               </div>
               {isExpanded && phases.length > 0 && (
@@ -378,8 +378,8 @@ export default function Documents() {
                       className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
                       style={activeProject === p.id && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }}
                     >
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
-                      <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(p.id, phase).length}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
+                      <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(p.id, phase).length}</span>
                     </button>
                   ))}
                 </div>
@@ -401,7 +401,7 @@ export default function Documents() {
               >
                 <IconFolder size={14} className="shrink-0" />
                 <span className="text-xs">Sans projet</span>
-                <span className="ml-auto text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{unassignedDocs.length}</span>
+                <span className="ml-auto text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{unassignedDocs.length}</span>
               </button>
             </div>
             {expandedProjects.has('unassigned') && (
@@ -413,8 +413,8 @@ export default function Documents() {
                     className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
                     style={activeProject === 'unassigned' && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }}
                   >
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
-                    <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(null, phase).length}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
+                    <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(null, phase).length}</span>
                   </button>
                 ))}
               </div>
@@ -423,7 +423,7 @@ export default function Documents() {
         )}
 
         {/* Status summary */}
-        <div className="px-3 pt-3 pb-1 uppercase tracking-widest text-[10px] font-bold border-t mt-2 pt-3" style={{ color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}>Statut qualité</div>
+        <div className="px-3 pt-3 pb-1 uppercase tracking-widest text-[0.6875rem] font-bold border-t mt-2 pt-3" style={{ color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}>Statut qualité</div>
         {(['all', 'en_cours', 'approuve', 'perime'] as const).map(s => {
           const count = s === 'all' ? documents.length : documents.filter(d => (d.doc_statut || 'en_cours') === s).length;
           const cfg = s === 'all' ? null : DOC_STATUT_CONFIG[s];
@@ -438,7 +438,7 @@ export default function Documents() {
                 {cfg && <span className="w-2 h-2 rounded-full inline-block" style={{ background: cfg.color }} />}
                 {s === 'all' ? 'Tous' : cfg!.label}
               </span>
-              <span className="text-[10px]">{count}</span>
+              <span className="text-[0.6875rem]">{count}</span>
             </button>
           );
         })}
@@ -489,7 +489,7 @@ export default function Documents() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <tr className="text-[0.6875rem] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
                   <th className="px-4 py-3">Document</th>
                   <th className="px-4 py-3">Phase / Type</th>
                   <th className="px-4 py-3">Indice / Version</th>
@@ -525,7 +525,7 @@ export default function Documents() {
                             <p className="text-sm font-semibold truncate max-w-[180px]" style={{ color: 'var(--tblr-text)', textDecoration: isPerime ? 'line-through' : 'none' }} title={doc.name}>
                               {doc.name}
                             </p>
-                            <p className="text-[11px] truncate flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+                            <p className="text-[0.6875rem] truncate flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
                               {doc.storage_backend === 'external' && (
                                 <IconCloud size={12} className="shrink-0" title="Stocké sur l'espace de stockage du cabinet" />
                               )}
@@ -537,10 +537,10 @@ export default function Documents() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           {doc.phase && (
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold w-fit ${PHASE_COLORS[doc.phase as DocumentPhase] || PHASE_COLORS['Général']}`}>{doc.phase}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-bold w-fit ${PHASE_COLORS[doc.phase as DocumentPhase] || PHASE_COLORS['Général']}`}>{doc.phase}</span>
                           )}
                           {doc.doc_type && (
-                            <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{doc.doc_type}</span>
+                            <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{doc.doc_type}</span>
                           )}
                         </div>
                       </td>
@@ -574,7 +574,7 @@ export default function Documents() {
                           <div>
                             <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>{doc.approbateur}</p>
                             {doc.date_approbation && (
-                              <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(doc.date_approbation).toLocaleDateString('fr-FR')}</p>
+                              <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{new Date(doc.date_approbation).toLocaleDateString('fr-FR')}</p>
                             )}
                           </div>
                         ) : (
@@ -584,7 +584,7 @@ export default function Documents() {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => openDiffusion(doc)}
-                          className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
+                          className="flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-1 rounded-lg transition-colors"
                           style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
                           title="Gérer la diffusion"
                         >
@@ -833,7 +833,7 @@ export default function Documents() {
               </div>
 
               {/* Diffusion list */}
-              <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>Historique des diffusions ({diffusions.length})</p>
+              <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>Historique des diffusions ({diffusions.length})</p>
               {diffusions.length === 0 ? (
                 <p className="text-sm text-center py-6" style={{ color: 'var(--tblr-muted)' }}>Aucune diffusion enregistrée</p>
               ) : (
@@ -848,7 +848,7 @@ export default function Documents() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{d.contact_name}</p>
-                        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                           Envoyé le {new Date(d.sent_at).toLocaleDateString('fr-FR')}
                           {d.acknowledged_at && ` · AR le ${new Date(d.acknowledged_at).toLocaleDateString('fr-FR')}`}
                         </p>
@@ -856,7 +856,7 @@ export default function Documents() {
                       {!d.acknowledged_at && (
                         <button
                           onClick={() => handleAcknowledge(d.id)}
-                          className="text-[10px] font-bold px-2 py-1 rounded-lg shrink-0"
+                          className="text-[0.6875rem] font-bold px-2 py-1 rounded-lg shrink-0"
                           style={{ background: '#d3f9d8', color: '#2f9e44' }}
                         >
                           Marquer AR
@@ -895,8 +895,8 @@ export default function Documents() {
                       </div>
                       <div className="flex-1">
                         <p className="text-xs font-semibold" style={{ color: 'var(--tblr-text)' }}>{i === 0 ? 'Version actuelle' : `Version ${v.version}`}</p>
-                        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(v.uploaded_at).toLocaleDateString('fr-FR')} · {v.uploaded_by || '—'}</p>
-                        {v.description && <p className="text-[11px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{v.description}</p>}
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{new Date(v.uploaded_at).toLocaleDateString('fr-FR')} · {v.uploaded_by || '—'}</p>
+                        {v.description && <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{v.description}</p>}
                       </div>
                       <button onClick={() => openSignedUrl(v.file_url)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)' }} title="Télécharger">
                         <IconDownload size={14} />

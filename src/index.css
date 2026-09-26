@@ -47,6 +47,10 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /* Petites capitales Tabler conservées, mais moins espacées (0,05 em par
+     défaut) : à 11 px, un espacement large disperse le mot plus qu'il ne
+     l'aère. */
+  --tracking-wider: 0.03em;
 }
 
 /* ──────────────────────────────────────────────────
@@ -57,9 +61,16 @@
     @apply font-sans antialiased;
     background-color: var(--tblr-bg);
     color: var(--tblr-text);
-    font-size: 14px;
+    /* En rem, pas en px : le texte suit la taille choisie par l'utilisateur
+       dans son navigateur (14 px au réglage par défaut). */
+    font-size: 0.875rem;
     line-height: 1.5715;
   }
+  /* Les grands titres se resserrent légèrement : l'espacement d'une police
+     dessinée pour le texte courant paraît trop lâche en grande taille. Une
+     classe tracking-* posée sur le titre reste prioritaire. */
+  h1 { letter-spacing: -0.02em; }
+  h2 { letter-spacing: -0.01em; }
   *, *::before, *::after { box-sizing: border-box; }
 }
 
@@ -81,7 +92,7 @@
     font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     color: var(--tblr-muted);
   }
 
@@ -432,6 +443,15 @@
 .org-tree-node:first-child::before, .org-tree-node:last-child::after { border: 0 none !important; }
 .org-tree-node:last-child::before { border-right: 2px solid var(--tblr-border) !important; border-radius: 0 10px 0 0 !important; }
 .org-tree-node:first-child::after { border-radius: 10px 0 0 0 !important; }
+
+/* Éléments déplaçables au pointeur (useDragToZone, useBarDrag) : un appui
+   long sert à les soulever, il ne doit ni sélectionner le texte ni ouvrir le
+   menu contextuel d'iOS. */
+[data-drag-id] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* ──────────────────────────────────────────────────
    Préférences d'accessibilité du système

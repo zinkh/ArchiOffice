@@ -134,7 +134,7 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold rounded uppercase tracking-wider">Patrimoine (Monuments Historiques)</span>
+          <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Patrimoine (Monuments Historiques)</span>
         </div>
         {loading && <IconLoader2 size={14} className="animate-spin text-amber-500" />}
       </div>
@@ -148,11 +148,11 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
       ) : monuments.length > 0 ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] text-zinc-500">Monuments protégés à proximité (rayon 500m) :</p>
+            <p className="text-[0.6875rem] text-zinc-500">Monuments protégés à proximité (rayon 500m) :</p>
             <button 
               onClick={handleCopyAll}
               className={cn(
-                "flex items-center gap-1.5 px-2 py-1 transition-colors rounded-md text-[10px] font-bold uppercase tracking-wider",
+                "flex items-center gap-1.5 px-2 py-1 transition-colors rounded-md text-[0.6875rem] font-bold uppercase tracking-wider",
                 isCopied 
                   ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800" 
                   : "text-zinc-500 hover:text-amber-600 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700"
@@ -173,10 +173,10 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
                       {monument.fields.tico}
                     </h4>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
-                      <span className="text-[9px] px-1 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded font-bold border border-amber-100 dark:border-amber-800">
+                      <span className="text-[0.6875rem] px-1 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded font-bold border border-amber-100 dark:border-amber-800">
                         {monument.fields.stat}
                       </span>
-                      <span className="text-[9px] text-zinc-400 flex items-center gap-0.5">
+                      <span className="text-[0.6875rem] text-zinc-400 flex items-center gap-0.5">
                         <IconMapPin size={10} />
                         {monument.fields.comm} ({monument.fields.dpt})
                         {monument.fields.dist && ` • ${Math.round(parseFloat(monument.fields.dist))}m`}
@@ -199,17 +199,17 @@ Lien: https://www.pop.culture.gouv.fr/notice/merimee/${monument.fields.ref_merim
               
               <div className="mt-2 space-y-1">
                 {monument.fields.dpro && (
-                  <p className="text-[9px] text-zinc-500">
+                  <p className="text-[0.6875rem] text-zinc-500">
                     <span className="font-bold">Protection :</span> {monument.fields.dpro}
                   </p>
                 )}
                 {monument.fields.autr && monument.fields.autr.length > 0 && (
-                  <p className="text-[9px] text-zinc-500">
+                  <p className="text-[0.6875rem] text-zinc-500">
                     <span className="font-bold">Auteur :</span> {Array.isArray(monument.fields.autr) ? monument.fields.autr.join(', ') : monument.fields.autr}
                   </p>
                 )}
                 {monument.fields.prec_lib && (
-                  <p className="text-[9px] text-zinc-400 italic line-clamp-2 mt-1 border-t border-zinc-50 dark:border-zinc-800 pt-1">
+                  <p className="text-[0.6875rem] text-zinc-400 italic line-clamp-2 mt-1 border-t border-zinc-50 dark:border-zinc-800 pt-1">
                     {monument.fields.prec_lib}
                   </p>
                 )}

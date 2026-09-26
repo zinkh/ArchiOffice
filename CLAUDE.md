@@ -2249,6 +2249,26 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   doigt ; le ressort de retour repart de la vitesse du geste.
 - **Hauteurs d'écran en `dvh`**, jamais `100vh`/`h-screen` pour une mise en
   page : sur Safari iOS, `100vh` inclut la barre d'adresse et coupe le bas.
+- **Glisser-déposer au pointeur, jamais en HTML5 natif** (`draggable`,
+  `onDragStart`...), qui ne suit pas le doigt sur téléphone. Kanban et
+  calendrier passent par `useDragToZone` (`src/hooks/useDragToZone.ts`), le
+  planning (Gantt) par `useBarDrag` ; les deux s'appuient sur
+  `startPressDrag` (`src/lib/pressDrag.ts`) : à la souris le glisser démarre
+  après quelques pixels, au doigt après un appui de 220 ms (un doigt qui bouge
+  avant fait défiler la page), Échap annule, et le clic qui suit un glisser
+  est avalé. Une copie soulevée suit le pointeur 1:1 depuis le point saisi ;
+  au relâché, `onDrop` doit mettre à jour l'état **de façon optimiste et
+  synchrone** (il est appelé dans un `flushSync`) pour que la copie puisse
+  rejoindre la nouvelle place de l'élément. `project: true` (Kanban) choisit
+  la colonne sur le point projeté du geste ; pas sur une grille serrée comme
+  les jours d'un mois. Une tâche déposée va en bas de sa colonne : l'ordre à
+  l'intérieur d'une colonne n'est pas enregistré.
+- **Typographie : 11 px minimum, tailles en `rem`.** Les tailles arbitraires
+  s'écrivent `text-[0.6875rem]` et non `text-[11px]`, pour suivre la taille de
+  texte choisie dans le navigateur (le corps est à `0.875rem`) ; 10 px n'est
+  toléré que dans une pastille de taille fixe (initiales dans un cercle
+  `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
+  `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
 
 ### Maps
 

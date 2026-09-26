@@ -30,7 +30,7 @@ const NEW_CATEGORY = '__new__';
 
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 const inputClass = "w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20";
-const labelClass = "text-[10px] font-bold uppercase tracking-wider";
+const labelClass = "text-[0.6875rem] font-bold uppercase tracking-wider";
 const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
 const sectionClass = "text-sm font-bold uppercase tracking-widest pb-2";
 const sectionStyle: React.CSSProperties = { color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' };
@@ -210,12 +210,12 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
                 setWorkAddress(patch);
               }}
             />
-            <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_search_hint')}</p>
+            <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_search_hint')}</p>
           </div>
           {directors.length > 0 && (
             <div className="md:col-span-3 rounded-lg p-3 space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-wider" style={labelStyle}>{t('contacts_directors_label')}</p>
+                <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={labelStyle}>{t('contacts_directors_label')}</p>
                 <button type="button" onClick={() => setDirectors([])} style={labelStyle} title={t('contacts_directors_dismiss')}>
                   <IconX size={14} />
                 </button>
@@ -265,7 +265,7 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
         <h4 className={sectionClass} style={sectionStyle}>{t('contacts_section_contact_info')}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_emails_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_emails_label')}</h5>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <IconMail size={16} style={labelStyle} />
@@ -292,7 +292,7 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
             </div>
           </div>
           <div className="space-y-4">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_phones_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_phones_label')}</h5>
             <div className="grid grid-cols-1 gap-2">
               <div className="flex items-center gap-2">
                 <IconPhone size={16} style={labelStyle} />
@@ -324,7 +324,7 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
         <h4 className={sectionClass} style={sectionStyle}>{t('contacts_section_addresses')}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-3">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_address_work_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_address_work_label')}</h5>
             <AddressAutocomplete
               value={contact.address_work_street || ''}
               placeholder={t('contacts_street_placeholder')}
@@ -355,8 +355,8 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
           </div>
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_address_home_label')}</h5>
-              <label className="flex items-center gap-1.5 text-[11px] cursor-pointer" style={labelStyle}>
+              <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_address_home_label')}</h5>
+              <label className="flex items-center gap-1.5 text-[0.6875rem] cursor-pointer" style={labelStyle}>
                 <input
                   type="checkbox"
                   checked={sameAddress}
@@ -466,7 +466,7 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
                   {t('contacts_is_personal_perso')}
                 </button>
               </div>
-              <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_is_personal_hint')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_is_personal_hint')}</p>
             </div>
             {isEntrepriseContact(contact as Contact) && !!contact.category && (
               <div className="space-y-1">

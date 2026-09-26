@@ -69,7 +69,7 @@ function AttachmentView({ item }: { item: Attachment }) {
 
 function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] w-fit" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[0.6875rem] w-fit" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
       <IconFile size={12} /> {file.name}
       <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
     </div>
@@ -147,7 +147,7 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
 
 function MentionBadge() {
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wide" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
       @ Vous êtes mentionné(e)
     </span>
   );
@@ -386,7 +386,7 @@ export default function ActivityFeed() {
     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
       {/* Header */}
       <div className="flex justify-between items-center px-5 py-3" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-        <h2 className="text-[13px] font-semibold" style={{ color: 'var(--tblr-text)' }}>Flux d'activité</h2>
+        <h2 className="text-[0.8125rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>Flux d'activité</h2>
         <div className="relative" ref={hiddenMenuRef}>
           <button
             onClick={() => setShowHiddenMenu(v => !v)}
@@ -411,7 +411,7 @@ export default function ActivityFeed() {
                   onMouseLeave={e => { e.currentTarget.style.background = ''; }}
                 >
                   {cat}
-                  {hiddenTypes.has(cat) && <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>masqué</span>}
+                  {hiddenTypes.has(cat) && <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>masqué</span>}
                 </button>
               ))}
               {allCategories.length === 0 && <p className="text-xs px-3 py-2" style={{ color: 'var(--tblr-muted)' }}>Aucune catégorie</p>}
@@ -469,7 +469,7 @@ export default function ActivityFeed() {
             </button>
           </div>
         </div>
-        <p className="text-[10px] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
+        <p className="text-[0.6875rem] mt-1.5 pl-1" style={{ color: 'var(--tblr-muted)' }}>Ctrl+Entrée pour publier</p>
 
         <MentionDropdown
           suggestions={composer.suggestions}
@@ -502,11 +502,11 @@ export default function ActivityFeed() {
                 <Avatar name={item.user_name || 'U'} size={34} />
                 <div className="flex-1 min-w-0">
                   {item.kind === 'activity' ? (
-                    <p className="text-[13px] font-semibold leading-snug" style={{ color: 'var(--tblr-text)' }}>
+                    <p className="text-[0.8125rem] font-semibold leading-snug" style={{ color: 'var(--tblr-text)' }}>
                       {item.action}
                     </p>
                   ) : (
-                    <div className="text-[13px] leading-relaxed" style={{ color: 'var(--tblr-text)' }}>
+                    <div className="text-[0.8125rem] leading-relaxed" style={{ color: 'var(--tblr-text)' }}>
                       {renderTextWithMentions(item.content || '', teamMembers)}
                       <AttachmentView item={item} />
                     </div>
@@ -520,7 +520,7 @@ export default function ActivityFeed() {
                     {item.category && (
                       <>
                         <span>·</span>
-                        <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold", catColor)}>
+                        <span className={cn("px-1.5 py-0.5 rounded text-[0.6875rem] font-bold", catColor)}>
                           {item.category}
                         </span>
                       </>

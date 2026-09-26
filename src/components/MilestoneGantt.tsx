@@ -79,28 +79,28 @@ export default function MilestoneGantt({ milestones, startDate, endDate, onUpdat
       
       <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
         <div className="space-y-2">
-          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Liste des missions</h4>
+          <h4 className="text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-wider">Liste des missions</h4>
           <div className="space-y-1 max-h-[400px] overflow-y-auto pr-2">
             {milestones.map(m => (
               <div key={m.id} className="p-2 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50 space-y-2">
                 <div className="text-xs text-zinc-700 dark:text-zinc-300 font-bold truncate">{m.title}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-zinc-400 uppercase">Durée</label>
+                    <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Durée</label>
                     <div className="flex items-center gap-1">
                       <input 
                         type="number"
-                        className="w-full px-2 py-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[0.6875rem] outline-none focus:ring-1 focus:ring-blue-500"
                         value={m.duration_days || 0}
                         onChange={(e) => handleDurationChange(m.id, Number(e.target.value))}
                       />
-                      <span className="text-[8px] text-zinc-400">j</span>
+                      <span className="text-[0.6875rem] text-zinc-400">j</span>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[8px] font-bold text-zinc-400 uppercase">Après</label>
+                    <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Après</label>
                     <select 
-                      className="w-full px-1 py-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-1 py-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[0.6875rem] outline-none focus:ring-1 focus:ring-blue-500"
                       value={m.dependencies?.[0] || ''}
                       onChange={(e) => handleDependencyChange(m.id, e.target.value)}
                     >
@@ -120,7 +120,7 @@ export default function MilestoneGantt({ milestones, startDate, endDate, onUpdat
           <div className="min-w-[500px] relative">
             <div className="flex border-b border-zinc-200 dark:border-zinc-700 pb-2">
               {days.filter((_, i) => i % 30 === 0).map(day => (
-                <div key={day.toISOString()} className="flex-1 min-w-[60px] text-center text-[10px] text-zinc-500 dark:text-zinc-400">
+                <div key={day.toISOString()} className="flex-1 min-w-[60px] text-center text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
                   {format(day, 'MMM yyyy')}
                 </div>
               ))}
@@ -136,7 +136,7 @@ export default function MilestoneGantt({ milestones, startDate, endDate, onUpdat
                   <div key={milestone.id} className="h-6 relative bg-zinc-100/30 dark:bg-zinc-900/20 rounded-full">
                     <div 
                       className={cn(
-                        "absolute top-0 h-full flex items-center px-2 text-[8px] text-white font-bold transition-all rounded-full shadow-sm",
+                        "absolute top-0 h-full flex items-center px-2 text-[0.6875rem] text-white font-bold transition-all rounded-full shadow-sm",
                         milestone.completed ? "bg-green-500" : "bg-blue-500"
                       )}
                       style={{ left: `${Math.max(0, startOffset)}%`, width: `${Math.max(width, 2)}%` }}

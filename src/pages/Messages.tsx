@@ -342,7 +342,7 @@ export default function Messages() {
           <h2 className="font-bold text-zinc-900 dark:text-white flex items-center gap-2">
             <IconMessageCircle size={18} className="text-blue-600 dark:text-blue-400" />
             Messages
-            {totalUnread > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white">{totalUnread}</span>}
+            {totalUnread > 0 && <span className="text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white">{totalUnread}</span>}
           </h2>
           <button
             onClick={() => setShowNewConversation(true)}
@@ -374,12 +374,12 @@ export default function Messages() {
                   <span className={cn("text-sm truncate", conv.unread_count > 0 ? "font-bold text-zinc-900 dark:text-white" : "font-medium text-zinc-700 dark:text-zinc-300")}>
                     {conv.name}
                   </span>
-                  <span className="text-[10px] text-zinc-400 shrink-0">{timeAgo(conv.last_message_at)}</span>
+                  <span className="text-[0.6875rem] text-zinc-400 shrink-0">{timeAgo(conv.last_message_at)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{conv.last_message || 'Aucun message'}</span>
                   {conv.unread_count > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white shrink-0">{conv.unread_count}</span>
+                    <span className="text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white shrink-0">{conv.unread_count}</span>
                   )}
                 </div>
               </div>
@@ -407,7 +407,7 @@ export default function Messages() {
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-zinc-900 dark:text-white truncate">{selectedConversation.name}</p>
                 {selectedConversation.is_group && (
-                  <p className="text-[11px] text-zinc-400 truncate">{selectedConversation.participants.map(p => p.name).join(', ')}</p>
+                  <p className="text-[0.6875rem] text-zinc-400 truncate">{selectedConversation.participants.map(p => p.name).join(', ')}</p>
                 )}
               </div>
               {selectedConversation.is_group && (
@@ -428,7 +428,7 @@ export default function Messages() {
                       style={isMine ? ({ '--tblr-primary': '#ffffff', '--tblr-border': 'rgba(255,255,255,0.5)' } as React.CSSProperties) : undefined}
                     >
                       {!isMine && selectedConversation.is_group && (
-                        <p className="text-[10px] font-bold opacity-70 mb-0.5">{msg.sender_name}</p>
+                        <p className="text-[0.6875rem] font-bold opacity-70 mb-0.5">{msg.sender_name}</p>
                       )}
                       {msg.content && <div className="text-sm">{renderTextWithMentions(msg.content, [])}</div>}
                       {msg.attachment_url && (
@@ -442,7 +442,7 @@ export default function Messages() {
                           </button>
                         )
                       )}
-                      <p className={cn("text-[9px] mt-1", isMine ? "text-blue-100" : "text-zinc-400")}>{timeAgo(msg.created_at)}</p>
+                      <p className={cn("text-[0.6875rem] mt-1", isMine ? "text-blue-100" : "text-zinc-400")}>{timeAgo(msg.created_at)}</p>
                     </div>
                   </div>
                 );

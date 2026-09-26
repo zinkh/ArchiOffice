@@ -71,7 +71,7 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
     }
   };
 
-  const label = 'block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide mb-1';
+  const label = 'block text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wide mb-1';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={running ? undefined : onClose}>
@@ -107,7 +107,7 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
                         onChange={() => toggle(d.id)}
                       />
                       <span className="truncate flex-1">{d.name}</span>
-                      {d.phase && <span className="text-[10px] text-zinc-400 shrink-0">{d.phase}</span>}
+                      {d.phase && <span className="text-[0.6875rem] text-zinc-400 shrink-0">{d.phase}</span>}
                     </label>
                   </li>
                 ))}
@@ -155,7 +155,7 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
             />
           </div>
 
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[0.6875rem] text-zinc-500">
             Les lots proposés s'ajoutent à la suite du CCTP existant, marqués « IA ». Relisez-les avant d'enregistrer :
             quantités et prix restent à renseigner.
           </p>

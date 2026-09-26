@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconLayoutKanban, IconSearch, IconPlus } from '@tabler/icons-react';
 import { useTasks } from '../hooks/useTasks';
+import { useDragToZone } from '../hooks/useDragToZone';
 import { PillTabs } from '../components/ui/PillTabs';
 import { ErrorState, ListSkeleton } from '../components/DataState';
 import { TaskCard } from '../components/tasks/TaskCard';
@@ -29,8 +30,6 @@ export default function Kanban() {
   const [filterAssignee, setFilterAssignee] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
   const [modal, setModal] = useState<TaskFormInitial | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
 
@@ -45,20 +44,21 @@ export default function Kanban() {
     return true;
   }), [tasks, filterProject, filterAssignee, filterPriority, searchQuery]);
 
-  const handleDrop = async (col: TaskStatus) => {
-    const id = draggingId;
-    setDraggingId(null);
-    setDragOverColumn(null);
-    if (!id) return;
+  const handleDrop = (id: string, col: TaskStatus) => {
     setMoveError(null);
-    try {
-      await moveTask(id, col);
-    } catch (err: any) {
+    // moveTask met la carte dans sa nouvelle colonne avant même l'appel
+    // réseau : la carte glissée peut ainsi s'y poser tout de suite.
+    moveTask(id, col).catch((err: any) => {
       // moveTask a déjà remis la carte dans sa colonne d'origine — reste à
       // le dire, l'ancienne version échouait en silence.
       setMoveError(err?.message || (t('task_move_error') as string));
-    }
+    });
   };
+
+  // Glisser-déposer au pointeur (souris et doigt) : voir useDragToZone.
+  // `project` : une carte lancée vers la colonne voisine y termine sa course.
+  const boardScrollRef = useRef<HTMLDivElement>(null);
+  const { drag, itemProps, zoneProps } = useDragToZone<TaskStatus>({ onDrop: handleDrop, project: true, scrollRef: boardScrollRef });
 
   const today = new Date().toISOString().slice(0, 10);
   const openCreate = (status: TaskStatus) => setModal({
@@ -136,7 +136,7 @@ export default function Kanban() {
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-4 pb-2" style={{ background: 'var(--tblr-bg)' }}>
+      <div ref={boardScrollRef} className="flex-1 overflow-auto p-4 pb-2" style={{ background: 'var(--tblr-bg)' }}>
         {loading ? (
           <ListSkeleton rows={5} />
         ) : error ? (
@@ -153,7 +153,7 @@ export default function Kanban() {
           <div className="flex gap-4 min-w-max h-full">
             {COLUMNS.map(col => {
               const colTasks = filteredTasks.filter(task => getTaskStatus(task) === col.id);
-              const isOver = dragOverColumn === col.id;
+              const isOver = !!drag && drag.over === col.id && drag.source !== col.id;
               return (
                 <div
                   key={col.id}
@@ -163,9 +163,7 @@ export default function Kanban() {
                     outline: isOver ? '2px solid var(--tblr-primary)' : 'none',
                     outlineOffset: '-2px',
                   }}
-                  onDragOver={e => { e.preventDefault(); setDragOverColumn(col.id); }}
-                  onDragLeave={() => setDragOverColumn(null)}
-                  onDrop={() => handleDrop(col.id)}
+                  {...zoneProps(col.id)}
                 >
                   <div className="flex items-center justify-between p-3" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                     <span className="text-sm font-semibold" style={{ color: col.headerColor }}>{t(col.labelKey)}</span>
@@ -196,13 +194,21 @@ export default function Kanban() {
                         task={task}
                         projectName={task.project_id ? projectNameById.get(task.project_id) : undefined}
                         assigneeName={task.assignee_id ? memberNameById.get(task.assignee_id) : undefined}
-                        isDragging={draggingId === task.id}
+                        isDragging={drag?.id === task.id}
                         isDone={col.id === 'done'}
                         onClick={() => openEdit(task)}
-                        onDragStart={() => setDraggingId(task.id)}
-                        onDragEnd={() => { setDraggingId(null); setDragOverColumn(null); }}
+                        dragProps={itemProps(task.id, col.id)}
                       />
                     ))}
+                    {/* Emplacement où la carte va tomber : elle rejoint le bas
+                        de la colonne, l'ordre à l'intérieur d'une colonne
+                        n'étant pas enregistré. */}
+                    {isOver && colTasks.length > 0 && (
+                      <div
+                        className="rounded-lg"
+                        style={{ height: drag!.height, border: '2px dashed var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}
+                      />
+                    )}
                     {colTasks.length === 0 && (
                       <div
                         className="rounded-lg p-4 text-center transition-colors"

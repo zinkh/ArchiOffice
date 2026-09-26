@@ -55,7 +55,7 @@ export function UserSwitcher() {
                       </div>
                       <div className="text-left">
                         <p className="font-medium leading-none">{user.name}</p>
-                        <p className="text-[10px] opacity-70 uppercase">{user.system_role}</p>
+                        <p className="text-[0.6875rem] opacity-70 uppercase">{user.system_role}</p>
                       </div>
                     </button>
                   ))}

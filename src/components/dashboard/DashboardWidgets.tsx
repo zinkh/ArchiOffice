@@ -20,7 +20,7 @@ export function StatusBadge({ status }: { status: string }) {
   const s = map[status] ?? { bg: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' };
   return (
     <span
-      className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+      className="text-[0.6875rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
       style={{ background: s.bg, color: s.color }}
     >
       {status}
@@ -62,7 +62,7 @@ export function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, t
 
       <div className="flex items-center justify-between">
         <span
-          className="text-[10px] font-bold uppercase tracking-wider"
+          className="text-[0.6875rem] font-bold uppercase tracking-wider"
           style={{ color: cardBg ? accent : 'var(--tblr-muted)' }}
         >
           {label}
@@ -83,7 +83,7 @@ export function StatCard({ label, value, icon: Icon, accent, accentBg, cardBg, t
       </p>
 
       {trend && (
-        <div className="flex items-center gap-1 text-[11px] font-medium">
+        <div className="flex items-center gap-1 text-[0.6875rem] font-medium">
           {trendUp !== undefined && (
             trendUp
               ? <IconTrendingUp size={12} style={{ color: '#2fb344' }} />
@@ -101,7 +101,7 @@ export function TblrTooltip({ active, payload, label, valueFormatter }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div
-      className="px-3 py-2 text-[13px] rounded"
+      className="px-3 py-2 text-[0.8125rem] rounded"
       style={{
         background: 'var(--tblr-surface)',
         border: '1px solid var(--tblr-border)',
@@ -127,7 +127,7 @@ export function SectionCard({ title, action, children }: { title: React.ReactNod
         className="flex items-center justify-between px-4 py-3 border-b"
         style={{ borderColor: 'var(--tblr-border)' }}
       >
-        <h2 className="text-[13px] font-semibold" style={{ color: 'var(--tblr-text)' }}>{title}</h2>
+        <h2 className="text-[0.8125rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{title}</h2>
         {action}
       </div>
       <div className="p-4">{children}</div>
@@ -149,7 +149,7 @@ export function QuickAction({ icon: Icon, label, to, color }: { icon: React.Elem
       >
         <Icon size={22} />
       </span>
-      <span className="text-[11px] font-semibold text-center leading-tight" style={{ color: 'var(--tblr-muted)' }}>
+      <span className="text-[0.6875rem] font-semibold text-center leading-tight" style={{ color: 'var(--tblr-muted)' }}>
         {label}
       </span>
     </button>
@@ -183,7 +183,7 @@ export function HeroCard({ title, children, action }: { title: React.ReactNode; 
     >
       <div className="flex-1 min-w-0 p-5 sm:p-6 flex flex-col gap-2 relative z-10">
         <h2 className="text-lg font-bold" style={{ color: 'var(--tblr-primary)' }}>{title}</h2>
-        <div className="text-[13px] leading-relaxed max-w-md" style={{ color: 'var(--tblr-muted)' }}>{children}</div>
+        <div className="text-[0.8125rem] leading-relaxed max-w-md" style={{ color: 'var(--tblr-muted)' }}>{children}</div>
         {action && <div className="mt-auto pt-3">{action}</div>}
       </div>
       <div className="hidden sm:flex items-end shrink-0 pr-4 pt-4">
@@ -244,8 +244,8 @@ export function RadialGauge({ value, label, color = REVENUE_PAID_COLOR, size = 1
           strokeDasharray={`${(c * arc * v) / 100} ${c}`} strokeLinecap="round" />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[26px] font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>{Math.round(v)} %</span>
-        <span className="text-[11px] mt-1" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
+        <span className="text-[1.625rem] font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>{Math.round(v)} %</span>
+        <span className="text-[0.6875rem] mt-1" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
       </div>
     </div>
   );
@@ -284,15 +284,15 @@ export function RankedBars({ rows, muted }: { rows: { name: string; count: numbe
         const color = isMuted ? '#adb5bd' : CATEGORY_COLORS[i % CATEGORY_COLORS.length];
         return (
           <li key={r.name} className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[12px] font-bold shrink-0" style={{ background: color + '1f', color }}>
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[0.75rem] font-bold shrink-0" style={{ background: color + '1f', color }}>
               {r.count}
             </span>
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline justify-between gap-3 mb-1">
-                <span className={`text-[13px] truncate ${isMuted ? 'italic' : 'font-medium'}`} style={{ color: isMuted ? 'var(--tblr-muted)' : 'var(--tblr-text)' }} title={r.name}>
+                <span className={`text-[0.8125rem] truncate ${isMuted ? 'italic' : 'font-medium'}`} style={{ color: isMuted ? 'var(--tblr-muted)' : 'var(--tblr-text)' }} title={r.name}>
                   {r.name}
                 </span>
-                <span className="text-[12px] tabular-nums shrink-0" style={{ color: 'var(--tblr-muted)' }}>{r.pct} %</span>
+                <span className="text-[0.75rem] tabular-nums shrink-0" style={{ color: 'var(--tblr-muted)' }}>{r.pct} %</span>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--tblr-surface-2)' }}>
                 <div className="h-full rounded-full" style={{ width: `${(r.count / max) * 100}%`, background: color }} />

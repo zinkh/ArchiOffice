@@ -459,7 +459,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
       <div className="rounded-xl p-4 sm:p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-1">
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-1">
               Phase DET · Direction de l'exécution des travaux
             </p>
             <h2 className="text-2xl font-bold text-[var(--tblr-text)]">Chantier</h2>
@@ -507,7 +507,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
               {/* CR list */}
               <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-                <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
+                <div className="px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
                   Comptes-rendus · {reports.length}
                 </div>
                 <div className="max-h-[70vh] overflow-y-auto">
@@ -523,9 +523,9 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-sm text-[var(--tblr-text)]">CR {r.report_number}</span>
                         {r.pendingSync ? (
-                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+                          <span className="text-[0.6875rem] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
                         ) : (
-                          <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[r.statut || 'brouillon'])}>
+                          <span className={cn('text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[r.statut || 'brouillon'])}>
                             {STATUT_CR_LABELS[r.statut || 'brouillon']}
                           </span>
                         )}
@@ -556,7 +556,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                           <h3 className="text-lg font-bold text-[var(--tblr-text)]">
                             Compte-rendu de visite n° {selectedReport.report_number}
                           </h3>
-                          <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[selectedReport.statut || 'brouillon'])}>
+                          <span className={cn('text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[selectedReport.statut || 'brouillon'])}>
                             {STATUT_CR_LABELS[selectedReport.statut || 'brouillon']}
                           </span>
                         </div>
@@ -676,7 +676,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     )}
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
-                        <thead className="text-[var(--tblr-muted)] text-[10px] font-bold uppercase tracking-wider">
+                        <thead className="text-[var(--tblr-muted)] text-[0.6875rem] font-bold uppercase tracking-wider">
                           <tr>
                             <th className="text-left py-1.5 pr-2">Lot / Entreprise</th>
                             <th className="text-left py-1.5 pr-2">Statut</th>
@@ -785,7 +785,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                                   defaultValue={n.text} placeholder="Texte..." onBlur={e => saveNoteField(n.id, 'text', e.target.value)} />
                                 <input className="shrink-0 w-32 bg-transparent border-none outline-none text-xs"
                                   defaultValue={n.responsible_company || ''} placeholder="Société" onBlur={e => saveNoteField(n.id, 'responsible_company', e.target.value)} />
-                                <select className="shrink-0 text-[10px] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
+                                <select className="shrink-0 text-[0.6875rem] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
                                   value={n.status} onChange={e => saveNoteField(n.id, 'status', e.target.value)}>
                                   <option value="open">Ouvert</option>
                                   <option value="done">Soldé</option>
@@ -858,7 +858,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)]">
                           <input className="flex-1 bg-transparent border-none outline-none text-sm"
                             placeholder="Décision..." value={d.texte} onChange={e => updateDecision(i, { texte: e.target.value })} />
-                          <select className="text-[10px] font-bold uppercase px-2 py-1 rounded-full border-none bg-zinc-200 dark:bg-zinc-700"
+                          <select className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-none bg-zinc-200 dark:bg-zinc-700"
                             value={d.tag} onChange={e => updateDecision(i, { tag: e.target.value as any })}>
                             <option value="planning">Planning</option>
                             <option value="technique">Technique</option>
@@ -914,7 +914,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
         {/* Sidebar */}
         <div className="space-y-4">
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Dernier CR diffusé</p>
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Dernier CR diffusé</p>
             {dernierCrDiffuse ? (
               <p className="text-sm text-[var(--tblr-text)]">CR n° {dernierCrDiffuse.report_number} — {dernierCrDiffuse.date}</p>
             ) : (
@@ -922,7 +922,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             )}
           </div>
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Avancement DET</p>
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Avancement DET</p>
             <p className="text-3xl font-bold text-[var(--tblr-text)]">{avancementDet} %</p>
             <div className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-2 overflow-hidden">
               <div className="h-full bg-blue-600" style={{ width: `${avancementDet}%` }} />
@@ -934,7 +934,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             </ul>
           </div>
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">
               Réserves ouvertes <span className="text-red-600 dark:text-red-400">{reservesOuvertes.length}</span>
             </p>
             {reservesOuvertes.length === 0 ? (
@@ -944,14 +944,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                 {reservesOuvertes.slice(0, 5).map(o => (
                   <div key={o.id} className="border-l-2 border-red-500 pl-2">
                     <p className="text-xs text-[var(--tblr-text)] line-clamp-2">{o.texte}</p>
-                    {o.due_date && <p className="text-[10px] text-red-500 font-semibold">échéance {o.due_date}</p>}
+                    {o.due_date && <p className="text-[0.6875rem] text-red-500 font-semibold">échéance {o.due_date}</p>}
                   </div>
                 ))}
               </div>
             )}
           </div>
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Entreprises sur site</p>
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Entreprises sur site</p>
             <div className="space-y-1.5 text-sm">
               {lots_list.slice(0, 6).map(lot => (
                 <div key={lot.id} className="flex justify-between text-[var(--tblr-text)]">
@@ -963,7 +963,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
             </div>
           </div>
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Intempéries cumulées</p>
+            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Intempéries cumulées</p>
             <p className="text-2xl font-bold text-[var(--tblr-text)]">{intemperies} <span className="text-sm font-normal text-[var(--tblr-muted)]">j</span></p>
             <p className="text-xs text-[var(--tblr-muted)] mt-1">Comptes-rendus signalant une météo défavorable.</p>
           </div>
@@ -1004,7 +1004,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 function StatPill({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
+      <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
       <p className={cn('text-xl font-bold', accent ? 'text-red-600 dark:text-red-400' : 'text-[var(--tblr-text)]')}>{value}</p>
     </div>
   );
@@ -1014,7 +1014,7 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-[var(--tblr-surface-2)] p-2.5 text-center">
       <p className="text-lg font-bold text-[var(--tblr-text)]">{value}</p>
-      <p className="text-[10px] uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
+      <p className="text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
     </div>
   );
 }
@@ -1038,7 +1038,7 @@ function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSa
   return (
     <div className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)] group">
       <select
-        className={cn('shrink-0 text-[9px] font-bold uppercase px-1.5 py-1 rounded border-none cursor-pointer', TYPE_COLORS[obs.type || 'observation'])}
+        className={cn('shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded border-none cursor-pointer', TYPE_COLORS[obs.type || 'observation'])}
         value={obs.type || 'observation'}
         onChange={e => onSave(obs.id, 'type', e.target.value)}
       >
@@ -1051,13 +1051,13 @@ function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSa
         onBlur={e => onSave(obs.id, 'texte', e.target.value)}
       />
       {obs.pendingSync && (
-        <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+        <span className="shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
       )}
       {obs.urgence === 'bloquant' && (
-        <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-1 rounded bg-red-600 text-white">{URGENCE_LABELS.bloquant}</span>
+        <span className="shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-red-600 text-white">{URGENCE_LABELS.bloquant}</span>
       )}
       <select
-        className="shrink-0 text-[10px] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
+        className="shrink-0 text-[0.6875rem] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
         value={obs.urgence || 'normal'}
         onChange={e => onSave(obs.id, 'urgence', e.target.value)}
       >
@@ -1073,7 +1073,7 @@ function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSa
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(obs.id, f); e.target.value = ''; }} />
       {(obs.photos || []).length > 0 && (
-        <span className="shrink-0 text-[10px] text-[var(--tblr-muted)]">{obs.photos!.length} 📷</span>
+        <span className="shrink-0 text-[0.6875rem] text-[var(--tblr-muted)]">{obs.photos!.length} 📷</span>
       )}
     </div>
   );
@@ -1083,7 +1083,7 @@ function EntreprisesTab({ lots_list, observations }: { lots_list: ProjectLot[]; 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
       <table className="w-full text-sm">
-        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
           <tr>
             <th className="px-4 py-3 text-left">Lot</th>
             <th className="px-4 py-3 text-left">Entreprise</th>
@@ -1135,7 +1135,7 @@ function PhotosTab({ observations, reports }: { observations: Observation[]; rep
           <div className="aspect-square bg-zinc-100 dark:bg-zinc-800">
             <SignedImage src={item.url} alt="" className="w-full h-full object-cover" />
           </div>
-          <div className="p-2 text-[10px] text-[var(--tblr-muted)] truncate">
+          <div className="p-2 text-[0.6875rem] text-[var(--tblr-muted)] truncate">
             {item.report ? `CR ${item.report.report_number}` : ''} {item.obs.lot?.lot_title || ''}
           </div>
         </button>

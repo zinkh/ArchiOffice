@@ -37,7 +37,7 @@ function Bubble({ msg }: { msg: Message }) {
         'max-w-[80%] rounded-xl px-3 py-2 text-sm',
         isPlatform ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
       )}>
-        <p className="text-[11px] opacity-70 mb-0.5">{msg.author_name || (isPlatform ? 'Support ArchiOffice' : 'Cabinet')}</p>
+        <p className="text-[0.6875rem] opacity-70 mb-0.5">{msg.author_name || (isPlatform ? 'Support ArchiOffice' : 'Cabinet')}</p>
         {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
         {msg.attachment_url && (
           msg.attachment_type?.startsWith('image/') ? (
@@ -50,7 +50,7 @@ function Bubble({ msg }: { msg: Message }) {
             </button>
           )
         )}
-        <p className="text-[10px] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
+        <p className="text-[0.6875rem] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
       </div>
     </div>
   );
@@ -201,7 +201,7 @@ export default function AdminSupport() {
               >
                 <div>
                   <p className="font-medium" style={{ color: 'var(--tblr-text)' }}>{t.subject}</p>
-                  <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                     {t.tenant_name || t.tenant_id} — {new Date(t.last_message_at).toLocaleDateString('fr-FR')}
                   </p>
                 </div>

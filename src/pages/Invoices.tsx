@@ -184,7 +184,7 @@ function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
                 <span>€</span>
               </div>
               {montantAvancement > 0 && phase.montant_phase !== montantAvancement && (
-                <button type="button" className="text-[10px] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
+                <button type="button" className="text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
                   Auto
                 </button>
               )}
@@ -753,8 +753,8 @@ export default function Invoices() {
               { label: t('invoices_col_invoice_project'), primary: true, render: inv => (
                 <div>
                   <p className="font-semibold text-sm">{inv.invoice_number}</p>
-                  {inv.affaire_invoice_number && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
-                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
+                  {inv.affaire_invoice_number && <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
               { label: t('invoices_col_client'), render: inv => invoiceClientName(inv, projects, contacts) },
@@ -762,9 +762,9 @@ export default function Invoices() {
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
                 <div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
                   {inv.accounting_deleted_at && (
-                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
+                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
                   )}
                 </div>
               )},
@@ -853,7 +853,7 @@ export default function Invoices() {
                               : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
                           </div>
                           <span className="font-bold text-sm transition-colors" style={{ color: 'var(--tblr-text)' }}>{group.name}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                          <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                             {group.invoices.length > 1 ? t('invoices_count_invoices_plural', { count: group.invoices.length }) : t('invoices_count_invoices', { count: group.invoices.length })}
                           </span>
                         </div>
@@ -875,11 +875,11 @@ export default function Invoices() {
                               <div className="flex items-center gap-2">
                                 <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                                 {invoice.invoice_type === 'acompte' && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                                  <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                                 )}
                               </div>
                               {invoice.affaire_invoice_number && (
-                                <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                                <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                               )}
                               <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
@@ -895,11 +895,11 @@ export default function Invoices() {
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                          <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
                             {invoice.status}
                           </span>
                           {invoice.accounting_deleted_at && (
-                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
                               Supprimée sur Zoho
                             </span>
                           )}
@@ -988,13 +988,13 @@ export default function Invoices() {
                               </button>
                             )}
                           </div>
-                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                           {pdpNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                           )}
                           {chorusProNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                           )}
                         </td>
                       </tr>
@@ -1018,13 +1018,13 @@ export default function Invoices() {
                           <div className="flex items-center gap-2">
                             <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                             {invoice.invoice_type === 'acompte' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                             )}
-                            <span className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
+                            <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
                             <p className="text-xs font-medium" style={{ color: 'var(--tblr-primary)' }}>{invoice.project_name || 'General'}</p>
                           </div>
                           {invoice.affaire_invoice_number && (
-                            <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                            <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                           )}
                           <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                         </div>
@@ -1040,11 +1040,11 @@ export default function Invoices() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                      <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
                         {invoice.status}
                       </span>
                       {invoice.accounting_deleted_at && (
-                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
                           Supprimée sur Zoho
                         </span>
                       )}
@@ -1133,13 +1133,13 @@ export default function Invoices() {
                           </button>
                         )}
                       </div>
-                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                       {pdpNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                       )}
                       {chorusProNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                       )}
                     </td>
                   </tr>

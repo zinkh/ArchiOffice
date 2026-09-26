@@ -2826,22 +2826,22 @@ export default function Settings() {
                         </div>
                         {/* Status badge */}
                         {plugin.status === 'coming_soon' ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             Bientôt
                           </span>
                         ) : isConnected ? (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
                             <IconPlugConnected size={10} /> Connecté
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             <IconPlugConnectedX size={10} /> Non connecté
                           </span>
                         )}
                       </div>
 
                       <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{plugin.name}</p>
-                      <p className="text-[11px] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
+                      <p className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
                       <p className="text-xs leading-relaxed" style={{ color: 'var(--tblr-muted)' }}>{plugin.description}</p>
                     </div>
 
@@ -2863,7 +2863,7 @@ export default function Settings() {
                         <span className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Disponible prochainement</span>
                       )}
                       <span className={cn(
-                        "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                        "text-[0.6875rem] font-medium px-2 py-0.5 rounded-full",
                         plugin.category === 'accounting' ? "bg-blue-50 text-blue-600" :
                         plugin.category === 'storage' ? "bg-teal-50 text-teal-600" :
                         plugin.category === 'crm' ? "bg-purple-50 text-purple-600" :
@@ -3220,7 +3220,7 @@ export default function Settings() {
               alt={currentUser?.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
               <IconCamera size={18} className="text-white" />
-              <span className="text-white text-[10px] font-medium">Modifier</span>
+              <span className="text-white text-[0.6875rem] font-medium">Modifier</span>
             </div>
           </button>
           <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />

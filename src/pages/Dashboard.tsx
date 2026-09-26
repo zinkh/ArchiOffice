@@ -177,7 +177,7 @@ function AdminDashboardView() {
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
             {t('dashboard')}
           </h1>
-          <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
+          <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
             {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
@@ -185,7 +185,7 @@ function AdminDashboardView() {
 
       {/* Mobile date greeting */}
       <div className="sm:hidden">
-        <p className="text-[12px] capitalize" style={{ color: 'var(--tblr-muted)' }}>
+        <p className="text-[0.75rem] capitalize" style={{ color: 'var(--tblr-muted)' }}>
           {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
       </div>
@@ -243,7 +243,7 @@ function AdminDashboardView() {
             action={
               <Link
                 to="/invoices"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[0.75rem] font-semibold transition-colors"
                 style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
               >
                 {finance.overdueCount > 0 ? t('dashboard_hero_cta_overdue') : t('dashboard_hero_cta')}
@@ -296,8 +296,8 @@ function AdminDashboardView() {
           >
             <div className="md:col-span-2 p-4 md:border-r" style={{ borderColor: 'var(--tblr-border)' }}>
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-[15px] font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('dashboard_revenue_12m')}</h2>
-                <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
+                <h2 className="text-[0.9375rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('dashboard_revenue_12m')}</h2>
+                <div className="flex items-center gap-3 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                   <span className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full inline-block" style={{ background: REVENUE_INVOICED_COLOR }} />
                     {t('dashboard_invoiced')}
@@ -323,13 +323,13 @@ function AdminDashboardView() {
             </div>
             <div className="p-4 flex flex-col items-center justify-center gap-3 border-t md:border-t-0" style={{ borderColor: 'var(--tblr-border)' }}>
               <span
-                className="text-[11px] font-semibold px-2 py-0.5 rounded"
+                className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded"
                 style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
               >
                 {new Date().getFullYear()}
               </span>
               <RadialGauge value={finance.collectionRate} label={t('dashboard_gauge_label')} />
-              <p className="text-[12px] font-medium text-center" style={{ color: 'var(--tblr-muted)' }}>
+              <p className="text-[0.75rem] font-medium text-center" style={{ color: 'var(--tblr-muted)' }}>
                 {t('dashboard_gauge_caption', { rate: finance.collectionRate })}
               </p>
               <div className="grid grid-cols-2 gap-3 w-full">
@@ -342,8 +342,8 @@ function AdminDashboardView() {
                       <item.icon size={16} />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{item.label}</p>
-                      <p className="text-[13px] font-semibold tabular-nums truncate" style={{ color: 'var(--tblr-text)' }}>{formatEurShort(item.value)}</p>
+                      <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{item.label}</p>
+                      <p className="text-[0.8125rem] font-semibold tabular-nums truncate" style={{ color: 'var(--tblr-text)' }}>{formatEurShort(item.value)}</p>
                     </div>
                   </div>
                 ))}
@@ -397,8 +397,8 @@ function AdminDashboardView() {
             onClick={() => navigate('/invoices')}
           >
             <div className="shrink-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#e67700' }}>{t('dashboard_kpi_receivable')}</p>
-              <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: '#ffec99', color: '#e67700' }}>
+              <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: '#e67700' }}>{t('dashboard_kpi_receivable')}</p>
+              <span className="inline-block mt-1 text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded" style={{ background: '#ffec99', color: '#e67700' }}>
                 {t('dashboard_unpaid_count', { count: finance.unpaidCount })}
               </span>
               <p className="text-2xl font-bold mt-2 leading-none tabular-nums" style={{ color: '#e67700' }}>{formatEur(finance.receivable)}</p>
@@ -416,7 +416,7 @@ function AdminDashboardView() {
         <div className="col-span-12 md:col-span-6 xl:col-span-4">
           <SectionCard title={t('dashboard_project_status')}>
             {statusData.length === 0 ? (
-              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
+              <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
             ) : (
               <>
                 <div className="h-44 relative">
@@ -429,13 +429,13 @@ function AdminDashboardView() {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-[26px] font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>{projects.length}</span>
-                    <span className="text-[11px] mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_projects_total')}</span>
+                    <span className="text-[1.625rem] font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>{projects.length}</span>
+                    <span className="text-[0.6875rem] mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_projects_total')}</span>
                   </div>
                 </div>
                 <ul className="mt-3 space-y-2">
                   {statusData.map(d => (
-                    <li key={d.group} className="flex items-center gap-2.5 text-[12px]">
+                    <li key={d.group} className="flex items-center gap-2.5 text-[0.75rem]">
                       <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: STATUS_GROUP_COLORS[d.group] + '1f' }}>
                         <span className="w-2 h-2 rounded-full" style={{ background: STATUS_GROUP_COLORS[d.group] }} />
                       </span>
@@ -455,10 +455,10 @@ function AdminDashboardView() {
         <div className="col-span-12 md:col-span-6 xl:col-span-4">
           <SectionCard
             title={t('dashboard_categories')}
-            action={<span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_categories_hint')}</span>}
+            action={<span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_categories_hint')}</span>}
           >
             {categoryData.length === 0 ? (
-              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
+              <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
             ) : (
               <RankedBars rows={categoryData} muted={UNCATEGORIZED} />
             )}
@@ -468,7 +468,7 @@ function AdminDashboardView() {
         <div className="col-span-12 xl:col-span-4">
           <SectionCard title={t('dashboard_fees_progress')}>
             {feesRows.length === 0 ? (
-              <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
+              <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('dashboard_no_data')}</p>
             ) : (
               <ul className="space-y-4">
                 {feesRows.map((r, i) => {
@@ -479,8 +479,8 @@ function AdminDashboardView() {
                         {r.name.charAt(0).toUpperCase()}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }} title={r.name}>{r.name}</p>
-                        <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                        <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }} title={r.name}>{r.name}</p>
+                        <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                           {r.fees > 0
                             ? t('dashboard_fees_line', { paid: formatEur(r.paid), fees: formatEur(r.fees) })
                             : t('dashboard_fees_unknown')}
@@ -492,7 +492,7 @@ function AdminDashboardView() {
                           </div>
                         )}
                       </div>
-                      <span className="text-[13px] font-semibold tabular-nums shrink-0" style={{ color: r.pct !== null ? '#2f9e44' : 'var(--tblr-text)' }}>
+                      <span className="text-[0.8125rem] font-semibold tabular-nums shrink-0" style={{ color: r.pct !== null ? '#2f9e44' : 'var(--tblr-text)' }}>
                         {r.pct !== null ? `${r.pct} %` : formatEurShort(r.invoiced)}
                       </span>
                     </li>
@@ -506,7 +506,7 @@ function AdminDashboardView() {
 
       {/* ── Quick actions (mobile-prominent) ── */}
       <div className="xl:hidden">
-        <p className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>
+        <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>
           Création rapide
         </p>
         <div className="flex gap-2">
@@ -523,7 +523,7 @@ function AdminDashboardView() {
           <span className="flex items-center gap-1.5">
             {t('dashboard_ai_suggestions')}
             <span
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wide"
               style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
             >
               <IconSparkles size={10} /> IA
@@ -532,7 +532,7 @@ function AdminDashboardView() {
         }
       >
         {suggestions.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('ai_suggestions_empty')}</p>
+          <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('ai_suggestions_empty')}</p>
         ) : (
           <div className="space-y-2.5">
             {suggestions.map(s => (
@@ -546,10 +546,10 @@ function AdminDashboardView() {
               >
                 <IconAlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? '#c92a2a' : '#e67700' }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                  <p className="text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
                   <button
                     onClick={() => openChat(undefined, s.draft)}
-                    className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold hover:underline"
+                    className="mt-1.5 flex items-center gap-1 text-[0.6875rem] font-semibold hover:underline"
                     style={{ color: 'var(--tblr-primary)' }}
                   >
                     <IconSparkles size={12} />
@@ -570,7 +570,7 @@ function AdminDashboardView() {
         action={
           <Link
             to="/projects"
-            className="flex items-center gap-1 text-[12px] font-medium transition-colors"
+            className="flex items-center gap-1 text-[0.75rem] font-medium transition-colors"
             style={{ color: 'var(--tblr-primary)' }}
           >
             {t('view_all')} <IconChevronRight size={14} />
@@ -578,7 +578,7 @@ function AdminDashboardView() {
         }
       >
         {projects.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
+          <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</p>
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
             {projects.slice(0, 6).map(project => (
@@ -597,11 +597,11 @@ function AdminDashboardView() {
                   {project.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
+                  <p className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
                     {project.name}
                   </p>
                   {project.client && (
-                    <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                    <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                       {project.client}
                     </p>
                   )}

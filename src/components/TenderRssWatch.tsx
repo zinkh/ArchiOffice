@@ -421,7 +421,7 @@ export function TenderRssWatch() {
                   { label: t('tender_rss_source_name'), primary: true, render: (s: TenderRssSource) => (
                     <div>
                       <p className="font-medium text-sm">{s.name}</p>
-                      <p className="text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                         {s.source_type === 'boamp' || s.source_type === 'ted' ? `${t(`tender_rss_source_type_${s.source_type}`)} · ${describeSource(s, t)}` : s.url}
                       </p>
                     </div>
@@ -453,7 +453,7 @@ export function TenderRssWatch() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span
-                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
+                          className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold uppercase shrink-0"
                           style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
                         >
                           {s.source_type === 'boamp' ? 'BOAMP' : s.source_type === 'ted' ? 'TED' : 'RSS'}

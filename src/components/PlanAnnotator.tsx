@@ -114,7 +114,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
           </div>
         </div>
         {isAddingMode && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-full text-[10px] font-bold uppercase tracking-wider animate-pulse">
+          <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider animate-pulse">
             Mode Annotation Actif - Cliquez sur le plan
           </div>
         )}
@@ -162,7 +162,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
                 onSelectMarker?.(marker.id);
               }}
               className={cn(
-                "absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg cursor-pointer transition-transform hover:scale-110",
+                "absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shadow-lg cursor-pointer transition-transform hover:scale-110",
                 "bg-red-600 text-white border-2 border-white"
               )}
               style={{ left: `${marker.x}%`, top: `${marker.y}%` }}

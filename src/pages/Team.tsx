@@ -189,7 +189,7 @@ export default function Team() {
             </Link>
 
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
+              <label className="block text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
               {isAdmin ? (
                 <select
                   value={member.system_role}
@@ -210,7 +210,7 @@ export default function Team() {
 
             {isAdmin && (
               <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
+                <label className="block text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
                 <select
                   value={member.manager_id || ''}
                   onChange={(e) => handleManagerChange(member.id, e.target.value)}

@@ -46,7 +46,7 @@ export function PendingWritesIndicator() {
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+        className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
         style={hasError
           ? { background: '#fff0f0', color: '#e03131', border: '1px solid #ffc9c9' }
           : { background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
@@ -74,11 +74,11 @@ export function PendingWritesIndicator() {
                 <li key={w.id} className="flex items-center justify-between gap-2 px-1.5 py-1 rounded text-xs" style={{ color: 'var(--tblr-text)' }}>
                   <span className="truncate">{ENTITY_LABELS[w.entity] || w.entity}</span>
                   {w.status === 'error' ? (
-                    <span className="flex-shrink-0 text-[10px] font-semibold" style={{ color: 'var(--tblr-danger, #e03131)' }} title={w.lastError}>
+                    <span className="flex-shrink-0 text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-danger, #e03131)' }} title={w.lastError}>
                       Échec
                     </span>
                   ) : (
-                    <span className="flex-shrink-0 text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                    <span className="flex-shrink-0 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                       {new Date(w.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}

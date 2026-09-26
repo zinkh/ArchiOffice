@@ -331,7 +331,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         {/* ── Left tree panel ────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-72 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm select-none">
-            <div className="px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
+            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
               Structure
             </div>
 
@@ -378,7 +378,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                           <span className="font-medium text-zinc-400 text-xs mr-1">{chap.numero}</span>
                           <span className="truncate text-xs flex-1">{chap.titre || 'Sans titre'}</span>
                           {chap.cctpOnly && (
-                            <span className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
+                            <span className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
                               CCTP
                             </span>
                           )}
@@ -405,14 +405,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                     : 'text-zinc-500 dark:text-zinc-400'
                                 } ${ligne.cctpOnly ? 'italic' : ''}`}
                               >
-                                <span className="font-medium text-zinc-400 text-[10px] mr-1 shrink-0">{ligne.numero}</span>
-                                <span className="truncate text-[11px] flex-1">{ligne.designation}</span>
+                                <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
+                                <span className="truncate text-[0.6875rem] flex-1">{ligne.designation}</span>
                                 {/* Repère de provenance : article issu de la
                                     bibliothèque d'ouvrages du cabinet. */}
                                 {ligne.articleTypeId && (
                                   <span
                                     title="Article issu de la bibliothèque d’ouvrages"
-                                    className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded font-bold"
+                                    className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded font-bold"
                                   >
                                     BIB
                                   </span>
@@ -422,13 +422,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                 {ligne.genereParIa && (
                                   <span
                                     title={ligne.genereParIa === 'nomic' ? 'Article proposé par Nomic, à relire' : 'Article proposé par l’IA, à relire'}
-                                    className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded font-bold"
+                                    className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded font-bold"
                                   >
                                     IA
                                   </span>
                                 )}
                                 {ligne.cctpOnly && (
-                                  <span className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
+                                  <span className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
                                     CCTP
                                   </span>
                                 )}
@@ -447,7 +447,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                             {/* Add a new article under this chapter (visible in DPGF by default) */}
                             <button
                               onClick={() => addCCTPLigne(li, ci)}
-                              className="w-full flex items-center gap-1 pl-12 pr-2 py-0.5 text-[10px] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+                              className="w-full flex items-center gap-1 pl-12 pr-2 py-0.5 text-[0.6875rem] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
                             >
                               <IconPlus size={10} />
                               <span>Nouvel article</span>
@@ -460,7 +460,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     {/* Add a new chapter under this lot (visible in DPGF by default) */}
                     <button
                       onClick={() => addCCTPChapitre(li)}
-                      className="w-full flex items-center gap-1 pl-6 pr-2 py-1 text-[10px] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+                      className="w-full flex items-center gap-1 pl-6 pr-2 py-1 text-[0.6875rem] text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
                     >
                       <IconPlus size={10} />
                       <span>Nouveau chapitre</span>
@@ -486,11 +486,11 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
               {/* Item header */}
               <div className="border-b border-zinc-200 dark:border-zinc-700 pb-5">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                  <span className="text-[0.6875rem] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
                     {selData.label}
                   </span>
                   {isSelCctpOnly && (
-                    <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 rounded-full font-bold uppercase">
+                    <span className="flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 rounded-full font-bold uppercase">
                       <IconTag size={9} />
                       CCTP uniquement
                     </span>
@@ -557,7 +557,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     {(dpgf.multiBatiments || dpgf.multiPhases) && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Bâtiment / phase :</span>
+                        <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">Bâtiment / phase :</span>
                         <SelecteursDecoupage
                           doc={dpgf}
                           batimentId={selData.batimentId}
@@ -569,7 +569,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     )}
                     {selection.kind === 'ligne' && selData.ligne && (
                       <div className="flex items-center gap-1.5">
-                        <label className="text-[11px] text-zinc-500 dark:text-zinc-400" htmlFor="cctp-localisation">
+                        <label className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400" htmlFor="cctp-localisation">
                           Localisation (pièce, ouvrage) :
                         </label>
                         <input
@@ -598,7 +598,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                   placeholder={`Rédigez ici la description technique de ce ${selData.label.toLowerCase()}…\n\nEx : matériaux, mise en œuvre, prescriptions, normes applicables (NF EN…), conditions d'exécution, essais, réception…`}
                   className="w-full px-4 py-3 text-sm border border-zinc-200 dark:border-zinc-700 rounded-xl bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y leading-relaxed font-sans"
                 />
-                <p className="text-[11px] text-zinc-400">
+                <p className="text-[0.6875rem] text-zinc-400">
                   Ce texte apparaît uniquement dans le document CCTP, pas dans le DPGF.
                 </p>
               </div>

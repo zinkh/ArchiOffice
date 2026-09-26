@@ -15,6 +15,7 @@ import {
 import { fr, enUS } from 'date-fns/locale';
 import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck, IconCalendar, IconPlus, IconBrandGoogle, IconRefresh, IconLoader2 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
+import { useDragToZone } from '../hooks/useDragToZone';
 import type { Project, Milestone, Task, TeamMember } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
@@ -76,8 +77,6 @@ export default function CalendarPage() {
   const [eventModal, setEventModal] = useState<CalendarEventInitial | null>(null);
   const [taskModal, setTaskModal] = useState<TaskFormInitial | null>(null);
   const [team, setTeam] = useState<TeamMember[]>([]);
-  const [draggingEvent, setDraggingEvent] = useState<{ calId: string; type: 'milestone' | 'task'; originalDate: string } | null>(null);
-  const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
   const [dragError, setDragError] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; email: string | null; last_synced_at: string | null } | null>(null);
   const [googleEvents, setGoogleEvents] = useState<{ id: string; title: string; date: string; calendarId?: string; color?: string | null }[]>([]);
@@ -151,23 +150,17 @@ export default function CalendarPage() {
   const handleEventDeleted = () => { setEventModal(null); load(); };
   const afterTaskWrite = () => { setTaskModal(null); load(); };
 
-  const handleDragStart = (ev: CalEvent) => {
-    if (ev.type === 'google') return; // pulled external events aren't draggable — see Étape 4
-    setDraggingEvent({ calId: ev.id, type: ev.type, originalDate: ev.date });
-  };
-  const handleDragEnd = () => { setDraggingEvent(null); setDragOverDayKey(null); };
-
   // Always sends the full record with only the date field(s) overridden —
   // never a bare { due_date } / { start_date, end_date } patch. Both PUT
   // routes default an omitted `dependencies` (and milestones also
   // `completed`/`duration_days`) to empty/false/null rather than leaving
   // it untouched, so a partial patch would silently wipe that data (the
   // same reason CalendarEventModal always round-trips `dependencies`).
-  const handleDrop = async (day: Date) => {
-    const dragging = draggingEvent;
-    setDraggingEvent(null);
-    setDragOverDayKey(null);
-    if (!dragging) return;
+  const handleDrop = async (calId: string, dayKey: string) => {
+    const ev = events.find(e => e.id === calId);
+    if (!ev || ev.type === 'google') return; // pulled external events aren't draggable — see Étape 4
+    const dragging = { calId, type: ev.type, originalDate: ev.date };
+    const day = parseISO(dayKey);
     const newDateStr = format(day, 'yyyy-MM-dd');
     if (newDateStr === dragging.originalDate.slice(0, 10)) return;
 
@@ -202,6 +195,12 @@ export default function CalendarPage() {
       }
     }
   };
+
+  // Glisser-déposer au pointeur (souris et doigt) d'un événement vers un
+  // autre jour : voir useDragToZone. Sans projection d'élan, les jours d'un
+  // mois étant trop serrés pour qu'un geste lancé tombe au bon endroit.
+  const { drag, itemProps, zoneProps } = useDragToZone<string>({ onDrop: (id, dayKey) => { void handleDrop(id, dayKey); } });
+  const dragOverKey = drag && drag.over !== drag.source ? drag.over : null;
 
   const GOOGLE_PULL_THROTTLE_MS = 5 * 60 * 1000;
 
@@ -328,7 +327,7 @@ export default function CalendarPage() {
         };
       });
     // Pulled Google events are never editable/draggable here (see
-    // handleDragStart/openEditEvent, which both bail on type === 'google')
+    // handleDrop/openEditEvent, which both bail on type === 'google')
     // — that's what keeps the pull side of the sync read-only end-to-end,
     // not just at the API layer.
     const fromGoogle: CalEvent[] = googleEvents.map(g => ({
@@ -414,7 +413,7 @@ export default function CalendarPage() {
       <div className="space-y-5">
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
-          <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
+          <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
         <Skeleton className="h-[520px] w-full rounded-xl" />
       </div>
@@ -426,7 +425,7 @@ export default function CalendarPage() {
       <div className="space-y-5">
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
-          <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
+          <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
         <ErrorState message={error} onRetry={load} />
       </div>
@@ -438,7 +437,7 @@ export default function CalendarPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
-          <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
+          <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
         {isCalendarGridView && (
           <div className="flex items-center gap-2">
@@ -540,7 +539,7 @@ export default function CalendarPage() {
         {overdueCount > 0 && (isCalendarGridView || view === 'agenda') && (
           <button
             onClick={() => setView('agenda')}
-            className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors"
+            className="px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold transition-colors"
             style={{ background: '#fff5f5', color: '#c92a2a', border: '1px solid #ffc9c9' }}
           >
             {t('calendar_overdue_count', { count: overdueCount })}
@@ -658,7 +657,7 @@ export default function CalendarPage() {
         <div className="rounded-xl p-4 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           {overdueEvents.length > 0 && (
             <div>
-              <h2 className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: '#c92a2a' }}>
+              <h2 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-2" style={{ color: '#c92a2a' }}>
                 {t('calendar_overdue')}
               </h2>
               <div className="space-y-1.5">
@@ -676,7 +675,7 @@ export default function CalendarPage() {
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>{ev.title}</p>
-                      <p className="text-[10px]" style={{ color: '#c92a2a' }}>
+                      <p className="text-[0.6875rem]" style={{ color: '#c92a2a' }}>
                         {format(new Date(ev.date), 'EEE d MMM', { locale })}{ev.projectName ? ` · ${ev.projectName}` : ''}
                       </p>
                     </div>
@@ -691,7 +690,7 @@ export default function CalendarPage() {
           ) : (
             Array.from(upcomingByDay.entries()).map(([dayKey, dayEvents]) => (
               <div key={dayKey}>
-                <h2 className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--tblr-muted)' }}>
+                <h2 className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--tblr-muted)' }}>
                   {format(new Date(dayKey), 'EEEE d MMMM', { locale })}
                 </h2>
                 <div className="space-y-1.5">
@@ -713,7 +712,7 @@ export default function CalendarPage() {
                         <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)', textDecoration: ev.completed ? 'line-through' : 'none' }}>
                           {ev.title}
                         </p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                           {ev.type === 'milestone' ? t('calendar_milestone') : t('calendar_task')}
                           {ev.projectName ? ` · ${ev.projectName}` : ''}
                         </p>
@@ -733,7 +732,7 @@ export default function CalendarPage() {
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
             {(activeGridView === 'month' ? weekdayLabels : days.map(day => format(day, 'EEE d', { locale }))).map((label, i) => (
-              <div key={i} className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
+              <div key={i} className="px-2 py-2 text-center text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
                 {label}
               </div>
             ))}
@@ -755,17 +754,14 @@ export default function CalendarPage() {
                   tabIndex={0}
                   onClick={() => setSelectedDay(day)}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedDay(day); } }}
-                  onDragOver={e => { if (draggingEvent) e.preventDefault(); }}
-                  onDragEnter={() => { if (draggingEvent) setDragOverDayKey(key); }}
-                  onDragLeave={() => setDragOverDayKey(prev => (prev === key ? null : prev))}
-                  onDrop={() => handleDrop(day)}
+                  {...zoneProps(key)}
                   className={cn('group relative p-1.5 flex flex-col items-start text-left transition-colors cursor-pointer', activeGridView === 'month' ? 'min-h-[92px]' : 'min-h-[180px]')}
                   style={{
                     borderRight: '1px solid var(--tblr-border)',
                     borderBottom: '1px solid var(--tblr-border)',
-                    background: dragOverDayKey === key ? 'var(--tblr-primary-lt)' : selected ? 'var(--tblr-primary-lt)' : 'transparent',
+                    background: dragOverKey === key ? 'var(--tblr-primary-lt)' : selected ? 'var(--tblr-primary-lt)' : 'transparent',
                     opacity: inMonth ? 1 : 0.4,
-                    outline: dragOverDayKey === key ? '2px dashed var(--tblr-primary)' : 'none',
+                    outline: dragOverKey === key ? '2px dashed var(--tblr-primary)' : 'none',
                     outlineOffset: '-2px',
                   }}
                 >
@@ -778,7 +774,7 @@ export default function CalendarPage() {
                     <IconPlus size={11} />
                   </button>
                   <span
-                    className={cn('text-[11px] font-semibold w-5 h-5 flex items-center justify-center rounded-full mb-1')}
+                    className={cn('text-[0.6875rem] font-semibold w-5 h-5 flex items-center justify-center rounded-full mb-1')}
                     style={today ? { background: 'var(--tblr-primary)', color: 'white' } : { color: 'var(--tblr-text)' }}
                   >
                     {format(day, 'd')}
@@ -787,17 +783,15 @@ export default function CalendarPage() {
                     {dayEvents.slice(0, activeGridView === 'month' ? 3 : 8).map(ev => (
                       <span
                         key={ev.id}
-                        draggable={ev.type !== 'google'}
-                        onDragStart={e => { e.stopPropagation(); handleDragStart(ev); }}
-                        onDragEnd={e => { e.stopPropagation(); handleDragEnd(); }}
+                        {...itemProps(ev.id, key, { disabled: ev.type === 'google' })}
                         onClick={e => { e.stopPropagation(); openEditEvent(ev); }}
-                        className="text-[10px] px-1 py-0.5 rounded truncate w-full cursor-pointer"
+                        className="text-[0.6875rem] px-1 py-0.5 rounded truncate w-full cursor-pointer"
                         style={{
                           background: colorForEvent(ev) + '22',
                           color: colorForEvent(ev),
                           textDecoration: ev.completed ? 'line-through' : 'none',
                           borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none',
-                          opacity: draggingEvent?.calId === ev.id ? 0.4 : 1,
+                          opacity: drag?.id === ev.id ? 0.4 : 1,
                         }}
                         title={ev.overdue ? `${ev.title} — ${t('calendar_overdue')}` : ev.title}
                       >
@@ -805,7 +799,7 @@ export default function CalendarPage() {
                       </span>
                     ))}
                     {dayEvents.length > (activeGridView === 'month' ? 3 : 8) && (
-                      <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                      <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                         +{dayEvents.length - (activeGridView === 'month' ? 3 : 8)}
                       </span>
                     )}
@@ -819,7 +813,7 @@ export default function CalendarPage() {
         {/* ── Sidebar: this week + selected day detail ── */}
         <div className="space-y-4">
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <h2 className="text-[13px] font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('calendar_this_week')}</h2>
+            <h2 className="text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('calendar_this_week')}</h2>
             {thisWeekEvents.length === 0 ? (
               <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_no_events_week')}</p>
             ) : (
@@ -838,7 +832,7 @@ export default function CalendarPage() {
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.title}</p>
-                      <p className="text-[10px]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
                         {format(new Date(ev.date), 'EEE d MMM', { locale })}{ev.projectName ? ` · ${ev.projectName}` : ''}
                       </p>
                     </div>
@@ -849,7 +843,7 @@ export default function CalendarPage() {
           </div>
 
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <h2 className="text-[13px] font-semibold mb-1" style={{ color: 'var(--tblr-text)' }}>
+            <h2 className="text-[0.8125rem] font-semibold mb-1" style={{ color: 'var(--tblr-text)' }}>
               {format(selectedDay, 'EEEE d MMMM', { locale })}
             </h2>
             {selectedDayEvents.length === 0 ? (
@@ -874,7 +868,7 @@ export default function CalendarPage() {
                       <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)', textDecoration: ev.completed ? 'line-through' : 'none' }}>
                         {ev.title}
                       </p>
-                      <p className="text-[10px]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
                         {ev.type === 'milestone' ? t('calendar_milestone') : t('calendar_task')}
                         {ev.overdue ? ` · ${t('calendar_overdue')}` : ''}
                         {ev.projectName ? ` · ${ev.projectName}` : ''}

@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconCalendar, IconAlignLeft } from '@tabler/icons-react';
 import { format, parseISO, isPast } from 'date-fns';
@@ -12,11 +13,14 @@ export interface TaskCardProps {
   isDragging: boolean;
   isDone: boolean;
   onClick: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
+  /** Poignée de glisser-déposer au pointeur (useDragToZone). */
+  dragProps?: {
+    'data-drag-id': string;
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
+  };
 }
 
-export function TaskCard({ task, projectName, assigneeName, isDragging, isDone, onClick, onDragStart, onDragEnd }: TaskCardProps) {
+export function TaskCard({ task, projectName, assigneeName, isDragging, isDone, onClick, dragProps }: TaskCardProps) {
   const { t } = useTranslation();
   const deadline = taskDeadline(task);
   const isOverdue = !!deadline && isPast(parseISO(deadline)) && !isDone;
@@ -26,14 +30,14 @@ export function TaskCard({ task, projectName, assigneeName, isDragging, isDone, 
     <div
       role="button"
       tabIndex={0}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      {...dragProps}
       onClick={onClick}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={cn(
-        "rounded-lg p-3 cursor-pointer active:cursor-grabbing select-none transition-all",
-        isDragging ? 'opacity-40 scale-95' : 'hover:-translate-y-0.5'
+        "rounded-lg p-3 cursor-pointer active:cursor-grabbing select-none transition-[opacity,box-shadow,translate]",
+        // Pendant le glisser, la carte d'origine reste à sa place, estompée :
+        // c'est sa copie soulevée qui suit le pointeur.
+        isDragging ? 'opacity-40' : 'hover:-translate-y-0.5'
       )}
       style={{
         background: 'var(--tblr-surface)',
@@ -70,7 +74,7 @@ export function TaskCard({ task, projectName, assigneeName, isDragging, isDone, 
         {task.assignee_id && (
           <span
             title={assigneeName}
-            className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
+            className="w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0"
             style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
           >
             {initialsOf(assigneeName)}

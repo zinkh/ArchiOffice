@@ -13,7 +13,7 @@ export function InfoPanelBoundary({ children, label }: { children: React.ReactNo
   return (
     <Sentry.ErrorBoundary
       fallback={
-        <div className="text-[11px] italic p-3 rounded-lg" style={{ color: 'var(--tblr-muted, #71717a)', background: 'var(--tblr-surface-2, #f4f4f5)' }}>
+        <div className="text-[0.6875rem] italic p-3 rounded-lg" style={{ color: 'var(--tblr-muted, #71717a)', background: 'var(--tblr-surface-2, #f4f4f5)' }}>
           {label ? `${label} : ` : ''}informations indisponibles pour cette adresse.
         </div>
       }

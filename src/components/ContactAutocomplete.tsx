@@ -143,7 +143,7 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
                   {contact.first_name} {contact.last_name}
                 </p>
                 {contact.company_name && (
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">{contact.company_name}</p>
+                  <p className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">{contact.company_name}</p>
                 )}
               </div>
             </button>

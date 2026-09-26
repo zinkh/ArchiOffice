@@ -157,7 +157,7 @@ function Avatar({ name, size = 38 }: { name: string; size?: number }) {
 
 function MentionBadge() {
   return (
-    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[9px] font-bold uppercase tracking-wide">
+    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[0.6875rem] font-bold uppercase tracking-wide">
       @ Vous êtes mentionné(e)
     </span>
   );
@@ -181,7 +181,7 @@ function AttachmentView({ item }: { item: Attachment }) {
 
 function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-700 rounded-lg text-[11px] text-zinc-500 dark:text-zinc-400 w-fit">
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-700 rounded-lg text-[0.6875rem] text-zinc-500 dark:text-zinc-400 w-fit">
       <IconFile size={12} /> {file.name}
       <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
     </div>
@@ -563,7 +563,7 @@ export default function Notifications() {
                 {t(f.label_key)}
                 {count > 0 && (
                   <span className={cn(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
+                    "text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
                     isActive
                       ? f.key === 'unread'
                         ? "bg-rose-500 text-white"
@@ -638,13 +638,13 @@ export default function Notifications() {
                           {item.category && (
                             <>
                               <span>·</span>
-                              <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide", catStyle)}>
+                              <span className={cn("px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wide", catStyle)}>
                                 {item.category}
                               </span>
                             </>
                           )}
                           {item.unread && (
-                            <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[9px] font-bold uppercase tracking-wide">
+                            <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[0.6875rem] font-bold uppercase tracking-wide">
                               Nouveau
                             </span>
                           )}
@@ -663,7 +663,7 @@ export default function Notifications() {
                             <IconMessageCircle size={14} />
                             <span>Commentaire</span>
                             {item.comments_count > 0 && (
-                              <span className="bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                              <span className="bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full text-[0.6875rem] font-bold">
                                 {item.comments_count}
                               </span>
                             )}
@@ -700,7 +700,7 @@ export default function Notifications() {
                                     </div>
                                     <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</div>
                                     <AttachmentView item={c} />
-                                    <p className="text-[10px] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
+                                    <p className="text-[0.6875rem] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
                                   </div>
                                 </div>
                               ))}

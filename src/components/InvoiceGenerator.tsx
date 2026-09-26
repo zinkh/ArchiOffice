@@ -536,7 +536,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Détails Émetteur</h3>
                     <div className="space-y-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nom / Agence</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Nom / Agence</label>
                         <input 
                           type="text" 
                           value={data.seller_name || ''}
@@ -545,7 +545,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Adresse</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Adresse</label>
                         <textarea 
                           value={data.seller_address || ''}
                           onChange={e => setData({...data, seller_address: e.target.value})}
@@ -553,7 +553,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">SIRET</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">SIRET</label>
                         <input 
                           type="text" 
                           value={data.seller_siret || ''}
@@ -562,7 +562,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">N° TVA</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">N° TVA</label>
                         <input 
                           type="text" 
                           value={data.seller_vat_number || ''}
@@ -571,7 +571,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">IBAN</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">IBAN</label>
                         <input 
                           type="text" 
                           value={data.seller_iban || ''}
@@ -580,7 +580,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">BIC</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">BIC</label>
                         <input 
                           type="text" 
                           value={data.seller_bic || ''}

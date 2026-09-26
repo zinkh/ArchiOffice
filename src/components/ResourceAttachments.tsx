@@ -166,8 +166,8 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
               >
                 <IconFile size={14} className="shrink-0 text-[var(--tblr-muted)]" />
                 <span className="text-xs truncate">{doc.name}</span>
-                {doc.category && <span className="text-[10px] uppercase font-bold text-[var(--tblr-muted)] shrink-0">{doc.category}</span>}
-                <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>
+                {doc.category && <span className="text-[0.6875rem] uppercase font-bold text-[var(--tblr-muted)] shrink-0">{doc.category}</span>}
+                <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>
               </button>
               <button
                 type="button"

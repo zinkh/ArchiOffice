@@ -729,7 +729,7 @@ export default function Contacts() {
                 <div className="flex items-center gap-2">
                   <span>{[c.prefix, c.last_name, c.first_name].filter(Boolean).join(' ')}</span>
                   {isContactIncomplete(c) && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#fff3bf', color: '#e67700' }}>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold" style={{ background: '#fff3bf', color: '#e67700' }}>
                       <IconAlertTriangle size={9} /> À compléter
                     </span>
                   )}
@@ -740,7 +740,7 @@ export default function Contacts() {
                 <div className="flex flex-wrap items-center gap-1">
                   {c.category && <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{c.category}</span>}
                   {[...(c.corps_etat || []), ...(c.specialite || [])].map(v => (
-                    <span key={v} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>{v}</span>
+                    <span key={v} className="inline-flex px-2 py-0.5 rounded-full text-[0.6875rem] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>{v}</span>
                   ))}
                   {!c.category && !(c.corps_etat?.length) && !(c.specialite?.length) && '---'}
                 </div>
@@ -811,13 +811,13 @@ export default function Contacts() {
                     <div className="flex items-center gap-2">
                       <span>{contact.last_name}</span>
                       {isContactIncomplete(contact) && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }} title="Informations manquantes : nom, téléphone ou email">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', border: '1px solid #ffe066' }} title="Informations manquantes : nom, téléphone ou email">
                           <IconAlertTriangle size={9} />
                           À compléter
                         </span>
                       )}
                       {contact.is_personal && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }} title={t('contacts_is_personal_hint')}>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }} title={t('contacts_is_personal_hint')}>
                           {t('contacts_is_personal_perso')}
                         </span>
                       )}
@@ -848,7 +848,7 @@ export default function Contacts() {
                         </span>
                       )}
                       {[...(contact.corps_etat || []), ...(contact.specialite || [])].map(v => (
-                        <span key={v} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>
+                        <span key={v} className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}>
                           {v}
                         </span>
                       ))}

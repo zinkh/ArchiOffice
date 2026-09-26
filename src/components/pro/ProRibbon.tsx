@@ -77,7 +77,7 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                       className={`
                         flex flex-col items-center justify-start gap-0.5
                         px-1.5 py-1 rounded min-w-[44px] max-w-[60px] h-[52px]
-                        text-[10px] border transition-all leading-tight
+                        text-[0.6875rem] border transition-all leading-tight
                         ${action.active
                           ? 'bg-[#cce0f5] dark:bg-blue-900/40 border-blue-400 text-blue-800 dark:text-blue-200'
                           : 'bg-transparent border-transparent hover:bg-[#dce8f8] hover:border-[#aac4dc] text-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600'
@@ -91,13 +91,13 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                           <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-1 ring-white dark:ring-zinc-800" />
                         )}
                       </span>
-                      <span className="text-center break-words leading-tight text-[9px] w-full px-0.5">
+                      <span className="text-center break-words leading-tight text-[0.6875rem] w-full px-0.5">
                         {action.label}
                       </span>
                     </button>
                   ))}
                 </div>
-                <div className="text-[9px] text-center text-zinc-500 dark:text-zinc-400 border-t border-[#c0d0e0] dark:border-zinc-600 pt-0.5 px-2">
+                <div className="text-[0.6875rem] text-center text-zinc-500 dark:text-zinc-400 border-t border-[#c0d0e0] dark:border-zinc-600 pt-0.5 px-2">
                   {group.label}
                 </div>
               </div>

@@ -86,7 +86,7 @@ const PRESETS = [
 
 const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm';
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
-const labelCls = 'block text-[10px] font-bold uppercase tracking-wider mb-1';
+const labelCls = 'block text-[0.6875rem] font-bold uppercase tracking-wider mb-1';
 const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.Brouillon;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
       <Icon size={11} />
       {cfg.label}
     </span>
@@ -618,9 +618,9 @@ function ContratModal({
                               <tr style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)' }}>
                                 <td colSpan={5} className="px-3 py-1.5">
                                   <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{cat.label}</span>
+                                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{cat.label}</span>
                                     <button type="button" onClick={() => addMission(cat.id)}
-                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                       style={{ color: 'var(--tblr-primary)' }}>
                                       <IconPlus size={11} /> {cat.addLabel}
                                     </button>
@@ -629,7 +629,7 @@ function ContratModal({
                               </tr>
                               {catMissions.length === 0 ? (
                                 <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                                  <td colSpan={5} className="px-3 py-2 text-center text-[11px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune mission</td>
+                                  <td colSpan={5} className="px-3 py-2 text-center text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune mission</td>
                                 </tr>
                               ) : catMissions.map(mission => (
                                 <tr key={mission.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
@@ -1197,7 +1197,7 @@ export default function Contrats() {
               <s.icon size={20} style={{ color: s.color }} />
               <div>
                 <p className="text-lg font-bold leading-none" style={{ color: 'var(--tblr-text)' }}>{s.value}</p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
+                <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
               </div>
             </div>
           ))}
@@ -1327,7 +1327,7 @@ export default function Contrats() {
                   {contrat.missions_list && contrat.missions_list.filter(m => m.incluse).length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                       {contrat.missions_list.filter(m => m.incluse).map(m => (
-                        <span key={m.id} className="text-[10px] px-2 py-0.5 rounded font-medium" style={{ background: '#e8f0fb', color: '#206bc4' }}>
+                        <span key={m.id} className="text-[0.6875rem] px-2 py-0.5 rounded font-medium" style={{ background: '#e8f0fb', color: '#206bc4' }}>
                           {m.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}
                         </span>
                       ))}
