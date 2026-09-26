@@ -123,7 +123,7 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
         ref={launchOriginRef}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-lg rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="w-full max-w-lg rounded-xl shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)' }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--tblr-border)' }}>

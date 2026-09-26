@@ -138,7 +138,7 @@ export default function AdminSupport() {
               {detail.status === 'closed' ? <><IconLockOpen size={12} /> Rouvrir</> : <><IconLock size={12} /> Fermer</>}
             </button>
           </div>
-          <div className="space-y-3 max-h-[50vh] overflow-y-auto py-2">
+          <div className="space-y-3 max-h-[50dvh] overflow-y-auto py-2">
             {detail.messages.map(m => <Bubble key={m.id} msg={m} />)}
           </div>
           <div className="pt-2 border-t space-y-2" style={{ borderColor: 'var(--tblr-border)' }}>

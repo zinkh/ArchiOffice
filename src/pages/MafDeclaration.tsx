@@ -169,7 +169,7 @@ function EntryForm({ entry, intercalaire, year, projects, tauxContratPermil, onS
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+      <div className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="sticky top-0 flex items-center justify-between px-5 py-4 border-b" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
           <div>
             <h3 className="font-bold text-base flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>

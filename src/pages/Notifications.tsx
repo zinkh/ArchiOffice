@@ -591,7 +591,7 @@ export default function Notifications() {
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-700/50">
             <AnimatePresence initial={false}>
-              {filteredItems.map((item, idx) => {
+              {filteredItems.map(item => {
                 const isOpen = expandedComments.has(item.id);
                 const CatIcon = TYPE_ICONS[item.target_type || (item.kind === 'post' ? 'post' : 'project')] || IconFileText;
                 const catStyle = CATEGORY_STYLES[item.category || ''] || 'bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300';
@@ -599,9 +599,6 @@ export default function Notifications() {
                 return (
                   <motion.div
                     key={item.id}
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03, duration: 0.2 }}
                     className={cn(
                       "px-5 py-4 transition-colors",
                       item.unread ? "bg-blue-50/40 dark:bg-blue-900/10 hover:bg-blue-50/60 dark:hover:bg-blue-900/20" : "hover:bg-zinc-50/60 dark:hover:bg-zinc-700/20"

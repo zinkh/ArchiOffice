@@ -261,7 +261,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 <span>Touchez le plan pour positionner une nouvelle réserve, ou un repère pour ouvrir sa fiche.</span>
               )}
             </div>
-            <div className="h-[60vh] sm:h-[500px]">
+            <div className="h-[60dvh] sm:h-[500px]">
               <PlanAnnotator
                 fileUrl={selectedPlan.file_url}
                 markers={planMarkers}

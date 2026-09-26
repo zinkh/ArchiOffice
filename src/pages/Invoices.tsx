@@ -1309,7 +1309,7 @@ export default function Invoices() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>

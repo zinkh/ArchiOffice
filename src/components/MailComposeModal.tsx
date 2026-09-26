@@ -137,7 +137,7 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <form
         onSubmit={send}
-        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
+        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         onClick={e => e.stopPropagation()}
       >

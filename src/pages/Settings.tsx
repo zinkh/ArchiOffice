@@ -26,6 +26,7 @@ import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
+import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -1178,10 +1179,12 @@ export default function Settings() {
     return (
       <div className="flex items-center gap-2 flex-wrap">
         <button type="button" disabled={status.saving} onClick={onSave}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
+          className="relative overflow-hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
           style={status.success ? { background: 'var(--tblr-success)', color: '#fff' } : { background: 'var(--tblr-primary)', color: '#fff' }}>
-          {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
-          {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          <SwapText swapKey={status.saving ? 'saving' : status.success ? 'success' : 'idle'}>
+            {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
+            {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          </SwapText>
         </button>
         {status.error && <span className="text-xs font-medium" style={{ color: 'var(--tblr-danger)' }}>{status.error}</span>}
       </div>

@@ -792,12 +792,9 @@ export default function Projects() {
         <ProjectCardSkeletonGrid />
       ) : projectsError && projects.length === 0 ? null : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {projectsPagination.pageItems.map((project, i) => (
+          {projectsPagination.pageItems.map(project => (
             <motion.div
               key={project.id}
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.04 }}
               onClick={() => handleProjectClick(project)}
               className="rounded-lg overflow-hidden group flex flex-col cursor-pointer transition-shadow hover:shadow-md"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
@@ -956,7 +953,7 @@ export default function Projects() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col"
             >
               <div className="relative h-48 bg-zinc-100 dark:bg-zinc-800 shrink-0">
                 <img 
@@ -1715,7 +1712,7 @@ export default function Projects() {
             ref={launchOriginRef}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
           >
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>

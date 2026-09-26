@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { motion, AnimatePresence } from 'motion/react';
 import { IconCloudUpload, IconAlertTriangle, IconRefresh, IconX } from '@tabler/icons-react';
 import { db, PendingWrite } from '../db';
 import { replayPendingWrites } from '../lib/offlineQueue';
@@ -56,12 +57,18 @@ export function PendingWritesIndicator() {
         {writes.length}
       </button>
 
+      <AnimatePresence>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
+          {/* Le panneau naît de la pastille (coin haut droit) et y retourne. */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ type: 'spring', bounce: 0, visualDuration: 0.18 }}
             className="absolute right-0 top-full mt-1 z-50 w-72 max-h-80 overflow-y-auto rounded-xl shadow-lg p-2"
-            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', transformOrigin: 'top right' }}
           >
             <div className="flex items-center justify-between px-1.5 py-1">
               <span className="text-xs font-bold" style={{ color: 'var(--tblr-text)' }}>
@@ -95,9 +102,10 @@ export function PendingWritesIndicator() {
               <IconRefresh size={13} className={retrying ? 'animate-spin' : ''} />
               {navigator.onLine ? 'Réessayer maintenant' : 'Hors ligne'}
             </button>
-          </div>
+          </motion.div>
         </>
       )}
+      </AnimatePresence>
     </div>
   );
 }
