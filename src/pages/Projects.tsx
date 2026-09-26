@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
@@ -951,9 +952,10 @@ export default function Projects() {
         {isModalOpen && selectedProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
             >
               <div className="relative h-48 bg-zinc-100 dark:bg-zinc-800 shrink-0">
@@ -1710,7 +1712,8 @@ export default function Projects() {
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
           >
@@ -1757,7 +1760,8 @@ export default function Projects() {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
           >

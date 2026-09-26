@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
@@ -670,9 +671,10 @@ export default function Proposals() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >

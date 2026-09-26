@@ -9,6 +9,7 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
@@ -607,9 +608,10 @@ export default function OrdresDeService() {
         {isFormOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="my-4 w-full max-w-2xl rounded-2xl shadow-2xl"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -843,7 +845,7 @@ export default function OrdresDeService() {
         {/* AR modal */}
         {arModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-4"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -880,7 +882,7 @@ export default function OrdresDeService() {
         {/* Delete confirm */}
         {osToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-5 text-center"
               style={{ background: 'var(--tblr-surface)' }}
             >

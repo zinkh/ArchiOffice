@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { IconSwitchHorizontal } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { cn } from '../lib/utils';
@@ -26,9 +27,10 @@ export function UserSwitcher() {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              exit={{ opacity: 0, scale: 0.9, y: 10 }}
               className="absolute bottom-16 right-0 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden"
             >
               <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">

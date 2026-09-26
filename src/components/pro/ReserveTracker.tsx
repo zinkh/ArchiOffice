@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -432,8 +433,10 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
         </div>
       </div>
 
+      <AnimatePresence>
       {(creating || openReserve) && (
         <ReserveDetail
+          key={creating ? 'new' : openReserve!.id}
           apiBase={apiBase}
           projectId={projectId}
           reserve={creating ? null : openReserve}
@@ -448,6 +451,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
           onDeleted={id => setReserves(prev => prev.filter(r => r.id !== id))}
         />
       )}
+      </AnimatePresence>
     </>
   );
 }

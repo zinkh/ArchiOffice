@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Select from 'react-select';
+import { motion, animate, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import {
   IconX, IconCamera, IconPhotoPlus, IconTrash, IconDeviceFloppy, IconMapPin, IconLoader2,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
+import { launchOriginRef } from '../../lib/launchOrigin';
+import { PANEL_SPRING, FLICK_SPRING, FLICK_VELOCITY, projectMomentum } from '../../lib/motion';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { SignedImage } from '../SignedImage';
 import { queuedJsonRequest, queuedMultipartRequest } from '../../lib/offlineQueue';
 import type { Plan, ReservePhoto } from '../../types';
@@ -85,6 +89,21 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const [error, setError] = useState<string | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Sur téléphone, la fiche est un panneau qui monte du bas et se referme en
+  // le faisant glisser vers le bas par son en-tête (poignée). Au bureau, elle
+  // reste une modale, qui naît de la réserve cliquée (launchOriginRef).
+  const isPhone = useMediaQuery('(max-width: 639px)');
+  const reduceMotion = useReducedMotion();
+  const sheetGesture = isPhone && !reduceMotion;
+  const dragControls = useDragControls();
+  const sheetY = useMotionValue<number | string>(0);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const draggedRef = useRef(false);
+  const panelHeight = () => panelRef.current?.offsetHeight || window.innerHeight;
+  // Référence stable : l'origine de l'animation se calcule une seule fois, au
+  // montage, et non à chaque saisie dans la fiche.
+  const setPanelRef = useCallback((el: HTMLDivElement | null) => { panelRef.current = el; launchOriginRef(el); }, []);
 
   useEffect(() => { setForm(formFromReserve(reserve)); setPhotos(reserve?.photos || []); }, [reserve?.id]);
   useEffect(() => () => { queued.forEach(q => URL.revokeObjectURL(q.preview)); }, []);
@@ -230,26 +249,69 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const retard = reserve ? reserveOverdueDays({ status: form.status, due_date: form.due_date }) : 0;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div
-        className="w-full sm:max-w-2xl h-[94vh] sm:h-auto sm:max-h-[92vh] rounded-t-2xl sm:rounded-xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ background: 'var(--tblr-surface)' }}
-        onClick={e => e.stopPropagation()}
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:p-4">
+      <motion.div
+        className="absolute inset-0"
+        style={{ background: 'rgba(0,0,0,0.5)' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      />
+      <motion.div
+        ref={setPanelRef}
+        className="relative w-full sm:max-w-2xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] rounded-t-2xl sm:rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        style={{ background: 'var(--tblr-surface)', y: sheetY }}
+        initial={reduceMotion ? { opacity: 0 } : isPhone ? { y: '100%' } : { opacity: 0, scale: 0.9 }}
+        animate={reduceMotion ? { opacity: 1 } : isPhone ? { y: 0 } : { opacity: 1, scale: 1 }}
+        exit={reduceMotion ? { opacity: 0 } : isPhone ? { y: panelHeight() } : { opacity: 0, scale: 0.9 }}
+        transition={PANEL_SPRING}
+        drag={sheetGesture ? 'y' : false}
+        dragListener={false}
+        dragControls={dragControls}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0.1, bottom: 1 }}
+        dragMomentum={false}
+        onDragStart={() => { draggedRef.current = true; }}
+        onDragEnd={(_, info) => {
+          // On décide sur le point d'arrivée projeté du geste, pas sur la
+          // position du doigt : un geste court mais rapide ferme la fiche.
+          const current = Number(sheetY.get()) || 0;
+          if (current + projectMomentum(info.velocity.y) > panelHeight() / 2) {
+            onClose();
+          } else {
+            const spring = Math.abs(info.velocity.y) > FLICK_VELOCITY ? FLICK_SPRING : PANEL_SPRING;
+            animate(sheetY, 0, { ...spring, velocity: info.velocity.y });
+          }
+          setTimeout(() => { draggedRef.current = false; }, 0);
+        }}
         role="dialog"
         aria-modal="true"
       >
-        {/* En-tête */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--tblr-border)] shrink-0">
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">
-              {isNew ? 'Nouvelle réserve' : `Réserve N° ${reserve?.number ?? '-'}`}
+        {/* En-tête, qui sert aussi de poignée sur téléphone */}
+        <div
+          className="shrink-0"
+          style={sheetGesture ? { touchAction: 'none' } : undefined}
+          onPointerDown={e => { if (sheetGesture) dragControls.start(e); }}
+          onClickCapture={e => { if (draggedRef.current) { e.preventDefault(); e.stopPropagation(); } }}
+        >
+          {sheetGesture && (
+            <div className="flex justify-center pt-2 -mb-1" aria-hidden="true">
+              <div className="w-9 h-1.5 rounded-full bg-[var(--tblr-border)]" />
             </div>
-            <div className="font-bold text-[var(--tblr-text)] truncate">{form.title || (isNew ? '' : reserve?.title)}</div>
+          )}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--tblr-border)]">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">
+                {isNew ? 'Nouvelle réserve' : `Réserve N° ${reserve?.number ?? '-'}`}
+              </div>
+              <div className="font-bold text-[var(--tblr-text)] truncate">{form.title || (isNew ? '' : reserve?.title)}</div>
+            </div>
+            <StatusSelect value={form.status} onChange={s => set('status', s)} />
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]" aria-label="Fermer">
+              <IconX size={18} />
+            </button>
           </div>
-          <StatusSelect value={form.status} onChange={s => set('status', s)} />
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]" aria-label="Fermer">
-            <IconX size={18} />
-          </button>
         </div>
 
         {/* Corps */}
@@ -417,7 +479,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
             {isNew ? 'Créer la réserve' : 'Enregistrer'}
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

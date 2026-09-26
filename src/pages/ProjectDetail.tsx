@@ -48,6 +48,7 @@ import {
   IconMail,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
@@ -5442,7 +5443,8 @@ export default function ProjectDetail() {
         {arOsTarget && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md rounded-lg shadow-2xl p-6"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -5486,7 +5488,8 @@ export default function ProjectDetail() {
         {showDeleteProjectConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md rounded-lg shadow-2xl p-6"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >

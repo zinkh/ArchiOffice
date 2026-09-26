@@ -27,6 +27,7 @@ import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
 import { MobileShortcutBar } from './components/MobileShortcutBar';
+import { MobileNavDrawer } from './components/MobileNavDrawer';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
@@ -632,48 +633,25 @@ function Header() {
 
     </header>
 
-      {/* Mobile nav drawer — slides in from left */}
-      <AnimatePresence>
-        {isMobileMenuOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-40 md:hidden"
-              style={{ background: 'rgba(0,0,0,0.45)' }}
-              onClick={() => setIsMobileMenuOpen(false)}
-            />
-            {/* Drawer */}
-            <motion.div
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'tween', duration: 0.25 }}
-              className="fixed inset-y-0 left-0 z-50 w-72 md:hidden flex flex-col overflow-y-auto"
-              style={{ background: 'var(--tblr-surface)', borderRight: '1px solid var(--tblr-border)' }}
-            >
-              {/* Drawer header */}
-              <div
-                className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
-                style={{ borderColor: 'var(--tblr-border)' }}
-              >
-                <BrandLogo logoUrl={settings?.logoUrl} size={28} />
-                <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
-              </div>
-              {/* Nav items — mêmes catégories repliables (Gestion, Affaires,
-                  Outils…) que la barre latérale desktop, plutôt qu'une liste
-                  à plat : `SidebarNav` porte à la fois le regroupement et
-                  l'état des connecteurs (Super PDP, Chorus Pro, MAF), déjà
-                  fetché côté desktop mais tout aussi valable ici puisque la
-                  barre desktop reste montée (masquée en CSS) même sur mobile. */}
-              <SidebarNav onNavigate={() => setIsMobileMenuOpen(false)} />
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {/* Menu mobile : glisse depuis la gauche, se referme d'un geste vers la
+          gauche (voir MobileNavDrawer). */}
+      <MobileNavDrawer open={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)}>
+        {/* Drawer header */}
+        <div
+          className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
+          style={{ borderColor: 'var(--tblr-border)' }}
+        >
+          <BrandLogo logoUrl={settings?.logoUrl} size={28} />
+          <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
+        </div>
+        {/* Nav items — mêmes catégories repliables (Gestion, Affaires,
+            Outils…) que la barre latérale desktop, plutôt qu'une liste
+            à plat : `SidebarNav` porte à la fois le regroupement et
+            l'état des connecteurs (Super PDP, Chorus Pro, MAF), déjà
+            fetché côté desktop mais tout aussi valable ici puisque la
+            barre desktop reste montée (masquée en CSS) même sur mobile. */}
+        <SidebarNav onNavigate={() => setIsMobileMenuOpen(false)} />
+      </MobileNavDrawer>
     </>
   );
 }
@@ -761,7 +739,7 @@ function ProtectedLayout() {
   return (
     <AgentChatProvider>
     <div
-      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-screen lg:h-screen lg:overflow-hidden' : 'min-h-screen')}
+      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
     >
       <Sidebar />

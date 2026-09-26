@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -230,9 +231,10 @@ export default function Team() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">

@@ -332,7 +332,7 @@ export default function Messages() {
   const totalUnread = conversations.reduce((sum, c) => sum + c.unread_count, 0);
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
+    <div className="h-[calc(100dvh-8rem)] flex bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
       {/* Conversation list */}
       <div className={cn(
         "w-full sm:w-80 border-r border-zinc-100 dark:border-zinc-700/50 flex flex-col shrink-0",

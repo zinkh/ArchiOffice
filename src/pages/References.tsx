@@ -1409,7 +1409,7 @@ export default function References() {
 
       {/* Desktop list-detail panel — large screens only */}
       {selectedItem && (
-        <div className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-2rem)] rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100dvh-2rem)] rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: 'var(--tblr-border)' }}>
             <h3 className="font-semibold text-sm truncate pr-2" style={{ color: 'var(--tblr-text)' }}>{selectedItem.name}</h3>
             <button onClick={() => setSelectedItem(null)} className="rounded p-1 hover:bg-[var(--tblr-surface-2)] transition-colors shrink-0"><IconX size={16} style={{ color: 'var(--tblr-muted)' }} /></button>

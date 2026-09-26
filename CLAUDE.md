@@ -2220,6 +2220,36 @@ obliques), `MKCOL` répondant 405 vaut succès (la collection existe déjà), et
 `assertPublicHttpUrl()` (`server/ssrfGuard.ts`) est appliqué à
 l'enregistrement **et** à chaque appel : c'est une URL fournie par le cabinet.
 
+### Mouvement, gestes et préférences d'accessibilité
+
+Les animations suivent les principes d'interface fluide d'Apple, sans toucher
+à l'identité Tabler (couleurs, bordures, rayons) : seul le mouvement change.
+
+- **Ressort par défaut, jamais une durée fixe.** `src/main.tsx` enveloppe
+  l'application dans `<MotionConfig reducedMotion="user" transition={DEFAULT_SPRING}>`.
+  Les réglages partagés (`DEFAULT_SPRING`, `PANEL_SPRING`, `FLICK_SPRING`,
+  `projectMomentum()`) vivent dans `src/lib/motion.ts` : `bounce: 0` par
+  défaut, un léger rebond seulement quand un geste a lancé l'élément.
+- **« Réduire les animations » est respecté** : Motion ne garde alors que les
+  fondus (`reducedMotion="user"`), et `src/index.css` coupe `animate-pulse` et
+  l'enfoncement des boutons. `prefers-reduced-transparency` retire les flous,
+  `prefers-contrast: more` renforce bordures et textes secondaires.
+- **Les modales naissent de leur déclencheur.** `launchOriginRef`
+  (`src/lib/launchOrigin.ts`) pose le `transform-origin` d'une modale sur le
+  dernier point d'appui. Une nouvelle modale animée en `scale` le reçoit par
+  `ref={launchOriginRef}` (référence stable, calculée une fois au montage).
+- **Retour à l'appui, survol réservé à la souris.** `.btn:active` s'enfonce en
+  50 ms ; les `:hover` de `.btn-*` sont sous `@media (hover: hover)`, comme la
+  variante `hover:` de Tailwind 4, pour ne pas rester affichés sur tablette.
+- **Panneaux qu'on referme d'un geste** : le menu mobile
+  (`src/components/MobileNavDrawer.tsx`) et, sur téléphone, la fiche de
+  réserve (`ReserveDetail.tsx`, glissée par son en-tête). Le panneau suit le
+  doigt 1:1, résiste au-delà de sa butée, et la décision au relâché se prend
+  sur le point d'arrivée PROJETÉ (`projectMomentum`), pas sur la position du
+  doigt ; le ressort de retour repart de la vitesse du geste.
+- **Hauteurs d'écran en `dvh`**, jamais `100vh`/`h-screen` pour une mise en
+  page : sur Safari iOS, `100vh` inclut la barre d'adresse et coupe le bas.
+
 ### Maps
 
 - `MapLibreCadastre.tsx` — Cadastral parcels via IGN WMTS tiles

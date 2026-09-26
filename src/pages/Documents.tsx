@@ -7,6 +7,7 @@ import {
   IconPencil,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
 import { Document, DocumentPhase, DocumentDiffusion, Project } from '../types';
 import { useUser } from '../UserContext';
@@ -335,7 +336,7 @@ export default function Documents() {
 
       {/* Sidebar tree */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 w-64 p-3 space-y-1 overflow-y-auto transition-transform duration-300 md:static md:w-60 md:shrink-0 md:rounded-3xl md:max-h-[calc(100vh-120px)] md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        className={`fixed inset-y-0 left-0 z-50 w-64 p-3 space-y-1 overflow-y-auto transition-transform duration-300 md:static md:w-60 md:shrink-0 md:rounded-3xl md:max-h-[calc(100dvh-120px)] md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         <button
@@ -622,7 +623,7 @@ export default function Documents() {
         {/* Upload modal */}
         {isModalOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="p-6 rounded-3xl w-full max-w-lg space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
               style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
             >
@@ -706,7 +707,7 @@ export default function Documents() {
         {/* Edit modal */}
         {isUpdateModalOpen && editingDoc && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="p-6 rounded-3xl w-full max-w-lg space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
               style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
             >
@@ -801,7 +802,7 @@ export default function Documents() {
         {/* Diffusion modal */}
         {diffusionDoc && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="p-6 rounded-3xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
               style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
             >
@@ -872,7 +873,7 @@ export default function Documents() {
         {/* Version history modal */}
         {historyDoc && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="p-6 rounded-3xl w-full max-w-md shadow-2xl max-h-[80vh] overflow-y-auto"
               style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
             >
@@ -911,7 +912,7 @@ export default function Documents() {
         {/* Delete confirm */}
         {docToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="p-6 rounded-3xl w-full max-w-sm space-y-6 shadow-2xl text-center"
               style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
             >

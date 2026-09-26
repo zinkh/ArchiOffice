@@ -371,7 +371,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   };
 
   return (
-    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100dvh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
       {(dpgf || bpu) && (

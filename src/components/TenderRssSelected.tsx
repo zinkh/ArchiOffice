@@ -133,7 +133,7 @@ export function TenderRssSelected() {
 
       {/* Detail panel — large screens only */}
       <div
-        className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100vh-2rem)] rounded-lg overflow-hidden"
+        className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100dvh-2rem)] rounded-lg overflow-hidden"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
         {selectedMatch ? (

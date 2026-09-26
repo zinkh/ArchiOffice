@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
 import type { Contact, ContactCategory, Project, Tender } from '../types';
 import { fetchJson, apiFetch } from '../lib/api';
@@ -913,7 +914,8 @@ export default function Contacts() {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
@@ -1024,7 +1026,8 @@ export default function Contacts() {
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
@@ -1078,7 +1081,8 @@ export default function Contacts() {
       {cardDavModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-xl shadow-xl w-full max-w-md"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}

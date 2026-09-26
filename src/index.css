@@ -137,18 +137,31 @@
     border-radius: var(--tblr-radius);
     border: 1px solid transparent;
     cursor: pointer;
-    transition: background 0.12s, filter 0.12s;
+    transition: background 0.12s, filter 0.12s, transform 0.16s ease-out;
     white-space: nowrap;
     line-height: 1.4;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Retour visuel dès l'appui, pas au relâché : le bouton s'enfonce
+     immédiatement (50 ms), puis revient en douceur. */
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+    filter: brightness(0.94);
+    transition-duration: 0.05s;
   }
   .btn-primary  { background: var(--tblr-primary); color: #fff; border-color: var(--tblr-primary); }
-  .btn-primary:hover { filter: brightness(1.08); }
   .btn-secondary { background: var(--tblr-surface); color: var(--tblr-text); border-color: var(--tblr-border); }
-  .btn-secondary:hover { background: var(--tblr-surface-2); }
   .btn-ghost { background: transparent; color: var(--tblr-muted); border-color: transparent; }
-  .btn-ghost:hover { background: var(--tblr-surface-2); color: var(--tblr-text); }
   .btn-danger { background: var(--tblr-danger); color: #fff; border-color: var(--tblr-danger); }
-  .btn-danger:hover { filter: brightness(1.08); }
+  /* Survol réservé aux appareils qui ont un vrai pointeur : sur tablette, un
+     :hover resterait affiché après l'appui (même règle que la variante
+     `hover:` de Tailwind 4). */
+  @media (hover: hover) {
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-secondary:hover { background: var(--tblr-surface-2); }
+    .btn-ghost:hover { background: var(--tblr-surface-2); color: var(--tblr-text); }
+    .btn-danger:hover { filter: brightness(1.08); }
+  }
 
   /* Tabler table */
   .tblr-table {
@@ -419,3 +432,36 @@
 .org-tree-node:first-child::before, .org-tree-node:last-child::after { border: 0 none !important; }
 .org-tree-node:last-child::before { border-right: 2px solid var(--tblr-border) !important; border-radius: 0 10px 0 0 !important; }
 .org-tree-node:first-child::after { border-radius: 10px 0 0 0 !important; }
+
+/* ──────────────────────────────────────────────────
+   Préférences d'accessibilité du système
+   Réduire les animations ne supprime pas le retour visuel : on remplace le
+   mouvement (déplacement, échelle, pulsation) par un simple changement d'état.
+   Les indicateurs de chargement (animate-spin) restent : ce sont des
+   informations, pas de la décoration.
+────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  .animate-pulse { animation: none !important; }
+  .btn:active:not(:disabled) { transform: none; }
+}
+
+/* Réduire la transparence : les voiles floutés deviennent opaques. */
+@media (prefers-reduced-transparency: reduce) {
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/* Contraste renforcé : bordures et textes secondaires plus marqués. */
+@media (prefers-contrast: more) {
+  :root {
+    --tblr-border: #9aa5b4;
+    --tblr-muted:  #475264;
+  }
+  .dark {
+    --tblr-border: #5b7190;
+    --tblr-muted:  #a9b6c8;
+  }
+}
