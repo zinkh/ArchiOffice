@@ -159,13 +159,10 @@ export default function Team() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {team.map((member, i) => (
+        {team.map(member => (
           <motion.div
             key={member.id}
             ref={el => { memberRefs.current[member.id] = el; }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.05 }}
             className={cn(
               "bg-white dark:bg-zinc-800 rounded-xl border p-6 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden",
               member.id === highlightId ? "border-blue-500 ring-2 ring-blue-400/60" : "border-zinc-200 dark:border-zinc-700"

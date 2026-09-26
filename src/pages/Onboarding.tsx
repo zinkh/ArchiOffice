@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import {
   IconBuilding, IconPhoto, IconUser, IconUsers, IconCheck, IconArrowRight, IconArrowLeft,
@@ -9,6 +10,13 @@ import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { getAccessToken } from '../lib/authToken';
 import { apiFetch } from '../lib/api';
 import type { DocumentTemplate } from '../types';
+import { DEFAULT_SPRING } from '../lib/motion';
+
+const STEP_VARIANTS = {
+  enter: (dir: number) => ({ opacity: 0, x: 16 * dir }),
+  center: { opacity: 1, x: 0, transition: DEFAULT_SPRING },
+  exit: (dir: number) => ({ opacity: 0, x: -16 * dir, transition: { duration: 0.15, ease: [0.23, 1, 0.32, 1] as const } }),
+};
 
 const STEPS = [
   { id: 'agency', label: 'Votre cabinet', icon: IconBuilding },
@@ -33,6 +41,11 @@ export default function Onboarding() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [step, setStep] = useState(0);
+  // Sens du dernier changement d'étape (1 en avançant, -1 en revenant), pour
+  // que le contenu glisse dans la direction du parcours.
+  const previousStep = useRef(step);
+  const stepDirection = step >= previousStep.current ? 1 : -1;
+  useEffect(() => { previousStep.current = step; }, [step]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -315,6 +328,18 @@ export default function Onboarding() {
 
         {/* Card */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-lg p-8 min-h-[320px]">
+          {/* Chaque étape glisse dans le sens du parcours : vers la gauche en
+              avançant, vers la droite en revenant. `initial={false}` : la
+              première étape s'affiche sans animation à l'arrivée. */}
+          <AnimatePresence mode="wait" initial={false} custom={stepDirection}>
+          <motion.div
+            key={step}
+            custom={stepDirection}
+            variants={STEP_VARIANTS}
+            initial="enter"
+            animate="center"
+            exit="exit"
+          >
 
           {/* Step 0 — Agency / company profile */}
           {step === 0 && (
@@ -600,6 +625,8 @@ export default function Onboarding() {
               </button>
             </div>
           )}
+          </motion.div>
+          </AnimatePresence>
         </div>
 
         {/* Navigation */}

@@ -2263,6 +2263,14 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   la colonne sur le point projeté du geste ; pas sur une grille serrée comme
   les jours d'un mois. Une tâche déposée va en bas de sa colonne : l'ordre à
   l'intérieur d'une colonne n'est pas enregistré.
+- **Pas d'apparition en cascade sur les pages de travail** (liste des
+  affaires, équipe, notifications) : elle rejouait à chaque visite d'une page
+  consultée des dizaines de fois par jour. Réservée aux moments rares
+  (page d'accueil publique). Les ajouts discrets restent : arrivée d'un
+  nouveau message dans le chat des agents (seulement s'il date de moins de
+  4 s, jamais l'historique rechargé), étapes de l'accueil qui glissent dans
+  le sens du parcours, libellés « Enregistré » en fondu (`SwapText`,
+  `src/components/ui/SwapText.tsx`).
 - **Typographie : 11 px minimum, tailles en `rem`.** Les tailles arbitraires
   s'écrivent `text-[0.6875rem]` et non `text-[11px]`, pour suivre la taille de
   texte choisie dans le navigateur (le corps est à `0.875rem`) ; 10 px n'est
