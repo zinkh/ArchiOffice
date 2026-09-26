@@ -106,7 +106,10 @@ export function importedTasksToCreatePayloads(
       status: taskStatus(task.progress),
       priority: 'normal',
       assignee_id: assignee,
-      dependencies: task.dependencies.map(dep => idMap.get(dep)).filter((id): id is string => !!id),
+      dependencies: task.dependencies.flatMap(dep => {
+        const mapped = idMap.get(dep);
+        return mapped ? [mapped] : [];
+      }),
     };
   });
 }
