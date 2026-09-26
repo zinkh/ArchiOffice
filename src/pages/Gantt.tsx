@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
 import { useBarDrag } from '../hooks/useBarDrag';
+import PlanningXmlControls from '../components/gantt/PlanningXmlControls';
 import type { TeamMember } from '../types';
 
 export default function Gantt() {
@@ -191,6 +192,8 @@ export default function Gantt() {
           </button>
         </div>
       </div>
+
+      <PlanningXmlControls projects={projects} tasks={tasks} team={team} onImported={load} />
 
       <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="p-4 flex items-center gap-6 text-xs font-medium" style={{ borderBottom: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
