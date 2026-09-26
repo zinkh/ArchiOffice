@@ -12,7 +12,7 @@ import {
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
 
-function collectTasks(nodes: any[], out: ImportedPlanningTask[]) {
+function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ predecessor: string; successor: string }>) {
   for (const node of nodes) {
     const id = asText(node?.['@_id'] ?? node?.id).trim();
     const title = asText(node?.['@_name'] ?? node?.name).trim();
@@ -27,21 +27,33 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[]) {
       start_date: start,
       end_date: addDays(start, duration - 1),
       progress: clampProgress(node?.['@_complete'] ?? node?.complete),
-      dependencies: asArray(node?.depend)
-        .map((dep: any) => asText(dep?.['@_id'] ?? dep?.id).trim())
-        .filter(Boolean),
+      dependencies: [],
       resourceNames: [],
       milestone: asText(node?.['@_milestone']).toLowerCase() === 'true',
     });
 
-    collectTasks(asArray(node?.task), out);
+    for (const dep of asArray(node?.depend)) {
+      const successor = asText((dep as any)?.['@_id'] ?? (dep as any)?.id).trim();
+      if (successor) edges.push({ predecessor: id, successor });
+    }
+
+    collectTasks(asArray(node?.task), out, edges);
   }
 }
 
 export function parseGanttProject(root: any): ParsedPlanningXml {
   const project = root.project;
   const tasks: ImportedPlanningTask[] = [];
-  collectTasks(asArray(project?.tasks?.task), tasks);
+  const edges: Array<{ predecessor: string; successor: string }> = [];
+  collectTasks(asArray(project?.tasks?.task), tasks, edges);
+
+  const byId = new Map(tasks.map(task => [task.sourceId, task]));
+  for (const edge of edges) {
+    const successor = byId.get(edge.successor);
+    if (successor && !successor.dependencies.includes(edge.predecessor)) {
+      successor.dependencies.push(edge.predecessor);
+    }
+  }
 
   const resources = new Map<string, string>();
   for (const resource of asArray(project?.resources?.resource)) {
@@ -50,7 +62,6 @@ export function parseGanttProject(root: any): ParsedPlanningXml {
     if (id && name) resources.set(id, name);
   }
 
-  const byId = new Map(tasks.map(task => [task.sourceId, task]));
   for (const allocation of asArray(project?.allocations?.allocation)) {
     const taskId = asText(allocation?.['@_task-id']).trim();
     const resourceId = asText(allocation?.['@_resource-id']).trim();
@@ -70,6 +81,15 @@ export function exportGanttProjectXml(project: Project, tasks: Task[], team: Tea
   const taskId = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceId = new Map(members.map((member, index) => [member.id, String(index + 1)]));
+  const successors = new Map<string, string[]>();
+  for (const task of tasks) {
+    for (const predecessor of task.dependencies || []) {
+      if (!taskId.has(predecessor)) continue;
+      const list = successors.get(predecessor) || [];
+      list.push(task.id);
+      successors.set(predecessor, list);
+    }
+  }
 
   const xml = {
     project: {
@@ -88,15 +108,13 @@ export function exportGanttProjectXml(project: Project, tasks: Task[], team: Tea
           '@_complete': String(task.progress || 0),
           '@_expand': 'true',
           ...(task.description ? { notes: task.description } : {}),
-          ...(task.dependencies?.length ? {
-            depend: task.dependencies
-              .filter(dep => taskId.has(dep))
-              .map(dep => ({
-                '@_id': taskId.get(dep),
-                '@_type': '2',
-                '@_difference': '0',
-                '@_hardness': 'Strong',
-              })),
+          ...(successors.get(task.id)?.length ? {
+            depend: successors.get(task.id)!.map(successorId => ({
+              '@_id': taskId.get(successorId),
+              '@_type': '2',
+              '@_difference': '0',
+              '@_hardness': 'Strong',
+            })),
           } : {}),
         })),
       },
