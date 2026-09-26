@@ -59,9 +59,8 @@ describe('planning XML interoperability', () => {
       <project name="Projet test">
         <tasks>
           <task id="1" name="APS" start="2026-09-01" duration="5" complete="100">
-            <task id="2" name="APD" start="2026-09-06" duration="7" complete="40">
-              <depend id="1" type="2" difference="0"/>
-            </task>
+            <depend id="2" type="2" difference="0"/>
+            <task id="2" name="APD" start="2026-09-06" duration="7" complete="40"/>
           </task>
         </tasks>
         <resources><resource id="3" name="Khal Doun"/></resources>
