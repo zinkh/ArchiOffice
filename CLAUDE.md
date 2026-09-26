@@ -99,6 +99,8 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `GEMINI_API_KEY` | One AI key required | Google Gemini (the default provider) |
 | `ANTHROPIC_API_KEY` | Optional | Claude, when a tenant or the instance runs on Anthropic |
 | `MISTRAL_API_KEY` | Optional | Mistral (French, EU-hosted) |
+| `NOMIC_API_KEY` | Optional | Nomic Platform (`nk-…`) : lecture des plans/DCE (Nomic Parse) et génération du CCTP (Nomic Extract). Sans elle, seul le moteur local existe |
+| `NOMIC_API_URL` / `DOCUMENT_PARSER` | Optional | Hôte de l'API Nomic (défaut `https://api-atlas.nomic.ai`) ; moteur de lecture par défaut de l'instance (`local` ou `nomic`), surclassé par le réglage `/admin` |
 | `AI_PROVIDER` / `AI_MODEL` | Optional | Instance-wide provider/model default, overridable at runtime from `/admin` (`gemini` + `gemini-3-flash-preview` when unset) |
 | `AI_PRICE_MARKUP` | Optional | Operator margin over each model's real cost (default `1.3333`) |
 | `VITE_SUPABASE_URL` | Yes | Supabase URL (injected into frontend at build time) |
@@ -881,6 +883,48 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
+
+### Nomic : lecture des plans et génération du CCTP
+
+Nomic n'a **pas d'API de chat** : ce n'est pas un quatrième fournisseur de
+`llm/`, mais un moteur de lecture (`/v1/parse`) et d'extraction structurée
+(`/v1/extract`) de pièces d'ingénierie. Client sans dépendance dans
+`packages/archioffice-agents/src/server/nomic.ts`, protocole relevé sur le SDK
+officiel : dépôt (`/v1/upload` puis PUT présigné), tâche, `/v1/status/:id`,
+résultat par `result_url`.
+
+**Moteur de lecture** (`documentParser.ts`) : `local` (pdf-parse + mammoth +
+Tesseract) ou `nomic`, réglé dans `/admin` (« Lecture des documents »,
+`GET/PUT /api/admin/document-parser`, stocké dans `platform_settings` sous
+`document_parser`, même cache de 30 s que le fournisseur IA). Priorité :
+`/admin` → `DOCUMENT_PARSER` → `local` ; basculer sur Nomic sans
+`NOMIC_API_KEY` est refusé. Il s'applique à `extractDocumentText`
+(pièces jointes de mail, `read_document`, courrier entrant), aux pièces jointes
+d'un message d'agent (après la branche vision, qui reste préférée pour une
+photo) et à `extractKnowledgeDocText` (analyse du DCE, génération du CCTP).
+**Deux règles à garder** : un échec de Nomic retombe sur le moteur local
+(`parseWithActiveEngine` rend `null`), et la bibliothèque de connaissances
+d'un agent reste TOUJOURS locale (`allowNomic = false`) : relue à chaque tour,
+elle serait refacturée à la page à chaque message. `server.ts` dépose le client
+Supabase au démarrage (`setDocumentParserSettingsClient`), sur le patron de
+`setExternalFileReader`.
+
+**« Générer » dans l'éditeur CCTP** (`CctpGenerateDialog.tsx`,
+`POST /api/projects/:projectId/cctp/generate`, `server/routes/cctpGeneration.ts`) :
+l'architecte coche jusqu'à 10 pièces de l'affaire et choisit le moteur.
+`llm` lit les pièces avec le moteur de lecture actif puis fait rédiger le
+modèle IA de la plateforme (réserve → exécute → règle, `endpoint_type =
+'cctp_generation'`) ; `nomic` dépose les fichiers bruts et laisse Nomic
+Extract remplir le schéma lots > chapitres > articles en voyant le plan
+lui-même. Le coût Nomic (lecture et extraction) est porté par le compte Nomic
+de l'opérateur et **n'est pas refacturé** aux crédits du cabinet : il n'a pas
+de tarif au jeton que `MODEL_CATALOG` pourrait porter, et inventer un montant
+est exclu. La route ne réécrit jamais le document : la proposition
+(`lotsDepuisGeneration`, `src/lib/cctpGeneration.ts`) s'ajoute APRÈS les lots
+existants, quantités et prix à 0, chaque article marqué `genereParIa` (badge
+« IA » dans l'arbre, comme « BIB » pour la bibliothèque), puis passe par
+l'enregistrement habituel. Seules les pièces dont `project_id` est l'affaire
+visée sont lues.
 
 ### Dictée vocale
 

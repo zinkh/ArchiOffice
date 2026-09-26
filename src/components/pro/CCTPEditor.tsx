@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconDeviceFloppy, IconTag, IconBuildingStore,
-  IconBuildingCommunity,
+  IconBuildingCommunity, IconSparkles,
 } from '@tabler/icons-react';
 import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
+import { CctpGenerateDialog } from './CctpGenerateDialog';
+import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
 
 interface CCTPEditorProps {
   dpgf: DPGF;
@@ -34,6 +36,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -117,6 +120,18 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     mutateDPGF(d => { d.lots[lotIdx].chapitres[chapIdx].lignes.push(...nouvelles); });
     setExpandedChaps(prev => new Set([...prev, chap.id]));
     setSelection({ kind: 'ligne', lotIdx, chapIdx, ligneIdx: base });
+  };
+
+  // ── Génération par IA ─────────────────────────────────────────────────────
+  // Les lots proposés s'ajoutent après les lots existants, jamais à leur
+  // place : un CCTP déjà rédigé ne doit pas être écrasé par une proposition.
+  const insererGeneration = (generated: GeneratedLot[], engine: CctpGenerationEngine) => {
+    const nouveaux = lotsDepuisGeneration(generated, dpgf.lots.length, engine, uid);
+    mutateDPGF(d => { d.lots.push(...nouveaux); });
+    setExpandedLots(prev => new Set([...prev, ...nouveaux.map(l => l.id)]));
+    setExpandedChaps(prev => new Set([...prev, ...nouveaux.flatMap(l => l.chapitres.map(c => c.id))]));
+    setSelection({ kind: 'lot', lotIdx: dpgf.lots.length });
+    setShowGenerate(false);
   };
 
   // ── Delete CCTP-only items ────────────────────────────────────────────────
@@ -266,6 +281,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
             )}
           </button>
           <button
+            onClick={() => setShowGenerate(true)}
+            title="Générer le CCTP à partir des plans et pièces de l’affaire"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300"
+          >
+            <IconSparkles size={14} />
+            Générer
+          </button>
+          <button
             onClick={() => setShowLibrary(v => !v)}
             title="Bibliothèque d’ouvrages"
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
@@ -286,6 +309,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
           </button>
         </div>
       </div>
+
+      {showGenerate && (
+        <CctpGenerateDialog
+          projectId={dpgf.projectId}
+          onClose={() => setShowGenerate(false)}
+          onGenerated={insererGeneration}
+        />
+      )}
 
       {showDecoupage && (
         <DecoupagePanel
@@ -384,6 +415,16 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                     className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded font-bold"
                                   >
                                     BIB
+                                  </span>
+                                )}
+                                {/* Repère de provenance : article proposé par
+                                    « Générer », à relire avant de l'assumer. */}
+                                {ligne.genereParIa && (
+                                  <span
+                                    title={ligne.genereParIa === 'nomic' ? 'Article proposé par Nomic, à relire' : 'Article proposé par l’IA, à relire'}
+                                    className="shrink-0 ml-1 text-[9px] px-1 py-0.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded font-bold"
+                                  >
+                                    IA
                                   </span>
                                 )}
                                 {ligne.cctpOnly && (
