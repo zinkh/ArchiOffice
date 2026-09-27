@@ -33,6 +33,17 @@
 :root { color-scheme: light; }
 :root.dark { color-scheme: dark; }
 
+/* Autofilled fields keep their own background and text colour instead of the
+   browser's autofill tint (olive/yellow in dark scheme, blue in light). The
+   UA rule is !important, so it is held off with a very long transition. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  transition: background-color 600000s 0s, color 600000s 0s;
+}
+
 .dark {
   --tblr-bg:            #182433;
   --tblr-surface:       #243044;
