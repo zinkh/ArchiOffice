@@ -465,6 +465,40 @@ export default function ProjectDetail() {
     [linkedContratsMoe],
   );
 
+  // Onglets de phase chantier gouvernés par une mission du contrat MOE : le
+  // contrat fait foi (même principe que HONOS ci-dessus), donc un onglet
+  // sans mission incluse est masqué — sauf s'il porte déjà des données,
+  // pour ne jamais donner l'impression qu'elles ont disparu (il reste alors
+  // affiché avec un badge « hors mission »). Sans contrat lié, impossible de
+  // savoir si la mission est prévue : on garde le repli historique (gate sur
+  // is_chantier seul). RDT n'a pas de mission MOP dédiée et suit DET.
+  const CHANTIER_TAB_MISSION_ID: Partial<Record<string, string>> = {
+    ACT: 'act', VISA: 'visa', DET: 'det', RDT: 'det', AOR: 'aor',
+  };
+  const chantierTabState = useMemo(() => {
+    const missionsList = contratHonoraires?.missions_list;
+    const hasData: Record<string, boolean> = {
+      ACT: marchesTravaux.length > 0,
+      VISA: visas.length > 0,
+      DET: ordresDeService.length > 0 || marchesTravaux.length > 0,
+      RDT: ordresDeService.length > 0 || marchesTravaux.length > 0,
+      AOR: receptions.length > 0 || reserves.length > 0,
+    };
+    const result: Record<string, { visible: boolean; horsMission: boolean }> = {};
+    for (const tabId of Object.keys(CHANTIER_TAB_MISSION_ID)) {
+      if (!contratHonoraires || !missionsList) {
+        result[tabId] = { visible: true, horsMission: false };
+        continue;
+      }
+      const missionId = CHANTIER_TAB_MISSION_ID[tabId]!;
+      const incluse = missionsList.some((m: any) => m.id === missionId && m.incluse);
+      result[tabId] = incluse
+        ? { visible: true, horsMission: false }
+        : { visible: hasData[tabId], horsMission: hasData[tabId] };
+    }
+    return result;
+  }, [contratHonoraires, marchesTravaux, visas, ordresDeService, receptions, reserves]);
+
   // Rapatrie les honoraires initiaux et le coût travaux prévisionnel depuis le
   // contrat MOE lié, plutôt que de laisser ces montants — déjà saisis dans le
   // contrat — à ressaisir manuellement ici. Dès qu'un contrat est lié, c'est
@@ -1716,9 +1750,14 @@ export default function ProjectDetail() {
             { id: 'RDT', label: 'RDT', icon: IconReportMoney },
             { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
             { id: 'CORRESPONDANCE', label: t('correspondence_title') as string, icon: IconMail },
-          ] as PillTabItem[]).filter(tab =>
-            !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
-          )}
+          ] as PillTabItem[])
+            .map(tab =>
+              chantierTabState[tab.id]?.horsMission ? { ...tab, badge: 'hors mission' } : tab
+            )
+            .filter(tab =>
+              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) &&
+                (!project.is_chantier || chantierTabState[tab.id]?.visible === false))
+            )}
         />
       </div>
 
