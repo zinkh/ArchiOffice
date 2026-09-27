@@ -26,6 +26,13 @@
   --ease-out:           cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+/* Native controls (checkboxes, radios, scrollbars) follow the app theme set by
+   ThemeProvider on <html>, not the OS setting: index.html declares
+   color-scheme "light dark", so an OS in dark mode drew dark checkboxes on
+   light pages. */
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
 .dark {
   --tblr-bg:            #182433;
   --tblr-surface:       #243044;
