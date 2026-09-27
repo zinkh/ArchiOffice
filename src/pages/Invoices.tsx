@@ -5,6 +5,7 @@ import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
 import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
 import { type EmailAttachment } from '../lib/emailAttachments';
@@ -762,7 +763,7 @@ export default function Invoices() {
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
                 <div>
-                  <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={statusStyle(inv.status)}>{statusLabel(inv.status)}</span>
                   {inv.accounting_deleted_at && (
                     <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
                   )}
@@ -896,7 +897,7 @@ export default function Invoices() {
                         </td>
                         <td className="px-6 py-4">
                           <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                            {invoice.status}
+                            {statusLabel(invoice.status)}
                           </span>
                           {invoice.accounting_deleted_at && (
                             <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
@@ -1041,7 +1042,7 @@ export default function Invoices() {
                     </td>
                     <td className="px-6 py-4">
                       <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                        {invoice.status}
+                        {statusLabel(invoice.status)}
                       </span>
                       {invoice.accounting_deleted_at && (
                         <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
@@ -1484,7 +1485,7 @@ export default function Invoices() {
                     onChange={e => setEditForm({ ...editForm, status: e.target.value as Invoice['status'] })}
                   >
                     {(['Draft', 'Sent', 'Paid', 'Overdue'] as const).map(s => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{statusLabel(s)}</option>
                     ))}
                   </select>
                 </div>

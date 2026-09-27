@@ -23,7 +23,7 @@ export default function Team() {
     name: '',
     email: '',
     system_role: 'user',
-    role: 'Member'
+    role: ''
   });
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export default function Team() {
       const result = await createUser(newUser) as any;
       setTeam([...team, result]);
       setIsModalOpen(false);
-      setNewUser({ name: '', email: '', system_role: 'user', role: 'Member' });
+      setNewUser({ name: '', email: '', system_role: 'user', role: '' });
       
       if (result.emailSent) {
         alert(t('team_user_created_email_sent'));
@@ -200,7 +200,7 @@ export default function Team() {
                 </select>
               ) : (
                 <div className="px-3 py-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-medium border border-zinc-100 dark:border-zinc-800">
-                  {member.system_role.toUpperCase()}
+                  {t(`team_role_${member.system_role}` as const, { defaultValue: member.system_role })}
                 </div>
               )}
             </div>

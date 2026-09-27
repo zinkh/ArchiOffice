@@ -1103,7 +1103,7 @@ export default function References() {
     } catch { doc.text('Références', 14, 15); }
     autoTable(doc, {
       head: [['Projet', 'Client', 'Date', 'Surface', 'Budget', 'Statut']],
-      body: selected.map(p => [p.name, p.client, p.end_date ? new Date(p.end_date).toLocaleDateString() : '---', p.surface ? `${p.surface} m²` : '---', formatCurrency(p.budget ?? 0), p.status]),
+      body: selected.map(p => [p.name, p.client, p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---', p.surface ? `${p.surface} m²` : '---', formatCurrency(p.budget), p.status]),
       startY,
     });
     doc.save('references.pdf');
@@ -1114,7 +1114,7 @@ export default function References() {
     const selected = filteredItems.filter(p => selectedIds.has(p.id));
     let agencyName = '';
     try { const s = await apiFetch<any>('/api/settings'); agencyName = s?.agencyName || ''; } catch { /* */ }
-    const rows = selected.map(p => ({ Projet: p.name, Client: p.client, 'Date de livraison': p.end_date ? new Date(p.end_date).toLocaleDateString() : '---', Surface: p.surface ? `${p.surface} m²` : '---', Budget: formatCurrency(p.budget ?? 0), Statut: p.status }));
+    const rows = selected.map(p => ({ Projet: p.name, Client: p.client, 'Date de livraison': p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---', Surface: p.surface ? `${p.surface} m²` : '---', Budget: formatCurrency(p.budget), Statut: p.status }));
     const ws = XLSX.utils.json_to_sheet([]);
     if (agencyName) { XLSX.utils.sheet_add_aoa(ws, [[agencyName]], { origin: 'A1' }); XLSX.utils.sheet_add_aoa(ws, [['Références']], { origin: 'A2' }); XLSX.utils.sheet_add_json(ws, rows, { origin: 'A4' }); }
     else { XLSX.utils.sheet_add_json(ws, rows, { origin: 'A1' }); }
@@ -1156,7 +1156,7 @@ export default function References() {
         <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.client || '---'}</td>
         <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.end_date ? new Date(item.end_date).toLocaleDateString('fr-FR') : '---'}</td>
         <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.surface ? `${item.surface} m²` : '---'}</td>
-        <td className="px-4 py-3 text-sm font-mono" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(item.budget ?? 0)}</td>
+        <td className="px-4 py-3 text-sm font-mono" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(item.budget)}</td>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
             <StatusBadge status={item.status} />
@@ -1277,7 +1277,7 @@ export default function References() {
               { label: t('references_col_client'), render: (p: RefItem) => p.client || '---' },
               { label: t('references_col_delivery'), render: (p: RefItem) => p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('references_col_surface'), render: (p: RefItem) => p.surface ? `${p.surface} m²` : '---' },
-              { label: t('references_col_budget'), render: (p: RefItem) => <span className="font-mono">{formatCurrency(p.budget ?? 0)}</span> },
+              { label: t('references_col_budget'), render: (p: RefItem) => <span className="font-mono">{formatCurrency(p.budget)}</span> },
               { label: t('references_col_status'), render: (p: RefItem) => <StatusBadge status={p.status} /> },
             ]}
             actions={(p: RefItem) => (
@@ -1370,7 +1370,7 @@ export default function References() {
                             <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.client || '---'}</td>
                             <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.end_date ? new Date(item.end_date).toLocaleDateString('fr-FR') : '---'}</td>
                             <td className="px-4 py-3 text-sm" style={{ color: 'var(--tblr-text)' }}>{item.surface ? `${item.surface} m²` : '---'}</td>
-                            <td className="px-4 py-3 text-sm font-mono" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(item.budget ?? 0)}</td>
+                            <td className="px-4 py-3 text-sm font-mono" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(item.budget)}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <StatusBadge status={item.status} />

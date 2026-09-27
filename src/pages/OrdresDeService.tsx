@@ -15,6 +15,7 @@ import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { formatCurrency } from '../lib/utils';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -45,10 +46,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function formatCurrency(n?: number) {
-  if (n === undefined || n === null) return '—';
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
-}
 
 // ── PDF generation
 async function generateOsPdf(os: OrdreDeService, project?: Project) {

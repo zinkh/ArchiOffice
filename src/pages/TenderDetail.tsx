@@ -27,6 +27,7 @@ import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT } from '../lib/con
 import { toRefItem, customToRefItem, type RefItem, type CustomRef } from '../lib/referenceItems';
 import { useUser } from '../UserContext';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 
 type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires';
 
@@ -652,7 +653,7 @@ export default function TenderDetail() {
             background: tender.status === 'Won' ? 'var(--tblr-success-lt)' : tender.status === 'Lost' ? 'var(--tblr-danger-lt)' : 'var(--tblr-primary-lt)',
             color: tender.status === 'Won' ? 'var(--tblr-success)' : tender.status === 'Lost' ? 'var(--tblr-danger)' : 'var(--tblr-primary)',
           }}>
-            {tender.status}
+            {statusLabel(tender.status)}
           </span>
         </div>
       </div>

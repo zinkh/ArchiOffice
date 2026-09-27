@@ -5,6 +5,7 @@ import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { exportLeaveBalancesTablePdf, exportLeaveBalanceFichePdf } from '../lib/hrExport';
+import { formatDate } from '../lib/date';
 import type { LeaveRequest, LeaveBalance, LeaveBalanceAllEntry, LeaveType, TeamMember } from '../types';
 
 export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
@@ -205,7 +206,7 @@ export default function Leave() {
                 {myRequests.map(r => (
                   <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                     <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}{r.motif && ` (${MOTIF_OPTIONS.find(m => m.value === r.motif)?.label || r.motif})`}</td>
-                    <td className="p-3">{r.start_date} → {r.end_date}</td>
+                    <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                     <td className="p-3">{r.business_days}</td>
                     <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                     <td className="p-3">
@@ -239,7 +240,7 @@ export default function Leave() {
                 <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                   <td className="p-3">{nameById[r.user_id] || r.user_id}</td>
                   <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}</td>
-                  <td className="p-3">{r.start_date} → {r.end_date}</td>
+                  <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                   <td className="p-3">{r.business_days}</td>
                   <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                   <td className="p-3">

@@ -5,6 +5,7 @@ import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, 
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -384,10 +385,10 @@ export default function Tenders() {
               style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="All">{t('tenders_all_statuses')}</option>
-              <option value="Draft">Draft</option>
-              <option value="Submitted">Submitted</option>
-              <option value="Won">Won</option>
-              <option value="Lost">Lost</option>
+              <option value="Draft">{statusLabel('Draft')}</option>
+              <option value="Submitted">{statusLabel('Submitted')}</option>
+              <option value="Won">{statusLabel('Won')}</option>
+              <option value="Lost">{statusLabel('Lost')}</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -450,7 +451,7 @@ export default function Tenders() {
                   background: td.status === 'Won' ? 'rgba(47,179,135,0.1)' : td.status === 'Lost' ? 'rgba(214,57,57,0.1)' : 'var(--tblr-primary-lt)',
                   color: td.status === 'Won' ? 'var(--tblr-success)' : td.status === 'Lost' ? 'var(--tblr-danger)' : 'var(--tblr-primary)',
                   border: '1px solid currentColor',
-                }}>{td.status}</span>
+                }}>{statusLabel(td.status)}</span>
               )},
             ]}
             actions={td => (
@@ -539,7 +540,7 @@ export default function Tenders() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {getStatusIcon(tender.status)}
-                      <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
+                      <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{statusLabel(tender.status)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -670,7 +671,7 @@ export default function Tenders() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           {getStatusIcon(tender.status)}
-                          <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
+                          <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{statusLabel(tender.status)}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -1032,10 +1033,10 @@ export default function Tenders() {
                         value={newTender.status || ''}
                         onChange={e => setNewTender({...newTender, status: e.target.value as any})}
                       >
-                        <option value="Draft">Draft</option>
-                        <option value="Submitted">Submitted</option>
-                        <option value="Won">Won</option>
-                        <option value="Lost">Lost</option>
+                        <option value="Draft">{statusLabel('Draft')}</option>
+                        <option value="Submitted">{statusLabel('Submitted')}</option>
+                        <option value="Won">{statusLabel('Won')}</option>
+                        <option value="Lost">{statusLabel('Lost')}</option>
                       </select>
                     </div>
                   )}
