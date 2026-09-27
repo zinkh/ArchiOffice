@@ -5,6 +5,7 @@ import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconT
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
@@ -528,7 +529,7 @@ export default function Proposals() {
                   background: p.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : p.status === 'Rejected' ? 'rgba(214,57,57,0.1)' : p.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
                   color: p.status === 'Accepted' ? 'var(--tblr-success)' : p.status === 'Rejected' ? 'var(--tblr-danger)' : p.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                   border: '1px solid currentColor',
-                }}>{p.status}</span>
+                }}>{statusLabel(p.status)}</span>
               )},
             ]}
             actions={p => (
@@ -569,7 +570,7 @@ export default function Proposals() {
                       <div>
                         <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{proposal.title}</p>
                         <p className="text-[0.6875rem] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
-                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString()}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString('fr-FR')}</p>
                       </div>
                     </div>
                   </td>
@@ -585,7 +586,7 @@ export default function Proposals() {
                       color: proposal.status === 'Accepted' ? 'var(--tblr-success)' : proposal.status === 'Rejected' ? 'var(--tblr-danger)' : proposal.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                       border: '1px solid currentColor',
                     }}>
-                      {proposal.status}
+                      {statusLabel(proposal.status)}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -704,7 +705,7 @@ export default function Proposals() {
                     <div className="md:col-span-2">
                       <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
                     </div>
-                    <FormField label="Status" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected']} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
+                    <FormField label="Statut" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected'].map(s => ({ id: s, name: statusLabel(s) }))} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
                     <FormField label="Ind" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
                   </div>
                 </div>

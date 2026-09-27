@@ -254,7 +254,7 @@ export default function ACT({ projectId }: { projectId: string }) {
                     const diff = minAmount !== Infinity ? (((c.amounts[lot.id] || 0) - minAmount) / minAmount * 100).toFixed(1) : '0';
                     return (
                       <td key={c.id} className={cn("p-2", isMin && "bg-green-100")}>
-                        {formatCurrency(c.amounts[lot.id] || 0)} {isMin ? '' : `(+${diff}%)`}
+                        {c.amounts[lot.id] != null ? formatCurrency(c.amounts[lot.id]) : '—'} {isMin ? '' : `(+${diff}%)`}
                       </td>
                     );
                   })}

@@ -91,8 +91,24 @@ function compareProjects(a: Project, b: Project, key: keyof Project, direction: 
   return direction === 'asc' ? result : -result;
 }
 
+// Le statut d'un projet est stocké en anglais (Planning/In Progress/
+// Completed/On Hold) — ce mapping traduit l'affichage sans toucher à la
+// valeur stockée, pour ne plus le laisser fuiter tel quel à l'écran (badge
+// de fiche, filtre) à côté du <select> d'édition, qui lui passait déjà par
+// ces mêmes clés i18n.
+const PROJECT_STATUS_KEYS: Record<string, string> = {
+  Planning: 'projects_status_planning',
+  'In Progress': 'projects_status_in_progress',
+  Completed: 'projects_status_completed',
+  'On Hold': 'projects_status_on_hold',
+};
+
 export default function Projects() {
   const { t } = useTranslation();
+  const projectStatusLabel = (status: string) => {
+    const key = PROJECT_STATUS_KEYS[status];
+    return key ? t(key) : status;
+  };
   const { currentUser } = useUser();
   const [projects, setProjects] = useState<Project[]>([]);
   const [team, setTeam] = useState<any[]>([]);
@@ -722,7 +738,7 @@ export default function Projects() {
               : { border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}
           >
             <IconFilter size={16} />
-            {filterStatus === 'All' ? t('projects_filter_status') : filterStatus}
+            {filterStatus === 'All' ? t('projects_filter_status') : projectStatusLabel(filterStatus)}
           </button>
           <button
             onClick={cycleCategoryFilter}
@@ -817,7 +833,7 @@ export default function Projects() {
                     project.status === 'Completed' ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } :
                     { background: 'rgba(255,255,255,0.85)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }
                   }>
-                    {project.status}
+                    {projectStatusLabel(project.status)}
                   </span>
                   {project.category && (
                     <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
@@ -855,7 +871,7 @@ export default function Projects() {
                     <p>{t('budget')}</p>
                   </div>
                   <div className="text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>
-                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString()}</p>
+                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString('fr-FR')}</p>
                     <p>{t('deadline')}</p>
                   </div>
                 </div>
@@ -1134,7 +1150,7 @@ export default function Projects() {
                         selectedProject.status === 'Completed' ? "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800" :
                         "bg-zinc-50 dark:bg-zinc-900/30 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
                       )}>
-                        {selectedProject.status}
+                        {projectStatusLabel(selectedProject.status)}
                       </div>
                     )}
                   </div>
@@ -1178,7 +1194,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, start_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.start_date).toLocaleDateString()}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.start_date).toLocaleDateString('fr-FR')}</p>
                     )}
                   </div>
                   <div className="space-y-1">
@@ -1191,7 +1207,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, end_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.end_date).toLocaleDateString()}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.end_date).toLocaleDateString('fr-FR')}</p>
                     )}
                   </div>
 
@@ -1219,7 +1235,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, construction_cost: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.construction_cost || 0)}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.construction_cost)}</p>
                     )}
                   </div>
 
@@ -1233,7 +1249,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, remuneration: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.remuneration || 0)}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.remuneration)}</p>
                     )}
                   </div>
 
@@ -1679,7 +1695,7 @@ export default function Projects() {
                               </p>
                               <div className="flex items-center gap-1 text-[0.6875rem] text-zinc-400">
                                 <IconCalendar size={10} />
-                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString()}</span>
+                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString('fr-FR')}</span>
                               </div>
                             </div>
                           </div>

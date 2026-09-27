@@ -168,7 +168,7 @@ export default {
       "created_by": "Created By",
       "add_contact": "Add Contact",
       "no_contacts": "No contacts found",
-      "templates": "Templates",
+      "templates": "Project templates",
       "gantt_shift_days": "{{sign}}{{count}} d",
       "update_progress": "Update Progress",
       "save": "Save",

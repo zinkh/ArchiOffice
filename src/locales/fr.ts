@@ -177,7 +177,7 @@ export default {
       "created_by": "Créé par",
       "add_contact": "Ajouter un contact",
       "no_contacts": "Aucun contact trouvé",
-      "templates": "Modèles",
+      "templates": "Modèles de projet",
       "gantt_shift_days": "{{sign}}{{count}} j",
       "update_progress": "Mettre à jour la progression",
       "save": "Enregistrer",

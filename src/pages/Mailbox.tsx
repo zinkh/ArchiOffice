@@ -496,7 +496,7 @@ export default function Mailbox() {
               >
                 <div className="min-w-0">
                   <div className="font-medium truncate">{m.subject || '(Sans objet)'}</div>
-                  <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString() : ''}</div>
+                  <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString('fr-FR') : ''}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button

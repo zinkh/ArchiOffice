@@ -470,12 +470,8 @@ html {
   /* Pas de grossissement automatique du texte en paysage sur iOS. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Ni rebond de page ni « tirer pour actualiser » : l'en-tête collant et les
-     panneaux (menu, fiche de réserve) ont leur propre défilement. */
-  overscroll-behavior: none;
 }
 body {
-  overscroll-behavior: none;
   /* viewport-fit=cover (index.html) : en paysage, le contenu ne passe pas
      sous l'encoche. */
   padding-left: env(safe-area-inset-left, 0px);
