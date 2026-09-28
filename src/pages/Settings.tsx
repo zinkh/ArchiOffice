@@ -26,6 +26,7 @@ import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
+import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
@@ -2923,6 +2924,12 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {/* n8n / IFTTT / tout automate HTTP — clé d'API entrante + webhooks
+              sortants. Ni l'un ni l'autre n'est un plugin du catalogue
+              ci-dessus (pas de connecteur à choisir : n'importe quel service
+              HTTP externe peut s'en servir), d'où une carte à part. */}
+          <AutomationIntegrationsCard />
         </>
       )}
 

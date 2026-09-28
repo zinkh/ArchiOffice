@@ -6,6 +6,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 async function assertSpecialtyContacts(supabaseAdmin: any, tenantId: string, specialties: any[] | undefined): Promise<boolean> {
   for (const s of specialties || []) {
@@ -83,6 +84,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       // Log activity
       const userNameTndr = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userNameTndr, `Nouvel appel d'offres "${title}"`, title, id, 'tender', 'Appels d\'offres');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'tender.created', { id, title, client, submission_deadline, value: value || 0 });
       res.status(201).json({ ...(data || {}), specialties_list: (data as any)?.tender_specialties || [], evaluation_criteria_list: (data as any)?.tender_evaluation_criteria || [], groupement_retenu_list: (data as any)?.tender_groupement_membres || [] });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create tender: " + e.message }); }
   });
