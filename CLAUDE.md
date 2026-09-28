@@ -1148,6 +1148,54 @@ plusieurs centaines de pages : ce dépôt n'a pas de recherche par mots-clés
 ni d'embeddings, tout document déposé est relu en entier. `/agents/:id/edit`
 le dit explicitement dans le texte d'aide du réglage.
 
+### Apprentissage des agents : proposer, jamais appliquer
+
+Un agent qui se voyait corrigé, ou qui butait sur une capacité qu'il n'avait
+pas, n'avait aucun moyen de le retenir au-delà de la conversation en cours —
+au tour suivant, il repartait de zéro. `learning_enabled`
+(`supabase/migrate_agent_learning.sql`), une colonne de plus sur `agents`
+réglable depuis `/agents/:id/edit`, off par défaut et jamais héritée d'un
+template (même traitement que `knowledge_enabled`), donne accès à l'outil
+`suggerer_amelioration(kind, titre, contenu, capacite_suggeree?)`
+(`packages/archioffice-agents/src/server/learningTools.ts`).
+
+**Trois natures de proposition**, jamais appliquées seules — même principe
+que `needs_confirmation` sur `create_record` : mémoriser une correction,
+signaler une capacité manquante ou rédiger une note change durablement le
+comportement d'un agent, ça se confirme, ça ne se déduit jamais.
+
+- `correction` — l'utilisateur vient de corriger une réponse ou une
+  hypothèse de l'agent.
+- `missing_capability` — l'agent n'a pas pu répondre correctement faute d'un
+  outil ou d'un accès qu'il n'a pas ; `capacite_suggeree` nomme la colonne
+  concernée (`mail_enabled`, `geo_enabled`...) pour que l'écran de revue
+  pointe directement vers `/agents/:id/edit`.
+- `knowledge_note` — l'agent propose lui-même une note pour sa mémoire (une
+  règle ou une préférence du cabinet apprise en tâche).
+
+**Une file d'attente, pas une écriture définitive.** L'outil dépose la
+proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans
+`documents` ni dans le prompt. L'architecte la revoit depuis
+`/agents/apprentissage` (`AgentLearning.tsx`) et l'approuve ou la rejette
+(`PUT /api/agent-learning-suggestions/:id`) ; `POST` (appelé par l'outil,
+`as_agent_id`) revalide l'agent comme `POST /api/feed/posts` revalide
+`as_agent_id` — introuvable, inactif ou sans `learning_enabled` est refusé.
+Une proposition déjà traitée ne peut pas être retraitée (409).
+
+**Seule une proposition *approuvée* devient mémoire, et seulement pour
+`correction`/`knowledge_note`.** `buildAgentContext()` (`context.ts`) relit,
+quand `learningEnabled` est vrai, les lignes `agent_learning_suggestions` de
+CET agent au statut `approved` de ces deux natures, dans
+`ctx.learningNotes` — auto-injecté à chaque tour comme
+`knowledgeDocuments`, jamais via un `tool`, jamais tant que le statut reste
+`pending` (`MÉMOIRE D'APPRENTISSAGE`, `systemPrompts.ts`, plafonné à
+`MAX_LEARNING_NOTES`/`MAX_LEARNING_NOTE_CHARS` — du texte court déjà en base,
+pas un document à extraire). Une proposition `missing_capability` approuvée
+ne déclenche RIEN d'automatique côté agent : approuver documente seulement
+que l'architecte a vu la demande, activer la capacité reste un geste
+volontaire distinct depuis `/agents/:id/edit` — jamais l'écran de revue lui-
+même.
+
 ### Lecture des pièces jointes de messagerie par les agents
 
 `read_email` (`mail_enabled`) rapportait déjà les pièces jointes d'un

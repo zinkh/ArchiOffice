@@ -182,6 +182,10 @@ export function registerAgentRoutes(
           // document n'y est encore rattaché) et son activation est un choix
           // de l'architecte, pas un défaut de métier.
           knowledge_enabled: false,
+          // Jamais hérité, comme knowledge_enabled : proposer une amélioration
+          // est un choix explicite du cabinet, pas un défaut de métier — et un
+          // agent tout juste activé n'a encore rien à retenir.
+          learning_enabled: false,
           is_active: true, is_system_template: false,
         };
       } else {
@@ -195,7 +199,7 @@ export function registerAgentRoutes(
           action_scopes: action_scopes || [],
           web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false, mail_attachments_enabled: false,
           geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, web_search_enabled: false,
-          knowledge_enabled: false,
+          knowledge_enabled: false, learning_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
         };
       }
@@ -215,7 +219,7 @@ export function registerAgentRoutes(
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
         mail_send_enabled, mail_attachments_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
-        knowledge_enabled,
+        knowledge_enabled, learning_enabled,
         system_prompt_override, is_active,
       } = req.body;
       const { data, error } = await supabaseAdmin.from('agents').update({
@@ -237,6 +241,7 @@ export function registerAgentRoutes(
         docs_write_enabled: !!docs_read_enabled && !!docs_write_enabled,
         web_search_enabled: !!web_search_enabled,
         knowledge_enabled: !!knowledge_enabled,
+        learning_enabled: !!learning_enabled,
         system_prompt_override, is_active,
       }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
@@ -254,6 +259,83 @@ export function registerAgentRoutes(
       const { error } = await supabaseAdmin.from('agents').update({ is_active: false }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Apprentissage des agents (agent_learning_suggestions) ────────────────
+  // File d'attente de propositions déposées par suggerer_amelioration
+  // (learningTools.ts) : rien ne s'applique jamais tout seul, voir
+  // migrate_agent_learning.sql. GET liste pour l'écran de revue
+  // (/agents/learning), POST est appelé par l'outil de l'agent (as_agent_id),
+  // PUT approuve ou rejette.
+
+  // GET /api/agent-learning-suggestions?status=pending
+  app.get('/api/agent-learning-suggestions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      let query = supabaseAdmin.from('agent_learning_suggestions').select('*').eq('tenant_id', tenantId);
+      const status = String(req.query.status || '').trim();
+      if (status) query = query.eq('status', status);
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
+      if (error) throw error;
+      const rows = (data as any[]) || [];
+      const agentIds = [...new Set(rows.map(r => r.agent_id))];
+      const { data: agentsData } = agentIds.length > 0
+        ? await supabaseAdmin.from('agents').select('id, name, role_title').in('id', agentIds)
+        : { data: [] as any[] };
+      const agentsById = new Map(((agentsData as any[]) || []).map(a => [a.id, a]));
+      res.json(rows.map(r => ({ ...r, agent: agentsById.get(r.agent_id) || null })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/agent-learning-suggestions — appelé par suggerer_amelioration
+  // via la boucle interne (as_agent_id), jamais directement par l'écran.
+  app.post('/api/agent-learning-suggestions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { as_agent_id, kind, title, content, suggested_capability } = req.body;
+      if (!['correction', 'missing_capability', 'knowledge_note'].includes(kind)) {
+        return res.status(400).json({ error: "kind doit être 'correction', 'missing_capability' ou 'knowledge_note'." });
+      }
+      if (!String(title || '').trim() || !String(content || '').trim()) {
+        return res.status(400).json({ error: 'title et content sont requis.' });
+      }
+      // Revalidé ici plutôt que de faire confiance à un id envoyé tel quel —
+      // même principe que as_agent_id sur POST /api/feed/posts
+      // (server/routes/activityFeed.ts) : un agent inexistant, inactif, ou
+      // sans la capacité learning_enabled ne peut pas déposer de proposition.
+      const { data: agent } = await supabaseAdmin.from('agents').select('id, learning_enabled')
+        .eq('id', as_agent_id).eq('tenant_id', tenantId).eq('is_active', true).maybeSingle();
+      if (!agent || !(agent as any).learning_enabled) {
+        return res.status(400).json({ error: "Agent introuvable, inactif, ou capacité d'apprentissage non activée pour ce cabinet." });
+      }
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('agent_learning_suggestions').insert({
+        id, tenant_id: tenantId, agent_id: (agent as any).id, kind,
+        title: String(title).trim().slice(0, 200), content: String(content).trim().slice(0, 4000),
+        suggested_capability: suggested_capability || null, status: 'pending',
+      });
+      if (error) throw error;
+      res.status(201).json({ id, status: 'pending' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/agent-learning-suggestions/:id — { action: 'approve' | 'reject' }
+  app.put('/api/agent-learning-suggestions/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const action = String(req.body?.action || '');
+      if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: "action doit être 'approve' ou 'reject'." });
+      const { data: existing } = await supabaseAdmin.from('agent_learning_suggestions').select('id, status').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Proposition introuvable.' });
+      if ((existing as any).status !== 'pending') return res.status(409).json({ error: 'Cette proposition a déjà été traitée.' });
+      const { data, error } = await supabaseAdmin.from('agent_learning_suggestions').update({
+        status: action === 'approve' ? 'approved' : 'rejected',
+        reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+      }).eq('id', id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -571,7 +653,7 @@ export function registerAgentRoutes(
       // chaque appel de timedChat() plus bas.
       const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
 
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge, caps.learning);
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, webSearchActive);
 

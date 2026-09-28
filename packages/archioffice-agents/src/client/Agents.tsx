@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconRobot, IconMessageCircle, IconPencil, IconPlus, IconCheck, IconBell } from '@tabler/icons-react';
+import { IconRobot, IconMessageCircle, IconPencil, IconPlus, IconCheck, IconBell, IconBulb } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
 import { useUser } from '@/src/UserContext';
 import type { Agent } from '../types.js';
@@ -162,6 +162,13 @@ export default function Agents() {
             style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
           >
             <IconBell size={14} /> {t('agent_alerts_title')}
+          </Link>
+          <Link
+            to="/agents/apprentissage"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px]"
+            style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
+          >
+            <IconBulb size={14} /> {t('agent_learning_title')}
           </Link>
         {tokenBalance !== null && (
           <div

@@ -255,6 +255,13 @@ export interface AgentCapabilities {
    *  sont auto-injectés à chaque tour, comme firm_knowledge — pas de tool à
    *  appeler, pas de condition de context_scopes (voir buildAgentContext). */
   knowledge: boolean;
+  /** suggerer_amelioration — l'agent peut proposer une correction à retenir,
+   *  signaler une capacité qui lui manque, ou rédiger une note pour sa propre
+   *  bibliothèque de connaissances. Toujours une PROPOSITION en attente
+   *  (agent_learning_suggestions, statut 'pending') : rien ne s'applique tout
+   *  seul, l'architecte valide depuis /agents/learning. Off par défaut et
+   *  jamais héritée d'un template, comme knowledge_enabled. */
+  learning: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -270,6 +277,7 @@ export function capabilitiesFromAgent(agent: {
   notify_users_enabled?: boolean | null;
   web_search_enabled?: boolean | null;
   knowledge_enabled?: boolean | null;
+  learning_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -292,6 +300,7 @@ export function capabilitiesFromAgent(agent: {
     notifyUsers: !!agent.notify_users_enabled,
     webSearch: !!agent.web_search_enabled,
     knowledge: !!agent.knowledge_enabled,
+    learning: !!agent.learning_enabled,
   };
 }
 
@@ -319,6 +328,7 @@ export interface Agent {
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
   knowledge_enabled: boolean;
+  learning_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -399,6 +409,7 @@ export interface AgentRow {
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
   knowledge_enabled: boolean;
+  learning_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
@@ -456,4 +467,12 @@ export interface AgentContext {
    * Auto-injecté à chaque tour comme firmKnowledge, jamais via un tool.
    */
   knowledgeDocuments: { title: string; excerpt: string }[];
+  /**
+   * Corrections et notes APPROUVÉES par l'architecte (agent_learning_suggestions,
+   * statut 'approved', kind 'correction'/'knowledge_note') — la mémoire
+   * d'apprentissage de cet agent. Comme knowledgeDocuments : auto-injectée à
+   * chaque tour, jamais via un tool, jamais tant qu'une proposition reste
+   * 'pending'. Voir capabilities.learning et migrate_agent_learning.sql.
+   */
+  learningNotes: { kind: 'correction' | 'knowledge_note'; title: string; content: string }[];
 }
