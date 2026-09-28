@@ -330,6 +330,7 @@ export default function Settings() {
     numAffaireSepPrefix: true,
     numAffaireSepSeq: true,
     numAffaireDigits: 3,
+    invoicePaymentTermsDays: 30,
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -2555,6 +2556,34 @@ export default function Settings() {
               numPrefixHonoraires: settings.numPrefixHonoraires, numPrefixAffaire: settings.numPrefixAffaire,
               numAffaireSepPrefix: settings.numAffaireSepPrefix, numAffaireSepSeq: settings.numAffaireSepSeq,
               numAffaireDigits: settings.numAffaireDigits,
+            }))}
+          </div>
+
+          {/* ── Facturation : délai de paiement par défaut ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facturation — Délai de paiement</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Nombre de jours ajoutés à la date d'émission pour calculer la date d'échéance d'une facture
+                quand elle n'est pas saisie à la main (facture créée depuis une note d'honoraires, par exemple).
+                Ce même délai part avec la facture vers Zoho Invoice, Zoho Books ou Odoo si un connecteur comptable
+                est actif.
+              </p>
+            </div>
+            <div className="max-w-xs">
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai de paiement (jours)</label>
+              <input
+                type="number"
+                min={0}
+                max={365}
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={settings.invoicePaymentTermsDays ?? 30}
+                onChange={e => setSettings({ ...settings, invoicePaymentTermsDays: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </div>
+            {renderSaveButton('invoicePaymentTerms', () => saveSection('invoicePaymentTerms', {
+              invoicePaymentTermsDays: settings.invoicePaymentTermsDays,
             }))}
           </div>
 

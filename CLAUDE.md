@@ -247,6 +247,37 @@ unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
 cabinet de porter le même numéro, quelle que soit la cause (course locale,
 numéro fourni par un client, import).
 
+### Délai de paiement et date d'échéance
+
+Une facture sans date d'échéance explicite (typiquement la facture brouillon
+générée depuis une note d'honoraires, `POST /api/notes_honoraires/:id/
+facture`) était insérée avec `due_date: null` — affiché à l'écran comme
+« 01/01/1970 » (`new Date(null)` vaut l'epoch, que `toLocaleDateString` formate
+sans se plaindre plutôt que d'échouer).
+
+`settings.invoice_payment_terms_days` (`supabase/migrate_invoice_payment_terms.sql`,
+réglable depuis `/settings` → Cabinet, « Facturation — Délai de paiement »,
+NULL valant 30 jours) fixe désormais le nombre de jours ajoutés à la date
+d'émission pour calculer l'échéance chaque fois qu'elle n'est pas fournie
+explicitement — `server/invoiceDueDate.ts::computeInvoiceDueDate()`, appelé
+par `POST /api/invoices` et `POST /api/notes_honoraires/:id/facture`. Une
+échéance explicitement fournie par l'appelant continue de gagner : ce réglage
+ne fait que combler l'absence, jamais l'écraser.
+
+**Se synchronise avec Zoho et Odoo sans code supplémentaire.** Les trois
+connecteurs (`pushInvoiceToZohoInvoice`/`Books`, `pushInvoiceToOdoo`) lisent
+déjà `invoices.due_date` de la ligne locale au moment du push — l'échéance
+calculée à la création part donc avec la facture dès le premier envoi, sans
+notion de délai de paiement à répliquer côté connecteur.
+
+Les écrans qui affichaient `new Date(invoice.due_date).toLocaleDateString()`
+sans garde (`Invoices.tsx`, `InvoiceGenerator.tsx`) sont corrigés pour rendre
+« --- » plutôt que l'epoch sur une facture antérieure à ce changement, dont
+`due_date` reste `null` tant qu'elle n'est pas rouverte et resauvegardée. Le
+formulaire de création de facture et `InvoiceGenerator` préremplissent
+désormais l'échéance par défaut à partir de ce même réglage plutôt que 14 ou
+30 jours codés en dur.
+
 ### Le Maître d'Ouvrage d'une facture (`invoices.client_id`)
 
 Jusqu'ici `invoices` n'avait aucun lien vers `contacts` : le « client » d'une
