@@ -134,11 +134,11 @@ export function ProjectOverview({
   const observationsField: 'etudes_notes' | 'chantier_notes' = isChantierPhase ? 'chantier_notes' : 'etudes_notes';
 
   return (
-    <div className="flex flex-col lg:h-full lg:flex-row overflow-visible lg:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
+    <div className="flex flex-col xl:h-full xl:flex-row overflow-visible xl:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
 
       {/* ── Column A — identity / admin ───────────────────────────── */}
       <div
-        className="w-full lg:w-[280px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        className="w-full xl:w-[280px] xl:shrink-0 border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="flex items-start gap-3 mb-3">
@@ -226,7 +226,7 @@ export function ProjectOverview({
 
       {/* ── Column B — historique ──────────────────────────────────── */}
       <div
-        className="w-full lg:w-[320px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        className="w-full xl:w-[320px] xl:shrink-0 border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="font-bold text-[0.9375rem] mb-3" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_history_title')}</div>
@@ -259,7 +259,7 @@ export function ProjectOverview({
 
       {/* ── Column C — note de phase ───────────────────────────────── */}
       <div
-        className="w-full lg:flex-1 lg:min-w-[380px] border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4 lg:p-6"
+        className="w-full xl:flex-1 xl:min-w-[380px] border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4 xl:p-6"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="font-bold text-base mb-4" style={{ color: 'var(--tblr-text)' }}>
@@ -335,7 +335,7 @@ export function ProjectOverview({
       </div>
 
       {/* ── Column D — plan d'actions ──────────────────────────────── */}
-      <div className="w-full lg:w-[260px] lg:shrink-0 overflow-visible lg:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
+      <div className="w-full xl:w-[260px] xl:shrink-0 overflow-visible xl:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
         <div className="font-bold text-[0.9375rem] mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
           <button

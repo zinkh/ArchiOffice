@@ -380,14 +380,38 @@ export default function Reunions() {
   const [exportingDocx, setExportingDocx] = useState(false);
 
   useEffect(() => {
+    // Hors ligne : réaffiche d'abord ce que src/db.ts a déjà en cache
+    // (rempli par cette page ou par /projects, /propositions,
+    // /appels-offres lors d'une précédente visite en ligne) — sans ça, les
+    // trois colonnes de gauche restent vides hors connexion et il devient
+    // impossible de rattacher une nouvelle réunion à une affaire.
+    (async () => {
+      try {
+        const [localProjects, localProposals, localTenders] = await Promise.all([
+          db.projects.toArray(),
+          db.proposals.toArray(),
+          db.tenders.toArray(),
+        ]);
+        if (localProjects.length > 0) setProjects(localProjects.filter(p => p.status !== 'Completed'));
+        if (localProposals.length > 0) setProposals(localProposals);
+        if (localTenders.length > 0) setTenders(localTenders);
+      } catch {
+        // IndexedDB indisponible (navigation privée, quota…) — pas de cache,
+        // on retombe simplement sur le réseau ci-dessous.
+      }
+    })();
+
     apiFetch<Project[]>('/api/projects').then(data => {
       setProjects(data.filter(p => p.status !== 'Completed'));
+      db.projects.clear().then(() => db.projects.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<Proposal[]>('/api/proposals').then(data => {
       setProposals(data);
+      db.proposals.clear().then(() => db.proposals.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any[]>('/api/tenders').then(data => {
       setTenders(data);
+      db.tenders.clear().then(() => db.tenders.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any>('/api/settings').then(s => {
       setAgencySettings({
@@ -699,8 +723,8 @@ export default function Reunions() {
   const ProjectsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
+      lg:w-72 lg:flex-shrink-0 lg:border-r
+      ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden lg:flex'}
     `} style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
       <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="relative">
@@ -852,11 +876,11 @@ export default function Reunions() {
   const MeetingsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
+      lg:w-72 lg:flex-shrink-0 lg:border-r
+      ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden lg:flex'}
     `} style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
       {/* Mobile back button */}
-      <div className="md:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+      <div className="lg:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
         <button
           onClick={() => setMobileView('projects')}
           className="flex items-center gap-1 text-xs font-medium"
@@ -1002,7 +1026,7 @@ export default function Reunions() {
           <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
           <button
             onClick={() => setMobileView('projects')}
-            className="md:hidden hover:underline mt-1"
+            className="lg:hidden hover:underline mt-1"
             style={{ color: 'var(--tblr-primary)' }}
           >
             ← Retour
@@ -1017,11 +1041,11 @@ export default function Reunions() {
   const DetailPanel = (
     <div className={`
       flex-1 overflow-y-auto
-      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden md:block'}
+      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden lg:block'}
     `} style={{ background: 'var(--tblr-surface)' }}>
       {/* Mobile back button */}
       {mobileView === 'detail' && (
-        <div className="md:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+        <div className="lg:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
           <button
             onClick={() => setMobileView('meetings')}
             className="flex items-center gap-1 text-xs font-medium"
