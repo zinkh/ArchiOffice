@@ -19,16 +19,19 @@ Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](
 
 ## Screenshots
 
-<!--
-  TODO: Add screenshots or a short demo GIF here once you have a running
-  instance with sample data. Recommended shots: the Dashboard, a Project
-  detail view (Gantt/Kanban), a CCTP/DPGF editor, and the Invoices list.
-  Drop image files under docs/screenshots/ and reference them below, e.g.:
+**Dashboard**: collected revenue, overdue invoices, 12-month billing, projects by status and category.
 
-  ![Dashboard](docs/screenshots/dashboard.png)
-  ![Project Gantt view](docs/screenshots/gantt.png)
--->
-*Screenshots coming soon — see the TODO above if you'd like to contribute some from a running instance.*
+![ArchiOffice dashboard](docs/screenshots/dashboard.webp)
+
+**Sign-up**: create your practice with a 14-day free trial, no credit card required.
+
+![Create your practice](docs/screenshots/register.webp)
+
+**Design mockups**: explorations for the dashboard and the projects view (sample data; the name shown on these mockups is a working title).
+
+![Dashboard mockup](docs/screenshots/mockup-dashboard.webp)
+
+![Projects mockup](docs/screenshots/mockup-projects.webp)
 
 ## Tech stack
 
