@@ -250,7 +250,8 @@ export default function TimeTracking() {
         </div>
       ) : tab === 'team' ? (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
               <tr><th className="text-left p-3">{t('time_tracking_team_name')}</th><th className="text-left p-3">{t('time_tracking_team_hours')}</th></tr>
             </thead>
@@ -263,6 +264,7 @@ export default function TimeTracking() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <div className="space-y-6">

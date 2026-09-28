@@ -299,7 +299,8 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
               <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_empty')}</p>
             ) : (
               <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
-                <table className="w-full text-xs">
+                <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
                   <thead>
                     <tr style={{ background: 'var(--tblr-surface-2)' }}>
                       <th className="px-3 py-2 text-left font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_name')}</th>
@@ -329,6 +330,7 @@ function RefModal({ initial, onSave, onClose, contacts, categories, team, onCont
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
           </div>
@@ -626,7 +628,8 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
                 <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{t('references_import_total', { count: dataRows.length })}</span>
               </p>
               <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
                   <thead>
                     <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>Champ ArchiOffice</th>
@@ -659,6 +662,7 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
               {error && <p className="text-sm text-red-500">{error}</p>}
             </div>
@@ -813,7 +817,8 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
             <IconUsers size={12} /> {t('references_cotraitants_title')}
           </h4>
           <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
               <thead>
                 <tr style={{ background: 'var(--tblr-surface-2)' }}>
                   <th className="px-2.5 py-1.5 text-left font-semibold uppercase" style={{ color: 'var(--tblr-muted)' }}>{t('references_cotraitants_name')}</th>
@@ -831,6 +836,7 @@ function ReferenceDetailContent({ item, full }: { item: RefItem; full: CustomRef
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
