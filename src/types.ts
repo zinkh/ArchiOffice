@@ -665,6 +665,8 @@ export interface Tender {
   // seulement sur le même lot/la même spécialité), ou absente (aucune
   // exigence). Onglet Partenaires.
   exclusivite?: 'totale' | 'partielle' | null;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 // Une sollicitation d'un bureau d'études pour une spécialité donnée — onglet
@@ -1091,6 +1093,8 @@ export interface Proposal {
   comp_fee_percent?: number;
   vat_rate?: number;
   decimal_precision?: number;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Invoice {

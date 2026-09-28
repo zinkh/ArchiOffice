@@ -371,6 +371,15 @@ export default function Reunions() {
   const [creatingMeeting, setCreatingMeeting] = useState(false);
   const [createError, setCreateError] = useState('');
 
+  // Créer une proposition ou un appel d'offres à la volée, y compris hors
+  // ligne — pour une visite de candidature ou de proposition, l'affaire
+  // n'existe souvent pas encore dans ArchiOffice au moment de la visite.
+  // Un titre suffit : le reste se complète plus tard, en ligne, depuis
+  // /propositions ou /appels-offres.
+  const [newParentKind, setNewParentKind] = useState<null | 'proposal' | 'tender'>(null);
+  const [newParentTitle, setNewParentTitle] = useState('');
+  const [creatingParent, setCreatingParent] = useState(false);
+
   const [editingCaption, setEditingCaption] = useState<string | null>(null);
   const [captionValue, setCaptionValue] = useState('');
   const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
@@ -380,14 +389,38 @@ export default function Reunions() {
   const [exportingDocx, setExportingDocx] = useState(false);
 
   useEffect(() => {
+    // Hors ligne : réaffiche d'abord ce que src/db.ts a déjà en cache
+    // (rempli par cette page ou par /projects, /propositions,
+    // /appels-offres lors d'une précédente visite en ligne) — sans ça, les
+    // trois colonnes de gauche restent vides hors connexion et il devient
+    // impossible de rattacher une nouvelle réunion à une affaire.
+    (async () => {
+      try {
+        const [localProjects, localProposals, localTenders] = await Promise.all([
+          db.projects.toArray(),
+          db.proposals.toArray(),
+          db.tenders.toArray(),
+        ]);
+        if (localProjects.length > 0) setProjects(localProjects.filter(p => p.status !== 'Completed'));
+        if (localProposals.length > 0) setProposals(localProposals);
+        if (localTenders.length > 0) setTenders(localTenders);
+      } catch {
+        // IndexedDB indisponible (navigation privée, quota…) — pas de cache,
+        // on retombe simplement sur le réseau ci-dessous.
+      }
+    })();
+
     apiFetch<Project[]>('/api/projects').then(data => {
       setProjects(data.filter(p => p.status !== 'Completed'));
+      db.projects.clear().then(() => db.projects.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<Proposal[]>('/api/proposals').then(data => {
       setProposals(data);
+      db.proposals.clear().then(() => db.proposals.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any[]>('/api/tenders').then(data => {
       setTenders(data);
+      db.tenders.clear().then(() => db.tenders.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any>('/api/settings').then(s => {
       setAgencySettings({
@@ -454,6 +487,46 @@ export default function Reunions() {
     loadMeetings('tender', tender.id);
     setShowNewMeeting(false);
     setMobileView('meetings');
+  };
+
+  // Crée une proposition ou un appel d'offres minimal (un titre suffit) et le
+  // sélectionne aussitôt, pour pouvoir y accrocher une réunion de visite dans
+  // la foulée. Id généré côté client (voir src/lib/offlineQueue.ts) : hors
+  // ligne, la création est mise en file et la réunion créée juste après peut
+  // référencer cet id immédiatement, sans attendre le retour du réseau —
+  // POST /api/tenders accepte désormais cet id tel quel, comme le fait déjà
+  // POST /api/proposals (server/routes/tenders.ts).
+  const createParent = async () => {
+    const kind = newParentKind;
+    const title = newParentTitle.trim();
+    if (!kind || !title || creatingParent) return;
+    const id = crypto.randomUUID();
+    setCreatingParent(true);
+    try {
+      if (kind === 'proposal') {
+        const body = { id, title, status: 'Draft' as const };
+        const { queued, data } = await queuedJsonRequest<Proposal>({ entity: 'proposal', id, method: 'POST', url: '/api/proposals', body });
+        const proposal: Proposal = queued
+          ? { ...body, client_id: '', amount: 0, description: '', created_at: new Date().toISOString(), pendingSync: true }
+          : data!;
+        setProposals(prev => [proposal, ...prev]);
+        db.proposals.put(proposal).catch(() => {});
+        selectProposal(proposal);
+      } else {
+        const body = { id, title, client: '', submission_deadline: '', status: 'Draft' as const };
+        const { queued, data } = await queuedJsonRequest<Tender>({ entity: 'tender', id, method: 'POST', url: '/api/tenders', body });
+        const tender: Tender = queued
+          ? { ...body, value: 0, notes: '', pendingSync: true }
+          : data!;
+        setTenders(prev => [tender, ...prev]);
+        db.tenders.put(tender).catch(() => {});
+        selectTender(tender);
+      }
+      setNewParentKind(null);
+      setNewParentTitle('');
+    } finally {
+      setCreatingParent(false);
+    }
   };
 
   // Lien direct depuis un agent (?parent=project:<id>|proposal:<id>|tender:<id>
@@ -556,9 +629,16 @@ export default function Reunions() {
   useEffect(() => {
     const onSynced = (e: Event) => {
       const { id, entity } = (e as CustomEvent).detail || {};
-      if (entity !== 'meeting') return;
-      setMeetings(prev => prev.map(m => m.id === id ? { ...m, pendingSync: false } : m));
-      setSelectedMeeting(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      if (entity === 'meeting') {
+        setMeetings(prev => prev.map(m => m.id === id ? { ...m, pendingSync: false } : m));
+        setSelectedMeeting(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      } else if (entity === 'proposal') {
+        setProposals(prev => prev.map(p => p.id === id ? { ...p, pendingSync: false } : p));
+        setSelectedProposal(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      } else if (entity === 'tender') {
+        setTenders(prev => prev.map(t => t.id === id ? { ...t, pendingSync: false } : t));
+        setSelectedTender(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      }
     };
     window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
     return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
@@ -699,8 +779,8 @@ export default function Reunions() {
   const ProjectsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
+      lg:w-72 lg:flex-shrink-0 lg:border-r
+      ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden lg:flex'}
     `} style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
       <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="relative">
@@ -759,20 +839,65 @@ export default function Reunions() {
 
         {/* ── Propositions section ── */}
         <div>
-          <button
-            onClick={() => toggleTopSection('proposals')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
-            style={{ color: 'var(--tblr-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
-          >
-            {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-            <IconBriefcase size={14} />
-            Propositions
-          </button>
+          <div className="flex items-center gap-0.5 pr-1.5">
+            <button
+              onClick={() => toggleTopSection('proposals')}
+              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+              <IconBriefcase size={14} />
+              Propositions
+            </button>
+            <button
+              type="button"
+              onClick={() => { setNewParentKind('proposal'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, proposals: true })); }}
+              className="flex-shrink-0 p-1 rounded transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              title="Nouvelle proposition"
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              <IconPlus size={14} />
+            </button>
+          </div>
           {expandedTopSections.proposals && (
             <div className="pl-2 pb-1">
-              {filteredProposals().length === 0 ? (
+              {newParentKind === 'proposal' && (
+                <div className="mx-2 mb-1.5 p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)' }}>
+                  <input
+                    type="text"
+                    placeholder="Titre de la proposition"
+                    value={newParentTitle}
+                    onChange={e => setNewParentTitle(e.target.value)}
+                    autoFocus
+                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    onKeyDown={e => e.key === 'Enter' && createParent()}
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={createParent}
+                      disabled={creatingParent || !newParentTitle.trim()}
+                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                    >
+                      {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                      Créer
+                    </button>
+                    <button
+                      onClick={() => setNewParentKind(null)}
+                      className="px-2 py-1 text-xs rounded transition-colors"
+                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {filteredProposals().length === 0 && newParentKind !== 'proposal' ? (
                 <p className="px-4 py-1.5 text-[0.8125rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
               ) : (
                 filteredProposals().map(proposal => {
@@ -788,7 +913,10 @@ export default function Reunions() {
                       onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
-                      <div className="truncate font-medium">{proposal.title}</div>
+                      <div className="truncate font-medium flex items-center gap-1.5">
+                        {proposal.title}
+                        {proposal.pendingSync && <span className="text-[0.5625rem] px-1 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--tblr-warning-lt)', color: 'var(--tblr-warning)' }}>en attente</span>}
+                      </div>
                       <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
                     </button>
                   );
@@ -800,20 +928,65 @@ export default function Reunions() {
 
         {/* ── Appels d'offres section ── */}
         <div>
-          <button
-            onClick={() => toggleTopSection('tenders')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
-            style={{ color: 'var(--tblr-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
-          >
-            {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-            <IconClipboardList size={14} />
-            Appels d'offres
-          </button>
+          <div className="flex items-center gap-0.5 pr-1.5">
+            <button
+              onClick={() => toggleTopSection('tenders')}
+              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+              <IconClipboardList size={14} />
+              Appels d'offres
+            </button>
+            <button
+              type="button"
+              onClick={() => { setNewParentKind('tender'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, tenders: true })); }}
+              className="flex-shrink-0 p-1 rounded transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              title="Nouvel appel d'offres"
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              <IconPlus size={14} />
+            </button>
+          </div>
           {expandedTopSections.tenders && (
             <div className="pl-2 pb-1">
-              {filteredTenders().length === 0 ? (
+              {newParentKind === 'tender' && (
+                <div className="mx-2 mb-1.5 p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)' }}>
+                  <input
+                    type="text"
+                    placeholder="Titre de l'appel d'offres"
+                    value={newParentTitle}
+                    onChange={e => setNewParentTitle(e.target.value)}
+                    autoFocus
+                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    onKeyDown={e => e.key === 'Enter' && createParent()}
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={createParent}
+                      disabled={creatingParent || !newParentTitle.trim()}
+                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                    >
+                      {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                      Créer
+                    </button>
+                    <button
+                      onClick={() => setNewParentKind(null)}
+                      className="px-2 py-1 text-xs rounded transition-colors"
+                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {filteredTenders().length === 0 && newParentKind !== 'tender' ? (
                 <p className="px-4 py-1.5 text-[0.8125rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
               ) : (
                 filteredTenders().map(tender => {
@@ -829,7 +1002,10 @@ export default function Reunions() {
                       onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
-                      <div className="truncate font-medium">{tender.title}</div>
+                      <div className="truncate font-medium flex items-center gap-1.5">
+                        {tender.title}
+                        {tender.pendingSync && <span className="text-[0.5625rem] px-1 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--tblr-warning-lt)', color: 'var(--tblr-warning)' }}>en attente</span>}
+                      </div>
                       <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
                     </button>
                   );
@@ -852,11 +1028,11 @@ export default function Reunions() {
   const MeetingsPanel = (
     <div className={`
       flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
+      lg:w-72 lg:flex-shrink-0 lg:border-r
+      ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden lg:flex'}
     `} style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
       {/* Mobile back button */}
-      <div className="md:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+      <div className="lg:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
         <button
           onClick={() => setMobileView('projects')}
           className="flex items-center gap-1 text-xs font-medium"
@@ -1002,7 +1178,7 @@ export default function Reunions() {
           <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
           <button
             onClick={() => setMobileView('projects')}
-            className="md:hidden hover:underline mt-1"
+            className="lg:hidden hover:underline mt-1"
             style={{ color: 'var(--tblr-primary)' }}
           >
             ← Retour
@@ -1017,11 +1193,11 @@ export default function Reunions() {
   const DetailPanel = (
     <div className={`
       flex-1 overflow-y-auto
-      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden md:block'}
+      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden lg:block'}
     `} style={{ background: 'var(--tblr-surface)' }}>
       {/* Mobile back button */}
       {mobileView === 'detail' && (
-        <div className="md:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+        <div className="lg:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
           <button
             onClick={() => setMobileView('meetings')}
             className="flex items-center gap-1 text-xs font-medium"
