@@ -10,6 +10,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos } from '../reservePhotos';
 import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 /** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
 async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
@@ -215,6 +216,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       // Log activity
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.created', { id, name, project_code, client, status: status || 'Planning' });
 
       res.status(201).json({ id, project_code });
     } catch (error: any) {

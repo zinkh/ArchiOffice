@@ -9,6 +9,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -87,6 +88,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'meeting.created', { id, project_id, title, date, type: meetingType });
       res.status(201).json({ id, project_id, proposal_id, tender_id, type: meetingType, title, date, notes, created_at, photos: [] });
     } catch (e: any) {
       console.error("[POST /api/meetings]", e); res.status(500).json({ error: e.message }); }

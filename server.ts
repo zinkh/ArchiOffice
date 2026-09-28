@@ -9,6 +9,7 @@ import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerTelegramRoutes } from "./server/routes/telegram";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
+import { resolveAutomationApiKey } from "./server/automationApiKeys";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -96,6 +97,8 @@ import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { registerAutomationApiKeyRoutes } from "./server/routes/automationApiKeys";
+import { registerWebhookRoutes } from "./server/routes/webhooks";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
 import { registerStorageProviders } from "./server/externalStorage/providers";
 import { parseExternalRef } from "./server/externalStorage/externalRef";
@@ -804,6 +807,18 @@ export async function createApp() {
           return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
         }
       }
+      // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
+      // server/automationApiKeys.ts. Liaison persistante et révocable comme
+      // tg_at_, pas à usage unique comme mail_at_ : un scénario n8n rappelle
+      // la même clé à chaque exécution.
+      if (token.startsWith('auto_at_')) {
+        const resolved = await resolveAutomationApiKey(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
       return res.status(401).json({ error: "Token invalide" });
     }
     req.user = user;
@@ -1039,6 +1054,8 @@ export async function createApp() {
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
   registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerAutomationApiKeyRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerWebhookRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });

@@ -5,6 +5,7 @@
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos, deleteReservePhotos } from '../reservePhotos';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -84,8 +85,16 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
       if (plan_id && !(await assertTenantEntity(supabaseAdmin, 'plans', plan_id, tenantId))) {
         return res.status(400).json({ error: "Plan introuvable pour ce cabinet." });
       }
+      const { data: existingReserve } = await supabaseAdmin.from('reserves').select('status, project_id, number')
+        .eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
       const { error } = await supabaseAdmin.from('reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null }).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;
+      const wasClosed = existingReserve && ['Levée', 'Quitus Transmis'].includes((existingReserve as any).status);
+      if (!wasClosed && status && ['Levée', 'Quitus Transmis'].includes(status)) {
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'reserve.resolved', {
+          id: req.params.id, title, status, project_id: (existingReserve as any)?.project_id ?? null, number: (existingReserve as any)?.number ?? null,
+        });
+      }
       res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
   });

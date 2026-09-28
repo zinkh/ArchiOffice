@@ -8,6 +8,7 @@ import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -176,6 +177,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         } catch (err) {
           console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.accepted', { id, title: p.title, amount: p.amount, client_id: p.client_id || null, project_id: projectId });
+      } else if (p.status === 'Rejected' && oldProposal?.status !== 'Rejected') {
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.declined', { id, title: p.title, amount: p.amount, client_id: p.client_id || null });
       }
 
       const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).eq('tenant_id', tenantId).single();
