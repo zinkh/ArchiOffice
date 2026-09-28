@@ -11,6 +11,7 @@ import { invoiceSchema } from '../../src/schemas/invoice.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoiceAccountingSync';
 import { loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
+import { computeInvoiceDueDate, resolveInvoicePaymentTermsDays } from '../invoiceDueDate';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -156,11 +157,18 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const finalAffaireInvoiceNumber = affaire_invoice_number
         || (invoice_type === 'acompte' && project_id ? await getNextAffaireInvoiceNumber(tenantId, project_id) : null);
 
+      const finalIssueDate = issue_date || created_at.split('T')[0];
+      // Une échéance non fournie n'est plus laissée à null (affiché comme
+      // "01/01/1970" côté écran, new Date(null) → epoch 0) : elle se déduit
+      // du délai de paiement réglé pour le cabinet (settings.invoice_
+      // payment_terms_days, /settings → Cabinet), 30 jours par défaut.
+      const finalDueDate = due_date || computeInvoiceDueDate(finalIssueDate, await resolveInvoicePaymentTermsDays(supabaseAdmin, tenantId));
+
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
         id, tenant_id: tenantId, invoice_number: finalInvoiceNumber, project_id, client_id: finalClientId,
         amount: amount || 0, tax_amount: tax_amount || 0, total_amount: total_amount || 0,
-        status: finalStatus, due_date: due_date || null,
-        issue_date: issue_date || created_at.split('T')[0], description: description || '', created_at,
+        status: finalStatus, due_date: finalDueDate,
+        issue_date: finalIssueDate, description: description || '', created_at,
         seller_name: finalSellerName || null, seller_address: finalSellerAddress || null,
         seller_siret: finalSellerSiret || null, seller_vat_number: finalSellerVatNumber || null,
         seller_iban: finalSellerIban || null, seller_bic: finalSellerBic || null, vat_rate: vat_rate || 20,
@@ -198,7 +206,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         accountingSyncResult = await syncInvoiceToAccounting(supabaseAdmin, tenantId, id, accountingProvider, {
           project_id, client_id: finalClientId, project_name: pushProjectName,
           project_code: pushProjectCode, project_address: pushProjectAddress, description,
-          issue_date: issue_date || created_at.split('T')[0], due_date, amount, vat_rate, items: items || [],
+          issue_date: finalIssueDate, due_date: finalDueDate, amount, vat_rate, items: items || [],
         });
       }
 

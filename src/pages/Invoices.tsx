@@ -19,6 +19,16 @@ import { usePagination } from '../hooks/usePagination';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { isClientContact } from '../lib/contactCategories';
 
+// Une facture sans échéance (avant que le délai de paiement par défaut du
+// cabinet ne s'applique systématiquement côté serveur, voir server/
+// invoiceDueDate.ts) affichait "01/01/1970" : new Date(null) vaut l'epoch,
+// que toLocaleDateString formate sans se plaindre.
+const formatDueDate = (dueDate: string | null | undefined): string => {
+  if (!dueDate) return '---';
+  const d = new Date(dueDate);
+  return Number.isNaN(d.getTime()) ? '---' : d.toLocaleDateString('fr-FR');
+};
+
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
   { id: 'aps',      name: 'A.P.S.',         default_pct: 12 },
@@ -242,13 +252,19 @@ export default function Invoices() {
   const [sendAttachments, setSendAttachments] = useState<EmailAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+  // réglable depuis /settings → Cabinet) : sert à préremplir l'échéance d'une
+  // nouvelle facture tant qu'elle n'a pas été chargée, 30 jours étant la même
+  // valeur par défaut que côté serveur (server/invoiceDueDate.ts).
+  const [paymentTermsDays, setPaymentTermsDays] = useState(30);
+  const defaultDueDate = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
     project_id: '',
     amount: 0,
     description: '',
     status: 'Draft',
     invoice_type: 'standard',
-    due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    due_date: defaultDueDate(30)
   });
 
   useEffect(() => {
@@ -268,6 +284,9 @@ export default function Invoices() {
         setProjects(projectsData);
         setContacts(contactsData);
         if (settingsData?.currency) setCurrency(settingsData.currency);
+        if (Number.isFinite(settingsData?.invoicePaymentTermsDays) && settingsData.invoicePaymentTermsDays >= 0) {
+          setPaymentTermsDays(settingsData.invoicePaymentTermsDays);
+        }
       } catch (err) {
         console.error('Invoices data fetch failed:', err);
       }
@@ -441,12 +460,12 @@ export default function Invoices() {
       missions: missionLine,
       montant_ht: formatCurrency(invoice.amount, currency),
       montant_ttc: formatCurrency(invoice.total_amount ?? invoice.amount, currency),
-      echeance: new Date(invoice.due_date).toLocaleDateString('fr-FR'),
+      echeance: formatDueDate(invoice.due_date),
     };
     // Fallback text if the tenant's "invoice" email template can't be fetched —
     // exactly what this modal always sent before templates existed.
     const fallbackSubject = `${typeFacture} N° ${invoice.invoice_number}${affaireRef} – ${projetNom}`;
-    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
+    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${formatDueDate(invoice.due_date)}\n\nCordialement`;
     setSendingInvoice(invoice);
     setSendForm({ to: clientEmail, subject: fallbackSubject, message: fallbackMessage });
     setSendAttachments([]);
@@ -534,7 +553,7 @@ export default function Invoices() {
         description: '',
         status: 'Draft',
         invoice_type: 'standard',
-        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        due_date: defaultDueDate(paymentTermsDays)
       });
     } catch (err) {
       console.error('Create invoice failed:', err);
@@ -673,7 +692,7 @@ export default function Invoices() {
             </button>
           )}
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { setNewInvoice(inv => ({ ...inv, due_date: defaultDueDate(paymentTermsDays) })); setIsModalOpen(true); }}
             className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
@@ -892,7 +911,7 @@ export default function Invoices() {
                         <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                           <div className="flex items-center gap-1.5">
                             <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                            {new Date(invoice.due_date).toLocaleDateString()}
+                            {formatDueDate(invoice.due_date)}
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -1037,7 +1056,7 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                       <div className="flex items-center gap-1.5">
                         <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                        {new Date(invoice.due_date).toLocaleDateString()}
+                        {formatDueDate(invoice.due_date)}
                       </div>
                     </td>
                     <td className="px-6 py-4">

@@ -62,7 +62,14 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             seller_vat_number: settings.vatNumber || prev.seller_vat_number,
             seller_iban: settings.seller_iban || prev.seller_iban,
             seller_bic: settings.seller_bic || prev.seller_bic,
-            currency: settings.currency || prev.currency
+            currency: settings.currency || prev.currency,
+            // Le délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+            // réglable depuis /settings → Cabinet) ne doit remplacer l'échéance
+            // pré-remplie que pour une facture NOUVELLE — une facture existante
+            // rouverte pour édition (initialData.due_date déjà posé) garde la sienne.
+            due_date: !initialData?.due_date && Number.isFinite(settings.invoicePaymentTermsDays) && settings.invoicePaymentTermsDays >= 0
+              ? new Date(Date.now() + settings.invoicePaymentTermsDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+              : prev.due_date
           }));
           if (settings.logoUrl) setLogoUrl(settings.logoUrl);
         }
@@ -415,7 +422,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <span className="text-zinc-500">BIC :</span>
                     <span className="font-mono">{data.seller_bic}</span>
                     <span className="text-zinc-500">Échéance :</span>
-                    <span className="font-bold">{new Date(data.due_date || '').toLocaleDateString('fr-FR')}</span>
+                    <span className="font-bold">{data.due_date ? new Date(data.due_date).toLocaleDateString('fr-FR') : '---'}</span>
                   </div>
                 </div>
 
