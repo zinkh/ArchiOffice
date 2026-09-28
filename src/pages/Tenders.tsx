@@ -465,7 +465,7 @@ export default function Tenders() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table className="min-w-full text-left text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>
@@ -622,7 +622,7 @@ export default function Tenders() {
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
           >
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                     <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>

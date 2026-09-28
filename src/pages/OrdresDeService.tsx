@@ -458,7 +458,7 @@ export default function OrdresDeService() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="min-w-full text-left border-collapse">
               <thead>
                 <tr className="text-[0.6875rem] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
                   <th className="px-4 py-3">N° OS</th>

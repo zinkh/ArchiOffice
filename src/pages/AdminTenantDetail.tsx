@@ -308,7 +308,7 @@ export default function AdminTenantDetail() {
           }
         >
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.members.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun membre</td></tr>
@@ -349,7 +349,7 @@ export default function AdminTenantDetail() {
         {/* Recent projects */}
         <Card title="Projets récents" icon={<IconBuildingSkyscraper size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.recent_projects.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</td></tr>
@@ -369,7 +369,7 @@ export default function AdminTenantDetail() {
         {/* Billing history */}
         <Card title="Historique de paiement" icon={<IconReceipt size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.billing_events.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun événement de paiement</td></tr>
@@ -394,7 +394,7 @@ export default function AdminTenantDetail() {
         {/* Support tickets */}
         <Card title={`Tickets support (${tickets.length})`} icon={<IconMessageCircle size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tickets.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun ticket</td></tr>
@@ -416,7 +416,7 @@ export default function AdminTenantDetail() {
         {/* Audit log */}
         <Card title="Journal d'activité admin" icon={<IconHistory size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.audit_log.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucune action enregistrée</td></tr>

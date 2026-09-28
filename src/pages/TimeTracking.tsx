@@ -277,7 +277,7 @@ export default function TimeTracking() {
             </div>
             {matrix ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-full text-sm">
                   <thead className="bg-zinc-50 dark:bg-zinc-900">
                     <tr>
                       <th className="text-left p-2">{t('time_tracking_team_name')}</th>

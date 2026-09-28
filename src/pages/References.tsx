@@ -672,7 +672,7 @@ function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported
                 — {t('references_import_total', { count: dataRows.length })}
               </p>
               <div className="rounded-lg overflow-hidden border overflow-x-auto" style={{ borderColor: 'var(--tblr-border)' }}>
-                <table className="w-full text-xs">
+                <table className="min-w-full text-xs">
                   <thead>
                     <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                       {(['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status'] as ImportField[]).map(f => (
@@ -1298,7 +1298,7 @@ export default function References() {
 
         {/* Desktop */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="min-w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="w-12 px-4 py-3" />

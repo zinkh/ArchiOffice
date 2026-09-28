@@ -544,7 +544,7 @@ export default function Proposals() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="min-w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_proposal')}</th>

@@ -433,7 +433,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
 
       {/* Table */}
       <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl">
-        <table className="w-full text-sm border-collapse">
+        <table className="min-w-full text-sm border-collapse">
           <thead>
             {table.getHeaderGroups().map(hg => (
               <tr key={hg.id} className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
