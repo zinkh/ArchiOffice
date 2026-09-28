@@ -116,6 +116,12 @@ const MAX_KNOWLEDGE_DOCS = 10;
 const MAX_KNOWLEDGE_DOC_CHARS = 6000;
 const KNOWLEDGE_EXTRACTION_TIMEOUT_MS = 10_000;
 
+// Mémoire d'apprentissage (agent_learning_suggestions approuvées) : du texte
+// court déjà en base, pas un document à extraire — plafonds bien plus serrés
+// que la bibliothèque de connaissances, qui porte des pièces entières.
+const MAX_LEARNING_NOTES = 15;
+const MAX_LEARNING_NOTE_CHARS = 1000;
+
 function daysBetween(start: string, end: string): number | null {
   const s = new Date(start).getTime();
   const e = new Date(end).getTime();
@@ -262,7 +268,9 @@ export async function buildAgentContext(
   supportsVision: boolean = false,
   // capabilitiesFromAgent(agent).knowledge — indépendant de context_scopes,
   // comme docsRead/docsWrite (voir AgentCapabilities.knowledge dans types.ts).
-  knowledgeEnabled: boolean = false
+  knowledgeEnabled: boolean = false,
+  // capabilitiesFromAgent(agent).learning — même indépendance de context_scopes.
+  learningEnabled: boolean = false
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -284,6 +292,7 @@ export async function buildAgentContext(
     teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
     knowledgeDocuments: [],
+    learningNotes: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -415,6 +424,28 @@ export async function buildAgentContext(
         .then((r: any) => {
           if (r.error) { console.warn('[agent context] firm_knowledge dpgfs (cctp) fetch failed:', r.error.message); return; }
           ctx.firmKnowledge.cctpExcerpts = summarizeCctpExcerpts((r.data || []) as any[]);
+        })
+    );
+  }
+
+  // Mémoire d'apprentissage — corrections et notes déjà APPROUVÉES par
+  // l'architecte (agent_learning_suggestions), jamais une proposition encore
+  // 'pending'. Toujours peuplée quand learningEnabled, comme
+  // knowledgeDocuments : c'est ce qui referme la boucle de
+  // suggerer_amelioration une fois la proposition validée.
+  if (learningEnabled) {
+    fetches.push(
+      supabaseAdmin.from('agent_learning_suggestions')
+        .select('kind, title, content')
+        .eq('tenant_id', tenantId).eq('agent_id', currentAgentId).eq('status', 'approved')
+        .in('kind', ['correction', 'knowledge_note'])
+        .order('created_at', { ascending: false })
+        .limit(MAX_LEARNING_NOTES)
+        .then((r: any) => {
+          if (r.error) { console.warn('[agent context] learning notes fetch failed:', r.error.message); return; }
+          ctx.learningNotes = ((r.data || []) as any[]).map(row => ({
+            kind: row.kind, title: row.title, content: String(row.content || '').slice(0, MAX_LEARNING_NOTE_CHARS),
+          }));
         })
     );
   }

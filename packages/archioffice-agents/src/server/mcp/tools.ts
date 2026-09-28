@@ -549,6 +549,10 @@ const MCP_CAPS: AgentCapabilities = {
   notifyUsers: false,
   webSearch: false,
   knowledge: false,
+  // Comme delegate/notifyUsers ci-dessus : suggerer_amelioration modifie la
+  // mémoire de l'agent lui-même, hors périmètre d'un outil MCP externe qui
+  // ne fait qu'agir sur des fiches simples.
+  learning: false,
 };
 
 function genericTools(): FunctionDeclarationLike[] {

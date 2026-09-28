@@ -20,6 +20,7 @@ function baseAgent(overrides: Partial<AgentRow> = {}): AgentRow {
     geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, delegate_enabled: false, notify_users_enabled: false,
     web_search_enabled: false,
     knowledge_enabled: false,
+    learning_enabled: false,
     is_active: true, is_system_template: false,
     ...overrides,
   };
@@ -31,7 +32,7 @@ function baseContext(overrides: Partial<AgentContext> = {}): AgentContext {
     projects: [], contacts: [], upcomingMeetings: [], recentDocuments: [], tasks: [],
     documentContents: [], documentImages: [], colleagues: [], teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
-    knowledgeDocuments: [],
+    knowledgeDocuments: [], learningNotes: [],
     ...overrides,
   };
 }

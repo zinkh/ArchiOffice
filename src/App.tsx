@@ -86,7 +86,7 @@ const DocumentTemplates = lazy(() => import('./pages/DocumentTemplates'));
 const TimeTracking = lazy(() => import('./pages/TimeTracking'));
 const Leave = lazy(() => import('./pages/Leave'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
-import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentChatPage } from '@zinkh/archioffice-agents/client';
+import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentLearning, AgentChatPage } from '@zinkh/archioffice-agents/client';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -846,6 +846,7 @@ export default function App() {
               <Route path="/agents/:id/chat" element={<AgentChatPage />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
               <Route path="/agents/alertes" element={<AgentAlerts />} />
+              <Route path="/agents/apprentissage" element={<AgentLearning />} />
               <Route path="/admin" element={<RequireSuperAdmin><AdminDashboard /></RequireSuperAdmin>} />
               <Route path="/admin/tenants/:id" element={<RequireSuperAdmin><AdminTenantDetail /></RequireSuperAdmin>} />
               <Route path="/admin/support" element={<RequireSuperAdmin><AdminSupport /></RequireSuperAdmin>} />
