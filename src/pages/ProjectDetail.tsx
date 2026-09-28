@@ -530,7 +530,15 @@ export default function ProjectDetail() {
       }
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
-  }, [contratHonoraires, project?.id]);
+    // `project?.remuneration`/`construction_cost` sont bien des dépendances,
+    // pas seulement le résultat de cet effet : `fetchFullProject()` recharge
+    // le projet en entier (cache Dexie, puis réseau) de façon indépendante et
+    // peut résoudre APRÈS cette synchronisation, écrasant alors le montant
+    // repris du contrat par la valeur non persistée côté base (0). Sans ces
+    // dépendances, l'effet ne se redéclenche jamais pour corriger ce retour
+    // en arrière — c'est exactement le bug observé (montant du contrat
+    // affiché puis retombé à 0,00 €).
+  }, [contratHonoraires, project?.id, project?.remuneration, project?.construction_cost]);
 
   useEffect(() => {
     if (activeTab === 'HONOS' && id) {
