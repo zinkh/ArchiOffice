@@ -264,3 +264,13 @@ export function initOfflineQueue(): void {
 export async function countPendingWrites(): Promise<number> {
   return db.pendingWrites.count();
 }
+
+/** Écritures en file pour une entité donnée, dans l'ordre de création (relecture au rechargement d'un écran). */
+export async function listPendingWrites(entity: PendingWrite['entity']): Promise<PendingWrite[]> {
+  try {
+    const all = await db.pendingWrites.orderBy('createdAt').toArray();
+    return all.filter(w => w.entity === entity);
+  } catch {
+    return [];
+  }
+}
