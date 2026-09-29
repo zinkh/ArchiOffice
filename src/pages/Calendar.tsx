@@ -17,6 +17,7 @@ import { fr, enUS } from 'date-fns/locale';
 import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck, IconCalendar, IconPlus, IconBrandGoogle, IconRefresh, IconLoader2 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
 import { useDragToZone } from '../hooks/useDragToZone';
+import { useSwipeNav } from '../hooks/useSwipeNav';
 import type { Project, Milestone, Task, TeamMember } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
@@ -368,6 +369,11 @@ export default function CalendarPage() {
   const activeGridView: CalendarGridView = isCalendarGridView ? view : 'month';
   const visibleRange = getCalendarRange(activeGridView, viewDate);
   const days = eachDayOfInterval({ start: visibleRange.start, end: visibleRange.end });
+  const swipeProps = useSwipeNav({
+    onPrev: () => setViewDate(navigateCalendarDate(activeGridView, viewDate, -1)),
+    onNext: () => setViewDate(navigateCalendarDate(activeGridView, viewDate, 1)),
+    disabled: !!drag,
+  });
   const navigationLabel = activeGridView === 'month'
     ? format(viewDate, 'MMMM yyyy', { locale })
     : `${format(visibleRange.start, 'd MMM', { locale })} – ${format(visibleRange.end, 'd MMM yyyy', { locale })}`;
@@ -730,7 +736,7 @@ export default function CalendarPage() {
       {isCalendarGridView && (
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
         {/* ── Calendar grid ── */}
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div {...swipeProps} className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
             {(activeGridView === 'month' ? weekdayLabels : days.map(day => format(day, 'EEE d', { locale }))).map((label, i) => (
               <div key={i} className="px-2 py-2 text-center text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
