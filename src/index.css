@@ -560,3 +560,23 @@ button, [role="button"], [role="tab"], .btn {
     --tblr-muted:  #a9b6c8;
   }
 }
+
+/* Colonnes de liste repliables (CollapsiblePanel) : largeur animée en 200 ms,
+   poignée de 16 px à la souris, 44 px au doigt. */
+@media (min-width: 1024px) {
+  .collapsible-panel {
+    --panel-w: 18rem;
+    width: var(--panel-w);
+    flex-shrink: 0;
+    transition: width 200ms ease-out;
+  }
+  .collapsible-panel[data-collapsed="true"] {
+    width: 1rem;
+  }
+  @media (pointer: coarse) {
+    .collapsible-panel[data-collapsed="true"] { width: 2.75rem; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-panel { transition: none; }
+}

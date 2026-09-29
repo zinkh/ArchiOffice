@@ -1853,4 +1853,8 @@ export default {
       "observations_table_confirm_delete": "Delete this observation?",
       "mfa_settings_confirm_disable": "Disable two-factor authentication? Your account will only be protected by your password.",
       "ligne_ouvrage_editor_saved": "Saved",
+      "panel_sidebar_collapse": "Collapse menu (Ctrl+B)",
+      "panel_sidebar_expand": "Expand menu (Ctrl+B)",
+      "panel_list_collapse": "Collapse list (Ctrl+Shift+B)",
+      "panel_list_expand": "Show list (Ctrl+Shift+B)",
 };

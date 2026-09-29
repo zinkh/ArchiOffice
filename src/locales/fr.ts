@@ -1998,4 +1998,8 @@ export default {
       "observations_table_confirm_delete": "Supprimer cette observation ?",
       "mfa_settings_confirm_disable": "Désactiver la double authentification ? Votre compte ne sera plus protégé que par votre mot de passe.",
       "ligne_ouvrage_editor_saved": "Enregistré",
+      "panel_sidebar_collapse": "Replier le menu (Ctrl+B)",
+      "panel_sidebar_expand": "Déplier le menu (Ctrl+B)",
+      "panel_list_collapse": "Replier la liste (Ctrl+Maj+B)",
+      "panel_list_expand": "Afficher la liste (Ctrl+Maj+B)",
 };
