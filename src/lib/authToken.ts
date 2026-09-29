@@ -172,7 +172,7 @@ async function fetchAccessToken(): Promise<string | null> {
   // impossible, mais la session, elle, reste valable. On garde alors le jeton
   // périmé (les écritures partent en file, voir offlineQueue.ts) plutôt que de
   // tenter un refresh qui échouerait et passerait pour une session morte.
-  if (needsRefresh && typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (needsRefresh && typeof navigator !== 'undefined' && navigator.onLine === false) {
     return session?.access_token ?? null;
   }
   if (needsRefresh) {
