@@ -5,6 +5,7 @@ import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { BPUWorkspace } from './BPUWorkspace';
 import { LotsManager } from './LotsManager';
+import { appliquerOrdreLots, type LotProjet } from '../../lib/lotsOrder';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
@@ -161,6 +162,14 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   const { doc: bpu, setDoc: setBpu, loading: bpuLoading, saveStatus: bpuSaveStatus, saveNow: handleBpuSave } = bpuDoc;
 
   const isBpuTab = activeSubTab === 'BPU' || activeSubTab === 'DQE';
+
+  // La liste des lots du projet fait foi : son ordre et ses numéros sont
+  // reportés sur le DPGF (donc le CCTP, même document) et sur le bordereau.
+  const synchroniserLots = useCallback((lotsProjet: LotProjet[]) => {
+    if (dpgf && dpgf.lots.length) setDpgf(appliquerOrdreLots(dpgf, lotsProjet));
+    if (bpuTouched && bpu && bpu.lots.length) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+    onLotsChanged?.();
+  }, [dpgf, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
   useEffect(() => { if (isBpuTab) setBpuTouched(true); }, [isBpuTab]);
 
   // Initialise le bordereau depuis le DPGF, en préservant tout ce qui a déjà
@@ -460,7 +469,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         {/* LOTS */}
         {activeSubTab === 'LOTS' && (
           <div className="flex-1 overflow-y-auto px-4">
-            <LotsManager projectId={projectId} onChange={onLotsChanged} />
+            <LotsManager projectId={projectId} onChange={synchroniserLots} />
           </div>
         )}
 

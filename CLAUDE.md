@@ -419,6 +419,21 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
+### Ordre des lots : la liste des lots du projet fait foi
+
+`LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
+pointeur (`startPressDrag`, poignée à gauche de chaque ligne). Pas de colonne
+de rang : `PUT /api/projects/:projectId/lots/order` reçoit les ids dans leur
+nouvel ordre et renumérote `lot_number` en « 01 », « 02 »... ; le numéro EST
+l'ordre (`GET` trie par numéro naturel). Aucune migration SQL.
+`src/lib/lotsOrder.ts::appliquerOrdreLots()` reporte ensuite cet ordre et ces
+numéros sur le DPGF (donc le CCTP, même document) et le bordereau, chapitres
+et articles compris (seul le préfixe « ancien. » est remplacé, un code de
+bibliothèque n'est jamais touché). Rattachement par `projectLotId`, à défaut par
+intitulé, et le lien est alors posé ; un lot du document absent du projet garde
+son numéro et passe en dernier. `ProTab.synchroniserLots` fait cette
+propagation, l'autosauvegarde enregistre.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes
