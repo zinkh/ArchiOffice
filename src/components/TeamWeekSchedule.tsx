@@ -4,6 +4,7 @@ import { startOfWeek, addDays, format } from 'date-fns';
 import { fr, enUS } from 'date-fns/locale';
 import { IconChevronLeft, IconChevronRight, IconBeach } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { useSwipeNav } from '../hooks/useSwipeNav';
 import type { TeamSchedule, TimeEntry, LeaveRequest } from '../types';
 import { ErrorState, Skeleton } from './DataState';
 import { colorForProject } from '../pages/Calendar';
@@ -86,6 +87,11 @@ export default function TeamWeekSchedule() {
     return totals;
   }, [data]);
 
+  const swipeProps = useSwipeNav({
+    onPrev: () => setWeekStart(w => addDays(w, -7)),
+    onNext: () => setWeekStart(w => addDays(w, 7)),
+  });
+
   if (loading && !data) {
     return <Skeleton className="h-[420px] w-full rounded-xl" />;
   }
@@ -97,7 +103,7 @@ export default function TeamWeekSchedule() {
   const employees = data?.employees || [];
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+    <div {...swipeProps} className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
       <div className="flex items-center justify-between p-3" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <div className="flex items-center gap-2">
           <button
