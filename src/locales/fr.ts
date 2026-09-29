@@ -1591,6 +1591,9 @@ export default {
 
       // Calendar page
       "calendar_page_subtitle": "Jalons et tâches, par semaine et par mois",
+      "calendar_week_short": "S",
+      "calendar_week_column": "Semaine",
+      "calendar_week_number": "Semaine {{week}}",
       "calendar_today_btn": "Aujourd'hui",
       "calendar_jump_to_date": "Aller à une date",
       "calendar_this_week": "Cette semaine",

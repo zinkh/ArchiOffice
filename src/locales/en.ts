@@ -1446,6 +1446,9 @@ export default {
 
       // Calendar page
       "calendar_page_subtitle": "Milestones and tasks, by week and by month",
+      "calendar_week_short": "W",
+      "calendar_week_column": "Week",
+      "calendar_week_number": "Week {{week}}",
       "calendar_today_btn": "Today",
       "calendar_jump_to_date": "Jump to date",
       "calendar_this_week": "This week",
