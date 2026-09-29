@@ -14,7 +14,8 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       const { projectId } = req.params;
       const { data: lots, error } = await supabaseAdmin.from('project_lots').select('*').eq('project_id', projectId).eq('tenant_id', tenantId);
       if (error) throw error;
-      res.json(lots);
+      // Ordre naturel par numéro : la réorganisation renumérote « 01 », « 02 »... donc l'ordre est le numéro.
+      res.json([...(lots ?? [])].sort((a: any, b: any) => String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true })));
     } catch (error) {
       console.error("[GET /api/projects/:projectId/lots]", error);
       res.status(500).json({ error: "Failed to fetch lots" });
@@ -33,6 +34,38 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     } catch (error) {
       console.error("[POST /api/projects/:projectId/lots]", error);
       res.status(500).json({ error: "Failed to create lot" });
+    }
+  });
+
+  // Réorganise les lots d'un projet : `ids` donne le nouvel ordre, les numéros
+  // sont réattribués automatiquement (01, 02, ...). Aucune colonne de rang :
+  // le numéro est l'ordre.
+  app.put("/api/projects/:projectId/lots/order", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const ids = req.body?.ids;
+      if (!Array.isArray(ids) || ids.some((i: unknown) => typeof i !== 'string') || new Set(ids).size !== ids.length) {
+        return res.status(400).json({ error: "ids doit être une liste d'identifiants distincts" });
+      }
+      const { data: existing, error } = await supabaseAdmin.from('project_lots').select('id').eq('project_id', projectId).eq('tenant_id', tenantId);
+      if (error) throw error;
+      const known = new Set((existing ?? []).map((l: any) => l.id));
+      if (ids.length !== known.size || ids.some((i: string) => !known.has(i))) {
+        return res.status(400).json({ error: "La liste doit contenir exactement les lots du projet" });
+      }
+      for (const [index, id] of ids.entries()) {
+        const { error: upErr } = await supabaseAdmin.from('project_lots')
+          .update({ lot_number: String(index + 1).padStart(2, '0') })
+          .eq('id', id).eq('tenant_id', tenantId).eq('project_id', projectId);
+        if (upErr) throw upErr;
+      }
+      const { data: lots, error: readErr } = await supabaseAdmin.from('project_lots').select('*').eq('project_id', projectId).eq('tenant_id', tenantId);
+      if (readErr) throw readErr;
+      res.json([...(lots ?? [])].sort((a: any, b: any) => String(a.lot_number).localeCompare(String(b.lot_number), 'fr', { numeric: true })));
+    } catch (error) {
+      console.error("[PUT /api/projects/:projectId/lots/order]", error);
+      res.status(500).json({ error: "Failed to reorder lots" });
     }
   });
 
