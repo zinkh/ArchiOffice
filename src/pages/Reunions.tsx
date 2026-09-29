@@ -30,7 +30,7 @@ import {
 import { apiFetch } from '../lib/api';
 import { CollapsiblePanel, PanelCollapseButton, useListPanel, useExpandLabel } from '../components/CollapsiblePanel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
@@ -471,8 +471,17 @@ export default function Reunions() {
       // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, la liste
       // déjà consultée pour cette affaire reste affichée au lieu de
       // disparaître — c'est ce que l'ancien apiFetch seul ne permettait pas.
-      const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, setMeetings);
-      if (!hadLocalData && !synced) setMeetings([]);
+      // Les réunions créées hors-ligne et pas encore rejouées ne sont ni sur
+      // le serveur ni dans le cache : sans les relire dans la file, un
+      // rechargement de la page (ou une reconnexion) les faisait disparaître
+      // de l'écran alors qu'elles attendaient toujours d'être envoyées.
+      const pending = (await listPendingWrites('meeting'))
+        .filter(w => w.method === 'POST' && w.jsonBody)
+        .map(w => ({ ...w.jsonBody, created_at: new Date(w.createdAt).toISOString(), photos: [], pendingSync: true } as Meeting))
+        .filter(scopeFilter);
+      const withPending = (list: Meeting[]) => [...pending.filter(p => !list.some(m => m.id === p.id)), ...list];
+      const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, list => setMeetings(withPending(list)));
+      if (!hadLocalData && !synced) setMeetings(withPending([]));
     } finally {
       setLoadingMeetings(false);
     }
@@ -592,7 +601,13 @@ export default function Reunions() {
       setSelectedMeeting(data);
       setNotesValue(data.notes || '');
     } catch {
-      setSelectedMeeting(meeting);
+      // Réunion pas encore sur le serveur (créée hors-ligne) : on remet
+      // ses photos en file, avec un aperçu local, plutôt qu'une fiche vide.
+      const queuedPhotos = (await listPendingWrites('meetingPhoto'))
+        .filter(w => w.method === 'POST' && w.blob && w.url === `/api/meetings/${meeting.id}/photos`)
+        .map(w => ({ id: w.id, meeting_id: meeting.id, file_url: '', uploaded_at: new Date(w.createdAt).toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(w.blob!) } as MeetingPhoto));
+      const restored = { ...meeting, photos: [...(meeting.photos || []), ...queuedPhotos] };
+      setSelectedMeeting(restored);
       setNotesValue(meeting.notes || '');
     } finally {
       setLoadingDetail(false);
