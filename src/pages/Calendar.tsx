@@ -27,6 +27,7 @@ import TeamWeekSchedule from '../components/TeamWeekSchedule';
 import { CalendarEventModal, type CalendarEventInitial } from '../components/CalendarEventModal';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
 import { CalendarAccountsPanel } from '../components/CalendarAccountsPanel';
+import { CalendarWeekStrip } from '../components/CalendarWeekStrip';
 import { IconSettings } from '@tabler/icons-react';
 
 interface CalEvent {
@@ -370,11 +371,35 @@ export default function CalendarPage() {
   const activeGridView: CalendarGridView = isCalendarGridView ? view : 'month';
   const visibleRange = getCalendarRange(activeGridView, viewDate);
   const days = eachDayOfInterval({ start: visibleRange.start, end: visibleRange.end });
+  // Déplace la période affichée. Hors vue mensuelle, le jour sélectionné
+  // suit du même écart : sa liste (sous la bande de jours sur téléphone)
+  // doit toujours porter sur un jour de la période visible.
+  const shiftView = (direction: -1 | 1) => {
+    const next = navigateCalendarDate(activeGridView, viewDate, direction);
+    if (activeGridView !== 'month') setSelectedDay(prev => addDays(prev, differenceInCalendarDays(next, viewDate)));
+    setViewDate(next);
+  };
   const swipeProps = useSwipeNav({
-    onPrev: () => setViewDate(navigateCalendarDate(activeGridView, viewDate, -1)),
-    onNext: () => setViewDate(navigateCalendarDate(activeGridView, viewDate, 1)),
+    onPrev: () => shiftView(-1),
+    onNext: () => shiftView(1),
     disabled: !!drag,
   });
+
+  // Passer de la vue mensuelle à 3 ou 5 jours (ou choisir une date) peut
+  // laisser le jour sélectionné hors de la période : on le ramène dedans.
+  const rangeStartMs = visibleRange.start.getTime();
+  useEffect(() => {
+    if (!isCalendarGridView || activeGridView === 'month') return;
+    if (days.some(d => isSameDay(d, selectedDay))) return;
+    setSelectedDay(days.find(d => dfIsToday(d)) ?? days[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, rangeStartMs]);
+
+  const stripDots = (day: Date) => {
+    const evs = eventsByDay.get(format(day, 'yyyy-MM-dd')) || [];
+    const colors = evs.slice(0, 3).map(ev => (ev.overdue ? '#c92a2a' : colorForEvent(ev)));
+    return { colors, extra: Math.max(0, evs.length - 3) };
+  };
   const navigationLabel = activeGridView === 'month'
     ? format(viewDate, 'MMMM yyyy', { locale })
     : `${format(visibleRange.start, 'd MMM', { locale })} – ${format(visibleRange.end, 'd MMM yyyy', { locale })}`;
@@ -461,7 +486,7 @@ export default function CalendarPage() {
         {isCalendarGridView && (
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, -1))}
+              onClick={() => shiftView(-1)}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
@@ -475,7 +500,7 @@ export default function CalendarPage() {
               {t('calendar_today_btn')}
             </button>
             <button
-              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, 1))}
+              onClick={() => shiftView(1)}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
@@ -752,8 +777,21 @@ export default function CalendarPage() {
 
       {isCalendarGridView && (
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+        {/* ── Téléphone, vues 3 et 5 jours : bande de jours + liste du jour ── */}
+        {activeGridView !== 'month' && (
+          <CalendarWeekStrip
+            days={days}
+            selectedDay={selectedDay}
+            onSelect={setSelectedDay}
+            onPrev={() => shiftView(-1)}
+            onNext={() => shiftView(1)}
+            dotsFor={stripDots}
+            locale={locale}
+          />
+        )}
+
         {/* ── Calendar grid ── */}
-        <div {...swipeProps} className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div {...swipeProps} className={cn('rounded-xl overflow-hidden', activeGridView !== 'month' && 'hidden sm:block')} style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
           <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: gridColumns }}>
             <div className="px-0.5 py-2 text-center text-[0.6875rem] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }} title={t('calendar_week_column') as string}>
               {t('calendar_week_short')}
