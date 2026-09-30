@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- Préférence personnelle : afficher ou non ses propres contacts personnels
   -- dans la liste — voir migrate_contacts_personal_visibility.sql.
   show_personal_contacts BOOLEAN NOT NULL DEFAULT true,
+  -- Signature de courrier personnelle — voir migrate_profile_mail_signature.sql.
+  mail_signature TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

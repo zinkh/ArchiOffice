@@ -547,6 +547,8 @@ export interface TeamMember {
   department?: string;
   /** Préférence personnelle : afficher ses propres contacts personnels dans la liste (défaut : oui). */
   showPersonalContacts?: boolean;
+  /** Signature de courrier personnelle, ajoutée aux nouveaux messages rédigés dans l'application. */
+  mailSignature?: string;
   tenantId?: string | null;
   // Platform back-office access — orthogonal to system_role (see
   // server/superAdminAuth.ts). Only ever set on the current user's own

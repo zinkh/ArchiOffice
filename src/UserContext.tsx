@@ -125,6 +125,7 @@ async function loadFullProfile(session: MinimalSession): Promise<UserProfile> {
       senderOption: profile.senderOption ?? undefined,
       defaultEmailTemplate: profile.defaultEmailTemplate ?? undefined,
       showPersonalContacts: profile.showPersonalContacts ?? true,
+      mailSignature: profile.mailSignature ?? '',
       // null = confirmed no agency yet (drives the /agency-setup redirect below);
       // offline builds have no /api/me tenantId field, so this stays undefined there.
       tenantId: profile.tenantId ?? null,
