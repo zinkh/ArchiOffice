@@ -633,8 +633,17 @@ CREATE TABLE IF NOT EXISTS project_templates (
   default_status TEXT DEFAULT 'Planning',
   default_budget NUMERIC DEFAULT 0,
   default_description TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  -- migrate_project_templates_structure.sql : trame complète de l'affaire
+  operation_type TEXT CHECK (operation_type IS NULL OR operation_type IN ('neuf', 'rehabilitation', 'extension', 'maison_individuelle', 'permis_seul', 'autre')),
+  marche_type TEXT CHECK (marche_type IS NULL OR marche_type IN ('prive', 'public')),
+  default_lots JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_milestones JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  catalog_key TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS project_templates_tenant_catalog_key_idx
+  ON project_templates (tenant_id, catalog_key) WHERE catalog_key IS NOT NULL;
 
 -- ACT Data (Analyse Comparative des Offres)
 CREATE TABLE IF NOT EXISTS act_data (

@@ -1490,6 +1490,48 @@ sans effet — dégradé, mais honnête, plutôt qu'un réglage qui échouerait
 silencieusement ou ferait échouer l'appel API — tant qu'un cabinet fait
 tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
+### Modèles de projet : une trame d'affaire, pas un préremplissage
+
+Un modèle (`project_templates`, `/templates`) ne se limitait à quatre valeurs
+de formulaire (nom, statut, budget, description) : il ne créait ni lots, ni
+jalons, ni tâches, donc rien de ce qu'il faut réellement ressaisir à chaque
+affaire. `supabase/migrate_project_templates_structure.sql` lui ajoute
+`operation_type` (`neuf`, `rehabilitation`, `extension`, `maison_individuelle`,
+`permis_seul`, `autre`), `marche_type` (`prive`, `public`), trois listes jsonb
+(`default_lots`, `default_milestones`, `default_tasks`) et `catalog_key`.
+
+**Application : `POST /api/projects` reçoit `template_id`, rien d'autre.**
+`server/projectTemplateApply.ts` relit le modèle en base (vérifié dans le
+cabinet, 400 sinon) et crée lots, jalons et tâches APRÈS l'affaire, en
+meilleur effort : un échec est rapporté dans `template_applied.failed`, jamais
+au prix de l'affaire déjà créée. Un modèle `public` pose `is_public_client`,
+et `type_projet` se déduit du type d'opération quand le corps n'en porte pas.
+Le client ne fait que désigner le modèle : il ne peut pas faire écrire autre
+chose que ce que le cabinet a enregistré.
+
+**Délais relatifs, jamais de dates.** Jalons et tâches portent des décalages en
+jours depuis `start_date` (`addDaysIso`, `src/lib/projectTemplates.ts`). Les
+listes sont assainies à l'écriture (`sanitizeLots/Milestones/Tasks`,
+`server/routes/projectTemplates.ts`) : bornées, typées, priorités filtrées.
+
+**Trois origines.** Saisi à la main ; installé depuis le catalogue de démarrage
+(`server/projectTemplateCatalog.ts`, huit trames : neuf, réhabilitation,
+extension en privé et en public, maison individuelle, permis de construire
+seul) ; ou tiré d'une affaire (`POST /api/project-templates/from-project/:id`,
+lots, jalons et tâches en décalages, sans montants). `catalog_key` sous index
+unique partiel `(tenant_id, catalog_key)` empêche d'installer deux fois la même
+entrée, sans dépendre du nom que le cabinet a pu changer. Le catalogue n'est
+qu'une copie de départ : une fois installé, le modèle appartient au cabinet.
+
+**À ne pas défaire.** Les jalons du catalogue portent des intitulés
+d'événements (« Dépôt du permis », « Réception des travaux »), jamais le nom
+d'une mission du contrat MOE (« Esquisse (ESQ) ») : `ProjectDetail.tsx` crée un
+jalon par mission incluse et apparie par titre, un doublon de nom serait fusionné
+avec lui (verrouillé par un test). Le public diffère du privé par la procédure
+de passation (publication de l'avis, commission d'analyse, notification) et non
+par le fond des lots. Les délais d'instruction d'un permis suivent le Code de
+l'urbanisme (1 mois DP, 2 mois PC de maison individuelle, 3 mois les autres).
+
 ### Bibliothèque d'ouvrages
 
 `/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de

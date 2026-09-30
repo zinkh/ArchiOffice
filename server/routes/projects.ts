@@ -11,6 +11,9 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos } from '../reservePhotos';
 import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
 import { dispatchWebhookEvent } from '../webhookDispatch';
+import { applyTemplateToProject } from '../projectTemplateApply';
+import { OPERATION_LABELS } from '../../src/lib/projectTemplates';
+import type { TemplateOperationType } from '../../src/types';
 
 /** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
 async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
@@ -148,9 +151,18 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Modèle de projet : lu ici depuis la base (jamais depuis le corps), et
+      // vérifié comme toute référence inter-ressources. Ses lots, jalons et
+      // tâches sont appliqués une fois l'affaire créée, plus bas.
+      let template: any = null;
+      if (template_id) {
+        const { data: tpl } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_templates').select('*').eq('id', template_id).maybeSingle();
+        if (!tpl) return res.status(400).json({ error: "Modèle de projet introuvable pour ce cabinet." });
+        template = tpl;
+      }
       if (client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
@@ -189,13 +201,15 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         category: category || null, start_date: start_date || new Date().toISOString().split('T')[0],
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
-        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes,
+        is_public_client: !!is_public_client || template?.marche_type === 'public',
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat,
+        type_projet: type_projet || (template?.operation_type && template.operation_type !== 'autre' ? OPERATION_LABELS[template.operation_type as TemplateOperationType] : undefined),
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
@@ -213,12 +227,18 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       if (categories_list?.length) {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
+      // Lots, jalons et tâches du modèle, datés depuis le démarrage de l'affaire.
+      let templateApplied: Awaited<ReturnType<typeof applyTemplateToProject>> | undefined;
+      if (template) {
+        templateApplied = await applyTemplateToProject(supabaseAdmin, tenantId, req.user.id, id, template, start_date || new Date().toISOString().split('T')[0]);
+        if (templateApplied.failed.length) console.error('[POST /api/projects] modèle appliqué partiellement', templateApplied.failed);
+      }
       // Log activity
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
+      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"${template ? ` (modèle « ${template.name} »)` : ''}`, name, id, 'project', 'Projets');
       dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.created', { id, name, project_code, client, status: status || 'Planning' });
 
-      res.status(201).json({ id, project_code });
+      res.status(201).json({ id, project_code, ...(templateApplied ? { template_applied: templateApplied } : {}) });
     } catch (error: any) {
       console.error("Error creating project:", error);
       res.status(error.status || 500).json({ error: error.message || "Failed to create project" });
