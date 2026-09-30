@@ -640,6 +640,8 @@ CREATE TABLE IF NOT EXISTS project_templates (
   default_lots JSONB NOT NULL DEFAULT '[]'::jsonb,
   default_milestones JSONB NOT NULL DEFAULT '[]'::jsonb,
   default_tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- migrate_project_templates_missions.sql : répartition des missions MOE
+  default_missions JSONB NOT NULL DEFAULT '[]'::jsonb,
   catalog_key TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS project_templates_tenant_catalog_key_idx

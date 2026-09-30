@@ -3,13 +3,19 @@ import { IconPlus, IconTrash, IconEdit, IconX, IconDownload, IconCheck, IconCopy
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
 import type {
-  Project, ProjectTemplate, ProjectTemplateCatalogEntry, TemplateLot, TemplateMilestone, TemplateTask,
+  ContratMOEMission, ContratMissionCategory, Project, ProjectTemplate, ProjectTemplateCatalogEntry, TemplateLot, TemplateMilestone, TemplateTask,
   TemplateMarcheType, TemplateOperationType,
 } from '../types';
 import { MARCHE_LABELS, OPERATION_LABELS, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
 
-type Tab = 'general' | 'lots' | 'milestones' | 'tasks';
+type Tab = 'general' | 'missions' | 'lots' | 'milestones' | 'tasks';
+
+const MISSION_CATEGORIES: { id: ContratMissionCategory; key: string }[] = [
+  { id: 'base', key: 'ptpl_mission_cat_base' },
+  { id: 'exe', key: 'ptpl_mission_cat_exe' },
+  { id: 'complementaire', key: 'ptpl_mission_cat_comp' },
+];
 
 const STATUSES: ProjectTemplate['default_status'][] = ['Planning', 'In Progress', 'Completed', 'On Hold'];
 const STATUS_KEYS: Record<ProjectTemplate['default_status'], string> = {
@@ -35,6 +41,7 @@ const blankTemplate = (): ProjectTemplate => ({
   default_status: 'Planning',
   default_budget: 0,
   default_description: '',
+  default_missions: [],
   default_lots: [],
   default_milestones: [],
   default_tasks: [],
@@ -95,6 +102,7 @@ export default function ProjectTemplates() {
   const openEditor = (template: ProjectTemplate, creating: boolean) => {
     setEditForm({
       ...template,
+      default_missions: template.default_missions ?? [],
       default_lots: template.default_lots ?? [],
       default_milestones: template.default_milestones ?? [],
       default_tasks: template.default_tasks ?? [],
@@ -199,6 +207,11 @@ export default function ProjectTemplates() {
     (list ?? []).map((item, idx) => idx === i ? { ...item, ...change } : item);
   const removeAt = <T,>(list: T[] | undefined, i: number): T[] => (list ?? []).filter((_, idx) => idx !== i);
 
+  const addMission = () => patch({
+    default_missions: [...(editForm?.default_missions ?? []), { id: crypto.randomUUID(), name: '', pct: 0, incluse: true, category: 'base' }],
+  });
+  const missionsTotal = (editForm?.default_missions ?? []).filter(m => m.incluse).reduce((sum, m) => sum + (m.pct || 0), 0);
+
   const addLot = () => {
     const lots = editForm?.default_lots ?? [];
     patch({ default_lots: [...lots, { lot_number: String(lots.length + 1).padStart(2, '0'), lot_title: '' }] });
@@ -221,6 +234,7 @@ export default function ProjectTemplates() {
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'general', label: t('ptpl_tab_general') },
+    { id: 'missions', label: t('ptpl_tab_missions'), count: editForm?.default_missions?.filter(m => m.incluse).length },
     { id: 'lots', label: t('ptpl_tab_lots'), count: editForm?.default_lots?.length },
     { id: 'milestones', label: t('ptpl_tab_milestones'), count: editForm?.default_milestones?.length },
     { id: 'tasks', label: t('ptpl_tab_tasks'), count: editForm?.default_tasks?.length },
@@ -415,6 +429,39 @@ export default function ProjectTemplates() {
                     <label className={labelCls}>{t('ptpl_project_description')}</label>
                     <textarea className={inputCls} rows={3} value={editForm.default_description} onChange={e => patch({ default_description: e.target.value })} />
                   </div>
+                </>
+              )}
+
+              {tab === 'missions' && (
+                <>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">{t('ptpl_missions_hint')}</p>
+                  {(editForm.default_missions ?? []).map((m: ContratMOEMission, i) => (
+                    <div key={m.id} className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 space-y-2">
+                      <div className="flex gap-2 items-center">
+                        <input type="checkbox" checked={m.incluse} aria-label={t('ptpl_mission_included')} onChange={e => patch({ default_missions: updateAt(editForm.default_missions, i, { incluse: e.target.checked }) })} />
+                        <input className={inputCls} placeholder={t('ptpl_mission_name')} aria-label={t('ptpl_mission_name')} value={m.name} onChange={e => patch({ default_missions: updateAt(editForm.default_missions, i, { name: e.target.value }) })} />
+                        <button onClick={() => patch({ default_missions: removeAt(editForm.default_missions, i) })} aria-label={t('btn_delete')} className="text-zinc-500 hover:text-red-500 shrink-0"><IconTrash size={18} /></button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-zinc-500 mb-1">{t('ptpl_mission_pct')}</label>
+                          <input type="number" min={0} max={100} step="any" inputMode="decimal" className={inputCls} value={m.pct ?? 0} onChange={e => patch({ default_missions: updateAt(editForm.default_missions, i, { pct: Math.min(Math.max(parseFloat(e.target.value) || 0, 0), 100) }) })} />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-zinc-500 mb-1">{t('ptpl_mission_category')}</label>
+                          <select className={inputCls} value={m.category ?? 'base'} onChange={e => patch({ default_missions: updateAt(editForm.default_missions, i, { category: e.target.value as ContratMissionCategory }) })}>
+                            {MISSION_CATEGORIES.map(c => <option key={c.id} value={c.id}>{t(c.key)}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={addMission} className="flex items-center gap-2 text-sm text-blue-600 font-medium"><IconPlus size={16} />{t('ptpl_add_mission')}</button>
+                  {(editForm.default_missions ?? []).some(m => m.incluse) && (
+                    <p className={`text-sm font-medium ${Math.abs(missionsTotal - 100) < 0.01 ? 'text-zinc-600 dark:text-zinc-400' : 'text-amber-600'}`}>
+                      {t('ptpl_missions_total', { total: Math.round(missionsTotal * 100) / 100 })}
+                    </p>
+                  )}
                 </>
               )}
 

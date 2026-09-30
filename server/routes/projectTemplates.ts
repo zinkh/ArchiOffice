@@ -70,7 +70,23 @@ function templateFields(body: any) {
   if (body.default_lots !== undefined) out.default_lots = sanitizeLots(body.default_lots);
   if (body.default_milestones !== undefined) out.default_milestones = sanitizeMilestones(body.default_milestones);
   if (body.default_tasks !== undefined) out.default_tasks = sanitizeTasks(body.default_tasks);
+  if (body.default_missions !== undefined) out.default_missions = sanitizeMissions(body.default_missions);
   return out;
+}
+
+const MISSION_CATEGORIES = ['base', 'exe', 'complementaire'];
+
+export function sanitizeMissions(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_ITEMS)
+    .map((m: any) => ({
+      id: text(m?.id, 80) || crypto.randomUUID(),
+      name: text(m?.name),
+      pct: Math.min(Math.max(Number(m?.pct) || 0, 0), 100),
+      incluse: !!m?.incluse,
+      category: MISSION_CATEGORIES.includes(m?.category) ? m.category : 'base',
+    }))
+    .filter(m => m.name);
 }
 
 const dayDiff = (from: string, to: string) =>
@@ -144,11 +160,16 @@ export function registerProjectTemplateRoutes(app: Express, { supabaseAdmin, get
       const { data: project, error: pe } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('*').eq('id', projectId).single();
       if (pe || !project) return res.status(404).json({ error: 'Projet introuvable pour ce cabinet.' });
       const start: string = project.start_date || new Date().toISOString().slice(0, 10);
-      const [lots, milestones, tasks] = await Promise.all([
+      const [lots, milestones, tasks, contrats] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'project_lots').select('*').eq('project_id', projectId).then((r: any) => r.data || []),
         tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').select('*').eq('project_id', projectId).then((r: any) => r.data || []),
         tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').select('*').eq('project_id', projectId).then((r: any) => r.data || []),
+        // Missions du contrat MOE lié, le plus ancien d'abord (celui que la
+        // fiche projet lit comme contrat principal). Meilleur effort : une
+        // instance sans contrat n'empêche pas de tirer le reste de l'affaire.
+        tenantScopedFrom(supabaseAdmin, tenantId, 'contrats_moe').select('*').eq('project_id', projectId).then((r: any) => r.data || []),
       ]);
+      const primaryContrat = [...contrats].sort((a: any, b: any) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))[0];
       const name = text(req.body?.name, 200) || `${project.name} (modèle)`;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_templates').insert({
         id: crypto.randomUUID(),
@@ -162,6 +183,7 @@ export function registerProjectTemplateRoutes(app: Express, { supabaseAdmin, get
         default_lots: sanitizeLots([...lots]
           .sort((a: any, b: any) => String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true }))
           .map((l: any) => ({ lot_number: l.lot_number, lot_title: l.lot_title }))),
+        default_missions: sanitizeMissions(primaryContrat?.missions_list),
         default_milestones: sanitizeMilestones(milestones.map((m: any) => ({
           title: m.title, due_date_offset_days: m.due_date ? dayDiff(start, m.due_date) : 0,
         }))),

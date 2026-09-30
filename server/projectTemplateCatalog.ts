@@ -14,6 +14,7 @@
 // (« Esquisse (ESQ) »...) : ProjectDetail crée un jalon par mission incluse
 // et apparie par titre, un doublon de nom serait fusionné avec lui.
 import type {
+  ContratMOEMission,
   ProjectTemplateCatalogEntry,
   TemplateLot,
   TemplateMarcheType,
@@ -90,8 +91,68 @@ const LOTS_MAISON = numberLots([
   'Aménagements extérieurs',
 ]);
 
+
+const mission = (
+  id: string, name: string, pct: number,
+  category: ContratMOEMission['category'] = 'base', incluse = true,
+): ContratMOEMission => ({ id, name, pct, incluse, category });
+
+// Mêmes identifiants et intitulés que le contrat MOE (Contrats.tsx), pour que
+// `ProjectDetail` retrouve la phase de chaque mission. Le total des missions
+// incluses fait toujours 100 % (verrouillé par un test).
+const OPC_ET_DIAG_EN_OPTION = [
+  mission('opc', 'OPC', 0, 'complementaire', false),
+  mission('diag', 'Diagnostic', 0, 'complementaire', false),
+];
+
+const MISSIONS_MOP: ContratMOEMission[] = [
+  mission('esquisse', 'Esquisse (ESQ)', 10),
+  mission('aps', 'Avant-Projet Sommaire (APS)', 12),
+  mission('apd', 'Avant-Projet Détaillé (APD)', 14),
+  mission('pro', 'Projet (PRO)', 18),
+  mission('act', 'Assistance Contrats de Travaux (ACT)', 7),
+  mission('visa', 'Visa', 7, 'exe'),
+  mission('det', 'Direction de l\'Exécution des Travaux (DET)', 25, 'exe'),
+  mission('aor', 'Assistance aux Opérations de Réception (AOR)', 7, 'exe'),
+  ...OPC_ET_DIAG_EN_OPTION,
+];
+
+// Une réhabilitation commence par relever et diagnostiquer l'existant : une
+// mission à part entière, prise sur le reste de la répartition.
+const MISSIONS_REHAB: ContratMOEMission[] = [
+  mission('diag', 'Diagnostic et relevé de l\'existant', 5),
+  mission('esquisse', 'Esquisse (ESQ)', 8),
+  mission('aps', 'Avant-Projet Sommaire (APS)', 10),
+  mission('apd', 'Avant-Projet Détaillé (APD)', 12),
+  mission('pro', 'Projet (PRO)', 16),
+  mission('act', 'Assistance Contrats de Travaux (ACT)', 7),
+  mission('visa', 'Visa', 7, 'exe'),
+  mission('det', 'Direction de l\'Exécution des Travaux (DET)', 28, 'exe'),
+  mission('aor', 'Assistance aux Opérations de Réception (AOR)', 7, 'exe'),
+  mission('opc', 'OPC', 0, 'complementaire', false),
+];
+
+const MISSIONS_MAISON: ContratMOEMission[] = [
+  mission('esquisse', 'Esquisse (ESQ)', 10),
+  mission('aps', 'Avant-Projet Sommaire (APS)', 12),
+  mission('apd', 'Avant-Projet Détaillé (APD)', 14),
+  mission('pro', 'Projet (PRO)', 14),
+  mission('act', 'Assistance Contrats de Travaux (ACT)', 5),
+  mission('visa', 'Visa', 7, 'exe'),
+  mission('det', 'Direction de l\'Exécution des Travaux (DET)', 30, 'exe'),
+  mission('aor', 'Assistance aux Opérations de Réception (AOR)', 8, 'exe'),
+  ...OPC_ET_DIAG_EN_OPTION,
+];
+
+const MISSIONS_PERMIS: ContratMOEMission[] = [
+  mission('esquisse', 'Esquisse (ESQ)', 30),
+  mission('aps', 'Avant-Projet Sommaire (APS)', 30),
+  mission('pc', 'Dossier de demande de permis de construire', 40),
+];
+
 interface ChantierProfile {
   lots: TemplateLot[];
+  missions: ContratMOEMission[];
   /** Jour de dépôt de l'autorisation d'urbanisme. */
   permisDepot: number;
   /** Délai d'instruction réglementaire, en jours. */
@@ -181,6 +242,7 @@ function chantierTasks(p: ChantierProfile, marche: TemplateMarcheType): Template
 
 const PROFILE_NEUF: ChantierProfile = {
   lots: LOTS_NEUF,
+  missions: MISSIONS_MOP,
   permisDepot: 90,
   permisDelay: 90,
   dce: 150,
@@ -200,6 +262,7 @@ const PROFILE_NEUF: ChantierProfile = {
 
 const PROFILE_REHAB: ChantierProfile = {
   lots: LOTS_REHAB,
+  missions: MISSIONS_REHAB,
   permisDepot: 75,
   permisDelay: 90,
   dce: 135,
@@ -221,6 +284,7 @@ const PROFILE_REHAB: ChantierProfile = {
 
 const PROFILE_EXTENSION: ChantierProfile = {
   lots: LOTS_EXTENSION,
+  missions: MISSIONS_MOP,
   permisDepot: 60,
   permisDelay: 60,
   dce: 110,
@@ -239,6 +303,7 @@ const PROFILE_EXTENSION: ChantierProfile = {
 
 const PROFILE_MAISON: ChantierProfile = {
   lots: LOTS_MAISON,
+  missions: MISSIONS_MAISON,
   permisDepot: 60,
   permisDelay: 60,
   dce: 100,
@@ -294,6 +359,7 @@ function makeEntry(
     default_status: 'Planning',
     default_budget: 0,
     default_description: description,
+    default_missions: (profile ? profile.missions : MISSIONS_PERMIS).map(m => ({ ...m })),
     default_lots: profile ? profile.lots : [],
     default_milestones: profile ? chantierMilestones(profile, marche_type) : PERMIS_SEUL_MILESTONES,
     default_tasks: profile ? chantierTasks(profile, marche_type) : PERMIS_SEUL_TASKS,

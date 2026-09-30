@@ -83,6 +83,12 @@ export interface ProjectTemplate {
   default_lots?: TemplateLot[];
   default_milestones?: TemplateMilestone[];
   default_tasks?: TemplateTask[];
+  /**
+   * Répartition des missions MOE (même forme que `ContratMOE.missions_list`,
+   * donc reprise telle quelle par un contrat ; convertie en répartition
+   * d'honoraires pour une proposition, voir `feeDistributionFromTemplate`).
+   */
+  default_missions?: ContratMOEMission[];
   /** Modèle issu du catalogue de démarrage (clé stable), sinon absent. */
   catalog_key?: string | null;
 }
