@@ -478,6 +478,7 @@ export default function Settings() {
     department: '',
     avatar: '',
     showPersonalContacts: true,
+    mailSignature: '',
   });
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -575,6 +576,7 @@ export default function Settings() {
         department: currentUser.department || '',
         avatar: currentUser.avatar || '',
         showPersonalContacts: currentUser.showPersonalContacts ?? true,
+        mailSignature: currentUser.mailSignature || '',
       });
     }
   }, [currentUser]);
@@ -3322,6 +3324,26 @@ export default function Settings() {
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder={t('default_email_template')} value={userSettings.defaultEmailTemplate ?? ''}
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
+      </div>
+
+      {/* ── Signature de courrier ── */}
+      <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconMailbox size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_desc')}</p>
+          </div>
+        </div>
+        <textarea
+          rows={6}
+          maxLength={2000}
+          value={userSettings.mailSignature}
+          onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
+          placeholder={t('settings_mail_signature_placeholder') as string}
+          className="w-full p-2.5 rounded-lg text-sm resize-y"
+          style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+        />
       </div>
 
       {/* ── Contacts personnels ── */}

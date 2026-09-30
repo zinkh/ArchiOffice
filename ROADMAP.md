@@ -20,6 +20,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Document vault (versioning, diffusion/acknowledgement tracking) | ✅ | |
 | Maps: cadastre, PLU/GPU zoning, Géorisques, historical monuments, BDNB | ✅ | Proxies to French government open-data APIs. |
 | Internal feed, notifications, direct messaging | ✅ | |
+| Project correspondence: editable drafts, personal signature, filing in the origin mailbox | ✅ | Linking an email to a project files it in a Gmail label / Outlook or IMAP folder `ArchiOffice/<project>` (best effort). Drafts are edited in place in the provider mailbox; there is no stored draft-to-project link, the tab matches drafts by client address and project name/code. |
 | Team management, roles, multi-tenant join requests | ✅ | Roles: `admin`, `manager`, `pm`, `user`. |
 | Billing & plan quotas | ✅ | Payment processing via **Stancer** (not Stripe), quota enforcement (`projects`, `users`, `documents`) tied to plan/trial status. |
 

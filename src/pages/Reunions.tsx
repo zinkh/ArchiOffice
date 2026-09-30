@@ -580,7 +580,12 @@ export default function Reunions() {
     } else {
       return; // la liste concernée n'est pas encore chargée — on réessaiera au prochain rendu
     }
-    setSearchParams(prev => { prev.delete('parent'); return prev; }, { replace: true });
+    // ?new=1 : réunion lancée depuis l'aperçu d'une opération, le formulaire de
+    // création s'ouvre directement sur le parent sélectionné (posé APRÈS
+    // selectProject, qui referme ce formulaire).
+    const openNewForm = searchParams.get('new') === '1';
+    if (openNewForm) setShowNewMeeting(true);
+    setSearchParams(prev => { prev.delete('parent'); prev.delete('new'); return prev; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, proposals, tenders, searchParams]);
 

@@ -4695,7 +4695,7 @@ export default function ProjectDetail() {
 
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
-                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} />
+                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} relatedKeywords={[project?.name, project?.project_code, project?.reference].filter(Boolean) as string[]} />
               </div>
             )}
             {activeTab === 'AOR' && (
