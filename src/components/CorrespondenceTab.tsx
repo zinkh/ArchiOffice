@@ -257,7 +257,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail, re
   };
 
   const linkResult = async (result: SearchResult) => {
-    await apiFetch('/api/mail/links', {
+    const res = await apiFetch<{ filing?: { status: 'filed' | 'failed' | 'skipped'; folder?: string; error?: string } }>('/api/mail/links', {
       method: 'POST',
       body: JSON.stringify({
         provider: result.provider,
@@ -273,6 +273,15 @@ export default function CorrespondenceTab({ localType, localId, contactEmail, re
         message_date: result.date ? new Date(result.date).toISOString() : null,
       }),
     });
+    // Rattaché à une opération, le message est classé dans sa boîte d'origine
+    // (dossier ou libellé « ArchiOffice/<affaire> ») et change alors d'identifiant
+    // sur Outlook/IMAP : on le retire des résultats plutôt que de laisser un
+    // bouton pointer sur l'ancien emplacement.
+    if (res?.filing?.status === 'filed') {
+      setResults(prev => prev.filter(x => !(x.accountId === result.accountId && x.externalMessageId === result.externalMessageId)));
+    } else if (res?.filing?.status === 'failed') {
+      setError(t('correspondence_filing_failed', { error: res.filing.error }) as string);
+    }
     await loadLinked();
   };
 

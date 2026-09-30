@@ -1936,6 +1936,72 @@ l'ancien scope, plus étroit, et `calendarList` échoue alors en 403 avec la
 même forme que Gmail/Outlook (`isInsufficientScopeError`), proposant de
 reconnecter plutôt que d'échouer sans explication.
 
+### Aperçu d'opération, brouillons, signature et classement des emails
+
+**Volet « Plan d'actions »** (`ProjectOverview.tsx`, colonne D). Quatre gestes
+ouvrent une autre page déjà **rattachée à l'opération** par l'adresse, jamais
+par une sélection à refaire :
+
+| Bouton | Destination | Rattachement |
+|---|---|---|
+| Courrier | `/document_templates?project=<id>` | `DocumentTemplates` préremplit le sélecteur d'affaire ET coche « enregistrer dans le projet » |
+| Réunion | `/reunions?parent=project:<id>&new=1` | `Reunions.tsx` sélectionne l'affaire (mécanisme `?parent=` des liens d'agent) puis ouvre le formulaire de création ; `new` est posé APRÈS `selectProject`, qui referme ce formulaire |
+
+Sous « Prochains jalons », **« Prochaines tâches »** lit `useTasks({ projectId })` :
+les 5 premières tâches non terminées, échéance la plus proche d'abord (sans
+échéance en dernier), en rouge si dépassée ; un clic mène à `?tab=TACHES`. Ce sont
+bien des TÂCHES (`tasks`), distinctes des jalons (`milestones`) au-dessus.
+
+**Brouillons modifiables** (`CorrespondenceTab.tsx`, `MailDraftEditModal.tsx`,
+`server/mailDraft.ts`, `server/routes/mailDrafts.ts`). Un brouillon vit dans la
+boîte du fournisseur et n'est **jamais copié en base** : `GET /api/mail/drafts?
+account_id=` (20 récents), `GET /api/mail/drafts/:id?account_id=` (À, Cc, objet,
+corps) et `PUT /api/mail/drafts/:id` (réécrit, n'envoie jamais). `account_id` est
+toujours relu parmi les comptes de l'utilisateur. Gmail : `drafts.update` ; Outlook :
+`PATCH /me/messages/:id` (le corps repasse en texte brut) ; IMAP : pas de mise à
+jour possible, donc APPEND de la nouvelle version PUIS suppression de l'ancienne
+(un échec entre les deux laisse un doublon, jamais un brouillon perdu) et l'uid
+change. Aucun lien brouillon → opération n'est stocké (aucune migration) :
+l'onglet montre par défaut les brouillons adressés au client de l'affaire ou dont
+l'objet/l'extrait mentionne son nom, son code ou sa référence
+(`relatedKeywords`), avec un bascule « tous les brouillons ».
+
+**Signature de courrier** : `profiles.mail_signature` (TEXT,
+`migrate_profile_mail_signature.sql`), personnelle et non par cabinet (même
+principe que `show_personal_contacts`), réglée dans Réglages > Mon profil, lue et
+écrite par `GET /api/me` / `PUT /api/team/:id` (`mailSignature`, 2000 caractères
+maximum). `MailComposeModal` la pose sous le corps d'un nouveau message ou d'une
+réponse ; elle reste modifiable avant l'envoi. Les envois automatiques hors
+session (relances, alertes) ne la portent pas : aucune personne à qui l'attribuer.
+
+**Rattacher un email à une opération le classe dans sa boîte d'origine**
+(`server/mailFiling.ts`, appelé par `POST /api/mail/links`). Uniquement pour
+`local_type = 'project'`, avec un `connection_id`, sauf `file_in_mailbox: false` :
+
+| Fournisseur | Emplacement | Effet |
+|---|---|---|
+| Gmail | libellé `ArchiOffice/<code> - <nom>` | libellé posé ET `INBOX` retiré (le message quitte la boîte de réception) |
+| Outlook | dossier `<code> - <nom>` sous un dossier racine `ArchiOffice` | déplacement |
+| IMAP | dossier `ArchiOffice<délimiteur><code> - <nom>` (préfixe `INBOX.` si le serveur l'impose) | déplacement, dossier abonné |
+
+Dossier et libellé sont créés à la demande, retrouvés par leur nom exact sinon ;
+`projectFolderName()` retire séparateurs et caractères réservés (`/ \ : * ? " < > | .`)
+et plafonne à 60 caractères. Trois règles à ne pas défaire :
+
+1. **Outlook et IMAP renumérotent le message déplacé** (id Graph, uid). C'est le
+   NOUVEL identifiant qui est enregistré dans `email_links.external_message_id`
+   (rendu aussi dans la réponse) ; sans cela le lien ne rouvrirait plus rien. IMAP
+   lit `uidMap` et, sans UIDPLUS, retrouve le message par son Message-ID. Gmail
+   garde son id : un libellé n'est pas un déplacement. Le front retire le résultat
+   de la liste plutôt que de laisser un bouton sur l'ancien emplacement.
+2. **Meilleur effort, jamais bloquant.** Le rattachement est enregistré même si le
+   classement échoue ; la réponse porte `filing: { status: 'filed' | 'failed' |
+   'skipped', folder?, error? }` et l'écran affiche l'erreur. Cas typique : un compte
+   Gmail connecté avant `gmail.modify` ou un jeton Outlook sans `Mail.ReadWrite`
+   (proposer de reconnecter, comme pour l'archivage).
+3. **Retirer le lien ne remet pas le message en place** : le classement dans la
+   boîte est un geste de l'architecte, pas un état que l'application maintient.
+
 ### OCR
 
 `packages/archioffice-agents/src/server/ocr.ts` rattrape les documents sans

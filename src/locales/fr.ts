@@ -1780,6 +1780,7 @@ export default {
       "mail_drafts_show_all": "Afficher tous les brouillons",
       "mail_drafts_show_related": "Afficher seulement ceux de l'opération",
       "mail_drafts_edit": "Modifier",
+      "correspondence_filing_failed": "Email rattaché, mais non classé dans votre boîte : {{error}}. Si le droit de modification manque, reconnectez le compte.",
       "mail_compose_reply_title": "Répondre",
       "mail_compose_imap_fallback": "Votre messagerie n'a pas d'API d'envoi native — ce message sera envoyé via votre serveur SMTP configuré à la place.",
       "mailbox_compose_subject": "Objet",

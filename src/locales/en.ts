@@ -1635,6 +1635,7 @@ export default {
       "mail_drafts_show_all": "Show all drafts",
       "mail_drafts_show_related": "Show only this project's drafts",
       "mail_drafts_edit": "Edit",
+      "correspondence_filing_failed": "Email linked, but not filed in your mailbox: {{error}}. If write permission is missing, reconnect the account.",
       "mail_compose_reply_title": "Reply",
       "mail_compose_imap_fallback": "Your mailbox has no native send API — this message will be sent via your configured SMTP server instead.",
       "mailbox_compose_subject": "Subject",
