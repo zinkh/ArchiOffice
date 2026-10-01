@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useReactTable,
@@ -8,8 +8,9 @@ import {
   createColumnHelper,
   ColumnFiltersState,
   VisibilityState,
+  ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows } from '@tabler/icons-react';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
@@ -45,6 +46,37 @@ const urgenceColors: Record<string, string> = {
 
 const columnHelper = createColumnHelper<Observation>();
 
+/** Zone de texte qui s'agrandit avec son contenu (retours à la ligne conservés). */
+function AutoTextarea({ value, onCommit, className, placeholder }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  // Recalcule aussi quand la colonne est redimensionnée (largeur du parent).
+  useEffect(() => {
+    fit();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(fit);
+    if (el.parentElement) ro.observe(el.parentElement);
+    return () => ro.disconnect();
+  }, [fit, value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={className}
+      defaultValue={value}
+      placeholder={placeholder}
+      onInput={fit}
+      onBlur={e => onCommit(e.target.value)}
+    />
+  );
+}
+
 const COLUMN_LABELS: Record<string, string> = {
   number: 'N°',
   lot: 'Lot',
@@ -70,6 +102,16 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [openOnly, setOpenOnly] = useState(false);
+  const storeKey = `obsTable:${typeFilter || 'all'}`;
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    try { return JSON.parse(localStorage.getItem(`${storeKey}:sizes`) || '{}'); } catch { return {}; }
+  });
+  // Lot en en-tête : libère la colonne Lot au profit de l'observation.
+  const [groupByLot, setGroupByLot] = useState<boolean>(() => {
+    try { return localStorage.getItem(`${storeKey}:groupByLot`) !== '0'; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(`${storeKey}:sizes`, JSON.stringify(columnSizing)); } catch {} }, [columnSizing, storeKey]);
+  useEffect(() => { try { localStorage.setItem(`${storeKey}:groupByLot`, groupByLot ? '1' : '0'); } catch {} }, [groupByLot, storeKey]);
   const debounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const columnMenuRef = useRef<HTMLDivElement>(null);
 
@@ -210,18 +252,19 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     }),
     columnHelper.accessor('texte', {
       header: 'Observation',
+      size: 520,
+      minSize: 200,
       cell: info => {
         const row = info.row.original;
         return (
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white"
-              defaultValue={info.getValue() || ''}
+          <div className="flex items-start gap-1.5">
+            <AutoTextarea
+              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white resize-none overflow-hidden whitespace-pre-wrap break-words leading-snug"
+              value={info.getValue() || ''}
               placeholder="Saisir une observation..."
-              onBlur={e => {
-                updateLocal(row.id, { texte: e.target.value });
-                saveField(row.id, 'texte', e.target.value);
+              onCommit={v => {
+                updateLocal(row.id, { texte: v });
+                saveField(row.id, 'texte', v);
               }}
             />
             {row.pendingSync && (
@@ -335,12 +378,29 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const table = useReactTable({
     data: filtered,
     columns,
-    state: { columnFilters, columnVisibility },
+    state: { columnFilters, columnVisibility: groupByLot ? { ...columnVisibility, lot: false } : columnVisibility, columnSizing },
+    onColumnSizingChange: setColumnSizing,
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+    defaultColumn: { minSize: 40 },
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   });
+
+  const lotGroups = useMemo(() => {
+    const rows = table.getRowModel().rows;
+    const groups: { key: string; label: string; rows: typeof rows }[] = [];
+    lots.forEach(l => {
+      const r = rows.filter(x => x.original.lot_id === l.id);
+      if (r.length) groups.push({ key: l.id, label: `${l.lot_number} · ${l.lot_title}`, rows: r });
+    });
+    const orphans = rows.filter(x => !x.original.lot_id || !lots.some(l => l.id === x.original.lot_id));
+    if (orphans.length) groups.push({ key: 'none', label: 'Sans lot', rows: orphans });
+    return groups;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table.getRowModel().rows, lots]);
 
   const allColumnIds = columns
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
@@ -377,6 +437,13 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <input type="checkbox" checked={openOnly} onChange={e => setOpenOnly(e.target.checked)} className="rounded" />
           Ouverts seulement
         </label>
+        <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer select-none" title="Affiche le lot en titre de groupe plutôt qu'en colonne">
+          <input type="checkbox" checked={groupByLot} onChange={e => setGroupByLot(e.target.checked)} className="rounded" />
+          <IconLayoutRows size={15} /> Lot en en-tête
+        </label>
+        {Object.keys(columnSizing).length > 0 && (
+          <button onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
+        )}
         <div className="ml-auto relative" ref={columnMenuRef}>
           <button
             onClick={() => setShowColumnMenu(v => !v)}
@@ -388,7 +455,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           </button>
           {showColumnMenu && (
             <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg p-3 min-w-[160px] space-y-1.5">
-              {allColumnIds.map(colId => {
+              {allColumnIds.filter(id => !(groupByLot && id === 'lot')).map(colId => {
                 const col = table.getColumn(colId);
                 if (!col) return null;
                 return (
@@ -433,7 +500,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
 
       {/* Table */}
       <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl">
-        <table className="w-full text-sm border-collapse">
+        <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', width: table.getTotalSize(), minWidth: '100%' }}>
           <thead>
             {table.getHeaderGroups().map(hg => (
               <tr key={hg.id} className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
@@ -441,9 +508,18 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
                   <th
                     key={header.id}
                     style={{ width: header.getSize() }}
-                    className="p-2 text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+                    className="relative p-2 text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.column.getCanResize() && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onDoubleClick={() => header.column.resetSize()}
+                        title="Glisser pour régler la largeur (double clic : réinitialiser)"
+                        className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none hover:bg-blue-400 ${header.column.getIsResizing() ? 'bg-blue-500' : ''}`}
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -451,14 +527,28 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map(row => (
-                <tr key={row.id} className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-                  {row.getVisibleCells().map(cell => (
-                    <td key={cell.id} className="p-1">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
+              (groupByLot
+                ? lotGroups
+                : [{ key: 'all', label: '', rows: table.getRowModel().rows }]
+              ).map(group => (
+                <Fragment key={group.key}>
+                  {groupByLot && (
+                    <tr className="bg-zinc-50 dark:bg-zinc-800/60">
+                      <td colSpan={table.getVisibleLeafColumns().length} className="px-3 py-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                        {group.label} <span className="font-normal text-zinc-400">· {group.rows.length}</span>
+                      </td>
+                    </tr>
+                  )}
+                  {group.rows.map(row => (
+                    <tr key={row.id} className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors align-top">
+                      {row.getVisibleCells().map(cell => (
+                        <td key={cell.id} className="p-1" style={{ width: cell.column.getSize() }}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
+                </Fragment>
               ))
             ) : (
               <tr>
