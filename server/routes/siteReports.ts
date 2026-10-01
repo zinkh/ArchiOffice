@@ -145,6 +145,11 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (statut !== undefined) update.statut = statut;
       if (decisions !== undefined) update.decisions = decisions;
       if (lot_tracking !== undefined) update.lot_tracking = lot_tracking;
+      // Le client renvoie le CR entier à chaque sauvegarde : une date absente ou
+      // non conforme (ancienne valeur) est simplement ignorée, jamais un refus.
+      if (typeof req.body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date) && !Number.isNaN(Date.parse(`${req.body.date}T00:00:00Z`))) {
+        update.date = req.body.date;
+      }
       // Numéro de CR modifiable à la main : entier ≥ 1, unique dans l'affaire.
       if (req.body.report_number !== undefined) {
         const number = Number(req.body.report_number);
