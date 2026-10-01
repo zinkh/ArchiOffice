@@ -1096,7 +1096,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b" style={{ borderColor: 'var(--tblr-border)' }}>
                   {['Cabinet', 'Admin', 'Plan', 'Utilisateurs', 'Projets', 'Crédits IA', 'Essai expire', 'Créé le', 'Actions'].map(h => (

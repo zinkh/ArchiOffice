@@ -157,7 +157,8 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
       </div>
 
       <div className="rounded-xl border overflow-hidden shadow-sm" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
-        <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto">
+        <table className="min-w-full text-left border-collapse">
           <thead>
             <tr className="border-b" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
               <th className="p-4 w-10" aria-label="Déplacer" />
@@ -241,6 +242,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

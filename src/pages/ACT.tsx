@@ -237,7 +237,7 @@ export default function ACT({ projectId }: { projectId: string }) {
 
       {activeTab === 'comparatif' && (
         <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead>
               <tr>
                 <th>Lot</th>

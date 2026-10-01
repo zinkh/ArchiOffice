@@ -1306,7 +1306,8 @@ export default function Projects() {
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_table')}</label>
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                      <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_specialty_label')}</th>
@@ -1385,6 +1386,7 @@ export default function Projects() {
                           )}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -1506,7 +1508,8 @@ export default function Projects() {
                       )}
                     </div>
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                      <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium text-zinc-500 w-16">{t('projects_num_short')}</th>
@@ -1593,6 +1596,7 @@ export default function Projects() {
                           )}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                 )}

@@ -346,7 +346,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
 
         {/* Bureau : tableau groupé par lot / entreprise */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
               <tr>
                 <th className="px-4 py-3 text-left w-12">N°</th>
