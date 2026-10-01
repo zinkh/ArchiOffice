@@ -119,8 +119,12 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (!(await findMembership(supabaseAdmin, req.params.id, tenantId))) {
         return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
       }
-      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      const { name, senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+        return res.status(400).json({ error: 'Le nom et prénom ne peut pas être vide' });
+      }
       const { data, error } = await supabaseAdmin.from('profiles').update({
+        ...(typeof name === 'string' ? { name: name.trim().slice(0, 120) } : {}),
         sender_option: senderOption,
         default_email_template: defaultEmailTemplate,
         phone: phone || null,
