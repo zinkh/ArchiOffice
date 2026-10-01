@@ -39,12 +39,31 @@ const renumeroterLignes = (lignes: LigneNumerotee[] | undefined, ancien: string,
     children: renumeroterLignes(l.children, ancien, nouveau),
   }));
 
+/** Un lot « vide » ne porte aucun article ni aucun texte : le retirer ne fait rien perdre. */
+const lotEstVide = (l: LotDocument & { cctpDescription?: string }): boolean =>
+  !(l.cctpDescription ?? '').trim() &&
+  (l.chapitres ?? []).every((c: any) =>
+    !(c.cctpDescription ?? '').trim() && !(c.lignes?.length));
+
+/** Intitulés proches : l'un contient l'autre (« Charpente » / « CHARPENTE BOIS »). */
+const intitulesProches = (a: string, b: string): boolean => {
+  const x = norm(a), y = norm(b);
+  return x.length >= 4 && y.length >= 4 && (x.includes(y) || y.includes(x));
+};
+
+let _compteurLot = 0;
+const nouvelId = () => `lot_${Date.now()}_${_compteurLot++}`;
+
 /**
  * Range les lots d'un document (DPGF/CCTP ou BPU) dans l'ordre des lots du
  * projet et leur donne le numéro correspondant, chapitres et articles compris.
- * Rattachement : `projectLotId`, à défaut l'intitulé (sans casse ni accents),
- * et le rattachement est alors posé. Un lot du document sans équivalent dans
- * le projet garde son numéro et passe après les autres.
+ * La liste des lots du projet fait foi :
+ * - rattachement par `projectLotId`, à défaut par intitulé identique, puis
+ *   par intitulé proche (sans casse ni accents) ; le rattachement est posé ;
+ * - un lot du projet absent du document y est créé, vide ;
+ * - un lot du document sans équivalent dans le projet est retiré s'il est
+ *   vide ; s'il porte du contenu il est conservé après les autres, pour ne
+ *   rien perdre en silence.
  */
 export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet: LotProjet[]): D {
   const restants = [...(doc.lots as LotDocument[])];
@@ -64,13 +83,22 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
     if (l) explicites.set(p.id, l);
   }
   for (const [index, p] of lotsProjet.entries()) {
-    const l = explicites.get(p.id) ?? prendre(x => !x.projectLotId && norm(x.titre) === norm(p.lot_title));
-    if (!l) continue;
     const numero = p.lot_number || numeroDeLot(index);
+    const l = explicites.get(p.id)
+      ?? prendre(x => !x.projectLotId && norm(x.titre) === norm(p.lot_title))
+      ?? prendre(x => !x.projectLotId && intitulesProches(x.titre, p.lot_title));
+    if (!l) {
+      ordonnes.push({
+        id: nouvelId(), numero, titre: p.lot_title, projectLotId: p.id,
+        chapitres: [], sousTotal: 0,
+      } as LotDocument);
+      continue;
+    }
     ordonnes.push({
       ...l,
       projectLotId: p.id,
       numero,
+      titre: p.lot_title || l.titre,
       chapitres: l.chapitres?.map(c => ({
         ...c,
         numero: changerPrefixe(c.numero, l.numero, numero),
@@ -78,6 +106,6 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
       })),
     });
   }
-  const horsProjet = restants.filter(l => !pris.has(l.id));
+  const horsProjet = restants.filter(l => !pris.has(l.id) && !lotEstVide(l));
   return { ...doc, lots: [...ordonnes, ...horsProjet] };
 }

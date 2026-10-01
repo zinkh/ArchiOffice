@@ -434,6 +434,16 @@ intitulé, et le lien est alors posé ; un lot du document absent du projet gard
 son numéro et passe en dernier. `ProTab.synchroniserLots` fait cette
 propagation, l'autosauvegarde enregistre.
 
+**La vue LOTS est la source de vérité de l'ensemble**, pas seulement de l'ordre :
+`appliquerOrdreLots()` crée dans le document le lot du projet qui lui manque
+(vide), reprend l'intitulé du projet, rattache un lot par intitulé identique puis
+proche (« Charpente » ↔ « CHARPENTE BOIS »), et retire un lot du document absent
+du projet **seulement s'il est vide** (sans article ni texte CCTP) : un lot
+rédigé reste en fin de liste plutôt que de disparaître en silence. L'alignement
+tourne aussi une fois à l'ouverture de chaque document (DPGF/CCTP, puis BPU/DQE
+à son premier affichage), pas seulement quand on modifie la vue LOTS. Un projet
+sans lot ne touche jamais aux documents.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes
