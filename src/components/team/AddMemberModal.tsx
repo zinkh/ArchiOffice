@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { DEFAULT_SPRING } from '../../lib/motion';
 import type { UserProfile } from '../../services/userService';
-import { FOCUS_RING, HAIRLINE, MONO_LABEL, ROLES, RoleGlyph, type SystemRole } from './teamShared';
+import { FOCUS_FIELD, FOCUS_RING, HAIRLINE, MONO_LABEL, ROLES, RoleGlyph, type SystemRole } from './teamShared';
 
 type NewUser = Omit<UserProfile, 'id'>;
 
@@ -19,7 +19,7 @@ interface AddMemberModalProps {
 const INPUT = cn(
   'w-full rounded-[2px] border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 hover:border-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-100',
   HAIRLINE,
-  FOCUS_RING,
+  FOCUS_FIELD,
 );
 
 /** Feuille depuis le bas sur téléphone, planche centrée au bureau. Échap ferme, le premier champ prend le focus. */

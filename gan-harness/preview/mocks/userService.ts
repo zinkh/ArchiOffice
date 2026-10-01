@@ -19,6 +19,7 @@ const params = new URLSearchParams(window.location.search);
 const empty = params.get('empty') === '1';
 const slow = params.get('slow') === '1';
 const fail = params.get('error') === '1';
+const failWrite = params.get('failwrite') === '1';
 
 // Portrait fictif en niveaux de gris, généré en SVG (aucune image distante).
 const portrait =
@@ -57,6 +58,7 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
 
 export const updateUserRole = async (id: string, role: UserProfile['system_role']): Promise<void> => {
   await wait(120);
+  if (failWrite) throw new Error('write failed');
   members = members.map((m) => (m.id === id ? { ...m, system_role: role } : m));
 };
 

@@ -1165,7 +1165,7 @@ export default {
       "team_stat_admins": "Administrateurs",
       "team_stat_pending": "En attente",
       "team_stat_revision": "Mise à jour",
-      "team_search_placeholder": "Nom, fonction ou adresse e-mail",
+      "team_search_placeholder": "Nom, fonction, e-mail",
       "team_search_label": "Rechercher dans l'équipe",
       "team_filter_all": "Tous",
       "team_filter_role_aria": "Filtrer par niveau d'accès",
@@ -1919,7 +1919,7 @@ export default {
       "mail_folder_links_add": "Lier un dossier",
       "mail_folder_links_empty": "Aucun dossier lié pour l'instant.",
       "mail_folder_links_folder_empty": "Aucun message dans ce dossier.",
-      "team_schedule_empty": "Aucun salarié à afficher — réservé aux managers et administrateurs.",
+      "team_schedule_empty": "Aucun salarié à afficher : réservé aux managers et administrateurs.",
       "team_schedule_total": "Total",
       "team_schedule_all_day": "Toute la journée",
 

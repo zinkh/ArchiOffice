@@ -1,4 +1,4 @@
-# Generator State : Iteration 001
+# Generator State : Iteration 002
 
 ## What Was Built
 - Refonte de `src/pages/Team.tsx` (conteneur, logique inchangée) + sous-composants dans `src/components/team/`.
@@ -17,3 +17,13 @@
 - `npx vite --config gan-harness/preview/vite.config.ts --port 5199 --host 127.0.0.1`
 - Paramètres : `?theme=dark`, `?admin=0`, `?empty=1`, `?lang=en`, `?member=u5`, `?slow=1`, `?error=1`
 - URL : http://127.0.0.1:5199/ (en cours d'exécution)
+
+## Iteration 002
+- Registre uniquement a partir de 1024 px, Fiches en dessous (plus de debordement a 768 px).
+- Organigramme : conteneur defilant, indentation reduite sur mobile, noeuds tronques (aucun debordement a 390 et 768 px).
+- Puces de filtre : passage a la ligne. File de decisions : compteur compact en ligne sur mobile.
+- `alert()` remplaces par `TeamNotice` (bandeau noir et blanc, role=status ou alert, fermeture auto 7 s).
+- Focus differencie : anneau decale pour les boutons, filet interieur pour les champs. Legende des glyphes de role (bureau). Fleche du profil plus contrastee en sombre.
+- Tiret quadratin retire de `team_schedule_empty` (FR et EN). Placeholder de recherche raccourci.
+- Banc : `?failwrite=1` fait echouer le changement de role (test du bandeau).
+- Captures : `gan-harness/screenshots/i2-*.png`.

@@ -32,7 +32,7 @@ export default function JoinRequestQueue({ requests, decidingId, onDecide }: Joi
         style={{ backgroundImage: 'repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 6px)' }}
       />
       <div className="min-w-0 flex-1 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <p className={MONO_LABEL}>{t('team_queue_eyebrow')}</p>
             <h2 id="team-queue-title" className="mt-1 text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">
@@ -40,11 +40,11 @@ export default function JoinRequestQueue({ requests, decidingId, onDecide }: Joi
             </h2>
             <p className="mt-1 max-w-lg text-sm text-zinc-600 dark:text-zinc-400">{t('team_queue_hint')}</p>
           </div>
-          <div className="shrink-0 text-right" aria-live="polite">
-            <span className="block font-mono text-5xl font-extralight leading-none tabular-nums text-zinc-900 dark:text-white sm:text-6xl">
+          <div className="flex shrink-0 items-baseline gap-3 sm:block sm:text-right" aria-live="polite">
+            <span className="block font-mono text-3xl font-extralight leading-none tabular-nums text-zinc-900 dark:text-white sm:text-6xl">
               {pad2(requests.length)}
             </span>
-            <span className={cn(MONO_LABEL, 'mt-1 block')}>{t('team_queue_count', { count: requests.length })}</span>
+            <span className={cn(MONO_LABEL, 'sm:mt-1 sm:block')}>{t('team_queue_count', { count: requests.length })}</span>
           </div>
         </div>
 

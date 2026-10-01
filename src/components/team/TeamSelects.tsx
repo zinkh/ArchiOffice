@@ -2,7 +2,7 @@ import { IconChevronDown } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import type { UserProfile } from '../../services/userService';
-import { FOCUS_RING, HAIRLINE, ROLES, RoleGlyph, type SystemRole } from './teamShared';
+import { FOCUS_FIELD, HAIRLINE, ROLES, RoleGlyph, type SystemRole } from './teamShared';
 
 const FIELD =
   'w-full appearance-none rounded-[2px] border bg-white py-1.5 pr-7 text-sm text-zinc-900 transition-colors hover:border-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-100';
@@ -25,7 +25,7 @@ export function RoleSelect({
         value={member.system_role}
         aria-label={t('team_aria_role_of', { name: member.name })}
         onChange={(e) => onChange(member.id, e.target.value as SystemRole)}
-        className={cn(FIELD, HAIRLINE, 'pl-8', FOCUS_RING)}
+        className={cn(FIELD, HAIRLINE, 'pl-8', FOCUS_FIELD)}
       >
         {ROLES.slice().reverse().map((r) => (
           <option key={r} value={r}>{t(`team_role_short_${r}`)}</option>
@@ -53,7 +53,7 @@ export function ManagerSelect({
         value={member.manager_id || ''}
         aria-label={t('team_aria_manager_of', { name: member.name })}
         onChange={(e) => onChange(member.id, e.target.value)}
-        className={cn(FIELD, HAIRLINE, 'pl-2.5', FOCUS_RING)}
+        className={cn(FIELD, HAIRLINE, 'pl-2.5', FOCUS_FIELD)}
       >
         <option value="">{t('team_no_manager')}</option>
         {candidates.map((m) => (

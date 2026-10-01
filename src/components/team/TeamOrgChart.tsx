@@ -41,7 +41,7 @@ function Node({ branch, highlightId, memberRefs, depth }: { branch: Branch } & P
       className={cn(
         'relative',
         depth > 0 &&
-          'pl-6 before:absolute before:bottom-0 before:left-0 before:top-0 before:border-l before:border-zinc-400 last:before:bottom-auto last:before:h-[1.625rem] after:absolute after:left-0 after:top-[1.625rem] after:w-5 after:border-t after:border-zinc-400 dark:before:border-zinc-600 dark:after:border-zinc-600',
+          'pl-4 sm:pl-6 before:absolute before:bottom-0 before:left-0 before:top-0 before:border-l before:border-zinc-400 last:before:bottom-auto last:before:h-[1.625rem] after:absolute after:left-0 after:top-[1.625rem] after:w-3 sm:after:w-5 after:border-t after:border-zinc-400 dark:before:border-zinc-600 dark:after:border-zinc-600',
       )}
     >
       <Link
@@ -49,7 +49,7 @@ function Node({ branch, highlightId, memberRefs, depth }: { branch: Branch } & P
         ref={(el) => { memberRefs.current[member.id] = el; }}
         aria-current={highlighted ? 'true' : undefined}
         className={cn(
-          'my-1 inline-flex max-w-full items-center gap-3 border bg-white py-1.5 pl-1.5 pr-4 transition-colors duration-100 dark:bg-zinc-900',
+          'my-1 inline-flex min-w-0 max-w-full items-center gap-3 border bg-white py-1.5 pl-1.5 pr-4 transition-colors duration-100 dark:bg-zinc-900',
           highlighted ? 'border-zinc-900 outline-2 outline-offset-2 outline-zinc-900 dark:border-white dark:outline-white' : HAIRLINE,
           '[@media(hover:hover)]:hover:border-zinc-900 dark:[@media(hover:hover)]:hover:border-zinc-100',
           FOCUS_RING,
@@ -64,7 +64,7 @@ function Node({ branch, highlightId, memberRefs, depth }: { branch: Branch } & P
         <span className="sr-only">{t(`team_role_short_${member.system_role}`)}</span>
       </Link>
       {branch.children.length > 0 && (
-        <ul className={cn(depth === 0 ? 'ml-5' : 'ml-0')}>
+        <ul className={cn(depth === 0 ? 'ml-3 sm:ml-5' : 'ml-0')}>
           {branch.children.map((c) => (
             <Node key={c.member.id} branch={c} highlightId={highlightId} memberRefs={memberRefs} depth={depth + 1} />
           ))}
@@ -83,11 +83,11 @@ export default function TeamOrgChart({ team, highlightId, memberRefs }: Pick<Mem
   const rest = forest.filter((b) => !rooted.includes(b));
 
   return (
-    <div>
+    <div className="min-w-0 overflow-x-auto">
       <p className={cn(MONO_LABEL, 'mb-5')}>{t('team_org_hint')}</p>
       <div className="grid gap-x-10 gap-y-8 lg:grid-cols-2">
         {[...withTeam, ...rest].map((b) => (
-          <ul key={b.member.id}>
+          <ul key={b.member.id} className="min-w-0">
             <Node branch={b} highlightId={highlightId} memberRefs={memberRefs} depth={0} />
           </ul>
         ))}

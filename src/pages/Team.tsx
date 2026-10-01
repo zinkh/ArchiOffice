@@ -12,6 +12,7 @@ import JoinRequestQueue from '../components/team/JoinRequestQueue';
 import TeamRegistry from '../components/team/TeamRegistry';
 import TeamCards from '../components/team/TeamCards';
 import TeamOrgChart from '../components/team/TeamOrgChart';
+import TeamNotice, { type TeamNoticeData } from '../components/team/TeamNotice';
 import AddMemberModal from '../components/team/AddMemberModal';
 import { EmptyTeam, LoadError, NoResults, TeamSkeleton } from '../components/team/TeamStates';
 import { ROLE_RANK, useMediaQuery } from '../components/team/teamShared';
@@ -44,10 +45,11 @@ export default function Team() {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [sort, setSort] = useState<TeamSort>('name');
+  const [notice, setNotice] = useState<TeamNoticeData | null>(null);
   const [view, setView] = useState<TeamView>('registry');
 
   const isAdmin = currentUser?.system_role === 'admin';
-  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
   // Le registre dense exige de la largeur : sous un téléphone il retombe sur les fiches.
   const activeView: TeamView = view === 'registry' && !isDesktop ? 'cards' : view;
 
@@ -91,7 +93,7 @@ export default function Team() {
       window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
       if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
     } catch (err: any) {
-      alert(err.message || t('team_join_request_process_failed'));
+      setNotice({ kind: 'error', text: err.message || t('team_join_request_process_failed') });
     } finally {
       setDecidingId(null);
     }
@@ -103,7 +105,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
     } catch (err) {
       console.error(err);
-      alert(t('team_update_role_failed'));
+      setNotice({ kind: 'error', text: t('team_update_role_failed') });
     }
   };
 
@@ -113,7 +115,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, manager_id: managerId || null } : member));
     } catch (err) {
       console.error(err);
-      alert(t('team_update_manager_failed'));
+      setNotice({ kind: 'error', text: t('team_update_manager_failed') });
     }
   };
 
@@ -125,18 +127,19 @@ export default function Team() {
       setIsModalOpen(false);
 
       if (result.emailSent) {
-        alert(t('team_user_created_email_sent'));
+        setNotice({ kind: 'info', text: t('team_user_created_email_sent') });
       } else {
-        alert(t('team_user_created_email_failed', { error: result.emailError || t('team_unknown_error') }));
+        setNotice({ kind: 'error', text: t('team_user_created_email_failed', { error: result.emailError || t('team_unknown_error') }) });
       }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || t('team_create_user_failed'));
+      setNotice({ kind: 'error', text: err.message || t('team_create_user_failed') });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const closeNotice = useCallback(() => setNotice(null), []);
   const closeModal = useCallback(() => setIsModalOpen(false), []);
   const resetFilters = () => { setQuery(''); setRoleFilter('all'); };
 
@@ -187,6 +190,10 @@ export default function Team() {
       )}
 
       {body}
+
+      <AnimatePresence>
+        {notice && <TeamNotice key={notice.text} notice={notice} onClose={closeNotice} />}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isModalOpen && <AddMemberModal isSubmitting={isSubmitting} onClose={closeModal} onSubmit={handleAddUser} />}

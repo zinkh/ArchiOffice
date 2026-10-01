@@ -2,7 +2,7 @@ import { IconLayoutList, IconSearch, IconSitemap, IconId, IconX } from '@tabler/
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import type { UserProfile } from '../../services/userService';
-import { FOCUS_RING, HAIRLINE, INK_LINE, MONO_LABEL, ROLES, RoleGlyph, hatchStyle, pad2, type SystemRole } from './teamShared';
+import { FOCUS_FIELD, FOCUS_RING, HAIRLINE, INK_LINE, MONO_LABEL, ROLES, RoleGlyph, hatchStyle, pad2, type SystemRole } from './teamShared';
 
 export type TeamView = 'registry' | 'cards' | 'org';
 export type TeamSort = 'name' | 'role' | 'access';
@@ -73,7 +73,7 @@ export default function TeamToolbar(p: TeamToolbarProps) {
       <DimensionLine team={p.team} />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div role="group" aria-label={t('team_filter_role_aria') as string} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:pb-0">
+        <div role="group" aria-label={t('team_filter_role_aria') as string} className="flex flex-wrap gap-1.5">
           <button
             type="button"
             aria-pressed={p.roleFilter === 'all'}
@@ -111,7 +111,7 @@ export default function TeamToolbar(p: TeamToolbarProps) {
               className={cn(
                 'w-full rounded-[2px] border bg-white py-1.5 pl-8 pr-7 text-sm text-zinc-900 placeholder:text-zinc-400 hover:border-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-100 [&::-webkit-search-cancel-button]:hidden',
                 HAIRLINE,
-                FOCUS_RING,
+                FOCUS_FIELD,
               )}
             />
             {p.query && (
@@ -131,7 +131,7 @@ export default function TeamToolbar(p: TeamToolbarProps) {
             <select
               value={p.sort}
               onChange={(e) => p.onSort(e.target.value as TeamSort)}
-              className={cn('rounded-[2px] border bg-white py-1.5 pl-2 pr-1 text-sm text-zinc-900 hover:border-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-100', HAIRLINE, FOCUS_RING)}
+              className={cn('rounded-[2px] border bg-white py-1.5 pl-2 pr-1 text-sm text-zinc-900 hover:border-zinc-900 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-100', HAIRLINE, FOCUS_FIELD)}
             >
               <option value="name">{t('team_sort_name')}</option>
               <option value="role">{t('team_sort_role')}</option>
@@ -163,6 +163,15 @@ export default function TeamToolbar(p: TeamToolbarProps) {
           </div>
         </div>
       </div>
+
+      <dl className="mt-3 hidden flex-wrap gap-x-5 gap-y-1 lg:flex" aria-hidden="true">
+        {ROLES.slice().reverse().map((r) => (
+          <div key={r} className="flex items-center gap-1.5 text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
+            <dt><RoleGlyph role={r} size={11} className="text-zinc-900 dark:text-zinc-100" /></dt>
+            <dd><span className="font-semibold text-zinc-700 dark:text-zinc-200">{t(`team_role_short_${r}`)}</span> : {t(`team_role_hint_${r}`)}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }

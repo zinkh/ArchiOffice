@@ -1133,7 +1133,7 @@ export default {
       "team_stat_admins": "Administrators",
       "team_stat_pending": "Pending",
       "team_stat_revision": "Updated",
-      "team_search_placeholder": "Name, job title or email",
+      "team_search_placeholder": "Name, title, email",
       "team_search_label": "Search the team",
       "team_filter_all": "All",
       "team_filter_role_aria": "Filter by access level",
@@ -1774,7 +1774,7 @@ export default {
       "mail_folder_links_add": "Link a folder",
       "mail_folder_links_empty": "No folder linked yet.",
       "mail_folder_links_folder_empty": "No messages in this folder.",
-      "team_schedule_empty": "No employees to show — reserved for managers and admins.",
+      "team_schedule_empty": "No employees to show: reserved for managers and admins.",
       "team_schedule_total": "Total",
       "team_schedule_all_day": "All day",
 

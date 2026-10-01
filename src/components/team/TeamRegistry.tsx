@@ -75,7 +75,7 @@ export default function TeamRegistry({ members, team, isAdmin, highlightId, curr
                     to={`/profile/${member.id}`}
                     aria-label={`${t('team_view_profile')} : ${member.name}`}
                     title={t('team_view_profile') as string}
-                    className={cn('inline-flex border border-transparent p-1.5 text-zinc-500 transition-colors hover:border-zinc-900 hover:text-zinc-900 dark:hover:border-zinc-100 dark:hover:text-white', FOCUS_RING)}
+                    className={cn('inline-flex border border-transparent p-1.5 text-zinc-600 dark:text-zinc-300 transition-colors hover:border-zinc-900 hover:text-zinc-900 dark:hover:border-zinc-100 dark:hover:text-white', FOCUS_RING)}
                   >
                     <IconArrowUpRight size={17} aria-hidden="true" />
                   </Link>

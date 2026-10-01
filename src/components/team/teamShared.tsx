@@ -14,6 +14,9 @@ export const ROLE_RANK: Record<SystemRole, number> = { admin: 0, manager: 1, pm:
 export const INK_LINE = 'border-zinc-900/80 dark:border-zinc-100/70';
 export const HAIRLINE = 'border-zinc-300 dark:border-zinc-700';
 export const MONO_LABEL = 'font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400';
+/** Champs : le trait de focus se pose DANS le cadre (double filet), pour se distinguer de l'anneau décalé des boutons. */
+export const FOCUS_FIELD =
+  'focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-zinc-900 dark:focus-visible:outline-white focus-visible:border-zinc-900 dark:focus-visible:border-white';
 export const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 dark:focus-visible:outline-white';
 
