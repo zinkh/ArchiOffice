@@ -123,7 +123,29 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
         return res.status(400).json({ error: 'Le nom et prénom ne peut pas être vide' });
       }
+      // Changement d'adresse : uniquement sur son propre compte, car elle sert
+      // d'identifiant de connexion. Le compte d'authentification est mis à jour
+      // en premier, pour que profil et connexion ne divergent jamais.
+      let newEmail: string | null = null;
+      if (typeof req.body.email === 'string') {
+        const candidate = req.body.email.trim().toLowerCase();
+        const { data: current } = await supabaseAdmin.from('profiles').select('email').eq('id', req.params.id).maybeSingle();
+        if (candidate !== ((current as any)?.email || '').toLowerCase()) {
+          if (req.params.id !== req.user.id) {
+            return res.status(403).json({ error: "Seul le titulaire du compte peut modifier son adresse e-mail" });
+          }
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) || candidate.length > 254) {
+            return res.status(400).json({ error: "Adresse e-mail invalide" });
+          }
+          const { data: taken } = await supabaseAdmin.from('profiles').select('id').eq('email', candidate).neq('id', req.params.id).maybeSingle();
+          if (taken) return res.status(409).json({ error: "Cette adresse e-mail est déjà utilisée par un autre compte" });
+          const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(req.params.id, { email: candidate, email_confirm: true });
+          if (authErr) return res.status(400).json({ error: authErr.message });
+          newEmail = candidate;
+        }
+      }
       const { data, error } = await supabaseAdmin.from('profiles').update({
+        ...(newEmail ? { email: newEmail } : {}),
         ...(typeof name === 'string' ? { name: name.trim().slice(0, 120) } : {}),
         sender_option: senderOption,
         default_email_template: defaultEmailTemplate,

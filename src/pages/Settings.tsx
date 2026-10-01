@@ -471,6 +471,7 @@ export default function Settings() {
 
   const [userSettings, setUserSettings] = useState({
     name: '',
+    email: '',
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
     phone: '',
@@ -570,6 +571,7 @@ export default function Settings() {
     if (currentUser) {
       setUserSettings({
         name: currentUser.name || '',
+        email: currentUser.email || '',
         senderOption: currentUser.senderOption || 'agency',
         defaultEmailTemplate: currentUser.defaultEmailTemplate || '',
         phone: currentUser.phone || '',
@@ -3279,6 +3281,7 @@ export default function Settings() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <input className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Nom et prénom" aria-label="Nom et prénom" maxLength={120} value={userSettings.name} onChange={e => setUserSettings({...userSettings, name: e.target.value})} />
+          <input type="email" className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Adresse e-mail (identifiant de connexion)" aria-label="Adresse e-mail" maxLength={254} value={userSettings.email} onChange={e => setUserSettings({...userSettings, email: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
