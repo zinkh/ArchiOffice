@@ -64,6 +64,15 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (error && error.code !== 'PGRST116') throw error;
       if (!data) return res.json(null);
 
+      // Une adresse changée depuis « Mon profil » n'est effective côté Supabase
+      // Auth qu'une fois le lien de confirmation ouvert : on recopie alors
+      // l'adresse confirmée dans le profil, qui sert aux recherches par e-mail.
+      const authEmail = typeof req.user.email === 'string' ? req.user.email.toLowerCase() : null;
+      if (authEmail && authEmail !== (data.email || '').toLowerCase()) {
+        const { error: syncErr } = await supabaseAdmin.from('profiles').update({ email: authEmail }).eq('id', req.user.id);
+        if (!syncErr) data.email = authEmail;
+      }
+
       // Les cabinets de la personne, et celui qui sert cette requête. Le
       // client s'en sert pour son sélecteur de cabinet et pour savoir quel
       // rôle afficher : on est souvent gérant du sien et collaborateur de
@@ -119,8 +128,12 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (!(await findMembership(supabaseAdmin, req.params.id, tenantId))) {
         return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
       }
-      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      const { name, senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+        return res.status(400).json({ error: 'Le nom et prénom ne peut pas être vide' });
+      }
       const { data, error } = await supabaseAdmin.from('profiles').update({
+        ...(typeof name === 'string' ? { name: name.trim().slice(0, 120) } : {}),
         sender_option: senderOption,
         default_email_template: defaultEmailTemplate,
         phone: phone || null,
