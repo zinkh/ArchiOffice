@@ -278,12 +278,13 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
         setWeatherLoading(false);
       }
     }
-    const updated = { ...selectedReport, date, meteo, temperature };
+    const updated: SiteReport = { ...selectedReport, date, meteo, temperature: temperature ?? undefined };
     setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
+    // null (et non undefined) pour que le serveur efface l'ancienne température.
     const res = await fetch(`/api/reports/${selectedReport.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
+      body: JSON.stringify({ ...updated, temperature }),
     });
     if (res.ok) {
       const saved = await res.json();
