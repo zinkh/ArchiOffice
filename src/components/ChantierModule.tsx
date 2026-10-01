@@ -258,6 +258,41 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     }
   };
 
+  // La météo est celle du jour du compte-rendu : changer la date la recalcule.
+  // Si elle est introuvable, on ne garde pas la météo d'un autre jour.
+  const changeReportDate = async (date: string) => {
+    if (!selectedReport || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date === selectedReport.date) return;
+    let meteo = 'Inconnu';
+    let temperature: number | null = null;
+    if (project.address) {
+      setWeatherLoading(true);
+      try {
+        const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address)}&date=${date}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.meteo) { meteo = data.meteo; temperature = data.temperature ?? null; }
+        }
+      } catch (err) {
+        console.error('Failed to fetch weather:', err);
+      } finally {
+        setWeatherLoading(false);
+      }
+    }
+    const updated = { ...selectedReport, date, meteo, temperature };
+    setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
+    const res = await fetch(`/api/reports/${selectedReport.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+    } else {
+      setReports(prev => prev.map(r => (r.id === selectedReport.id ? selectedReport : r)));
+    }
+  };
+
   const updateReportField = async (field: keyof SiteReport, value: any) => {
     if (!selectedReport) return;
     const updated = { ...selectedReport, [field]: value };
@@ -633,7 +668,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-[var(--tblr-muted)]">
-                      <span>{selectedReport.date}</span>
+                      <input
+                        type="date"
+                        aria-label="Date du compte-rendu"
+                        title="La météo suit la date du compte-rendu"
+                        className="bg-transparent border-none outline-none"
+                        value={selectedReport.date || ''}
+                        onChange={e => changeReportDate(e.target.value)}
+                      />
                       <span className="flex items-center gap-1"><IconCloud size={14} />
                         <input className="bg-transparent border-none outline-none w-28"
                           value={selectedReport.meteo || ''} onChange={e => updateReportField('meteo', e.target.value)} />
